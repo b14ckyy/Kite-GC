@@ -4,6 +4,8 @@
 -->
 
 <script lang="ts" module>
+  import type { Vehicle, VehicleResolution } from '$lib/stores/flightlogTypes';
+
   export interface EndFlightStats {
     durationSec: number | null;
     maxAltM: number | null;
@@ -13,7 +15,18 @@
     batteryUsedMah: number | null;
     locationName?: string | null;
   }
-  export interface EndFlightResult { batterySerial: string; notes: string; linkMission: boolean; discard?: boolean; }
+  export interface EndFlightResult {
+    batterySerial: string;
+    notes: string;
+    linkMission: boolean;
+    discard?: boolean;
+    /** The library vehicle the user left selected (null = none) — only with an `identity`. */
+    vehicle?: Vehicle | null;
+    /** How the flight's identity resolved when the dialog opened (null: not resolved). */
+    resolution?: VehicleResolution | null;
+  }
+  /** The identity the flight is stored with (craft name, FC hardware id). */
+  export interface EndFlightIdentity { craftName: string; fcUid: string | null; }
   export interface EndFlightOptions {
     stats: EndFlightStats;
     /** Recorded to the DB → show the editable battery/notes/mission section. */
@@ -21,6 +34,8 @@
     /** The loaded mission is NOT FC-synced → offer to link it (confirmation). FC-synced
      *  missions are linked automatically by the caller and need no prompt. */
     missionConfirm?: boolean;
+    /** Recorded flight's identity → show its resolved library vehicle with a picker. */
+    identity?: EndFlightIdentity;
   }
 </script>
 
@@ -30,9 +45,11 @@
   import type { InterfaceSettings } from '$lib/stores/settings';
   import { settings } from '$lib/stores/settings';
   import { convertAltitude, convertSpeed, convertDistance, formatConverted } from '$lib/utils/units';
-  import { formatDurationSec, batteryDbList } from '$lib/stores/flightlog';
+  import { formatDurationSec, batteryDbList, vehicleDbList, vehicleDbResolve } from '$lib/stores/flightlog';
   import { normalizeSerial, normalizeSerialInput, serialTokens, normalizeSerialList } from '$lib/stores/batteryManager';
   import type { BatteryPack } from '$lib/stores/flightlogTypes';
+  import { vehiclePickLabel } from '$lib/controllers/vehicleLinkController';
+  import { hardwareUid } from '$lib/helpers/fcUid';
 
   let { interfaceSettings }: { interfaceSettings: InterfaceSettings } = $props();
 
@@ -46,6 +63,49 @@
   let confirmingDiscard = $state(false);
   let confirmingArchived = $state(false);
   let resolver: ((v: EndFlightResult | null) => void) | null = null;
+
+  // Library vehicle of the flight: resolved from its identity (FC id first, craft name as fallback),
+  // correctable with the picker; applied to the committed flight by the caller.
+  let identity = $state<EndFlightIdentity | null>(null);
+  let vehicles = $state<Vehicle[]>([]);
+  let resolution = $state<VehicleResolution | null>(null);
+  let vehicleId = $state<number | null>(null);
+  const vehicleOptions = $derived([...vehicles].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })));
+  const chosenVehicle = $derived(vehicles.find((v) => v.id === vehicleId) ?? null);
+  // Shown under the picker: how the pick relates to the flight's identity.
+  const vehicleHint = $derived.by((): string => {
+    if (!identity || !resolution) return '';
+    const resolvedId = resolution.vehicle?.id ?? null;
+    if (vehicleId == null) {
+      if (resolvedId != null) return '';
+      // Only a flight with a craft name or an FC id gets the "create a vehicle" offer after saving.
+      const identified = identity.craftName.trim() !== '' || hardwareUid(identity.fcUid) != null;
+      return identified ? $t('endFlight.vehicleUnmatched') : $t('endFlight.vehicleUnmatchedNoId');
+    }
+    if (vehicleId === resolvedId) {
+      if (resolution?.uid_conflict) return $t('endFlight.vehicleConflictHint');
+      return resolution?.matched_by === 'uid' ? $t('endFlight.vehicleMatchedUid') : $t('endFlight.vehicleMatchedCraft');
+    }
+    return '';
+  });
+
+
+  let vehicleLoadSeq = 0;
+  async function loadVehicle(ident: EndFlightIdentity, seq: number) {
+    const dbPath = get(settings).flightLogDbPath;
+    try {
+      const [list, res] = await Promise.all([
+        vehicleDbList(dbPath),
+        vehicleDbResolve(ident.fcUid, ident.craftName, dbPath),
+      ]);
+      if (seq !== vehicleLoadSeq) return; // another flight's dialog meanwhile
+      vehicles = list;
+      resolution = res;
+      vehicleId = res.vehicle?.id ?? null;
+    } catch (e) {
+      console.warn('[end-flight] vehicle lookup failed', e);
+    }
+  }
 
   // Battery serial combobox: filter text + a dropdown of existing packs. The typed value is what's
   // saved; if it matches no pack the caller offers to create one (see +page onRecordingEnded).
@@ -108,7 +168,18 @@
     }
   }
 
+  // A `show()` while the dialog is open waits for it to settle instead of replacing its pending result
+  // (§5e M3) — the page's flight-dialog queue normally keeps them apart already.
+  const waiting: (() => void)[] = [];
+
   export function show(opts: EndFlightOptions): Promise<EndFlightResult | null> {
+    if (open || resolver) {
+      return new Promise((resolve) => { waiting.push(() => { void present(opts).then(resolve); }); });
+    }
+    return present(opts);
+  }
+
+  function present(opts: EndFlightOptions): Promise<EndFlightResult | null> {
     stats = opts.stats;
     recorded = opts.recorded;
     missionConfirm = opts.missionConfirm ?? false;
@@ -119,7 +190,13 @@
     confirmingArchived = false;
     listOpen = false;
     batteries = [];
+    identity = opts.recorded ? (opts.identity ?? null) : null;
+    vehicles = [];
+    resolution = null;
+    vehicleId = null;
     if (opts.recorded) void loadBatteries();
+    const seq = ++vehicleLoadSeq;
+    if (identity) void loadVehicle(identity, seq);
     open = true;
     return new Promise((resolve) => { resolver = resolve; });
   }
@@ -133,11 +210,18 @@
     confirmingDiscard = false;
     confirmingArchived = false;
     if (resolver) { resolver(v); resolver = null; }
+    waiting.shift()?.();
   }
   function save() {
     // Linking to a retired/damaged pack needs an explicit confirm (possible accidental serial reuse).
     if (archivedMatch && !confirmingArchived) { confirmingArchived = true; return; }
-    settle({ batterySerial: normalizeSerialList(serial), notes: notes.trim(), linkMission: missionConfirm && linkMission });
+    settle({
+      batterySerial: normalizeSerialList(serial),
+      notes: notes.trim(),
+      linkMission: missionConfirm && linkMission,
+      vehicle: identity ? chosenVehicle : undefined,
+      resolution: identity ? resolution : undefined,
+    });
   }
   function confirmDiscard() { settle({ batterySerial: '', notes: '', linkMission: false, discard: true }); }
   // Modal: deliberately no backdrop-click / Escape dismissal — closing is an explicit Save or
@@ -170,6 +254,16 @@
 
       {#if recorded}
         <div class="ef-divider"></div>
+        {#if identity}
+          <label class="fld">
+            <span class="fld-label">{$t('endFlight.vehicle')}</span>
+            <select class="fld-input" bind:value={vehicleId}>
+              <option value={null}>{$t('endFlight.vehicleNone')}</option>
+              {#each vehicleOptions as v (v.id)}<option value={v.id}>{vehiclePickLabel(v)}</option>{/each}
+            </select>
+            {#if vehicleHint}<span class="vehicle-hint" class:vehicle-hint-warn={resolution?.uid_conflict && vehicleId === resolution?.vehicle?.id}>{vehicleHint}</span>{/if}
+          </label>
+        {/if}
         <label class="fld">
           <span class="fld-label">{$t('endFlight.battery')}</span>
           <div class="battery-combo">
@@ -279,6 +373,8 @@
   .bo-serial { font-weight: 600; }
   .bo-meta { color: #949494; font-size: 11px; }
   .battery-new-hint { display: block; margin-top: 4px; font-size: 11px; color: #37a8db; }
+  .vehicle-hint { display: block; margin-top: 4px; font-size: 11px; color: #949494; }
+  .vehicle-hint-warn { color: #e0b050; }
 
   .ef-check { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #e0e0e0; margin-bottom: 12px; cursor: pointer; }
   .ef-check input { accent-color: #37a8db; }

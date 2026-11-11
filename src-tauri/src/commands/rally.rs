@@ -13,7 +13,7 @@ use tauri::State;
 use ::mavlink::ardupilotmega::MavMissionType;
 
 use crate::mavlink_proto::{self, control, params_rt, mission::ArduWaypoint};
-use crate::state::{ActiveProtocol, AppState};
+use crate::state::AppState;
 
 // MAV_CMD for a rally point.
 const CMD_RALLY_POINT: u16 = 5100;
@@ -47,19 +47,16 @@ pub struct RallyConfig {
 }
 
 /// Resolve the MAVLink command sender + sysid (rally is MAVLink-only).
-fn mav_handle(state: &State<'_, AppState>) -> Result<Option<(std::sync::mpsc::Sender<crate::mavlink_proto::handler::MavlinkCommand>, u8, bool)>, String> {
-    let proto = state.protocol.lock().map_err(|e| e.to_string())?;
-    match proto.as_ref() {
-        Some(ActiveProtocol::Mavlink(h)) => Ok(Some((h.cmd_tx_clone(), h.fc_sysid, h.fc_variant.eq_ignore_ascii_case("px4")))),
-        _ => Ok(None), // MSP / passive / disconnected → no rally
-    }
+fn mav_handle(state: &State<'_, AppState>, vehicle_id: Option<&str>) -> Result<Option<(std::sync::mpsc::Sender<crate::mavlink_proto::handler::MavlinkCommand>, u8, bool)>, String> {
+    // `vehicle_id` = frontend "L1:S1" key, None = active vehicle. MSP / passive / disconnected → no rally
+    Ok(state.mav_target_opt(vehicle_id)?.map(|t| (t.cmd_tx, t.sysid, t.fc_variant.eq_ignore_ascii_case("px4"))))
 }
 
 /// Read the rally points + core params from the FC. Returns `has_rally=false` (empty) when not on a
 /// MAVLink link, so the frontend can always call it on connect.
 #[tauri::command(async)]
-pub fn rally_read_all(state: State<'_, AppState>) -> Result<RallyConfig, String> {
-    let Some((cmd_tx, fc_sysid, px4)) = mav_handle(&state)? else {
+pub fn rally_read_all(vehicle_id: Option<String>, state: State<'_, AppState>) -> Result<RallyConfig, String> {
+    let Some((cmd_tx, fc_sysid, px4)) = mav_handle(&state, vehicle_id.as_deref())? else {
         return Ok(RallyConfig::default());
     };
     let items = mavlink_proto::mission::download(&cmd_tx, fc_sysid, false, MavMissionType::MAV_MISSION_TYPE_RALLY, |_, _| {})?;
@@ -80,8 +77,8 @@ pub fn rally_read_all(state: State<'_, AppState>) -> Result<RallyConfig, String>
 /// the points went up, a slow or unknown parameter must not fail the save — on PX4 `set_param` reads
 /// the parameter's type first and errors on a timeout, and the points would already be on the vehicle.
 #[tauri::command(async)]
-pub fn rally_write_all(config: RallyConfig, state: State<'_, AppState>) -> Result<Vec<String>, String> {
-    let Some((cmd_tx, fc_sysid, px4)) = mav_handle(&state)? else {
+pub fn rally_write_all(vehicle_id: Option<String>, config: RallyConfig, state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let Some((cmd_tx, fc_sysid, px4)) = mav_handle(&state, vehicle_id.as_deref())? else {
         return Err("FC is not running MAVLink".into());
     };
     let items = encode_rally(&config);

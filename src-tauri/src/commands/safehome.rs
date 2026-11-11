@@ -85,8 +85,8 @@ pub async fn safehome_read_all(app: AppHandle) -> Result<SafeHomeConfig, String>
 
 fn read_all(state: &AppState, handle: &MspRequester) -> Result<SafeHomeConfig, String> {
     let has_autoland = {
-        let info = state.fc_info.lock().map_err(|e| e.to_string())?;
-        info.as_ref()
+        let reg = state.links.lock().map_err(|e| e.to_string())?;
+        reg.active_fc_info()
             .and_then(|fc| fc.features.as_ref())
             .map(|f| f.autoland_config)
             .unwrap_or(false)

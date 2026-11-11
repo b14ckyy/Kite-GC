@@ -17,7 +17,7 @@ use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 use std::time::Instant;
 
-use tauri::{AppHandle, Emitter};
+use crate::vehicle_registry::emitter::VehicleEmitter;
 
 use crate::flightlog::recorder::FlightRecorderHandle;
 use crate::flightmode::FlightModeState;
@@ -430,7 +430,7 @@ impl LtmDecoder {
 
     /// Emit the accumulated state as the unified telemetry events and feed the flight recorder. Each
     /// event is only sent once its relevant fields have been seen (mirrors the FrSky/CRSF decoders).
-    pub fn publish(&mut self, app: &AppHandle, recorder: Option<&FlightRecorderHandle>) {
+    pub fn publish(&mut self, app: &VehicleEmitter, recorder: Option<&FlightRecorderHandle>) {
         // Only emit a type when a fresh frame updated it since the last publish (no fixed-tick re-publish
         // of cached state). Capture + clear the flags, then emit from the immutably-borrowed state.
         let (f_status, f_att, f_gps, f_alt, f_an, f_asp) = {

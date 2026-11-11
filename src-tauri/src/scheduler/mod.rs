@@ -21,6 +21,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Emitter};
+use crate::vehicle_registry::emitter::VehicleEmitter;
 
 use crate::flightlog::recorder::FlightRecorderHandle;
 use crate::link_stats::LinkStats;
@@ -349,7 +350,7 @@ impl MspRequester {
 pub fn start(
     transport: Box<dyn Transport>,
     config: TelemetryConfig,
-    app_handle: AppHandle,
+    app_handle: VehicleEmitter,
     recorder: Option<FlightRecorderHandle>,
     radar_ingest: RadarIngest,
     radar_msp_enabled: Arc<AtomicBool>,
@@ -382,7 +383,7 @@ pub fn start(
 fn scheduler_loop(
     mut transport: Box<dyn Transport>,
     config: TelemetryConfig,
-    app_handle: AppHandle,
+    app_handle: VehicleEmitter,
     cmd_rx: mpsc::Receiver<SchedulerCommand>,
     recorder: Option<FlightRecorderHandle>,
     radar_ingest: RadarIngest,
@@ -1023,7 +1024,9 @@ fn scheduler_loop(
                     }
                     PendingKind::Radar => {
                         debug_tracker.on_timeout(code);
-                        let _ = app_handle.emit(
+                        // Raw handle: the listener expects the plain array (as `dispatch_radar` sends
+                        // it) — the VehicleEmitter would wrap it as `{ value, vehicleId, linkId }`.
+                        let _ = app_handle.app().emit(
                             radar::ADSB_STATUS_EVENT,
                             &[radar::AdsbStatus { name: "UAV (MSP)".into(), count: 0, ok: false }],
                         );
@@ -1198,7 +1201,7 @@ fn dispatch_telemetry(
     payload_bytes: &[u8],
     box_ids: &[u8],
     recorder: &Option<FlightRecorderHandle>,
-    app_handle: &AppHandle,
+    app_handle: &VehicleEmitter,
     link_stats_enabled: bool,
     override_active: &mut bool,
 ) {

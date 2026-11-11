@@ -16,6 +16,8 @@ use crate::scheduler;
 use crate::scheduler::{SchedulerHandle, SchedulerMode, TelemetryConfig};
 use crate::state::{ActiveProtocol, AppState};
 use crate::transport::{ByteTransport, Transport, TransportType};
+use crate::vehicle_registry::emitter::VehicleEmitter;
+use crate::vehicle_registry::{LinkEntry, LinkId, VehicleId, VehicleInfo, ERR_NOT_CONNECTED};
 use crate::transport::PortInfo;
 use crate::transport::serial::SerialConnection;
 use crate::transport::tcp::TcpTransport;
@@ -34,6 +36,52 @@ struct HomeEvent {
     lat: f64,
     lon: f64,
     alt: f64,
+}
+
+/// What `connect` hands back: the registry ids of the new link / its primary vehicle plus the
+/// handshake info (the pre-multi-vehicle return value).
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectResult {
+    pub link_id: LinkId,
+    pub vehicle_id: String,
+    pub fc_info: FcInfo,
+}
+
+/// A protocol path's result: the started handler and what it learned about the vehicle. `connect`
+/// turns this into a registry entry.
+struct Opened {
+    protocol: ActiveProtocol,
+    protocol_name: &'static str,
+    fc_info: FcInfo,
+    /// MAVLink system id of the handshake vehicle; 0 for MSP / passive (one vehicle per link).
+    sysid: u8,
+    /// MAVLink autopilot component id; 0 for MSP / passive.
+    compid: u8,
+}
+
+/// `link-closed` event payload.
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct LinkClosed {
+    link_id: LinkId,
+    reason: &'static str,
+}
+
+/// `vehicle-lost` event payload.
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct VehicleLost {
+    vehicle_id: String,
+    link_id: LinkId,
+    reason: &'static str,
+}
+
+/// `active-vehicle-changed` event payload.
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ActiveVehicleChanged {
+    pub vehicle_id: Option<String>,
 }
 
 /// List available serial ports. On iOS this is always empty — `transport::serial` resolves to the
@@ -90,10 +138,13 @@ pub fn inav_set_craft_name(name: String, state: State<'_, AppState>) -> Result<(
         handle.msp_request(MSP_EEPROM_WRITE, &[])?;
         Ok(())
     })?;
-    // Keep the cached craft name in sync so the UI reflects it without a reconnect.
-    if let Ok(mut info) = state.fc_info.lock() {
-        if let Some(fc) = info.as_mut() {
-            fc.craft_name = trimmed.to_string();
+    // Keep the cached craft name in sync so the UI reflects it without a reconnect (the active
+    // vehicle's link — the one `with_msp` just wrote to).
+    if let Ok(mut reg) = state.links.lock() {
+        if let Some(link) = reg.active().map(|v| v.link) {
+            if let Some(entry) = reg.get_mut(link) {
+                entry.fc_info.craft_name = trimmed.to_string();
+            }
         }
     }
     Ok(())
@@ -154,14 +205,36 @@ pub async fn connect(
     flight_log_raw_always: Option<bool>,
     state: State<'_, AppState>,
     app_handle: AppHandle,
-) -> Result<FcInfo, String> {
-    // Check if already connected
-    {
-        let proto = state.protocol.lock().map_err(|e| e.to_string())?;
-        if proto.is_some() {
-            return Err("Already connected. Disconnect first.".into());
+) -> Result<ConnectResult, String> {
+    // Multi-vehicle: every connect opens an additional link. Reserve its id now (the handlers stamp
+    // their events with it) and, on the first link only, start RC injection from a clean slate — with
+    // another link already up, resetting would yank the other vehicle's engaged override.
+    let (link_id, first_link) = {
+        let mut reg = state.links.lock().map_err(|e| e.to_string())?;
+        let first = reg.is_empty();
+        // GATE(fleet): a second link is a multi-vehicle feature.
+        if !crate::fleet_mode::allows(first, crate::fleet_mode::enabled()) {
+            return Err("Already connected — disconnect first (multiple links need fleet mode)".into());
         }
-    }
+        if first {
+            if let Ok(mut rc) = state.rc_tx.lock() {
+                *rc = crate::scheduler::rc_tx::RcTxState::default();
+            }
+        }
+        (reg.reserve_id(), first)
+    };
+    // Group recording off (the default, `fleet_mode::group_recording`): ONE recorded vehicle at a time — a
+    // connecting link records only when no recorder runs right now (the first link; or the recorded one
+    // came back over a new link after a drop, while another link stayed up — its Continue-on-reconnect
+    // resumes then). Any further link records nothing (no recorder, no raw log), so a fleet session never
+    // writes group data into the flight database.
+    let nobody_records = first_link || state.recorders.lock().map(|m| m.is_empty()).unwrap_or(true);
+    let flight_log_enabled = if nobody_records || crate::fleet_mode::group_recording() {
+        flight_log_enabled
+    } else {
+        log::warn!("L{}: flight recording off — another vehicle is being recorded (KITE_FLEET_RECORDING not set)", link_id);
+        Some(false)
+    };
 
     let proto = protocol.as_deref().unwrap_or("msp");
 
@@ -204,15 +277,32 @@ pub async fn connect(
         }
     };
 
-    log::info!("Transport opened, protocol={}", proto);
-    // Transport-side context for a failed handshake (busy local UDP port → the vehicles' pushes go to
-    // the other listener); taken now, before the transport moves into the protocol path.
+    let transport_desc = byte_transport.description().to_string();
     let transport_note = byte_transport.diagnostic_note();
+    log::info!("Transport opened, protocol={} link=L{} ({})", proto, link_id, transport_desc);
+
+    // One link per endpoint. A second socket talking to the same UDP/TCP peer (or the same serial
+    // port / BLE device) does not give a second view of the vehicles — the peer answers whichever
+    // socket spoke last, so both links starve each other (PX4 SITL: 0 bytes on the newcomer, dropped
+    // vehicles on the first). Every vehicle behind one endpoint is already discovered on one link.
+    {
+        let reg = state.links.lock().map_err(|e| e.to_string())?;
+        let duplicate = reg.iter().find(|e| e.transport == transport_desc).map(|e| e.id);
+        drop(reg);
+        if let Some(existing) = duplicate {
+            log::warn!("Connect refused: {} is already open as L{}", transport_desc, existing);
+            return Err(format!(
+                "Already connected to {} as link L{}. Every vehicle on that endpoint is discovered there — select it from the Links list instead of opening a second link.",
+                transport_desc, existing
+            ));
+        }
+    }
 
     let result = match proto {
         "mavlink" => {
             // ── MAVLink Path ─────────────────────────────────────────────
             connect_mavlink(
+                link_id,
                 byte_transport,
                 attitude_rate_hz,
                 position_rate_hz,
@@ -225,25 +315,27 @@ pub async fn connect(
                 flight_log_raw_path,
                 flight_log_raw,
                 flight_log_raw_always,
-                state,
-                app_handle,
+                state.clone(),
+                app_handle.clone(),
             )
         }
         "telemetry" => {
             // ── Passive Telemetry Path (listen-only, auto-detect) ────────
             connect_passive_telemetry(
+                link_id,
                 byte_transport,
                 flight_log_enabled,
                 flight_log_db_enabled,
                 flight_log_path,
                 flight_log_raw_path,
-                state,
-                app_handle,
+                state.clone(),
+                app_handle.clone(),
             )
         }
         _ => {
             // ── MSP Path ────────────────────────────────────────────────
             connect_msp(
+                link_id,
                 byte_transport,
                 attitude_rate_hz,
                 position_rate_hz,
@@ -255,36 +347,62 @@ pub async fn connect(
                 flight_log_raw_path,
                 flight_log_raw,
                 flight_log_raw_always,
-                state,
-                app_handle,
+                state.clone(),
+                app_handle.clone(),
             )
         }
     };
 
     // Central success/failure log — a failed connect otherwise only surfaces in the UI toast and
     // leaves no trace in the diagnostics log (the original PX4 report had nothing to go on).
-    match result {
-        Ok(info) => {
+    let opened = match result {
+        Ok(o) => {
             log::info!(
-                "Connection established: {} {} (platform={})",
-                info.fc_variant, info.fc_version, info.platform_type,
+                "Connection established: {} {} (platform={}) as L{}:S{}",
+                o.fc_info.fc_variant, o.fc_info.fc_version, o.fc_info.platform_type, link_id, o.sysid,
             );
-            Ok(info)
+            o
         }
         Err(e) => {
             log::error!("Connection failed (protocol={}): {}", proto, e);
-            // A transport-level explanation turns a bare "no HEARTBEAT" into something the user can act on.
-            Err(match transport_note {
+            // A transport-level explanation (busy local UDP port → the vehicles' pushes go elsewhere)
+            // turns a bare "no HEARTBEAT" into something the user can act on.
+            return Err(match transport_note {
                 Some(note) => format!("{e}\n\n{note}"),
                 None => e,
-            })
+            });
         }
+    };
+
+    // Register the link. The first link's primary vehicle becomes the active one.
+    let primary = VehicleId::new(link_id, opened.sysid);
+    let entry = LinkEntry {
+        id: link_id,
+        protocol: opened.protocol,
+        protocol_name: opened.protocol_name,
+        transport: transport_desc,
+        fc_info: opened.fc_info.clone(),
+        primary: primary.clone(),
+    };
+    let discovered = VehicleInfo::primary_of(&entry, opened.compid);
+    let activated = {
+        let mut reg = state.links.lock().map_err(|e| e.to_string())?;
+        reg.insert(entry)
+    };
+    crate::link_presence::link_up(&opened.fc_info, opened.protocol_name);
+    let _ = app_handle.emit("vehicle-discovered", &discovered);
+    if activated {
+        state.retarget_rc(Some(&primary));
+        let _ = app_handle.emit("active-vehicle-changed", ActiveVehicleChanged { vehicle_id: Some(primary.to_key()) });
     }
+
+    Ok(ConnectResult { link_id, vehicle_id: primary.to_key(), fc_info: opened.fc_info })
 }
 
 /// MSP connection path: handshake → scheduler
 #[allow(clippy::too_many_arguments)] // mirrors the connect() command's parameter set
 fn connect_msp(
+    link_id: LinkId,
     byte_transport: Box<dyn ByteTransport>,
     attitude_rate_hz: Option<f64>,
     position_rate_hz: Option<f64>,
@@ -298,7 +416,7 @@ fn connect_msp(
     flight_log_raw_always: Option<bool>,
     state: State<'_, AppState>,
     app_handle: AppHandle,
-) -> Result<FcInfo, String> {
+) -> Result<Opened, String> {
     // Shared MSP raw-serial log sink (ADR-049): the transport writes into it, the recorder owns its
     // lifecycle. Created up front so both share the same slot.
     let msp_raw_sink: MspRawSink = std::sync::Arc::new(std::sync::Mutex::new(None));
@@ -335,6 +453,9 @@ fn connect_msp(
     // No tunnel on this link — clear the Tunnel tab's counters of an earlier MAVLink session.
     msp_tunnel::stats::reset();
 
+    // One vehicle per MSP link → sysid 0. Everything this link emits carries "L{id}:S0".
+    let emitter = VehicleEmitter::new(app_handle.clone(), VehicleId::new(link_id, 0));
+
     // ── MSP Handshake ──────────────────────────────────────────────
     // Identity, version gate, feature set, craft info and home (shared with the MSP-over-MAVLink
     // tunnel — see msp/handshake.rs). One attempt per request on a direct MSP link.
@@ -343,7 +464,7 @@ fn connect_msp(
     if let Some(fix) = handshake.home {
         let home = HomeEvent { lat: fix.lat, lon: fix.lon, alt: fix.alt };
         crate::link_status::on_home(home.lat, home.lon);
-        let _ = app_handle.emit("home-position", home);
+        let _ = emitter.emit("home-position", home);
     }
     let link_stats_supported = fc_info.features.as_ref().is_some_and(|f| f.link_stats);
     let wind_supported = fc_info.features.as_ref().is_some_and(|f| f.wind_estimate);
@@ -375,7 +496,7 @@ fn connect_msp(
             .and_then(|p| p.parent().map(|p| p.join(".portable").exists()))
             .unwrap_or(false);
 
-        match FlightRecorder::new(flight_log_settings, fc_info.clone(), "MSP", portable, app_handle.clone(), state.pending_session.clone(), state.resume_pending.clone(), state.active_temp_path.clone(), msp_raw_sink.clone()) {
+        match FlightRecorder::new(flight_log_settings, fc_info.clone(), "MSP", portable, emitter.clone(), state.sessions.clone(), msp_raw_sink.clone()) {
             Ok(mut rec) => {
                 rec.start_continuous_log();
                 let handle = std::sync::Arc::new(std::sync::Mutex::new(rec));
@@ -391,16 +512,11 @@ fn connect_msp(
         None
     };
 
-    // Fresh link starts with RC injection off (frontend re-engages explicitly).
-    if let Ok(mut rc) = state.rc_tx.lock() {
-        *rc = crate::scheduler::rc_tx::RcTxState::default();
-    }
-
-    store_recorder(&state, &recorder_handle);
+    store_recorder(&state, emitter.key(), &recorder_handle);
     let handle = scheduler::start(
         Box::new(transport),
         config,
-        app_handle,
+        emitter,
         recorder_handle,
         state.radar_ingest.clone(),
         state.radar_msp_enabled.clone(),
@@ -408,23 +524,13 @@ fn connect_msp(
         SchedulerMode::Telemetry,
     );
 
-    // Store MSP scheduler handle and FC info
-    {
-        let mut proto = state.protocol.lock().map_err(|e| e.to_string())?;
-        *proto = Some(ActiveProtocol::Msp(handle));
-    }
-    crate::link_presence::link_up(&fc_info, "MSP");
-    {
-        let mut info = state.fc_info.lock().map_err(|e| e.to_string())?;
-        *info = Some(fc_info.clone());
-    }
-
-    Ok(fc_info)
+    Ok(Opened { protocol: ActiveProtocol::Msp(handle), protocol_name: "MSP", fc_info, sysid: 0, compid: 0 })
 }
 
 /// MAVLink connection path: handshake → handler
 #[allow(clippy::too_many_arguments)]
 fn connect_mavlink(
+    link_id: LinkId,
     mut byte_transport: Box<dyn ByteTransport>,
     attitude_rate_hz: Option<f64>,
     position_rate_hz: Option<f64>,
@@ -439,7 +545,7 @@ fn connect_mavlink(
     flight_log_raw_always: Option<bool>,
     state: State<'_, AppState>,
     app_handle: AppHandle,
-) -> Result<FcInfo, String> {
+) -> Result<Opened, String> {
     // MAVLink handshake: wait for FC HEARTBEAT, send GCS HEARTBEAT back
     let (mut fc_info, fc_sysid, fc_compid, uid2_valid) = mavlink_proto::perform_handshake(&mut *byte_transport)?;
 
@@ -505,6 +611,10 @@ fn connect_mavlink(
         raw_always: flight_log_raw_always.unwrap_or(false),
     };
 
+    // Events of this link's handshake vehicle carry "L{link}:S{sysid}" (the recorder and the tunnel
+    // scheduler below share the emitter — they talk to the same vehicle).
+    let emitter = VehicleEmitter::new(app_handle.clone(), VehicleId::new(link_id, fc_sysid));
+
     let recorder_handle = if flight_log_settings.enabled {
         let portable = std::env::current_exe()
             .ok()
@@ -513,7 +623,7 @@ fn connect_mavlink(
 
         // MAVLink records via .tlog; the MSP raw sink is unused here (kept empty).
         let msp_raw_sink: MspRawSink = std::sync::Arc::new(std::sync::Mutex::new(None));
-        match FlightRecorder::new(flight_log_settings, fc_info.clone(), "MAVLink", portable, app_handle.clone(), state.pending_session.clone(), state.resume_pending.clone(), state.active_temp_path.clone(), msp_raw_sink) {
+        match FlightRecorder::new(flight_log_settings.clone(), fc_info.clone(), "MAVLink", portable, emitter.clone(), state.sessions.clone(), msp_raw_sink) {
             Ok(mut rec) => {
                 rec.start_continuous_log();
                 let handle = std::sync::Arc::new(std::sync::Mutex::new(rec));
@@ -529,16 +639,36 @@ fn connect_mavlink(
         None
     };
 
-    // Fresh link starts with RC injection off (frontend re-engages explicitly) — same as the MSP path.
-    if let Ok(mut rc) = state.rc_tx.lock() {
-        *rc = crate::scheduler::rc_tx::RcTxState::default();
-    }
-
-    // Start the MAVLink handler thread
-    store_recorder(&state, &recorder_handle);
+    // Start the MAVLink handler thread. Its events carry "L{link}:S{sysid}" of the handshake vehicle;
+    // vehicles it discovers later on the same link get their own sysid stamped. The stream shaping
+    // applied above is handed along so those vehicles are configured identically.
+    let rates = mavlink_proto::handler::StreamRateConfig {
+        full_telemetry: mavlink_full_telemetry.unwrap_or(false),
+        attitude_hz: attitude_rate_hz.unwrap_or(5.0),
+        position_hz: position_rate_hz.unwrap_or(2.0),
+        airspeed_enabled: airspeed_enabled.unwrap_or(false),
+        wind_enabled: wind_enabled.unwrap_or(false),
+    };
+    store_recorder(&state, emitter.key(), &recorder_handle);
+    // Vehicles discovered later on this link record unattended (DB only) with the same settings.
+    // Group recording off (`fleet_mode::group_recording`): vehicles discovered beside the primary get no
+    // recorder — only the first vehicle's flights reach the logbook.
+    let secondary_recording = if flight_log_settings.enabled && flight_log_settings.db_enabled && crate::fleet_mode::group_recording() {
+        let portable = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|p| p.join(".portable").exists()))
+            .unwrap_or(false);
+        Some(mavlink_proto::handler::SecondaryRecording {
+            settings: flight_log_settings.clone(),
+            portable,
+            slots: state.sessions.clone(),
+        })
+    } else {
+        None
+    };
     let link_desc = byte_transport.description();
     let probe_recorder = recorder_handle.clone();
-    let mut handle = mavlink_proto::handler::start(byte_transport, fc_sysid, fc_compid, fc_info.fc_variant.clone(), app_handle.clone(), recorder_handle, state.rc_tx.clone());
+    let mut handle = mavlink_proto::handler::start(byte_transport, fc_sysid, fc_compid, fc_info.fc_variant.clone(), (fc_info.platform_type, fc_info.mav_type), emitter.clone(), recorder_handle, state.rc_tx.clone(), rates, secondary_recording);
 
     // INAV MSP over MAVLink (D2): INAV's AUTOPILOT_VERSION carries an all-zero uid2 (and a fake
     // ArduPilot 4.7.0 version), so the MAVLink identity can't tell INAV apart — only the tunnel can.
@@ -546,7 +676,7 @@ fn connect_mavlink(
     // ArduPilot / PX4, no probe, no delay.
     msp_tunnel::stats::reset();
     if !uid2_valid {
-        match probe_msp_tunnel(&handle, fc_sysid, fc_info.mav_type, &link_desc, &state, &app_handle) {
+        match probe_msp_tunnel(&handle, fc_sysid, fc_info.mav_type, &link_desc, &state, &emitter) {
             TunnelProbe::Up(sched, inav_info) => {
                 handle.msp = Some(sched);
                 // INAV confirmed → the handler switches to INAV's MAVLink conventions (MISSION_CURRENT).
@@ -555,7 +685,7 @@ fn connect_mavlink(
                 //  • `handle.fc_variant` keeps the HEARTBEAT variant ("Generic" / "ArduPlane" / …). The
                 //    handler decodes telemetry with it — INAV emulates ArduPilot flight modes in the
                 //    HEARTBEAT `custom_mode`, so the MAVLink mode tables are the right ones.
-                //  • `state.fc_info` (returned to the frontend below) is the INAV identity from the MSP
+                //  • the link entry's `fc_info` (returned to the frontend below) is the INAV identity from the MSP
                 //    handshake, with `features.msp_tunnel = true`. The frontend keys its INAV surface on
                 //    that flag (`hasMsp` / `isArduPilotLink` in stores/connection.ts), and every INAV
                 //    command reaches this scheduler through `state::with_msp`.
@@ -570,11 +700,14 @@ fn connect_mavlink(
             }
             TunnelProbe::NoTunnel => {}
             TunnelProbe::LinkLost => {
-                // The handler already emitted `connection-lost` (before `state.protocol` was set, so the
+                // The handler already emitted `connection-lost` (before the link was registered, so the
                 // frontend's disconnect found nothing) — tear down and fail the connect instead of
                 // storing a dead "connected" link.
+                // That `connection-lost` carries this (still unregistered) link's `linkId`; the
+                // +page.svelte listener ignores a linkId it does not know, so other links stay up.
                 let _ = handle.stop();
-                store_recorder(&state, &None);
+                // The primary's and any secondary discovered during the probe.
+                state.drop_link_recorders(link_id);
                 msp_tunnel::stats::emit_now(&app_handle);
                 return Err("Link lost during MSP tunnel probe".into());
             }
@@ -582,18 +715,7 @@ fn connect_mavlink(
     }
     msp_tunnel::stats::emit_now(&app_handle);
 
-    // Store MAVLink handle and FC info
-    {
-        let mut proto = state.protocol.lock().map_err(|e| e.to_string())?;
-        *proto = Some(ActiveProtocol::Mavlink(handle));
-    }
-    crate::link_presence::link_up(&fc_info, "MAVLink");
-    {
-        let mut info = state.fc_info.lock().map_err(|e| e.to_string())?;
-        *info = Some(fc_info.clone());
-    }
-
-    Ok(fc_info)
+    Ok(Opened { protocol: ActiveProtocol::Mavlink(handle), protocol_name: "MAVLink", fc_info, sysid: fc_sysid, compid: fc_compid })
 }
 
 /// Outcome of the connect-time MSP-over-MAVLink probe.
@@ -618,7 +740,7 @@ fn probe_msp_tunnel(
     mav_type: u8,
     link_desc: &str,
     state: &State<'_, AppState>,
-    app_handle: &AppHandle,
+    app_handle: &VehicleEmitter,
 ) -> TunnelProbe {
     use std::time::{Duration, Instant};
 
@@ -826,6 +948,7 @@ fn parse_hex_payload(text: &str) -> Result<Vec<u8>, String> {
 /// is enabled, a recorder is attached and fed the decoded telemetry (arm/disarm derived from the FC's
 /// flight-mode field — e.g. FrSky MODES).
 fn connect_passive_telemetry(
+    link_id: LinkId,
     byte_transport: Box<dyn ByteTransport>,
     flight_log_enabled: Option<bool>,
     flight_log_db_enabled: Option<bool>,
@@ -833,7 +956,7 @@ fn connect_passive_telemetry(
     flight_log_raw_path: Option<String>,
     state: State<'_, AppState>,
     app_handle: AppHandle,
-) -> Result<FcInfo, String> {
+) -> Result<Opened, String> {
     log::info!(
         "Passive telemetry connect (listen-only) via {}",
         byte_transport.description()
@@ -857,13 +980,16 @@ fn connect_passive_telemetry(
         raw_always: false,
     };
 
+    // One vehicle per passive link → sysid 0.
+    let emitter = VehicleEmitter::new(app_handle, VehicleId::new(link_id, 0));
+
     let recorder_handle = if flight_log_settings.enabled {
         let portable = std::env::current_exe()
             .ok()
             .and_then(|p| p.parent().map(|p| p.join(".portable").exists()))
             .unwrap_or(false);
         let msp_raw_sink: MspRawSink = std::sync::Arc::new(std::sync::Mutex::new(None));
-        match FlightRecorder::new(flight_log_settings, fc_info.clone(), "Telemetry", portable, app_handle.clone(), state.pending_session.clone(), state.resume_pending.clone(), state.active_temp_path.clone(), msp_raw_sink) {
+        match FlightRecorder::new(flight_log_settings, fc_info.clone(), "Telemetry", portable, emitter.clone(), state.sessions.clone(), msp_raw_sink) {
             Ok(mut rec) => {
                 rec.start_continuous_log();
                 log::info!("Flight recorder initialized (passive telemetry)");
@@ -878,33 +1004,28 @@ fn connect_passive_telemetry(
         None
     };
 
-    store_recorder(&state, &recorder_handle);
-    let handle = crate::passive_telemetry::start(byte_transport, app_handle, recorder_handle);
+    store_recorder(&state, emitter.key(), &recorder_handle);
+    let handle = crate::passive_telemetry::start(byte_transport, emitter, recorder_handle);
 
-    {
-        let mut proto = state.protocol.lock().map_err(|e| e.to_string())?;
-        *proto = Some(ActiveProtocol::PassiveTelemetry(handle));
-    }
-    crate::link_presence::link_up(&fc_info, "Telemetry");
-    {
-        let mut info = state.fc_info.lock().map_err(|e| e.to_string())?;
-        *info = Some(fc_info.clone());
-    }
-
-    Ok(fc_info)
+    Ok(Opened { protocol: ActiveProtocol::PassiveTelemetry(handle), protocol_name: "Telemetry", fc_info, sysid: 0, compid: 0 })
 }
 
-/// Disconnect from the flight controller
+/// Disconnect one link (`link_id`) or, with `None`, every link (the pre-multi-vehicle behaviour the
+/// single connect/disconnect toggle still relies on). Stops the handler(s), drops the transport(s) and
+/// moves the active vehicle to a remaining link if its own went away.
 #[tauri::command]
-pub async fn disconnect(state: State<'_, AppState>) -> Result<(), String> {
+pub async fn disconnect(link_id: Option<LinkId>, state: State<'_, AppState>, app_handle: AppHandle) -> Result<(), String> {
     // A running MSP write transaction (safehome / geozone / mission save) gets up to 5 s to finish, so
     // the scheduler is not stopped between its SET requests (half-written RAM config). Read
-    // transactions simply end on the scheduler stop.
-    let msp = {
-        let proto = state.protocol.lock().map_err(|e| e.to_string())?;
-        proto.as_ref().and_then(|p| p.msp_requester())
+    // transactions simply end on the scheduler stop. Only the link(s) about to close are waited for.
+    let msps: Vec<crate::scheduler::MspRequester> = {
+        let reg = state.links.lock().map_err(|e| e.to_string())?;
+        reg.iter()
+            .filter(|e| link_id.is_none_or(|id| e.id == id))
+            .filter_map(|e| e.protocol.msp_requester())
+            .collect()
     };
-    if let Some(msp) = msp {
+    for msp in msps {
         let idle = tauri::async_runtime::spawn_blocking(move || msp.wait_idle(DISCONNECT_TXN_WAIT))
             .await
             .unwrap_or(true);
@@ -913,44 +1034,67 @@ pub async fn disconnect(state: State<'_, AppState>) -> Result<(), String> {
         }
     }
 
-    let mut proto = state.protocol.lock().map_err(|e| e.to_string())?;
-    if proto.is_none() {
-        return Err("Not connected".into());
+    // Take the entries out under the lock, stop them after releasing it (stop() joins the thread).
+    let (entries, active_change) = {
+        let mut reg = state.links.lock().map_err(|e| e.to_string())?;
+        if reg.is_empty() {
+            return Err(ERR_NOT_CONNECTED.into());
+        }
+        match link_id {
+            None => (reg.drain(), Some(None)),
+            Some(id) => {
+                let (entry, change) = reg.remove(id).ok_or_else(|| format!("Unknown link L{id}"))?;
+                (vec![entry], change)
+            }
+        }
+    };
+
+    for entry in entries {
+        let vehicle_key = entry.primary.to_key();
+        match entry.protocol {
+            ActiveProtocol::Msp(handle) => {
+                let _transport = handle.stop(); // transport dropped here
+                log::info!("MSP scheduler stopped (L{})", entry.id);
+            }
+            ActiveProtocol::Mavlink(handle) => {
+                let _transport = handle.stop(); // transport dropped here
+                log::info!("MAVLink handler stopped (L{})", entry.id);
+            }
+            ActiveProtocol::PassiveTelemetry(handle) => {
+                let _transport = handle.stop(); // transport dropped here
+                log::info!("Passive telemetry handler stopped (L{})", entry.id);
+            }
+        }
+        state.drop_link_recorders(entry.id);
+        let _ = app_handle.emit("vehicle-lost", VehicleLost { vehicle_id: vehicle_key, link_id: entry.id, reason: "user" });
+        let _ = app_handle.emit("link-closed", LinkClosed { link_id: entry.id, reason: "user" });
     }
 
-    // Stop the active protocol handler
-    match proto.take() {
-        Some(ActiveProtocol::Msp(handle)) => {
-            let _transport = handle.stop(); // transport dropped here
-            log::info!("MSP scheduler stopped");
-        }
-        Some(ActiveProtocol::Mavlink(handle)) => {
-            let _transport = handle.stop(); // transport dropped here
-            log::info!("MAVLink handler stopped");
-        }
-        Some(ActiveProtocol::PassiveTelemetry(handle)) => {
-            let _transport = handle.stop(); // transport dropped here
-            log::info!("Passive telemetry handler stopped");
-        }
-        None => {}
+    if let Some(new_active) = active_change {
+        state.retarget_rc(new_active.as_ref());
+        let _ = app_handle.emit("active-vehicle-changed", ActiveVehicleChanged { vehicle_id: new_active.map(|v| v.to_key()) });
     }
 
-    // Clear FC info + the recorder handle
-    let mut info = state.fc_info.lock().map_err(|e| e.to_string())?;
-    *info = None;
-    if let Ok(mut rec) = state.recorder.lock() {
-        *rec = None;
+    let none_left = state.links.lock().map(|r| r.is_empty()).unwrap_or(true);
+    if none_left {
+        if let Ok(mut recs) = state.recorders.lock() {
+            recs.clear();
+        }
+        crate::link_presence::link_down();
+        log::info!("Disconnected");
+    } else {
+        log::info!("Link closed; other links remain");
     }
-
-    crate::link_presence::link_down();
-    log::info!("Disconnected");
     Ok(())
 }
 
-/// Publish the connection's recorder handle for the command layer (cleared again on disconnect).
-fn store_recorder(state: &State<'_, AppState>, rec: &Option<crate::flightlog::recorder::FlightRecorderHandle>) {
-    if let Ok(mut slot) = state.recorder.lock() {
-        *slot = rec.clone();
+/// Publish (or drop) a link primary's recorder handle for the command layer, under its vehicle key
+/// (dropped again on disconnect), and register it with the group-flight coordinator (it unregisters
+/// itself on teardown).
+fn store_recorder(state: &State<'_, AppState>, key: &str, rec: &Option<crate::flightlog::recorder::FlightRecorderHandle>) {
+    state.set_recorder(key, rec.as_ref());
+    if let Some(r) = rec {
+        state.groups.register(r);
     }
 }
 
@@ -959,18 +1103,26 @@ fn store_recorder(state: &State<'_, AppState>, rec: &Option<crate::flightlog::re
 /// later on this link — is saved with the chosen type. RAM only; nothing is persisted.
 #[tauri::command]
 pub fn set_platform_type(platform_type: u8, state: State<'_, AppState>) -> Result<(), String> {
-    {
-        let mut info = state.fc_info.lock().map_err(|e| e.to_string())?;
-        match info.as_mut() {
-            Some(i) => i.platform_type = platform_type,
-            None => return Err("Not connected".into()),
-        }
-    }
-    if let Ok(slot) = state.recorder.lock() {
-        if let Some(rec) = slot.as_ref() {
-            if let Ok(mut r) = rec.lock() {
-                r.set_platform_type(platform_type);
+    let active_key = {
+        // Multi-vehicle: the link's FcInfo describes its primary vehicle — only that one's override
+        // lands there; a selected secondary leaves it alone.
+        let mut reg = state.links.lock().map_err(|e| e.to_string())?;
+        let active = reg.active().cloned().ok_or_else(|| crate::vehicle_registry::ERR_NOT_CONNECTED.to_string())?;
+        match reg.get_mut(active.link) {
+            Some(entry) => {
+                if entry.primary == active {
+                    entry.fc_info.platform_type = platform_type;
+                }
             }
+            None => return Err(crate::vehicle_registry::ERR_NOT_CONNECTED.to_string()),
+        }
+        active.to_key()
+    };
+    // The ACTIVE vehicle's recorder — not whichever link connected last.
+    let recorder = state.recorders.lock().ok().and_then(|m| m.get(&active_key).cloned());
+    if let Some(rec) = recorder {
+        if let Ok(mut r) = rec.lock() {
+            r.set_platform_type(platform_type);
         }
     }
     log::info!("Platform type override: {}", platform_type);

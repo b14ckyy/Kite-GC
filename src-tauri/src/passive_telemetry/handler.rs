@@ -13,7 +13,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter};
+use crate::vehicle_registry::emitter::VehicleEmitter;
 
 use crate::flightlog::recorder::FlightRecorderHandle;
 use crate::transport::{ByteTransport, TransportError};
@@ -69,7 +69,7 @@ impl PassiveHandle {
 /// Start the passive telemetry handler on a dedicated thread.
 pub fn start(
     transport: Box<dyn ByteTransport>,
-    app_handle: AppHandle,
+    app_handle: VehicleEmitter,
     recorder: Option<FlightRecorderHandle>,
 ) -> PassiveHandle {
     let (cmd_tx, cmd_rx) = mpsc::channel::<PassiveCommand>();
@@ -146,7 +146,7 @@ struct TelemSnapshot {
 
 fn handler_loop(
     mut transport: Box<dyn ByteTransport>,
-    app_handle: AppHandle,
+    app_handle: VehicleEmitter,
     cmd_rx: mpsc::Receiver<PassiveCommand>,
     recorder: Option<FlightRecorderHandle>,
 ) -> Option<Box<dyn ByteTransport>> {

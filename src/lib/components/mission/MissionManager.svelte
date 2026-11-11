@@ -21,6 +21,7 @@
     formatDurationSec,
   } from '$lib/stores/flightlog';
   import type { LibraryMission, FlightSummary } from '$lib/stores/flightlogTypes';
+  import { serializeWaypoints } from '$lib/stores/missionArdupilot';
   import {
     mission, missionModified, missionSetWaypoints, loadedMissionId, markMissionSynced,
     missionImportXml, missionLoadFile, applyMissionLaunchDefault, type Waypoint,
@@ -265,13 +266,24 @@
 
   async function exportMission(m: LibraryMission) {
     try {
+      // ArduPilot/PX4 library rows hold ArduWaypoint JSON → QGC WPL 110 `.waypoints`; the Rust
+      // `.mission` (INAV XML) path only understands INAV waypoints.
+      const isMav = m.format === 'ardupilot' || m.format === 'px4';
+      const base = (m.name || 'mission').replace(/[^\w\-]+/g, '_');
       const path = await save({
         title: $t('missionMgr.exportTitle'),
-        defaultPath: `${(m.name || 'mission').replace(/[^\w\-]+/g, '_')}.mission`,
-        filters: [{ name: 'Mission', extensions: ['mission'] }],
+        defaultPath: isMav ? `${base}.waypoints` : `${base}.mission`,
+        filters: isMav
+          ? [{ name: 'Waypoints', extensions: ['waypoints'] }]
+          : [{ name: 'Mission', extensions: ['mission'] }],
       });
       if (!path) return;
-      await missionExportFileFromJson(path, m.waypoints_json);
+      if (isMav) {
+        const wps = JSON.parse(m.waypoints_json) as ArduWaypoint[];
+        await invoke<void>('write_text_file', { path, content: serializeWaypoints(wps) });
+      } else {
+        await missionExportFileFromJson(path, m.waypoints_json);
+      }
       statusMessage = $t('missionMgr.exported');
     } catch (e) {
       statusMessage = $t('missionMgr.exportFailed', { values: { error: String(e) } });
@@ -471,14 +483,19 @@
           {#if !collapsed.has(key)}
             <div class="tree-items">
               {#each items as m (m.id)}
-                <button class="lib-item" class:selected={m.id === $missionManagerSelectedId} onclick={() => select(m.id)}>
-                  <div class="lib-item-title">{m.name || $t('missionMgr.unnamed')}</div>
-                  <div class="lib-item-meta">
-                    <span>{m.wp_count} WP</span>
-                    <span>{fmtDist(m.total_distance_m)}</span>
-                    <span class="fmt-badge">{formatBadge(m.format || 'inav')}</span>
-                  </div>
-                </button>
+                <div class="lib-item" class:selected={m.id === $missionManagerSelectedId}>
+                  <button class="lib-item-main" onclick={() => select(m.id)}>
+                    <div class="lib-item-title">{m.name || $t('missionMgr.unnamed')}</div>
+                    <div class="lib-item-meta">
+                      <span>{m.wp_count} WP</span>
+                      <span>{fmtDist(m.total_distance_m)}</span>
+                      <span class="fmt-badge">{formatBadge(m.format || 'inav')}</span>
+                    </div>
+                  </button>
+                  <!-- Row-level delete, so removing a saved mission doesn't require selecting it first. -->
+                  <button class="lib-item-del" title={$t('missionMgr.delete')} aria-label={$t('missionMgr.delete')}
+                          onclick={(e) => { e.stopPropagation(); select(m.id); void deleteMission(m); }}>✕</button>
+                </div>
               {/each}
             </div>
           {/if}
@@ -580,9 +597,12 @@
   .tree-count { font-size: 10px; color: #8fb4c5; background: rgba(55, 168, 219, 0.12); border: 1px solid rgba(55, 168, 219, 0.32); border-radius: 999px; padding: 1px 6px; }
   .tree-items { margin-top: 4px; margin-left: 12px; }
 
-  .lib-item { width: calc(100% - 12px); text-align: left; border: 1px solid #555; border-radius: 4px; background: #383838; color: #ddd; margin-bottom: 4px; padding: 6px; cursor: pointer; }
+  .lib-item { position: relative; display: flex; align-items: stretch; width: calc(100% - 12px); border: 1px solid #555; border-radius: 4px; background: #383838; color: #ddd; margin-bottom: 4px; }
   .lib-item:hover { border-color: #37a8db; }
   .lib-item.selected { border-color: #37a8db; background: rgba(55, 168, 219, 0.18); }
+  .lib-item-main { flex: 1 1 auto; min-width: 0; text-align: left; padding: 6px 26px 6px 6px; background: transparent; border: 0; color: inherit; font: inherit; cursor: pointer; }
+  .lib-item-del { position: absolute; top: 4px; right: 4px; width: 20px; height: 20px; padding: 0; background: transparent; border: 1px solid transparent; border-radius: 3px; color: #888; font-size: 11px; line-height: 1; cursor: pointer; }
+  .lib-item-del:hover { border-color: #e06c6c; color: #e06c6c; background: rgba(224, 108, 108, 0.12); }
   .lib-item-title { font-size: 12px; color: #fff; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .lib-item-meta { margin-top: 2px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 10px; color: #aaa; }
   .fmt-badge { font-size: 9px; font-weight: 600; color: #9cc6d9; background: rgba(55, 168, 219, 0.14); border: 1px solid rgba(55, 168, 219, 0.34); border-radius: 999px; padding: 0 6px; text-transform: uppercase; letter-spacing: 0.4px; }

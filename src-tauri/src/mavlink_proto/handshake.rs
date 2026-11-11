@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use ::mavlink::ardupilotmega::{
     MavAutopilot, MavCmd, MavMessage,
-    COMMAND_LONG_DATA,
+    AUTOPILOT_VERSION_DATA, COMMAND_LONG_DATA,
 };
 use ::mavlink::Message;
 
@@ -188,21 +188,8 @@ pub fn perform_handshake(transport: &mut dyn ByteTransport) -> Result<(FcInfo, u
     fc_info.api_version = "MAVLink v2".into();
     fc_info.board_id = "MAVLink".into();
 
-    // Request AUTOPILOT_VERSION to get firmware version
-    // MAV_CMD_REQUEST_MESSAGE (512), param1 = message_id of AUTOPILOT_VERSION (148)
-    let version_request = MavMessage::COMMAND_LONG(COMMAND_LONG_DATA {
-        target_system: fc_sysid,
-        target_component: 1, // MAV_COMP_ID_AUTOPILOT1
-        command: MavCmd::MAV_CMD_REQUEST_MESSAGE,
-        confirmation: 0,
-        param1: 148.0, // AUTOPILOT_VERSION msg_id
-        param2: 0.0,
-        param3: 0.0,
-        param4: 0.0,
-        param5: 0.0,
-        param6: 0.0,
-        param7: 0.0,
-    });
+    // Request AUTOPILOT_VERSION to get firmware version and hardware id
+    let version_request = autopilot_version_request(fc_sysid, 1); // MAV_COMP_ID_AUTOPILOT1
     let frame = codec::serialize_v2(&header, &version_request, &mut seq);
     if let Err(e) = transport.write_bytes(&frame) {
         log::warn!("Failed to request AUTOPILOT_VERSION: {}", e);
@@ -227,44 +214,18 @@ pub fn perform_handshake(transport: &mut dyn ByteTransport) -> Result<(FcInfo, u
                         continue;
                     }
                     if let MavMessage::AUTOPILOT_VERSION(ref ver) = frame.message {
-                        // Extract version from flight_sw_version (semver encoded in u32)
-                        // Format: major << 24 | minor << 16 | patch << 8 | type
-                        let sw = ver.flight_sw_version;
-                        let major = (sw >> 24) & 0xFF;
-                        let minor = (sw >> 16) & 0xFF;
-                        let patch = (sw >> 8) & 0xFF;
-                        let dev_type = sw & 0xFF;
-
-                        // Type: 0=dev, 64=alpha, 128=beta, 192=rc, 255=release
-                        let suffix = match dev_type {
-                            255 => "".to_string(),
-                            192..=254 => "-rc".to_string(),
-                            128..=191 => "-beta".to_string(),
-                            64..=127 => "-alpha".to_string(),
-                            _ => "-dev".to_string(),
-                        };
-
-                        fc_info.fc_version = format!("{}.{}.{}{}", major, minor, patch, suffix);
-
-                        // Try to get board version from board_version field
-                        if ver.board_version > 0 {
-                            fc_info.hardware_revision = ver.board_version as u16;
+                        let v = parse_autopilot_version(ver);
+                        fc_info.fc_version = v.fc_version;
+                        if let Some(rev) = v.hardware_revision {
+                            fc_info.hardware_revision = rev;
                         }
-
-                        // Hardware identity: uid2 (MAVLink 2 extension — the MCU serial on ArduPilot /
-                        // PX4) preferred, else the legacy 64-bit uid. All-zero = not provided.
-                        uid2_valid = ver.uid2.iter().any(|b| *b != 0);
-                        if uid2_valid {
-                            fc_info.fc_uid = Some(ver.uid2.iter().map(|b| format!("{:02X}", b)).collect());
-                        } else if ver.uid != 0 {
-                            fc_info.fc_uid = Some(format!("{:016X}", ver.uid));
-                        }
-
+                        uid2_valid = v.uid2_valid;
+                        fc_info.fc_uid = v.fc_uid;
                         log::info!(
                             "AUTOPILOT_VERSION: {} v{} (sw=0x{:08X}, board={})",
                             fc_info.fc_variant,
                             fc_info.fc_version,
-                            sw,
+                            ver.flight_sw_version,
                             ver.board_version,
                         );
                         break 'version;
@@ -277,4 +238,97 @@ pub fn perform_handshake(transport: &mut dyn ByteTransport) -> Result<(FcInfo, u
     }
 
     Ok((fc_info, fc_sysid, fc_compid, uid2_valid))
+}
+
+/// `MAV_CMD_REQUEST_MESSAGE` for `AUTOPILOT_VERSION` (148), addressed to `sysid` / `compid` — the
+/// handshake asks the primary vehicle's autopilot (component 1), the handler a vehicle discovered later on
+/// a shared link at the component its HEARTBEAT came from.
+pub(crate) fn autopilot_version_request(sysid: u8, compid: u8) -> MavMessage {
+    MavMessage::COMMAND_LONG(COMMAND_LONG_DATA {
+        target_system: sysid,
+        target_component: compid,
+        command: MavCmd::MAV_CMD_REQUEST_MESSAGE,
+        confirmation: 0,
+        param1: 148.0, // AUTOPILOT_VERSION msg_id
+        param2: 0.0,
+        param3: 0.0,
+        param4: 0.0,
+        param5: 0.0,
+        param6: 0.0,
+        param7: 0.0,
+    })
+}
+
+/// What Kite takes from an `AUTOPILOT_VERSION`.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct AutopilotVersion {
+    /// `flight_sw_version` as "major.minor.patch[-type]".
+    pub fc_version: String,
+    /// `board_version`, when the autopilot fills it.
+    pub hardware_revision: Option<u16>,
+    /// The hardware id (`uid2` through `msp::hardware_uid`); `None` when the autopilot gives none.
+    pub fc_uid: Option<String>,
+    /// `uid2` has any non-zero byte (ArduPilot / PX4 fill it from the MCU serial; INAV sends zeros).
+    pub uid2_valid: bool,
+}
+
+/// Decode an `AUTOPILOT_VERSION` — shared by the handshake (primary) and the handler (vehicles
+/// discovered later). An all-zero `uid2` means no hardware id: the legacy 64-bit `uid` is not used —
+/// INAV fills it with the sysid, PX4 SITL with a constant + sysid.
+pub(crate) fn parse_autopilot_version(ver: &AUTOPILOT_VERSION_DATA) -> AutopilotVersion {
+    // flight_sw_version: major << 24 | minor << 16 | patch << 8 | type
+    let sw = ver.flight_sw_version;
+    let (major, minor, patch, dev_type) = ((sw >> 24) & 0xFF, (sw >> 16) & 0xFF, (sw >> 8) & 0xFF, sw & 0xFF);
+    // Type: 0=dev, 64=alpha, 128=beta, 192=rc, 255=release
+    let suffix = match dev_type {
+        255 => "",
+        192..=254 => "-rc",
+        128..=191 => "-beta",
+        64..=127 => "-alpha",
+        _ => "-dev",
+    };
+    let uid2: String = ver.uid2.iter().map(|b| format!("{:02X}", b)).collect();
+    let fc_uid = crate::msp::types::hardware_uid(&uid2);
+    if fc_uid.is_none() && ver.uid != 0 {
+        log::info!("AUTOPILOT_VERSION: uid2 is zero — uid {:016X} is not used as a hardware id", ver.uid);
+    }
+    AutopilotVersion {
+        fc_version: format!("{}.{}.{}{}", major, minor, patch, suffix),
+        hardware_revision: (ver.board_version > 0).then_some(ver.board_version as u16),
+        fc_uid,
+        uid2_valid: ver.uid2.iter().any(|b| *b != 0),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn version(sw: u32, board: u32, uid: u64, uid2: [u8; 18]) -> AUTOPILOT_VERSION_DATA {
+        AUTOPILOT_VERSION_DATA { flight_sw_version: sw, board_version: board, uid, uid2, ..Default::default() }
+    }
+
+    #[test]
+    fn autopilot_version_takes_uid2_as_the_hardware_id() {
+        let mut uid2 = [0u8; 18];
+        uid2[..4].copy_from_slice(&[0x2F, 0x00, 0x34, 0x00]);
+        let v = parse_autopilot_version(&version(0x0406_02FF, 0x0123, 7, uid2));
+        assert_eq!(v.fc_version, "4.6.2");
+        assert_eq!(v.hardware_revision, Some(0x0123));
+        assert_eq!(v.fc_uid, Some(format!("2F003400{}", "00".repeat(14))));
+        assert!(v.uid2_valid);
+    }
+
+    #[test]
+    fn autopilot_version_without_uid2_has_no_hardware_id() {
+        // INAV / PX4 SITL at sysid 1: zero uid2, a synthetic `uid` — never used.
+        let v = parse_autopilot_version(&version(0x0A00_00C0, 0, 1, [0; 18]));
+        assert_eq!((v.fc_version.as_str(), v.hardware_revision, v.fc_uid, v.uid2_valid), ("10.0.0-rc", None, None, false));
+        // PX4 SITL at sysid 2: byte 0 = sysid - 1 — kept (distinct per instance).
+        let mut uid2 = [0u8; 18];
+        uid2[0] = 1;
+        let v = parse_autopilot_version(&version(0x010F_0000, 0, 0, uid2));
+        assert_eq!(v.fc_version, "1.15.0-dev");
+        assert_eq!(v.fc_uid, Some(format!("01{}", "00".repeat(17))));
+    }
 }

@@ -13,6 +13,8 @@ background and splits it into flights by **arm → disarm**. When a flight ends 
 **post-flight summary** where you can:
 
 - **Save or discard** the flight,
+- check the **vehicle** the flight was recognised as, or pick another one or none (see
+  **[Vehicles](vehicles.md#linking-flights)**),
 - enter the **battery** you flew (one or several serials, comma-separated — see **[Batteries](batteries.md)**),
 - add **notes**, and
 - **link the mission** that was loaded.
@@ -29,7 +31,9 @@ The post-flight summary — save or discard, link the battery (one or several se
 ## The flight list
 
 Flights are grouped into a collapsible tree you can re-organise with the **sort** selector — by
-**aircraft**, **location** and **date** in the order you prefer — and narrow with the **search** box.
+**aircraft**, **location** and **date** in the order you prefer — and narrow with the **search** box
+(it looks in the aircraft name, location, date and notes; a flight number such as `#170` finds exactly
+that flight).
 Each entry shows the essentials (date, aircraft, location, duration, distance); pick one to open its
 details.
 
@@ -38,7 +42,11 @@ details.
 The detail panel shows everything about the selected flight:
 
 - **Stats** — duration, max altitude / speed / distance, and more.
-- **Aircraft** — the craft name, soft-linked to its entry in the **[Vehicle library](vehicles.md)**.
+- **Craft** — the craft name the flight was recorded with; the ✎ button corrects it without changing
+  the vehicle link.
+- **Vehicle** — the **[Vehicle library](vehicles.md)** entry the flight belongs to (a click opens it).
+  The ✎ button picks another vehicle or none; a flight without one offers **Add vehicle**, which creates
+  the vehicle pre-filled from the flight and links the flight to it.
 - **Battery** — the linked pack(s), each as its own chip (open it in the Battery Manager, or shown as
   *not in library*); edit to add or change serials. See **[Batteries](batteries.md)**.
 - **Mission** — the linked mission, openable in the Mission Manager.
@@ -127,6 +135,13 @@ log, the same way a live recording is.
 
 PX4 ULog note: PX4 doesn't log a throttle *output*, so a replayed `.ulg` flight shows the FC's
 **thrust setpoint** as the throttle value.
+
+!!! note "On Android, iPhone and iPad"
+    The mobile app imports **`.kflight`**, **`.tlog`** and **`.rawmsp`** files only. Onboard logs —
+    INAV Blackbox, ArduPilot Dataflash, PX4 ULog — are imported on a desktop install and moved over as
+    `.kflight`. The mobile database keeps no original log files (an imported `.kflight` brings the
+    flight, its track and its records, but not the stored original), so **HI-RES** replay and the
+    original-log export are desktop features, and so is the **Open** button.
 
 ## Exporting
 

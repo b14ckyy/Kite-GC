@@ -97,8 +97,8 @@ pub fn rc_set_override_bitmask(mask: u32, state: State<'_, AppState>) -> Result<
     // never runs that stream. Changing the FC setting there would half-work (override armed, nothing
     // streamed), so a tunnel link gets a clear error instead.
     let handle = {
-        let proto = state.protocol.lock().map_err(|e| e.to_string())?;
-        match proto.as_ref() {
+        let proto = state.links.lock().map_err(|e| e.to_string())?;
+        match proto.active_protocol() {
             Some(ActiveProtocol::Msp(h)) => h.requester(),
             Some(ActiveProtocol::Mavlink(m)) if m.msp.is_some() => {
                 return Err("MSP RC override is not available over MSP over MAVLink".into())

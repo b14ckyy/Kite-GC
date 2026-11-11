@@ -76,8 +76,8 @@ pub async fn geozone_read_all(app: AppHandle) -> Result<GeozoneConfig, String> {
 
 fn read_all(state: &AppState, handle: &MspRequester) -> Result<GeozoneConfig, String> {
     let has_geozones = {
-        let info = state.fc_info.lock().map_err(|e| e.to_string())?;
-        info.as_ref()
+        let reg = state.links.lock().map_err(|e| e.to_string())?;
+        reg.active_fc_info()
             .and_then(|fc| fc.features.as_ref())
             .map(|f| f.geozones)
             .unwrap_or(false)

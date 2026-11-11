@@ -19,6 +19,9 @@
     buttons?: DialogButton[];
     /** Optional opt-in checkbox shown above the buttons; read via `checkboxResult()`. */
     checkbox?: { label: string; checked?: boolean };
+    /** Text of the built-in cancel button (it still resolves to null) when "Cancel" would not say what
+     *  dismissing does — e.g. "Leave unassigned". */
+    cancelLabel?: string;
   }
 </script>
 
@@ -31,6 +34,7 @@
   let buttons = $state<DialogButton[]>([]);
   let checkboxLabel = $state<string | null>(null);
   let checkboxChecked = $state(false);
+  let cancelLabel = $state<string | null>(null);
   let resolver: ((value: string | null) => void) | null = null;
 
   /** State of the optional checkbox at the time the dialog was dismissed. */
@@ -42,11 +46,15 @@
    * For info-only dialogs, pass no buttons — only OK + Cancel are shown.
    */
   export function show(opts: DialogOptions): Promise<string | null> {
+    // A dialog still open is displaced: its caller gets null (cancelled) instead of waiting forever.
+    resolver?.(null);
+    resolver = null;
     title = opts.title;
     message = opts.message;
     buttons = opts.buttons ?? [];
     checkboxLabel = opts.checkbox?.label ?? null;
     checkboxChecked = opts.checkbox?.checked ?? false;
+    cancelLabel = opts.cancelLabel ?? null;
     open = true;
     return new Promise<string | null>((resolve) => {
       resolver = resolve;
@@ -87,7 +95,7 @@
           <!-- Info-only: just an OK button -->
           <button class="dialog-btn dialog-btn-primary" onclick={() => close('ok')}>OK</button>
         {:else}
-          <button class="dialog-btn dialog-btn-cancel" onclick={() => close(null)}>{$tLocal('dialog.cancel')}</button>
+          <button class="dialog-btn dialog-btn-cancel" onclick={() => close(null)}>{cancelLabel ?? $tLocal('dialog.cancel')}</button>
           {#each buttons as btn}
             <button
               class="dialog-btn"

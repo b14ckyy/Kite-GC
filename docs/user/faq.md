@@ -72,4 +72,5 @@ appears.
 Such messages are harmless. **Update the aircraft to ArduPilot 4.6 or newer** — the current
 firmware refuses a request it cannot serve once instead of repeating the complaint — and keep the
 other ground station up to date as well. To keep the notification banner quiet in the meantime,
-set **[Settings → Alerts → System messages](reference/settings.md)** to *Warning*.
+set **[Settings → Alerts → System messages](reference/settings.md)** to *Warning* (the default) —
+debug-severity texts such as this one only appear at *Debug*.

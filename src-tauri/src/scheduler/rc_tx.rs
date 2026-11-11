@@ -32,8 +32,22 @@ pub const RC_RAW_DEFAULT_INTERVAL: Duration = Duration::from_millis(100);
 /// Shared by both the MSP scheduler and the MAVLink handler so the gate is identical across platforms.
 pub const RC_DEADMAN: Duration = Duration::from_millis(500);
 
+/// Which vehicle the MAVLink RC stream addresses (multi-vehicle). `None` = the link's handshake
+/// vehicle (single-vehicle behaviour). Set by the connection/vehicle commands whenever the active
+/// vehicle changes — together with `enabled = false`, so a switch never re-points a live stream at
+/// another aircraft; the operator re-engages on the new one explicitly.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RcTarget {
+    pub link: u16,
+    pub sysid: u8,
+    /// PX4 speaks MANUAL_CONTROL, ArduPilot RC_CHANNELS_OVERRIDE.
+    pub px4: bool,
+}
+
 /// Shared RC-injection state.
 pub struct RcTxState {
+    /// MAVLink stream target — see `RcTarget`.
+    pub mav_target: Option<RcTarget>,
     /// Master enable — set on engage, cleared on disengage. False = absolutely nothing is sent.
     pub enabled: bool,
     /// Latest encoded MSP_SET_RAW_RC payload (u16-LE CH1..CHmax). Empty = nothing to stream yet.
@@ -75,6 +89,7 @@ pub struct ManualControl {
 impl Default for RcTxState {
     fn default() -> Self {
         Self {
+            mav_target: None,
             enabled: false,
             raw: Vec::new(),
             last_update: Instant::now(),
