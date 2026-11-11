@@ -459,6 +459,12 @@ inside the box of the feature release they belong to, so the notes for one relea
       Initialising have names instead of a raw number. Flights recorded or imported before this
       fix keep the names they were stored with.
     - **ArduRover / Boat: Hold was missing from the mode buttons.** It is offered now.
+    - **Pressing F5 while connected left Kite connected with no way to disconnect.** F5 (or
+      Ctrl+R) reloaded the user interface only. The connection to the flight controller stayed
+      open in the background, but the status bar showed "disconnected" and the Connect button
+      could no longer reach it — only quitting Kite helped. The reload keys no longer do anything,
+      and should the interface ever restart on its own while connected, Connect now offers to
+      close the leftover connection and connect again.
     - **QuadPlane: QHover was offered without an RC source.** QHover only holds the altitude; the
       pilot holds the position. It is now behind *Show all modes* and locked without an RC source,
       like the other stick-flown modes.
