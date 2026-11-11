@@ -13,7 +13,7 @@ the 2D map and the 3D globe**:
 - **ESRI World Imagery** — satellite / aerial imagery.
 - **ESRI Hybrid** — satellite imagery with street and place labels on top (the default).
 - **OpenTopoMap** — topographic map with contour lines.
-- **CartoDB Dark Matter** — a dark, low-contrast basemap.
+- **ESRI Dark Gray** — a dark, low-contrast basemap.
 
 All of them work **offline** once the tiles have been cached — see below.
 
