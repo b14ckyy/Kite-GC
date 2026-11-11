@@ -261,11 +261,11 @@ inside the box of the feature release they belong to, so the notes for one relea
       background behind a notice that stays until it is done — on a hard disk or an SD card a large
       database takes minutes. It is refused while a flight is being recorded or an import is
       running, and it now works together with the automatic space reclaim instead of colliding
-      with it.
+      with it. [#243]
     - **INAV flash download: one unreadable log no longer ends the import.** A `.bbl` from the
       flight controller's flash holds one log per flight. If one of them was damaged, the import
       stopped there and the following flights were never imported. Kite now imports the rest and
-      shows which logs failed and why.
+      shows which logs failed and why. [#243]
     - **Network links: an empty host means this device.** The host field starts empty with a faded
       `localhost` hint instead of a pre-filled address; leave it empty (or type `localhost`) and Kite
       connects to `127.0.0.1` — what a local simulator needs. An address saved earlier is still shown. [#237]
@@ -538,6 +538,7 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#234]: https://github.com/b14ckyy/Kite-GC/pull/234
 [#237]: https://github.com/b14ckyy/Kite-GC/pull/237
 [#242]: https://github.com/b14ckyy/Kite-GC/pull/242
+[#243]: https://github.com/b14ckyy/Kite-GC/pull/243
 [#143]: https://github.com/b14ckyy/Kite-GC/pull/143
 [#145]: https://github.com/b14ckyy/Kite-GC/pull/145
 [#151]: https://github.com/b14ckyy/Kite-GC/pull/151
