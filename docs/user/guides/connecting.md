@@ -123,8 +123,9 @@ For network links — a SITL simulator, a companion computer, a Wi-Fi/serial bri
 forwarding to your PC.
 
 1. **Transport** → **TCP** or **UDP**.
-2. **Host** — the IP address or hostname to reach (e.g. `127.0.0.1` for a local simulator, or the
-   bridge's LAN address).
+2. **Host** — the IP address to reach (e.g. the bridge's LAN address). Left empty, the field shows a
+   faded `localhost` and Kite connects to **this device** itself (`127.0.0.1`), which is what a local
+   simulator needs.
 3. **Port** — the network port.
 
 Kite fills in the usual default and swaps it when you change either the protocol or the transport:
