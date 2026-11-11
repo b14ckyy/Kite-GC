@@ -96,7 +96,7 @@
     cachedTileLayer(provider.url, {
       attribution: '',
       maxZoom: 21,
-      maxNativeZoom: provider.maxZoom,
+      maxNativeZoom: provider.maxNativeZoom ?? provider.maxZoom,
       providerId: provider.detectPlaceholders ? provider.id : undefined,
     }).addTo(map);
     draw(waypointsJson);
