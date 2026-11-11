@@ -1547,7 +1547,11 @@
     "discardConfirmYes": "Discard",
     "cancel": "Cancel",
     "close": "Close",
-    "notRecordedHint": "Recording was off — this is a summary only."
+    "notRecordedHint": "Recording was off — this is a summary only.",
+    "saveFailedTitle": "Flight not saved",
+    "saveFailedMessage": "The flight could not be saved to the logbook:\n{error}\n\nRetry now, or cancel: the recording is kept and Kite offers it again at the next start.",
+    "saveRetry": "Retry",
+    "saveKeptMessage": "The recording could not be saved to the logbook:\n{error}\n\nIt is kept and Kite offers it again at the next start."
   },
   "recovery": {
     "title": "Unfinished recording found",
