@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/branding/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
     
     
       
@@ -1998,6 +1998,8 @@ background and splits it into flights by <strong>arm → disarm</strong>. When a
 <strong>post-flight summary</strong> where you can:</p>
 <ul>
 <li><strong>Save or discard</strong> the flight,</li>
+<li>check the <strong>vehicle</strong> the flight was recognised as, or pick another one or none (see
+  <strong><a href="../vehicles/#linking-flights">Vehicles</a></strong>),</li>
 <li>enter the <strong>battery</strong> you flew (one or several serials, comma-separated — see <strong><a href="../batteries/">Batteries</a></strong>),</li>
 <li>add <strong>notes</strong>, and</li>
 <li><strong>link the mission</strong> that was loaded.</li>
@@ -2013,14 +2015,20 @@ an interruption will have a <strong>gap</strong> for the time the link was down.
 </figure>
 <h2 id="the-flight-list">The flight list<a class="headerlink" href="#the-flight-list" title="Permanent link">&para;</a></h2>
 <p>Flights are grouped into a collapsible tree you can re-organise with the <strong>sort</strong> selector — by
-<strong>aircraft</strong>, <strong>location</strong> and <strong>date</strong> in the order you prefer — and narrow with the <strong>search</strong> box.
+<strong>aircraft</strong>, <strong>location</strong> and <strong>date</strong> in the order you prefer — and narrow with the <strong>search</strong> box
+(it looks in the aircraft name, location, date and notes; a flight number such as <code>#170</code> finds exactly
+that flight).
 Each entry shows the essentials (date, aircraft, location, duration, distance); pick one to open its
 details.</p>
 <h2 id="flight-details">Flight details<a class="headerlink" href="#flight-details" title="Permanent link">&para;</a></h2>
 <p>The detail panel shows everything about the selected flight:</p>
 <ul>
 <li><strong>Stats</strong> — duration, max altitude / speed / distance, and more.</li>
-<li><strong>Aircraft</strong> — the craft name, soft-linked to its entry in the <strong><a href="../vehicles/">Vehicle library</a></strong>.</li>
+<li><strong>Craft</strong> — the craft name the flight was recorded with; the ✎ button corrects it without changing
+  the vehicle link.</li>
+<li><strong>Vehicle</strong> — the <strong><a href="../vehicles/">Vehicle library</a></strong> entry the flight belongs to (a click opens it).
+  The ✎ button picks another vehicle or none; a flight without one offers <strong>Add vehicle</strong>, which creates
+  the vehicle pre-filled from the flight and links the flight to it.</li>
 <li><strong>Battery</strong> — the linked pack(s), each as its own chip (open it in the Battery Manager, or shown as
   <em>not in library</em>); edit to add or change serials. See <strong><a href="../batteries/">Batteries</a></strong>.</li>
 <li><strong>Mission</strong> — the linked mission, openable in the Mission Manager.</li>
@@ -2247,7 +2255,7 @@ newer Kite again or restore a matching backup.</p>
       <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["announce.dismiss", "navigation.top", "navigation.instant", "navigation.tracking", "toc.follow", "search.suggest", "search.highlight", "content.code.copy", "content.action.edit"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
     
     
-      <script src="../../assets/javascripts/bundle.c21346df.min.js"></script>
+      <script src="../../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
         <script src="../../assets/nav.js"></script>
       

@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/branding/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
     
     
       
@@ -866,6 +866,17 @@
     <span class="md-ellipsis">
       
         INAV extras
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deleting-a-vehicle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deleting a vehicle
       
     </span>
   </a>
@@ -1819,6 +1830,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#deleting-a-vehicle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deleting a vehicle
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#import-export" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1867,13 +1889,15 @@
 
 <h1 id="vehicles">Vehicles<a class="headerlink" href="#vehicles" title="Permanent link">&para;</a></h1>
 <p>The vehicle library is a catalogue of your aircraft — a structured <strong>build sheet</strong> for each one, plus
-its flight history. Flights soft-link to a vehicle by <strong>craft name</strong>, so the library fills itself in as
+its flight history. Every flight stores the vehicle it belongs to, recognised when the flight is saved by
+the flight controller's <strong>FC hardware ID</strong>, or by its <strong>craft name</strong> — so the library fills itself in as
 you fly. It's a subfeature of the <strong><a href="../logbook/">logbook</a></strong>: open it with the <strong>Vehicles</strong> button in the
 logbook toolbar.</p>
 <h2 id="the-vehicle-list">The vehicle list<a class="headerlink" href="#the-vehicle-list" title="Permanent link">&para;</a></h2>
-<p>Vehicles are grouped by <strong>type</strong> and can be <strong>searched</strong> (by name, craft name, model, type, notes or
-flight controller). Pick one to open its build sheet; the toolbar also creates a new vehicle and
-imports one from a file. While connected over INAV or MAVLink, the
+<p>Vehicles are grouped by <strong>type</strong> and can be <strong>searched</strong> (by name, craft name, model, type, notes,
+flight controller or FC hardware ID). Each row shows the name, and below it the type, the craft name —
+or the shortened FC hardware ID for a vehicle without one — and the model. Pick one to open its build
+sheet; the toolbar also creates a new vehicle and imports one from a file. While connected over INAV or MAVLink, the
 <a href="../telemetry-and-display/#uav-info-panel">UAV Info panel</a> can also save the connected craft here in one click.</p>
 <figure>
 <p><img alt="The vehicle library list" src="../../assets/guides/vehicles/vehicle-manager.png" /></p>
@@ -1884,7 +1908,7 @@ imports one from a file. While connected over INAV or MAVLink, the
 <h2 id="the-build-sheet">The build sheet<a class="headerlink" href="#the-build-sheet" title="Permanent link">&para;</a></h2>
 <p>Each vehicle is a structured record you can fill in as much (or as little) as you like:</p>
 <ul>
-<li><strong>Identity</strong> — name, <strong>craft name</strong> (the link key — see below), <strong>type</strong> (fixed-wing, flying-wing,
+<li><strong>Identity</strong> — name, <strong>craft name</strong> (a link key — see below), <strong>type</strong> (fixed-wing, flying-wing,
   VTOL, multirotor, helicopter, rover, boat, other) and <strong>status</strong> (active, storage, retired, damaged,
   <strong>crashed</strong>), plus a header <strong>image</strong> and free-form notes.</li>
 <li><strong>Airframe</strong> — model, wingspan, length, all-up weight and dry weight.</li>
@@ -1893,9 +1917,7 @@ imports one from a file. While connected over INAV or MAVLink, the
 <li><strong>Sensors</strong> — checkboxes for GPS, RTK, compass, airspeed, rangefinder and optical-flow.</li>
 <li><strong>Flight controller</strong> — model, manufacturer, firmware and version, whether blackbox is available, and
   the <strong>FC hardware ID</strong> (filled in automatically when the vehicle is created from the connected craft
-  via the UAV Info panel). Flights still link by craft name, so swapping the flight controller keeps the
-  vehicle — paste the new ID from the UAV Info panel here and its <strong>View in vehicle library</strong> button
-  finds the entry again.</li>
+  via the UAV Info panel) — the first key flights are recognised by, see below.</li>
 </ul>
 <figure>
 <p><img alt="A vehicle build sheet with stats and linked flights" src="../../assets/guides/vehicles/vehicle-manager_details.png" /></p>
@@ -1904,24 +1926,69 @@ imports one from a file. While connected over INAV or MAVLink, the
 </figcaption>
 </figure>
 <h2 id="linking-flights">Linking flights<a class="headerlink" href="#linking-flights" title="Permanent link">&para;</a></h2>
-<p>A flight links to a vehicle by <strong>craft name</strong> (the name already recorded with each flight — so it works
-retroactively, no re-import needed):</p>
+<p>Each flight stores the vehicle it belongs to. When a flight is saved — a live recording, a log import or
+a <code>.kflight</code> import — Kite looks for its vehicle:</p>
+<ol>
+<li>the vehicle whose <strong>FC hardware ID</strong> is the one the flight was flown with,</li>
+<li>else the vehicle whose <strong>craft name</strong> matches the flight's (ignoring case and surrounding spaces).</li>
+</ol>
+<p>If several vehicles match, the newest one wins. <strong>When unsure, the flight stays unassigned:</strong> a flight
+with an FC ID is never linked by craft name to a vehicle that stores a <em>different</em> FC ID (a swapped
+flight controller, or a second aircraft with the same name) — you decide on the post-flight summary, or
+later in the logbook. A flight keeps the FC ID it was flown with and its
+recorded craft name (unless you correct the name with ✎ in the logbook); the link to the vehicle is
+stored next to them and can be changed at any time.</p>
 <ul>
-<li><strong>INAV</strong> supplies the craft name automatically, so flights link on their own.</li>
-<li><strong>ArduPilot / PX4</strong> don't carry one in telemetry — set it on the flight (post-flight or later in the
-  logbook) to link it.</li>
+<li><strong>INAV</strong> reports both — the craft name and the FC ID (also over <strong>MSP/MAV</strong>).</li>
+<li><strong>ArduPilot / PX4</strong> report an FC ID but no craft name: pick the vehicle once on the post-flight
+  summary, and Kite offers to store the FC ID in that vehicle — from then on its flights are recognised
+  by themselves. Picking the vehicle later in the logbook links only that one flight.</li>
+<li><strong>No FC ID</strong> comes from telemetry-only links, from imported logs (they link by craft name), from
+  <strong>INAV over plain MAVLink</strong> (without MSP/MAV), and from simulators that report a placeholder instead
+  of a real ID (INAV SITL, PX4 SITL as system ID 1).</li>
 </ul>
+<p><strong>After a flight</strong> the post-flight summary shows the vehicle it was recognised as, with a picker to choose
+another one or none. After <strong>Save</strong> Kite asks when the choice raises a question:</p>
+<ul>
+<li>the vehicle has <strong>no FC ID yet</strong> but the flight has one → <em>Store FC ID</em> (existing flights flown with this
+  FC ID or the vehicle's craft name that belong to no vehicle yet are linked too);</li>
+<li>the vehicle has a <strong>different FC ID</strong> → <em>FC swapped — replace ID</em> (the vehicle keeps all its earlier
+  flights and gets this one), <em>Create new vehicle</em> (a second aircraft with the same craft name) or
+  <em>Leave unassigned</em> (the flight belongs to no vehicle; link it later in the logbook);</li>
+<li><strong>no vehicle</strong> matched → <em>Create vehicle</em> opens the Manager pre-filled from the flight, and the flight
+  belongs to the new vehicle once it is saved. A flight with neither a craft name nor an FC ID gets no
+  such offer.</li>
+</ul>
+<p><strong>An FC ID belongs to one vehicle.</strong> When <em>Store FC ID</em> or <em>replace ID</em> gives a vehicle an FC ID that
+another vehicle stores, the question names that vehicle, and answering yes removes the ID there. Entering such an FC
+ID on a build sheet, or importing a <code>.kvehicle</code> that carries one, asks first whether to move it — Cancel
+saves nothing. <em>Save to vehicle library</em> in the UAV Info panel never creates a second vehicle with an
+FC ID that is already in the library.</p>
+<p><strong>Existing flights are only re-linked with your OK.</strong> After creating a vehicle (here, from the post-flight
+summary, from a flight in the logbook, with <em>Save to vehicle library</em> in the UAV Info panel or by a
+<code>.kvehicle</code> import), after changing its craft name, and after entering an FC ID on a vehicle that had
+none, Kite counts the logged flights flown with the vehicle's craft name or its FC ID that belong to no
+vehicle yet and asks whether to link them — a flight flown with a different FC ID is never counted by
+its craft name. <strong>Swapped the flight controller?</strong> Replace the FC ID on the build sheet: the earlier
+flights stay with the vehicle and the new FC's flights are recognised by the new ID. Kite asks only when
+flights flown with the new FC ID are already in the logbook without a vehicle (it offers to link
+those).</p>
 <p>Each vehicle then shows its <strong>lifetime totals</strong> (flight count, time, distance) and the <strong>list of linked
-flights</strong>, jump-to-able from the build sheet.</p>
+flights</strong>, jump-to-able from the build sheet. A <strong><code>.kflight</code></strong> export does not carry the link (the
+library is local); importing it recognises the vehicle again in the receiving library.</p>
 <h2 id="inav-extras">INAV extras<a class="headerlink" href="#inav-extras" title="Permanent link">&para;</a></h2>
 <p>When an <strong>INAV</strong> flight controller is connected (and disarmed):</p>
 <ul>
-<li><strong>Write to FC</strong> — push the build sheet's craft name to the FC, so its future flights auto-link to this
-  vehicle.</li>
+<li><strong>Write to FC</strong> — push the build sheet's craft name to the FC, so its future flights carry the same
+  craft name as the vehicle.</li>
 <li><strong>Adopt FC lifetime stats</strong> — read the FC's onboard <code>stats</code> totals (if the feature is enabled) and
   stage them as the vehicle's <strong>lifetime baseline</strong>; saved, they're added to the logbook flights so the
   totals reflect the airframe's whole life, including flights from before you used Kite.</li>
 </ul>
+<h2 id="deleting-a-vehicle">Deleting a vehicle<a class="headerlink" href="#deleting-a-vehicle" title="Permanent link">&para;</a></h2>
+<p>Deleting a vehicle never deletes flights. With linked flights, the dialog offers to <strong>transfer</strong> them to
+another vehicle first (pick it from the list — handy when an aircraft is replaced and its pilot keeps the
+history), or to <strong>delete without transfer</strong>: the flights stay in the logbook and belong to no vehicle.</p>
 <h2 id="import-export">Import &amp; export<a class="headerlink" href="#import-export" title="Permanent link">&para;</a></h2>
 <p>Move a vehicle between installs (or back it up) with a <strong><code>.kvehicle</code></strong> file — export the open vehicle, or
 import one (with a preview before it's added). The lifetime baseline travels with the file.</p>
@@ -2013,7 +2080,7 @@ import one (with a preview before it's added). The lifetime baseline travels wit
       <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["announce.dismiss", "navigation.top", "navigation.instant", "navigation.tracking", "toc.follow", "search.suggest", "search.highlight", "content.code.copy", "content.action.edit"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
     
     
-      <script src="../../assets/javascripts/bundle.c21346df.min.js"></script>
+      <script src="../../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
         <script src="../../assets/nav.js"></script>
       
