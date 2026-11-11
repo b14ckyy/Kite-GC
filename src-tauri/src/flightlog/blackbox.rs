@@ -33,7 +33,6 @@ const MAX_PLAUSIBLE_YEAR: i32 = 2040;
 
 struct ParsedRow {
     timestamp_us: i64,
-    csv_data: String,
     telemetry: TelemetryRecord,
 }
 
@@ -141,7 +140,6 @@ where
     let mut prev_lat: Option<f64> = None;
     let mut prev_lon: Option<f64> = None;
     let mut telemetry_rows = Vec::with_capacity(rows.len());
-    let mut blackbox_rows = Vec::with_capacity(rows.len());
 
     for row in rows {
         // Use raw GPS for position, nav fused for altitude
@@ -182,7 +180,6 @@ where
             }
         }
 
-        blackbox_rows.push((row.timestamp_us, row.csv_data));
         telemetry_rows.push(row.telemetry);
     }
 
@@ -292,10 +289,6 @@ where
     report(82, "store-track", "Storing track data...");
     db::insert_telemetry_batch(conn, &telemetry_rows)
         .map_err(|e| format!("Failed to store imported Blackbox telemetry: {}", e))?;
-
-    report(90, "store-blackbox", "Archiving parsed Blackbox rows...");
-    db::insert_blackbox_records(conn, flight_id, &blackbox_rows)
-        .map_err(|e| format!("Failed to store Blackbox rows: {}", e))?;
 
     report(96, "archive", "Archiving original Blackbox file...");
     // Only this log's bytes: a flash download holds every flight, so archiving the whole file per log
@@ -426,9 +419,6 @@ fn parse_csv_rows(csv_output: &str, target_interval_us: i64) -> Result<Vec<Parse
         }
         last_kept_us = timestamp_us;
 
-        // Store the raw CSV line (comma-joined) — cheap, no JSON serialization.
-        let csv_data: String = record.iter().collect::<Vec<_>>().join(",");
-
         let telemetry = build_telemetry_record_indexed(&cols, &record, raw_row_count as i64);
 
         // Debug: log first 5 GPS values to verify parsing
@@ -443,7 +433,6 @@ fn parse_csv_rows(csv_output: &str, target_interval_us: i64) -> Result<Vec<Parse
         let timestamp_us = telemetry.timestamp_ms * 1000;
         rows.push(ParsedRow {
             timestamp_us,
-            csv_data,
             telemetry,
         });
     }

@@ -18,7 +18,7 @@ use super::types::{
 use crate::msp::hardware_uid;
 use crate::msp::types::INAV_SITL_UID;
 
-const CURRENT_SCHEMA_VERSION: u32 = 20;
+const CURRENT_SCHEMA_VERSION: u32 = 21;
 
 /// Column list (excluding the autoincrement `id`) for `telemetry_records`, shared by the temp-session
 /// copy so the SELECT and INSERT column orders can never drift apart. `flight_id` is first so the
@@ -89,8 +89,8 @@ pub fn open_database(path: &Path) -> SqlResult<Connection> {
     )?;
 
     // Incremental auto-vacuum: freed pages (e.g. a deleted blackbox BLOB) go on a freelist and are
-    // reclaimed cheaply via `PRAGMA incremental_vacuum` after a delete — cost ∝ freed pages, not the
-    // whole DB. (A full `VACUUM` rewrites the entire file, which is unusable once logs reach GBs.)
+    // handed back via `PRAGMA incremental_vacuum` in the background after a delete (`spawn_reclaim`) —
+    // cost ∝ freed pages, not the whole DB. (A full `VACUUM` rewrites the entire file, which is unusable once logs reach GBs.)
     // The mode can only be set before tables exist on a fresh DB, or converted with one VACUUM on an
     // existing one — so do that one-time conversion here when the DB isn't already INCREMENTAL (2).
     let auto_vacuum: i64 = conn.query_row("PRAGMA auto_vacuum", [], |row| row.get(0))?;
@@ -106,12 +106,256 @@ pub fn open_database(path: &Path) -> SqlResult<Connection> {
     // A fresh DB (v0) has nothing to lose and gets none. If the snapshot fails (disk full, …) the
     // open fails too — migrating without the safety copy is not acceptable.
     let version = get_user_version(&conn)?;
-    if version > 0 && version < CURRENT_SCHEMA_VERSION {
+    let upgrade = version > 0 && version < CURRENT_SCHEMA_VERSION;
+    if upgrade {
         backup_before_migration(&conn, path, version)?;
     }
 
     migrate(&conn)?;
+
+    // A large freelist left behind — a schema step that dropped a table (v21: `blackbox_records`;
+    // the steps run in transactions and may not vacuum themselves), or a reclaim cut short by an app
+    // exit — is handed back to the file system in the background. One cheap pragma per open (this runs
+    // for every command connection); repeated triggers are harmless (`spawn_reclaim` is single-flight).
+    if freelist_pages(&conn)? > RECLAIM_ON_OPEN_PAGES {
+        spawn_reclaim(&conn);
+    }
     Ok(conn)
+}
+
+/// Freelist size (pages) above which `open_database` starts a reclaim: 4096 pages = 16 MiB at 4 KiB
+/// pages. Below that the next delete picks the pages up anyway; above it something big was left behind.
+const RECLAIM_ON_OPEN_PAGES: i64 = 4096;
+
+/// Pages per `PRAGMA incremental_vacuum(N)` call of the background reclaim. Each call is its own
+/// write transaction: a small chunk keeps the write lock short — a recording or import waits at most
+/// about one chunk, PROVIDED its write transaction takes the lock up front (`write_tx`; a deferred
+/// read→write upgrade fails instead of waiting) — and lets the WAL auto-checkpoint between chunks
+/// instead of growing by the whole freelist.
+/// Measured on copies of a 1.2 GB archive (113k free pages, 4 KiB pages): a 1024-page chunk takes tens
+/// of ms on an SSD (34 ms median / 46 ms p95 including the auto-checkpoint, ~4.2 s for the whole
+/// freelist, WAL peak 7 MB); on a 7200 rpm hard disk chunks take a few hundred ms (2048-page chunks:
+/// 0.39–0.53 s median, 22–29 s in total).
+const RECLAIM_CHUNK_PAGES: i64 = 1024;
+
+/// Pause of the background reclaim between two chunks. Writers waiting for the lock must get a real
+/// window between chunks — also when the auto-checkpoint cannot run because a long-lived reader pins
+/// the WAL and the chunks would otherwise follow back to back.
+const RECLAIM_CHUNK_PAUSE: std::time::Duration = std::time::Duration::from_millis(5);
+
+/// How long a reclaim chunk waits for the write lock before it gives up (the remainder stays on the
+/// freelist for the next trigger).
+const RECLAIM_BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Directories whose databases are never reclaimed: the scratch store of "open a log without importing
+/// it" (registered by `commands::flightlog::scratch_dir`). It is thrown away whole, so reclaiming it is
+/// wasted I/O — and on Windows its wipe fails while a reclaim thread holds the database open.
+static NO_RECLAIM_DIRS: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+
+/// Never reclaim a database inside `dir` (see `NO_RECLAIM_DIRS`).
+pub(crate) fn exclude_from_reclaim(dir: &Path) {
+    let dir = std::path::absolute(dir).unwrap_or_else(|_| dir.to_path_buf());
+    let mut dirs = NO_RECLAIM_DIRS.lock().unwrap_or_else(|e| e.into_inner());
+    if !dirs.contains(&dir) {
+        dirs.push(dir);
+    }
+}
+
+/// Whether the database file `db_file` (an absolute path, as `Connection::path` names it) lies in a
+/// directory registered with `exclude_from_reclaim`. Compared in canonical form: SQLite names the file
+/// with symlinks resolved (on macOS the temp folder sits behind `/var` → `/private/var`), which
+/// `std::path::absolute` does not do.
+fn reclaim_excluded(db_file: &Path) -> bool {
+    let canonical = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let file = canonical(db_file);
+    NO_RECLAIM_DIRS.lock().unwrap_or_else(|e| e.into_inner()).iter().any(|dir| file.starts_with(canonical(dir)))
+}
+
+/// Database files a background reclaim is running on, each with a "go round once more" flag set by a
+/// trigger that arrived meanwhile (single flight per file).
+static RECLAIMS_IN_FLIGHT: std::sync::Mutex<Vec<(PathBuf, bool)>> = std::sync::Mutex::new(Vec::new());
+
+fn reclaims_in_flight() -> std::sync::MutexGuard<'static, Vec<(PathBuf, bool)>> {
+    RECLAIMS_IN_FLIGHT.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+fn freelist_pages(conn: &Connection) -> SqlResult<i64> {
+    conn.query_row("PRAGMA freelist_count", [], |row| row.get(0))
+}
+
+/// Bytes on the freelist (`freelist_count × page_size`).
+fn freelist_bytes(conn: &Connection) -> SqlResult<i64> {
+    let page_size: i64 = conn.query_row("PRAGMA page_size", [], |row| row.get(0))?;
+    Ok(freelist_pages(conn)? * page_size)
+}
+
+/// What one `reclaim_free_pages` run did.
+#[derive(Debug, Default)]
+struct ReclaimStats {
+    pages: i64,
+    chunks: u32,
+    /// The longest single chunk — the longest the write lock was held.
+    longest: std::time::Duration,
+}
+
+/// Hand the whole freelist back to the file system (`auto_vacuum = INCREMENTAL`, see `open_database`),
+/// `chunk_pages` at a time, each chunk its own implicit transaction. `PRAGMA incremental_vacuum(N)`
+/// frees one page per result row it yields, so every call is stepped to the end (`execute_batch` steps
+/// once and frees exactly one page). Loops until `freelist_count` is 0, so pages freed by others while
+/// it runs go too; `pause` is slept before every chunk but the first. Synchronous — the app goes
+/// through `spawn_reclaim`.
+fn reclaim_free_pages(conn: &Connection, chunk_pages: i64, pause: std::time::Duration) -> SqlResult<ReclaimStats> {
+    let mut stats = ReclaimStats::default();
+    while freelist_pages(conn)? > 0 {
+        if stats.chunks > 0 && !pause.is_zero() {
+            std::thread::sleep(pause);
+        }
+        let started = std::time::Instant::now();
+        let mut freed = 0;
+        {
+            let mut stmt = conn.prepare(&format!("PRAGMA incremental_vacuum({chunk_pages})"))?;
+            let mut rows = stmt.query([])?;
+            while rows.next()?.is_some() {
+                freed += 1;
+            }
+        }
+        if freed == 0 {
+            break; // not an INCREMENTAL database — nothing can be handed back this way
+        }
+        stats.pages += freed;
+        stats.chunks += 1;
+        stats.longest = stats.longest.max(started.elapsed());
+    }
+    Ok(stats)
+}
+
+/// Reclaim the free pages of `conn`'s database file in a background thread, so a delete or an upgrade
+/// never blocks its (often main-thread) caller and never fails on the reclaim. The thread opens its own
+/// plain connection (no `open_database`: no migration, no backup). Single flight per file: a trigger
+/// while one runs makes it go round once more instead of starting a second one. Errors are logged
+/// only — whatever stays on the freelist is picked up by the next trigger. A connection without a
+/// file (in-memory, the tests) is reclaimed synchronously right here.
+pub(crate) fn spawn_reclaim(conn: &Connection) {
+    let path = match conn.path() {
+        Some(p) if !p.is_empty() => PathBuf::from(p),
+        _ => {
+            if let Err(e) = reclaim_free_pages(conn, RECLAIM_CHUNK_PAGES, std::time::Duration::ZERO) {
+                log::warn!("[flightlog] free-page reclaim failed: {e}");
+            }
+            return;
+        }
+    };
+    if reclaim_excluded(&path) {
+        return;
+    }
+    {
+        let mut running = reclaims_in_flight();
+        if let Some(entry) = running.iter_mut().find(|(p, _)| *p == path) {
+            entry.1 = true;
+            return;
+        }
+        running.push((path.clone(), false));
+    }
+    let spawned = std::thread::Builder::new()
+        .name("db-reclaim".into())
+        .spawn({
+            let path = path.clone();
+            move || reclaim_thread(&path)
+        });
+    if let Err(e) = spawned {
+        reclaims_in_flight().retain(|(p, _)| *p != path);
+        log::warn!("[flightlog] could not start the free-page reclaim: {e}");
+    }
+}
+
+/// Removes the in-flight entry if the thread ends without doing so itself (error, panic).
+struct ReclaimInFlight<'a> {
+    path: &'a Path,
+    armed: bool,
+}
+
+impl Drop for ReclaimInFlight<'_> {
+    fn drop(&mut self) {
+        if self.armed {
+            reclaims_in_flight().retain(|(p, _)| p != self.path);
+        }
+    }
+}
+
+fn reclaim_thread(path: &Path) {
+    let mut entry = ReclaimInFlight { path, armed: true };
+    let started = std::time::Instant::now();
+    let mut total = ReclaimStats::default();
+    let mut freelist: Option<(i64, i64)> = None; // bytes before the first / after the last round
+    loop {
+        match reclaim_file(path) {
+            Ok((before, stats, after)) => {
+                freelist = Some((freelist.map_or(before, |(b, _)| b), after));
+                total.pages += stats.pages;
+                total.chunks += stats.chunks;
+                total.longest = total.longest.max(stats.longest);
+            }
+            Err(e) => {
+                log::warn!("[flightlog] free-page reclaim of {} failed: {e}", path.display());
+                break;
+            }
+        }
+        // The file is closed again (`reclaim_file`); go round once more if a trigger came meanwhile.
+        let mut running = reclaims_in_flight();
+        match running.iter().position(|(p, _)| p == path) {
+            Some(i) if running[i].1 => running[i].1 = false,
+            Some(i) => {
+                running.remove(i);
+                entry.armed = false;
+                break;
+            }
+            None => {
+                entry.armed = false;
+                break;
+            }
+        }
+    }
+    if let Some((before, after)) = freelist.filter(|_| total.pages > 0) {
+        log::info!(
+            "[flightlog] reclaimed {} free pages in {} ms ({} chunks, longest {} ms): freelist {:.1} MB -> {:.1} MB",
+            total.pages,
+            started.elapsed().as_millis(),
+            total.chunks,
+            total.longest.as_millis(),
+            before as f64 / 1_048_576.0,
+            after as f64 / 1_048_576.0
+        );
+    }
+}
+
+/// One reclaim round on its own connection: freelist bytes before, what was done, bytes after. Opened
+/// without CREATE — a database deleted meanwhile (the scratch store) must not come back as an empty file.
+fn reclaim_file(path: &Path) -> SqlResult<(i64, ReclaimStats, i64)> {
+    let conn = Connection::open_with_flags(
+        path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
+    conn.busy_timeout(RECLAIM_BUSY_TIMEOUT)?;
+    let before = freelist_bytes(&conn)?;
+    let stats = reclaim_free_pages(&conn, RECLAIM_CHUNK_PAGES, RECLAIM_CHUNK_PAUSE)?;
+    Ok((before, stats, freelist_bytes(&conn)?))
+}
+
+/// Whether a background reclaim is running on the database file `path` (as `Connection::path` names it).
+#[cfg(test)]
+fn reclaim_running(path: &str) -> bool {
+    reclaims_in_flight().iter().any(|(p, _)| p == Path::new(path))
+}
+
+/// Wait (bounded) until no background reclaim runs on `path`; panics after `limit`.
+#[cfg(test)]
+fn wait_for_reclaim(path: &str, limit: std::time::Duration) -> std::time::Duration {
+    let started = std::time::Instant::now();
+    while reclaim_running(path) {
+        assert!(started.elapsed() < limit, "the background reclaim of {path} did not finish within {limit:?}");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    started.elapsed()
 }
 
 /// Sibling file of the DB holding the single pre-migration backup — it lives next to `flights.db`
@@ -265,6 +509,18 @@ pub fn resolve_raw_log_dir(custom_path: &str, portable: bool) -> PathBuf {
     PathBuf::from(".")
 }
 
+/// Begin a write transaction (`BEGIN IMMEDIATE`). THE RULE for the flight database: every transaction
+/// that writes takes the write lock up front through this helper — never a DEFERRED one. A deferred
+/// transaction that reads first and writes later is upgraded to a writer at its first write, and that
+/// upgrade fails at once with SQLITE_BUSY — the busy timeout is NOT applied — whenever another
+/// connection holds the write lock or has committed since the read. The background reclaim
+/// (`spawn_reclaim`) holds the lock in back-to-back chunks, and recordings, imports and a second open
+/// write too. `BEGIN IMMEDIATE` waits under the busy timeout instead; for write-first transactions
+/// it costs nothing.
+pub(crate) fn write_tx(conn: &Connection) -> SqlResult<rusqlite::Transaction<'_>> {
+    rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)
+}
+
 // ── Schema migrations ────────────────────────────────────────────────
 
 fn get_user_version(conn: &Connection) -> SqlResult<u32> {
@@ -292,7 +548,7 @@ type MigrationStep = fn(&Connection) -> SqlResult<()>;
 
 /// The migration chain, one `(target version, step)` per schema version. Module-level so the tests
 /// can build a DB at an older version from the real steps.
-const MIGRATION_STEPS: [(u32, MigrationStep); 20] = [
+const MIGRATION_STEPS: [(u32, MigrationStep); 21] = [
     (1, migrate_v0_to_v1),
     (2, migrate_v1_to_v2),
     (3, migrate_v2_to_v3),
@@ -313,6 +569,7 @@ const MIGRATION_STEPS: [(u32, MigrationStep); 20] = [
     (18, migrate_v17_to_v18),
     (19, migrate_v18_to_v19),
     (20, migrate_v19_to_v20),
+    (21, migrate_v20_to_v21),
 ];
 
 fn migrate(conn: &Connection) -> SqlResult<()> {
@@ -333,7 +590,7 @@ fn migrate(conn: &Connection) -> SqlResult<()> {
     // None of the steps may contain VACUUM or its own BEGIN/COMMIT.
     for (target, step) in MIGRATION_STEPS {
         if current < target {
-            let tx = conn.unchecked_transaction()?;
+            let tx = write_tx(conn)?;
             step(&tx)?;
             tx.commit()?;
             log::info!("[flightlog] db schema migrated to v{target}");
@@ -357,6 +614,7 @@ fn migrate(conn: &Connection) -> SqlResult<()> {
     ensure_v18_schema(conn)?;
     ensure_v19_schema(conn)?;
     ensure_v20_schema(conn)?;
+    ensure_v21_schema(conn)?;
 
     Ok(())
 }
@@ -794,6 +1052,94 @@ fn migrate_v19_to_v20(conn: &Connection) -> SqlResult<()> {
     Ok(())
 }
 
+/// Whether the database has a table named `table`.
+pub(crate) fn table_exists(conn: &Connection, table: &str) -> SqlResult<bool> {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+        params![table],
+        |row| row.get(0),
+    )
+}
+
+/// v21: `blackbox_records` (the decoded CSV line of every kept INAV Blackbox row) is dropped — nothing
+/// read it: replay uses `telemetry_records`, hi-res replay re-decodes the archived original in
+/// `blackbox_files`. Its one use, the source restore when a live/log pair is unlinked, now reads
+/// `flights.source_before_link`: the flight's own source (`live` / `blackbox`) while `source` reads
+/// `both` for a linked pair, NULL for an unlinked flight. Idempotent; `open_database` starts the
+/// background reclaim of the freed pages after the upgrade.
+fn ensure_v21_schema(conn: &Connection) -> SqlResult<()> {
+    if !column_exists(conn, "flights", "source_before_link")? {
+        // Column and back-fill commit together, like `flights.vehicle_id` in v20 — and the back-fill
+        // runs only here, when the column is born, while `blackbox_records` still exists.
+        conn.execute_batch("SAVEPOINT v21_source_before_link;")?;
+        let added = conn
+            .execute_batch("ALTER TABLE flights ADD COLUMN source_before_link TEXT;")
+            .and_then(|_| backfill_source_before_link(conn));
+        match added {
+            Ok(linked) => {
+                conn.execute_batch("RELEASE v21_source_before_link;")?;
+                log::info!("[flightlog] flights.source_before_link added — set on {linked} linked flight(s)");
+            }
+            Err(e) => {
+                let _ = conn.execute_batch("ROLLBACK TO v21_source_before_link; RELEASE v21_source_before_link;");
+                return Err(e);
+            }
+        }
+    }
+    // Gated so that a healthy v21 open (this runs in the self-heal pass too) issues no DDL at all.
+    if table_exists(conn, "blackbox_records")? {
+        conn.execute_batch(
+            "DROP INDEX IF EXISTS idx_blackbox_records_flight;
+             DROP TABLE IF EXISTS blackbox_records;",
+        )?;
+    }
+    Ok(())
+}
+
+/// SQL condition on a `flights` row: the flight was made by a log importer. Only they write these
+/// `protocol` values — `BLACKBOX` (blackbox.rs), `DATAFLASH` (ardupilot.rs), `ULOG` (ulog.rs); live
+/// recordings and raw-log imports write `MSP` / `MAVLink` / `Telemetry …`. A macro so `END_LINK_SET`
+/// can embed it at compile time.
+macro_rules! log_protocol_sql {
+    () => {
+        "protocol IN ('BLACKBOX', 'DATAFLASH', 'ULOG')"
+    };
+}
+
+/// `log_protocol_sql!` for a value already read into Rust.
+pub(crate) fn is_log_protocol(protocol: &str) -> bool {
+    matches!(protocol, "BLACKBOX" | "DATAFLASH" | "ULOG")
+}
+
+/// Set `source_before_link` on every linked flight: `blackbox` when a log importer made it, or it holds
+/// decoded Blackbox rows (`blackbox_records`, if the table is still there) or an archived log
+/// (`blackbox_files`), `live` otherwise. Returns the number of flights set.
+fn backfill_source_before_link(conn: &Connection) -> SqlResult<usize> {
+    let records = if table_exists(conn, "blackbox_records")? {
+        "EXISTS(SELECT 1 FROM blackbox_records WHERE flight_id = flights.id) OR "
+    } else {
+        ""
+    };
+    conn.execute(
+        &format!(
+            "UPDATE flights SET source_before_link = CASE
+                WHEN {} OR {records}EXISTS(SELECT 1 FROM blackbox_files WHERE flight_id = flights.id)
+                    THEN 'blackbox'
+                ELSE 'live'
+             END
+             WHERE linked_flight_id IS NOT NULL",
+            log_protocol_sql!()
+        ),
+        [],
+    )
+}
+
+fn migrate_v20_to_v21(conn: &Connection) -> SqlResult<()> {
+    ensure_v21_schema(conn)?;
+    set_user_version(conn, 21)?;
+    Ok(())
+}
+
 fn migrate_v6_to_v7(conn: &Connection) -> SqlResult<()> {
     conn.execute_batch(
         "ALTER TABLE telemetry_records ADD COLUMN battery_percentage INTEGER;",
@@ -1016,7 +1362,7 @@ pub fn insert_telemetry_batch(
     conn: &Connection,
     records: &[TelemetryRecord],
 ) -> SqlResult<()> {
-    let tx = conn.unchecked_transaction()?;
+    let tx = write_tx(conn)?;
     {
         let mut stmt = tx.prepare_cached(
             "INSERT INTO telemetry_records (
@@ -1102,7 +1448,7 @@ pub fn insert_telemetry_batch(
 
 /// Insert a batch of per-instance battery samples (multi-battery; see docs/active/MULTI_BATTERY.md).
 pub fn insert_battery_records_batch(conn: &Connection, records: &[BatteryRecord]) -> SqlResult<()> {
-    let tx = conn.unchecked_transaction()?;
+    let tx = write_tx(conn)?;
     {
         let mut stmt = tx.prepare_cached(
             "INSERT INTO battery_records (
@@ -1486,7 +1832,7 @@ pub fn commit_session_to_main(
         };
         let has_events = attached_table_exists(conn, "session_events")?;
 
-        let tx = conn.unchecked_transaction()?;
+        let tx = write_tx(conn)?;
         let mut row = flight.clone();
         if let Some(gid) = meta_group_id {
             row.group_id = Some(gid);
@@ -2380,7 +2726,7 @@ pub fn find_vehicle_by_craft_name(conn: &Connection, craft: &str) -> SqlResult<O
 /// they keep their craft name and FC id. Done explicitly as well as by the FK's `ON DELETE SET NULL`,
 /// so a connection without `foreign_keys` cannot leave dangling ids.
 pub fn delete_vehicle(conn: &Connection, id: i64) -> SqlResult<()> {
-    let tx = conn.unchecked_transaction()?;
+    let tx = write_tx(conn)?;
     tx.execute("UPDATE flights SET vehicle_id = NULL WHERE vehicle_id = ?1", params![id])?;
     tx.execute("DELETE FROM vehicles WHERE id = ?1", params![id])?;
     tx.commit()
@@ -2466,7 +2812,7 @@ pub fn resolve_vehicle(conn: &Connection, fc_uid: Option<&str>, craft_name: &str
 /// Returns how many other vehicles lost it.
 pub fn set_vehicle_fc_uid(conn: &Connection, vehicle_id: i64, fc_uid: Option<&str>) -> SqlResult<usize> {
     let uid = fc_uid.map(str::trim).filter(|s| !s.is_empty());
-    let tx = conn.unchecked_transaction()?;
+    let tx = write_tx(conn)?;
     let moved = match uid {
         Some(u) => tx.execute(
             "UPDATE vehicles SET fc_uid = NULL, updated_at = datetime('now') \
@@ -2921,35 +3267,58 @@ pub fn find_duplicate_flight(
     Ok(Some(flight))
 }
 
-/// Delete a flight and all related data (telemetry, battery samples, events, blackbox records,
-/// archived files). Explicitly deletes child rows first (in case foreign_keys is off), then VACUUMs.
+/// Delete a flight and all related data (telemetry, battery samples, events, archived files).
+/// Explicitly deletes child rows first (in case foreign_keys is off), then starts the background
+/// reclaim of the freed pages.
 pub fn delete_flight(conn: &Connection, flight_id: i64) -> SqlResult<bool> {
     let deleted = delete_flight_rows(conn, flight_id)?;
 
-    // Reclaim the freed pages (large blackbox BLOBs) — cheap incremental reclaim, not a full rewrite.
+    // Hand the freed pages (large blackbox BLOBs) back in the background — incremental, not a full
+    // rewrite; the delete itself is committed and succeeds whatever the reclaim does.
     if deleted {
-        conn.execute_batch("PRAGMA incremental_vacuum;")?;
+        spawn_reclaim(conn);
     }
 
     Ok(deleted)
 }
 
+/// SQL expression on a `flights` row of a `both` flight: its own source (schema v21) — what it was
+/// before `link_flights`, or, without a stored value (an orphan `both`, or a pair whose value was
+/// lost), `blackbox` for a log importer's flight or one that holds an archived log, `live` otherwise.
+/// A macro so the consts below can embed it at compile time.
+macro_rules! own_source_sql {
+    () => {
+        concat!(
+            "COALESCE(source_before_link, CASE WHEN ",
+            log_protocol_sql!(),
+            " OR EXISTS(SELECT 1 FROM blackbox_files WHERE flight_id = flights.id) THEN 'blackbox' ELSE 'live' END)"
+        )
+    };
+}
+
+/// `own_source_sql!` as a value, for the `.kflight` export (exchange.rs), whose `flights` table has the
+/// same columns.
+pub(crate) const OWN_SOURCE_SQL: &str = own_source_sql!();
+
+/// `SET` clause that ends a flight's link (schema v21): `source` goes back to the flight's own source
+/// (`own_source_sql!`). Also applied to `.kflight` files and imports (exchange.rs).
+pub(crate) const END_LINK_SET: &str = concat!(
+    "linked_flight_id = NULL, source = ",
+    own_source_sql!(),
+    ", source_before_link = NULL"
+);
+
 /// The row work of `delete_flight` without the page reclaim, so it can run inside a transaction.
 fn delete_flight_rows(conn: &Connection, flight_id: i64) -> SqlResult<bool> {
     // Clear any linked_flight_id references pointing to this flight
     conn.execute(
-        "UPDATE flights SET linked_flight_id = NULL, source = CASE
-            WHEN (SELECT COUNT(*) FROM blackbox_records WHERE flight_id = flights.id) > 0 THEN 'blackbox'
-            ELSE 'live'
-         END
-         WHERE linked_flight_id = ?1",
+        &format!("UPDATE flights SET {END_LINK_SET} WHERE linked_flight_id = ?1"),
         params![flight_id],
     )?;
 
     // Explicitly delete child tables (don't rely solely on CASCADE; `battery_records` has no FK at
     // all, so without this its rows outlived the flight).
     conn.execute("DELETE FROM blackbox_files WHERE flight_id = ?1", params![flight_id])?;
-    conn.execute("DELETE FROM blackbox_records WHERE flight_id = ?1", params![flight_id])?;
     conn.execute("DELETE FROM telemetry_records WHERE flight_id = ?1", params![flight_id])?;
     conn.execute("DELETE FROM battery_records WHERE flight_id = ?1", params![flight_id])?;
     conn.execute("DELETE FROM flight_events WHERE flight_id = ?1", params![flight_id])?;
@@ -3060,7 +3429,7 @@ pub fn update_flight_group_notes(conn: &Connection, id: &str, notes: &str) -> Sq
 /// One transaction; returns whether the group existed.
 #[allow(dead_code)] // group flights: callers arrive with GROUP_FLIGHTS.md steps 3-7
 pub fn delete_flight_group(conn: &Connection, id: &str, with_members: bool) -> SqlResult<bool> {
-    let tx = conn.unchecked_transaction()?;
+    let tx = write_tx(conn)?;
     let mut members_deleted = false;
     if with_members {
         for member in list_flight_group_member_ids(&tx, id)? {
@@ -3073,7 +3442,7 @@ pub fn delete_flight_group(conn: &Connection, id: &str, with_members: bool) -> S
     let affected = tx.execute("DELETE FROM flight_groups WHERE id = ?1", params![id])?;
     tx.commit()?;
     if members_deleted {
-        conn.execute_batch("PRAGMA incremental_vacuum;")?;
+        spawn_reclaim(conn);
     }
     Ok(affected > 0)
 }
@@ -3081,7 +3450,7 @@ pub fn delete_flight_group(conn: &Connection, id: &str, with_members: bool) -> S
 /// Append timeline events to their flights (`id` is ignored — assigned by the database).
 #[allow(dead_code)] // group flights: callers arrive with GROUP_FLIGHTS.md steps 3-7
 pub fn insert_flight_events(conn: &Connection, events: &[FlightEvent]) -> SqlResult<()> {
-    let tx = conn.unchecked_transaction()?;
+    let tx = write_tx(conn)?;
     {
         let mut stmt = tx.prepare_cached(
             "INSERT INTO flight_events (flight_id, timestamp_ms, wall_ms, kind, code, text, source)
@@ -3172,23 +3541,22 @@ pub fn update_flight_pilot(
     Ok(())
 }
 
-/// Link two flights together (bidirectional). Sets `linked_flight_id` on both
-/// and updates their `source` to "both".
+/// Link two flights together (bidirectional). Sets `linked_flight_id` on both and updates their
+/// `source` to "both"; the source each had before is kept in `source_before_link` for the unlink (a
+/// flight that already reads "both" keeps the value it has).
 pub fn link_flights(conn: &Connection, flight_a: i64, flight_b: i64) -> SqlResult<()> {
     eprintln!("[LINK] Linking flights {} <-> {}", flight_a, flight_b);
-    conn.execute(
-        "UPDATE flights SET linked_flight_id = ?1, source = 'both' WHERE id = ?2",
-        params![flight_b, flight_a],
-    )?;
-    conn.execute(
-        "UPDATE flights SET linked_flight_id = ?1, source = 'both' WHERE id = ?2",
-        params![flight_a, flight_b],
-    )?;
+    const LINK: &str = "UPDATE flights SET linked_flight_id = ?1,
+            source_before_link = CASE WHEN source = 'both' THEN source_before_link ELSE source END,
+            source = 'both'
+         WHERE id = ?2";
+    conn.execute(LINK, params![flight_b, flight_a])?;
+    conn.execute(LINK, params![flight_a, flight_b])?;
     Ok(())
 }
 
-/// Remove the link from a flight and its partner. Resets source based on
-/// whether the flight has blackbox_records (→ "blackbox") or not (→ "live").
+/// Remove the link from a flight and its partner. Each gets back the source it had before the link
+/// (`END_LINK_SET`).
 pub fn unlink_flight(conn: &Connection, flight_id: i64) -> SqlResult<()> {
     // Find the partner
     let partner_id: Option<i64> = conn
@@ -3201,30 +3569,13 @@ pub fn unlink_flight(conn: &Connection, flight_id: i64) -> SqlResult<()> {
         .flatten();
 
     // Clear link on this flight and restore source
-    let has_bbx: bool = conn.query_row(
-        "SELECT COUNT(*) > 0 FROM blackbox_records WHERE flight_id = ?1",
-        params![flight_id],
-        |row| row.get(0),
-    )?;
-    let source = if has_bbx { "blackbox" } else { "live" };
-    conn.execute(
-        "UPDATE flights SET linked_flight_id = NULL, source = ?1 WHERE id = ?2",
-        params![source, flight_id],
-    )?;
+    let end_link = format!("UPDATE flights SET {END_LINK_SET} WHERE id = ?1");
+    conn.execute(&end_link, params![flight_id])?;
 
     // Clear link on partner (if exists)
     if let Some(pid) = partner_id {
-        let partner_has_bbx: bool = conn.query_row(
-            "SELECT COUNT(*) > 0 FROM blackbox_records WHERE flight_id = ?1",
-            params![pid],
-            |row| row.get(0),
-        )?;
-        let partner_source = if partner_has_bbx { "blackbox" } else { "live" };
-        conn.execute(
-            "UPDATE flights SET linked_flight_id = NULL, source = ?1 WHERE id = ?2",
-            params![partner_source, pid],
-        )?;
-        eprintln!("[UNLINK] Unlinked flight {} (source={}) from {} (source={})", flight_id, source, pid, partner_source);
+        conn.execute(&end_link, params![pid])?;
+        eprintln!("[UNLINK] Unlinked flight {} from {}", flight_id, pid);
     } else {
         eprintln!("[UNLINK] Flight {} had no partner", flight_id);
     }
@@ -3287,26 +3638,6 @@ pub fn find_linkable_live_flight(
         .optional()?;
 
     Ok(result)
-}
-
-pub fn insert_blackbox_records(
-    conn: &Connection,
-    flight_id: i64,
-    records: &[(i64, String)],
-) -> SqlResult<()> {
-    let tx = conn.unchecked_transaction()?;
-    {
-        let mut stmt = tx.prepare_cached(
-            "INSERT INTO blackbox_records (flight_id, timestamp_us, csv_data)
-             VALUES (?1, ?2, ?3)",
-        )?;
-
-        for (timestamp_us, csv_data) in records {
-            stmt.execute(params![flight_id, timestamp_us, csv_data])?;
-        }
-    }
-    tx.commit()?;
-    Ok(())
 }
 
 /// Retrieve the first blackbox file BLOB + original filename for a flight.
@@ -3390,9 +3721,9 @@ pub fn blackbox_file_info(conn: &Connection, flight_id: i64) -> SqlResult<Option
 }
 
 /// Delete the stored original blackbox file BLOB for a flight (or its linked partner), keeping the
-/// parsed `blackbox_records` + the flight row intact — replay still works from the DB, only the
-/// "export original" capability is lost. Returns the deleted file's original filename (None if there
-/// was nothing to delete).
+/// flight row and its `telemetry_records` intact — replay still works from the DB; the "export
+/// original" capability and hi-res replay (which re-decodes the original) are lost. Returns the
+/// deleted file's original filename (None if there was nothing to delete).
 pub fn delete_blackbox_file(conn: &Connection, flight_id: i64) -> SqlResult<Option<String>> {
     // Resolve which flight actually holds the file: this one, else its linked partner.
     let mut target: Option<i64> = None;
@@ -3438,8 +3769,8 @@ pub fn delete_blackbox_file(conn: &Connection, flight_id: i64) -> SqlResult<Opti
         params![target_id],
     )?;
     if affected > 0 {
-        // Reclaim the freed BLOB pages incrementally (cheap), not via a full-DB VACUUM rewrite.
-        conn.execute_batch("PRAGMA incremental_vacuum;")?;
+        // Hand the freed BLOB pages back in the background, not via a full-DB VACUUM rewrite.
+        spawn_reclaim(conn);
     }
     Ok(filename)
 }
@@ -3591,8 +3922,58 @@ mod tests {
         let _ = std::fs::remove_file(&work);
         let _ = std::fs::remove_file(backup_path_for(&work));
         std::fs::copy(&src, &work).expect("copy fixture");
+        let mb = |p: &Path| std::fs::metadata(p).map(|m| m.len() as f64 / 1_048_576.0).unwrap_or(0.0);
+        let (from_version, records_before, linked_before): (u32, i64, i64) = {
+            let c = Connection::open(&work).unwrap();
+            let records = if table_exists(&c, "blackbox_records").unwrap() {
+                c.query_row("SELECT COUNT(*) FROM blackbox_records", [], |r| r.get(0)).unwrap()
+            } else {
+                0
+            };
+            let linked = c
+                .query_row("SELECT COUNT(*) FROM flights WHERE linked_flight_id IS NOT NULL", [], |r| r.get(0))
+                .unwrap();
+            (get_user_version(&c).unwrap(), records, linked)
+        };
+        eprintln!(
+            "real DB before: v{from_version}, {:.1} MB, {records_before} blackbox_records rows, {linked_before} linked flights",
+            mb(&work)
+        );
+        let opened = std::time::Instant::now();
         let conn = open_database(&work).expect("open + migrate the real DB");
+        let open_ms = opened.elapsed().as_millis();
         assert_eq!(get_user_version(&conn).unwrap(), CURRENT_SCHEMA_VERSION);
+        // v21: the decoded rows are gone, the freed pages were handed back (open_database starts the
+        // background reclaim when the freelist is large), and every linked flight knows its own source.
+        let db_file = conn.path().unwrap().to_string();
+        let reclaim = wait_for_reclaim(&db_file, std::time::Duration::from_secs(120));
+        eprintln!(
+            "real DB open + migrate: {open_ms} ms (backup included); background reclaim finished {} ms after the open returned",
+            reclaim.as_millis()
+        );
+        assert!(!table_exists(&conn, "blackbox_records").unwrap());
+        assert!(!object_exists(&conn, "index", "idx_blackbox_records_flight"));
+        let free_after = freelist_bytes(&conn).unwrap();
+        let (unset, as_live, as_blackbox): (i64, i64, i64) = conn
+            .query_row(
+                "SELECT COUNT(*) FILTER (WHERE source_before_link IS NULL),
+                        COUNT(*) FILTER (WHERE source_before_link = 'live'),
+                        COUNT(*) FILTER (WHERE source_before_link = 'blackbox')
+                 FROM flights WHERE linked_flight_id IS NOT NULL",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(unset, 0, "every linked flight gets source_before_link");
+        let stray: i64 = conn
+            .query_row("SELECT COUNT(*) FROM flights WHERE linked_flight_id IS NULL AND source_before_link IS NOT NULL", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(stray, 0, "unlinked flights keep source_before_link NULL");
+        eprintln!(
+            "real DB after: source_before_link live={as_live} blackbox={as_blackbox}, freelist {:.1} MB",
+            free_after as f64 / 1_048_576.0
+        );
+        assert_eq!(free_after, 0, "the upgrade reclaim must empty the freelist");
         let flights: i64 =
             conn.query_row("SELECT COUNT(*) FROM flights", [], |r| r.get(0)).unwrap();
         let telemetry: i64 =
@@ -3628,8 +4009,15 @@ mod tests {
             }
         }
         eprintln!("real DB: {vehicles} vehicles, {linked} of {flights} flights linked by the back-fill");
+        // The reclaim thread closed its connection before it left the in-flight list, so this is the
+        // last close: it checkpoints the WAL, which truncates the file to its page count.
         drop(conn);
-        let _ = std::fs::remove_file(&work);
+        eprintln!(
+            "real DB file: {:.1} MB after the upgrade (pre-migration backup {:.1} MB)",
+            mb(&work),
+            mb(&backup_path_for(&work))
+        );
+        remove_temp_session(&work); // the copy + its -wal / -shm
         let _ = std::fs::remove_file(backup_path_for(&work));
     }
 
@@ -3911,18 +4299,15 @@ mod tests {
             vehicle_id: None,
         };
         let flight_id = insert_flight(&conn, &flight).unwrap();
-        insert_blackbox_records(&conn, flight_id, &[(123_000, "{}".into())]).unwrap();
         insert_blackbox_file(&conn, flight_id, "test.TXT", 0, b"abc").unwrap();
 
-        let blackbox_count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM blackbox_records WHERE flight_id = ?1", params![flight_id], |row| row.get(0))
-            .unwrap();
         let file_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM blackbox_files WHERE flight_id = ?1", params![flight_id], |row| row.get(0))
             .unwrap();
 
-        assert_eq!(blackbox_count, 1);
         assert_eq!(file_count, 1);
+        // v21: the decoded rows are no longer stored.
+        assert!(!table_exists(&conn, "blackbox_records").unwrap());
     }
 
     #[test]
@@ -3953,7 +4338,7 @@ mod tests {
     fn migrate_to(conn: &Connection, version: u32) {
         for (target, step) in MIGRATION_STEPS {
             if target <= version {
-                let tx = conn.unchecked_transaction().unwrap();
+                let tx = write_tx(conn).unwrap();
                 step(&tx).unwrap();
                 tx.commit().unwrap();
             }
@@ -4131,7 +4516,7 @@ mod tests {
             .unwrap();
 
         migrate(&conn).unwrap();
-        assert_eq!(get_user_version(&conn).unwrap(), 20);
+        assert_eq!(get_user_version(&conn).unwrap(), CURRENT_SCHEMA_VERSION);
         assert!(object_exists(&conn, "table", "flight_groups"));
         assert!(object_exists(&conn, "table", "flight_events"));
         assert!(object_exists(&conn, "index", "idx_flights_group"));
@@ -4146,7 +4531,7 @@ mod tests {
         assert!(track[0].wall_ms.is_none());
 
         migrate(&conn).unwrap(); // re-entrant
-        assert_eq!(get_user_version(&conn).unwrap(), 20);
+        assert_eq!(get_user_version(&conn).unwrap(), CURRENT_SCHEMA_VERSION);
         // The v19 → v20 step itself is idempotent too (the backup test re-runs it on a v20 DB).
         let tx = conn.unchecked_transaction().unwrap();
         migrate_v19_to_v20(&tx).unwrap();
@@ -4164,7 +4549,7 @@ mod tests {
             migrate_to(&conn, 19);
         }
         let conn = open_database(&path).unwrap();
-        assert_eq!(get_user_version(&conn).unwrap(), 20);
+        assert_eq!(get_user_version(&conn).unwrap(), CURRENT_SCHEMA_VERSION);
         let backup = backup_path_for(&path);
         assert!(backup.exists(), "the v19 -> v20 step must take the pre-migration backup");
         let bconn = Connection::open(&backup).unwrap();
@@ -4417,7 +4802,7 @@ mod tests {
         assert!(!column_exists(&conn, "flights", "vehicle_id").unwrap());
 
         migrate(&conn).unwrap();
-        assert_eq!(get_user_version(&conn).unwrap(), 20);
+        assert_eq!(get_user_version(&conn).unwrap(), CURRENT_SCHEMA_VERSION);
         assert!(column_exists(&conn, "flights", "vehicle_id").unwrap());
         assert!(object_exists(&conn, "index", "idx_flights_vehicle"));
         assert_eq!(vehicle_of(&conn, id), Some(wing));
@@ -4669,5 +5054,427 @@ mod tests {
         update_flight_craft_name(&conn, id, "quad").unwrap();
         assert_eq!(vehicle_of(&conn, id), Some(wing));
         assert_eq!(get_flight(&conn, id).unwrap().unwrap().craft_name, "quad");
+    }
+
+    // ── Schema v21: no decoded Blackbox rows, `flights.source_before_link` ───────────────────
+
+    fn source_of(conn: &Connection, flight_id: i64) -> (String, Option<String>, Option<i64>) {
+        conn.query_row(
+            "SELECT source, source_before_link, linked_flight_id FROM flights WHERE id = ?1",
+            params![flight_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap()
+    }
+
+    fn linked(source_before_link: &str, partner: i64) -> (String, Option<String>, Option<i64>) {
+        ("both".into(), Some(source_before_link.into()), Some(partner))
+    }
+
+    fn unlinked(source: &str) -> (String, Option<String>, Option<i64>) {
+        (source.into(), None, None)
+    }
+
+    /// A v20 database (built from the real steps) with linked pairs and stored decoded rows: the v21
+    /// step derives `source_before_link` for the linked flights from the decoded rows OR an archived
+    /// log, leaves unlinked flights NULL, drops the table + index, and a second pass is a no-op.
+    #[test]
+    fn v20_database_migrates_to_v21() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        migrate_to(&conn, 20);
+        assert!(table_exists(&conn, "blackbox_records").unwrap());
+        let raw = |source: &str| {
+            conn.execute(
+                "INSERT INTO flights (start_time, craft_name, source) VALUES ('2026-09-01T10:00:00+00:00', 'W', ?1)",
+                params![source],
+            )
+            .unwrap();
+            conn.last_insert_rowid()
+        };
+        let pair = |a: i64, b: i64| {
+            conn.execute("UPDATE flights SET linked_flight_id = ?1 WHERE id = ?2", params![b, a]).unwrap();
+            conn.execute("UPDATE flights SET linked_flight_id = ?1 WHERE id = ?2", params![a, b]).unwrap();
+        };
+        let records = |id: i64| {
+            conn.execute(
+                "INSERT INTO blackbox_records (flight_id, timestamp_us, csv_data) VALUES (?1, 0, '1,2,3')",
+                params![id],
+            )
+            .unwrap();
+        };
+        // Pair 1: the log flight has decoded rows but no archived original any more.
+        let live_1 = raw("both");
+        let log_1 = raw("both");
+        pair(live_1, log_1);
+        records(log_1);
+        // Pair 2: the log flight has only an archived original (an ArduPilot / PX4 import).
+        let live_2 = raw("both");
+        let log_2 = raw("both");
+        pair(live_2, log_2);
+        insert_blackbox_file(&conn, log_2, "00000042.BIN", 0, b"bin").unwrap();
+        // Pair 3: an ArduPilot import with neither decoded rows nor an archived original — only its
+        // protocol says it is a log flight.
+        let live_3 = raw("both");
+        let log_3 = raw("both");
+        conn.execute("UPDATE flights SET protocol = 'DATAFLASH' WHERE id = ?1", params![log_3]).unwrap();
+        pair(live_3, log_3);
+        // Unlinked flights stay NULL, whatever they hold.
+        let lone_log = raw("blackbox");
+        records(lone_log);
+        insert_blackbox_file(&conn, lone_log, "LOG00001.TXT", 0, b"txt").unwrap();
+        let lone_live = raw("live");
+
+        migrate(&conn).unwrap();
+        assert_eq!(get_user_version(&conn).unwrap(), 21);
+        assert!(!table_exists(&conn, "blackbox_records").unwrap());
+        assert!(!object_exists(&conn, "index", "idx_blackbox_records_flight"));
+        assert_eq!(source_of(&conn, live_1), linked("live", log_1));
+        assert_eq!(source_of(&conn, log_1), linked("blackbox", live_1));
+        assert_eq!(source_of(&conn, live_2), linked("live", log_2));
+        assert_eq!(source_of(&conn, log_2), linked("blackbox", live_2));
+        assert_eq!(source_of(&conn, live_3), linked("live", log_3));
+        assert_eq!(source_of(&conn, log_3), linked("blackbox", live_3));
+        assert_eq!(source_of(&conn, lone_log), unlinked("blackbox"));
+        assert_eq!(source_of(&conn, lone_live), unlinked("live"));
+        // The archived originals stay.
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM blackbox_files WHERE flight_id = ?1", log_2), 1);
+
+        // Re-entrant: the self-heal pass and the step itself change nothing.
+        migrate(&conn).unwrap();
+        let tx = conn.unchecked_transaction().unwrap();
+        migrate_v20_to_v21(&tx).unwrap();
+        tx.commit().unwrap();
+        assert_eq!(get_user_version(&conn).unwrap(), 21);
+        assert_eq!(source_of(&conn, log_1), linked("blackbox", live_1));
+        assert_eq!(source_of(&conn, lone_log), unlinked("blackbox"));
+        // The unlink restores what the back-fill derived — also for the log flight without a file.
+        unlink_flight(&conn, live_1).unwrap();
+        assert_eq!(source_of(&conn, live_1), unlinked("live"));
+        assert_eq!(source_of(&conn, log_1), unlinked("blackbox"));
+    }
+
+    /// The back-fill also runs on a database whose `blackbox_records` table is already gone.
+    #[test]
+    fn v21_backfill_without_the_records_table() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate_to(&conn, 20);
+        conn.execute_batch("DROP TABLE blackbox_records;").unwrap();
+        conn.execute_batch(
+            "INSERT INTO flights (id, start_time, source, linked_flight_id) VALUES (1, 't', 'both', 2), (2, 't', 'both', 1);",
+        )
+        .unwrap();
+        insert_blackbox_file(&conn, 2, "LOG00001.TXT", 0, b"txt").unwrap();
+        migrate(&conn).unwrap();
+        assert_eq!(source_of(&conn, 1), linked("live", 2));
+        assert_eq!(source_of(&conn, 2), linked("blackbox", 1));
+    }
+
+    /// Link and unlink round-trip the sources of both flights — also for a log flight whose archived
+    /// original is gone (deleted by the user, or never stored), where the old "has decoded rows" check
+    /// and the fallback "has a file" check would both say `live`. Deleting one flight of a pair
+    /// restores the partner.
+    #[test]
+    fn link_unlink_and_delete_restore_the_sources() {
+        let conn = test_db();
+        let new = |source: &str| insert_flight(&conn, &Flight { source: source.into(), ..flight("Wing", None) }).unwrap();
+
+        let live = new("live");
+        let log = new("blackbox");
+        insert_blackbox_file(&conn, log, "LOG00001.TXT", 0, b"txt").unwrap();
+        link_flights(&conn, live, log).unwrap();
+        assert_eq!(source_of(&conn, live), linked("live", log));
+        assert_eq!(source_of(&conn, log), linked("blackbox", live));
+        // Linking again keeps the stored sources (the flights already read "both").
+        link_flights(&conn, log, live).unwrap();
+        assert_eq!(source_of(&conn, log), linked("blackbox", live));
+        unlink_flight(&conn, log).unwrap();
+        assert_eq!(source_of(&conn, live), unlinked("live"));
+        assert_eq!(source_of(&conn, log), unlinked("blackbox"));
+
+        // The original is deleted while the pair is linked (it may sit on either flight).
+        link_flights(&conn, live, log).unwrap();
+        assert_eq!(delete_blackbox_file(&conn, live).unwrap().as_deref(), Some("LOG00001.TXT"));
+        unlink_flight(&conn, live).unwrap();
+        assert_eq!(source_of(&conn, log), unlinked("blackbox"));
+        assert_eq!(source_of(&conn, live), unlinked("live"));
+
+        // Delete one flight of a pair → the partner gets its own source back.
+        let live_2 = new("live");
+        let log_2 = new("blackbox");
+        link_flights(&conn, live_2, log_2).unwrap();
+        assert!(delete_flight(&conn, live_2).unwrap());
+        assert_eq!(source_of(&conn, log_2), unlinked("blackbox"));
+        link_flights(&conn, live, log_2).unwrap();
+        assert!(delete_flight(&conn, log_2).unwrap());
+        assert_eq!(source_of(&conn, live), unlinked("live"));
+
+        // Without a stored value the fallback decides: an archived log, or a log importer's protocol
+        // (an ArduPilot flight with no file at all) mean "blackbox".
+        let live_3 = new("live");
+        let log_3 = new("blackbox");
+        insert_blackbox_file(&conn, log_3, "LOG00002.TXT", 0, b"txt").unwrap();
+        let live_4 = new("live");
+        let log_4 = insert_flight(
+            &conn,
+            &Flight { source: "blackbox".into(), protocol: "DATAFLASH".into(), ..flight("Wing", None) },
+        )
+        .unwrap();
+        link_flights(&conn, live_3, log_3).unwrap();
+        link_flights(&conn, live_4, log_4).unwrap();
+        conn.execute("UPDATE flights SET source_before_link = NULL", []).unwrap();
+        unlink_flight(&conn, live_3).unwrap();
+        assert_eq!(source_of(&conn, live_3), unlinked("live"));
+        assert_eq!(source_of(&conn, log_3), unlinked("blackbox"));
+        assert!(delete_flight(&conn, live_4).unwrap());
+        assert_eq!(source_of(&conn, log_4), unlinked("blackbox"));
+    }
+
+    /// `delete_flight` on a file database hands the freed pages back (in the background): the freelist
+    /// reaches 0. The old one-step `execute_batch("PRAGMA incremental_vacuum;")` freed one page only.
+    #[test]
+    fn delete_flight_reclaims_the_freed_pages() {
+        let path = temp_db_path("delete-reclaim");
+        cleanup(&path);
+        let conn = open_database(&path).unwrap();
+        let id = insert_flight(&conn, &Flight { source: "blackbox".into(), ..flight("Wing", None) }).unwrap();
+        insert_blackbox_file(&conn, id, "LOG00001.TXT", 0, &vec![0x5a; 4 * 1024 * 1024]).unwrap();
+        let file = conn.path().unwrap().to_string();
+        assert!(delete_flight(&conn, id).unwrap());
+        wait_freelist_empty(&conn, "the delete");
+        wait_for_reclaim(&file, std::time::Duration::from_secs(5));
+        drop(conn);
+        cleanup(&path);
+    }
+
+    /// Polls (bounded, 5 s) until the freelist is empty; panics naming `after` otherwise.
+    fn wait_freelist_empty(conn: &Connection, after: &str) {
+        let started = std::time::Instant::now();
+        while freelist_pages(conn).unwrap() > 0 {
+            assert!(
+                started.elapsed() < std::time::Duration::from_secs(5),
+                "freelist still {} pages after {after}",
+                freelist_pages(conn).unwrap()
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+
+    /// Same for deleting only the archived original (`delete_blackbox_file`).
+    #[test]
+    fn delete_blackbox_file_reclaims_the_freed_pages() {
+        let path = temp_db_path("delete-file-reclaim");
+        cleanup(&path);
+        let conn = open_database(&path).unwrap();
+        let id = insert_flight(&conn, &Flight { source: "blackbox".into(), ..flight("Wing", None) }).unwrap();
+        insert_blackbox_file(&conn, id, "LOG00001.TXT", 0, &vec![0x5a; 4 * 1024 * 1024]).unwrap();
+        let file = conn.path().unwrap().to_string();
+        assert_eq!(delete_blackbox_file(&conn, id).unwrap().as_deref(), Some("LOG00001.TXT"));
+        wait_freelist_empty(&conn, "deleting the archived original");
+        wait_for_reclaim(&file, std::time::Duration::from_secs(5));
+        drop(conn);
+        cleanup(&path);
+    }
+
+    /// The scratch store ("open a log without importing it") is never reclaimed — neither after a
+    /// delete nor on open with a large freelist: it is thrown away whole, and on Windows its wipe
+    /// fails while a reclaim thread holds the file.
+    #[test]
+    fn scratch_store_is_not_reclaimed() {
+        let path = temp_db_path("scratch-no-reclaim");
+        cleanup(&path);
+        exclude_from_reclaim(path.parent().unwrap());
+        let conn = open_database(&path).unwrap();
+        let file = conn.path().unwrap().to_string();
+        let id = insert_flight(&conn, &Flight { source: "blackbox".into(), ..flight("Wing", None) }).unwrap();
+        let blob = vec![0x5a; ((RECLAIM_ON_OPEN_PAGES + 512) * 4096) as usize];
+        insert_blackbox_file(&conn, id, "LOG00001.TXT", 0, &blob).unwrap();
+        assert!(delete_flight(&conn, id).unwrap());
+        assert!(!reclaim_running(&file), "a delete in the scratch store must not start a reclaim");
+        drop(conn);
+        let conn = open_database(&path).unwrap();
+        assert!(!reclaim_running(&file), "opening the scratch store must not start a reclaim");
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let free = freelist_pages(&conn).unwrap();
+        assert!(free > RECLAIM_ON_OPEN_PAGES, "the scratch freelist was touched: {free} pages left");
+        drop(conn);
+        cleanup(&path);
+    }
+
+    /// `write_tx` takes the write lock up front: while a second connection holds it, the transaction
+    /// waits (busy timeout) and then reads and writes normally.
+    #[test]
+    fn write_tx_waits_for_the_write_lock() {
+        let path = temp_db_path("write-tx-waits");
+        cleanup(&path);
+        let a = open_database(&path).unwrap();
+        let b = Connection::open(&path).unwrap();
+        b.execute_batch("BEGIN IMMEDIATE; INSERT INTO flights (start_time) VALUES ('2026-11-11T10:00:00Z');")
+            .unwrap();
+        let hold = std::time::Duration::from_millis(300);
+        let started = std::time::Instant::now();
+        let holder = std::thread::spawn(move || {
+            std::thread::sleep(hold);
+            b.execute_batch("COMMIT;").unwrap();
+        });
+        let tx = write_tx(&a).unwrap();
+        let seen: i64 = tx.query_row("SELECT COUNT(*) FROM flights", [], |r| r.get(0)).unwrap();
+        tx.execute("INSERT INTO flights (start_time) VALUES ('2026-11-11T10:05:00Z')", []).unwrap();
+        tx.commit().unwrap();
+        assert!(started.elapsed() >= hold - std::time::Duration::from_millis(50), "it must have waited");
+        assert_eq!(seen, 1, "the read after the wait sees the other connection's commit");
+        holder.join().unwrap();
+        drop(a);
+        cleanup(&path);
+    }
+
+    fn is_busy(e: &rusqlite::Error) -> bool {
+        matches!(e, rusqlite::Error::SqliteFailure(f, _) if f.code == rusqlite::ErrorCode::DatabaseBusy)
+    }
+
+    /// Why `write_tx` exists: a DEFERRED transaction that reads first cannot become a writer once
+    /// another connection has committed since its read, or while another connection holds the write
+    /// lock — SQLite answers SQLITE_BUSY at once, without the busy timeout. This is what made a flight
+    /// save fail while the background reclaim was running.
+    #[test]
+    fn deferred_read_then_write_fails_without_waiting() {
+        let path = temp_db_path("deferred-busy");
+        cleanup(&path);
+        let a = open_database(&path).unwrap();
+        let b = Connection::open(&path).unwrap();
+        let insert = "INSERT INTO flights (start_time) VALUES ('2026-11-11T10:00:00Z')";
+
+        // 1. Another connection committed after the read: the snapshot is stale.
+        let tx = a.unchecked_transaction().unwrap();
+        let _: i64 = tx.query_row("SELECT COUNT(*) FROM flights", [], |r| r.get(0)).unwrap();
+        b.execute(insert, []).unwrap();
+        let err = tx.execute(insert, []).unwrap_err();
+        assert!(is_busy(&err), "{err:?}");
+        drop(tx);
+
+        // 2. Another connection holds the write lock: no waiting either (busy timeout is 5 s).
+        let tx = a.unchecked_transaction().unwrap();
+        let _: i64 = tx.query_row("SELECT COUNT(*) FROM flights", [], |r| r.get(0)).unwrap();
+        b.execute_batch(&format!("BEGIN IMMEDIATE; {insert};")).unwrap();
+        let started = std::time::Instant::now();
+        let err = tx.execute(insert, []).unwrap_err();
+        assert!(is_busy(&err), "{err:?}");
+        assert!(started.elapsed() < std::time::Duration::from_secs(1), "it failed without waiting");
+        drop(tx);
+        b.execute_batch("COMMIT;").unwrap();
+
+        // The same with `write_tx` works (nothing holds the lock now).
+        let tx = write_tx(&a).unwrap();
+        let _: i64 = tx.query_row("SELECT COUNT(*) FROM flights", [], |r| r.get(0)).unwrap();
+        tx.execute(insert, []).unwrap();
+        tx.commit().unwrap();
+        drop((a, b));
+        cleanup(&path);
+    }
+
+    /// The save path under load: flights are committed from temp sessions over and over while a real
+    /// chunked reclaim of a large freelist runs on another connection — every commit must succeed.
+    #[test]
+    fn session_commits_succeed_while_a_reclaim_runs() {
+        let path = db_with_freelist("commit-during-reclaim", 16_384);
+        let conn = open_database(&path).unwrap(); // starts the background reclaim (freelist > threshold)
+        let file = conn.path().unwrap().to_string();
+        assert!(reclaim_running(&file), "the reclaim must be running for this test to mean anything");
+        let mut during = 0;
+        for n in 0..400 {
+            let temp = path.with_file_name(format!("active_test_L1-S{n}.ktmp"));
+            remove_temp_session(&temp);
+            {
+                let t = open_temp_session(&temp).unwrap();
+                insert_telemetry_batch(&t, &[telemetry(0, 0, None), telemetry(0, 100, None)]).unwrap();
+            }
+            let running = reclaim_running(&file);
+            commit_session_to_main(&conn, &temp, &flight("Wing", None))
+                .unwrap_or_else(|e| panic!("commit {n} failed while the reclaim ran: {e}"));
+            remove_temp_session(&temp);
+            if running && reclaim_running(&file) {
+                during += 1;
+            } else if !reclaim_running(&file) {
+                break;
+            }
+        }
+        assert!(during >= 3, "only {during} commits overlapped the reclaim");
+        wait_for_reclaim(&file, std::time::Duration::from_secs(30));
+        assert_eq!(freelist_pages(&conn).unwrap(), 0);
+        drop(conn);
+        cleanup(&path);
+    }
+
+    /// A file with `pages` pages on its freelist and nothing else changed (a dropped table).
+    fn db_with_freelist(name: &str, pages: i64) -> PathBuf {
+        let path = temp_db_path(name);
+        cleanup(&path);
+        let conn = open_database(&path).unwrap();
+        let page_size: i64 = conn.query_row("PRAGMA page_size", [], |r| r.get(0)).unwrap();
+        conn.execute_batch("CREATE TABLE junk (b BLOB);").unwrap();
+        conn.execute("INSERT INTO junk (b) VALUES (zeroblob(?1))", params![pages * page_size]).unwrap();
+        conn.execute_batch("DROP TABLE junk;").unwrap();
+        let free = freelist_pages(&conn).unwrap();
+        // A little more than `pages`: the table's own pages and the auto-vacuum pointer-map pages.
+        assert!((pages..pages + 16 + pages / 256).contains(&free), "expected ~{pages} free pages, got {free}");
+        path
+    }
+
+    /// Opening a database whose freelist is above `RECLAIM_ON_OPEN_PAGES` reclaims it — no delete
+    /// needed (an interrupted reclaim, a dropped table); one below the threshold is left alone.
+    #[test]
+    fn open_reclaims_a_large_freelist_only() {
+        let big = db_with_freelist("open-reclaim-big", RECLAIM_ON_OPEN_PAGES + 512);
+        let conn = open_database(&big).unwrap();
+        let file = conn.path().unwrap().to_string();
+        let started = std::time::Instant::now();
+        while freelist_pages(&conn).unwrap() > 0 {
+            assert!(started.elapsed() < std::time::Duration::from_secs(10), "large freelist not reclaimed on open");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        wait_for_reclaim(&file, std::time::Duration::from_secs(10));
+        drop(conn);
+        cleanup(&big);
+
+        let small = db_with_freelist("open-reclaim-small", RECLAIM_ON_OPEN_PAGES / 8);
+        let conn = open_database(&small).unwrap();
+        let file = conn.path().unwrap().to_string();
+        assert!(!reclaim_running(&file), "a small freelist must not start a reclaim");
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        let free = freelist_pages(&conn).unwrap();
+        assert!(free >= RECLAIM_ON_OPEN_PAGES / 8, "the small freelist was touched: {free} pages left");
+        drop(conn);
+        cleanup(&small);
+    }
+
+    /// `PRAGMA incremental_vacuum` has to be stepped to the end: one result row per freed page.
+    #[test]
+    fn reclaim_free_pages_empties_the_freelist() {
+        let path = temp_db_path("reclaim");
+        cleanup(&path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "PRAGMA auto_vacuum = INCREMENTAL;
+             CREATE TABLE filler (id INTEGER PRIMARY KEY, payload TEXT NOT NULL);",
+        )
+        .unwrap();
+        let tx = conn.unchecked_transaction().unwrap();
+        for i in 0..5_000 {
+            tx.execute("INSERT INTO filler (payload) VALUES (?1)", params![format!("{i:0>200}")]).unwrap();
+        }
+        tx.commit().unwrap();
+        conn.execute_batch("DELETE FROM filler;").unwrap();
+        let free = |c: &Connection| c.query_row("PRAGMA freelist_count", [], |r| r.get::<_, i64>(0)).unwrap();
+        let before = free(&conn);
+        assert!(before > 1, "the delete must leave more than one free page (got {before})");
+        // A chunk smaller than the freelist, so the loop has to go round several times.
+        let chunk = before / 4;
+        let stats = reclaim_free_pages(&conn, chunk, std::time::Duration::ZERO).unwrap();
+        assert_eq!(free(&conn), 0);
+        assert_eq!(stats.pages, before);
+        assert!(stats.chunks >= 4, "{stats:?}");
+        drop(conn);
+        cleanup(&path);
     }
 }
