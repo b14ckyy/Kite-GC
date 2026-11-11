@@ -1140,6 +1140,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../guides/custom-maps/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Custom maps
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../guides/relay-and-forwarding/" class="md-nav__link">
         
   
@@ -2093,6 +2121,13 @@ install, just delete the <code>.portable</code> file (your data stays in <code>d
 <td><code>&lt;app&gt;/data/bin/</code></td>
 </tr>
 <tr>
+<td><a href="../../guides/custom-maps/">Custom maps</a> (default location)</td>
+<td><code>%APPDATA%\kite-gc\custom_maps\</code></td>
+<td><code>~/.local/share/kite-gc/custom_maps/</code></td>
+<td><code>~/Library/Application Support/kite-gc/custom_maps/</code></td>
+<td><code>&lt;app&gt;/data/custom_maps/</code></td>
+</tr>
+<tr>
 <td>Preferences &amp; layout (settings, widget/panel layout)</td>
 <td>web-view storage in your user profile</td>
 <td>web-view storage in your user profile</td>
@@ -2134,7 +2169,8 @@ the Documents path follows a OneDrive relocation automatically.</p>
 <p>Keeping it tidy:</p>
 <ul>
 <li>Deleting flights reclaims space incrementally (the database auto-shrinks over time).</li>
-<li><strong>Settings → Data → Compact Database</strong> runs a full defragmentation for maximum reclaim.</li>
+<li><strong>Settings → Data → Compact Database</strong> (desktop) rebuilds the whole file for maximum reclaim.
+  Kite is blocked while it runs (minutes on a slow drive), so do it between flights.</li>
 <li>Move the database to another drive via <strong>Settings</strong> if space is tight.</li>
 </ul>
 <h2 id="external-dependencies-automatic-downloads">External dependencies &amp; automatic downloads<a class="headerlink" href="#external-dependencies-automatic-downloads" title="Permanent link">&para;</a></h2>
@@ -2172,9 +2208,10 @@ the desktop when the toggle in the Video panel is on (see <strong><a href="../..
   (e.g. <code>brew install ffmpeg</code> on macOS, or your package manager / a manual download) and put it on
   your <code>PATH</code> or next to the app; Kite will pick it up.</li>
 <li>These downloads need <strong>internet access</strong>. The <strong>map</strong> also needs it: both <strong>2D map tiles</strong> and
-  <strong>3D terrain</strong> are streamed on demand and cached after first view — there's no offline map download
-  yet (it's under consideration for the future if there's enough demand). Connecting to your aircraft,
-  live telemetry, and logging all work fully offline.</li>
+  <strong>3D terrain</strong> are streamed on demand and cached after first view — Kite has no offline map download.
+  On the desktop, map tiles you already have can be shown from a folder as a
+  <a href="../../guides/custom-maps/">custom map</a>. Connecting to your aircraft, live telemetry, and logging all
+  work fully offline.</li>
 </ul>
 <h2 id="first-run">First run<a class="headerlink" href="#first-run" title="Permanent link">&para;</a></h2>
 <p>Launch Kite, and head to <strong><a href="../first-connection/">your first connection</a></strong>. New to the interface?

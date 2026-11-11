@@ -997,6 +997,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../guides/custom-maps/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Custom maps
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../guides/relay-and-forwarding/" class="md-nav__link">
         
   
@@ -2133,8 +2161,13 @@ clicked into ignores the wheel, so scrolling the panel never changes a value by 
 <tbody>
 <tr>
 <td><strong>Tile Provider</strong></td>
-<td>The map imagery source — used by <strong>both the 2D map and the 3D globe</strong>.</td>
+<td>The map imagery source — used by <strong>both the 2D map and the 3D globe</strong>. On the desktop the list ends with your own offline maps under <strong>Custom maps</strong>, each marked <strong>▦</strong>. See <strong><a href="../../guides/custom-maps/">Custom maps</a></strong>.</td>
 <td>ESRI Hybrid</td>
+</tr>
+<tr>
+<td><strong>Custom map location</strong> <em>(desktop only)</em></td>
+<td>The folder Kite reads custom maps from, one subfolder per map — <strong>Choose</strong> another folder or <strong>Use Default</strong>. Below it: how many maps were found, <strong>Show map area</strong> (moves the map to the area the selected custom map covers; shown only while one is selected) and <strong>Rescan</strong> (read the folder again, e.g. after adding tiles or plugging in the drive). See <strong><a href="../../guides/custom-maps/">Custom maps</a></strong>.</td>
+<td><code>custom_maps</code> in Kite's app data folder</td>
 </tr>
 <tr>
 <td><strong>Altitude Curtain (3D)</strong></td>
@@ -2239,7 +2272,7 @@ Altitude and Compass sit in the bottom dock and Home, RC Link and GPS in the rig
 <tbody>
 <tr>
 <td><strong>Tile Cache</strong></td>
-<td>On-disk cache size for the map imagery (off … 5 GB), with a usage bar and <strong>Clear</strong>. Used by <strong>both 2D and 3D</strong>, and what makes the map work <strong>offline</strong>.</td>
+<td>On-disk cache size for the map imagery (off … 5 GB), with a usage bar and <strong>Clear</strong>. Used by <strong>both 2D and 3D</strong>, and what makes the map work <strong>offline</strong>. Custom maps are read from disk and never go into this cache.</td>
 <td>200 MB</td>
 </tr>
 <tr>
@@ -2375,8 +2408,8 @@ leave them off to save bandwidth on a slow over-the-air radio, turn them on when
 <td>default path</td>
 </tr>
 <tr>
-<td><strong>Compact Database</strong></td>
-<td>Defragment the database to reclaim space (rarely needed).</td>
+<td><strong>Compact Database</strong> <em>(desktop only)</em></td>
+<td>Rebuild the database file to reclaim space (rarely needed — deleting flights already frees space in the background). Kite shows a blocking notice until it is done; on a hard disk or an SD card this can take several minutes. If a flight is being recorded or an import is running, Kite refuses with a message. While it runs it needs free space: up to the size of the database next to the database file, and about the same again in the system's temporary folder. On Android and iOS the button is not shown: the database holds no original log files there, and deleting flights already gives the space back.</td>
 <td>—</td>
 </tr>
 <tr>

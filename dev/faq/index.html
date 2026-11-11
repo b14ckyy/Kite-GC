@@ -997,6 +997,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../guides/custom-maps/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Custom maps
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../guides/relay-and-forwarding/" class="md-nav__link">
         
   
@@ -1955,13 +1983,17 @@ the 2D map and the 3D globe</strong>:</p>
 <li><strong>OpenTopoMap</strong> — topographic map with contour lines.</li>
 <li><strong>CartoDB Dark Matter</strong> — a dark, low-contrast basemap.</li>
 </ul>
-<p>All of them work <strong>offline</strong> once the tiles have been cached — see below.</p>
+<p>All of them work <strong>offline</strong> once the tiles have been cached — see below. On Windows, Linux and macOS
+the list also offers your own map tiles from a folder on disk — see <strong><a href="../guides/custom-maps/">Custom maps</a></strong>.</p>
 <h3 id="can-i-use-the-maps-offline">Can I use the maps offline?<a class="headerlink" href="#can-i-use-the-maps-offline" title="Permanent link">&para;</a></h3>
 <p>Yes, within limits. Kite caches every map tile it downloads (<strong><a href="../reference/settings/">Settings → Data → Map →
 Tile Cache</a></strong>). Pan and zoom over your flying area <strong>while you still have an
 internet connection</strong>, and those tiles stay available offline afterwards. There is <strong>no bulk
 "pre-download this whole region" button</strong> — the cache fills from what you actually view. The default
 cache is 200 MB and can be raised up to 5 GB.</p>
+<p>On the desktop there is a second way: map tiles you already have can be put into a folder and shown as
+a <strong><a href="../guides/custom-maps/">custom map</a></strong>, straight from disk and without any connection. Kite does not
+download those tiles for you.</p>
 <h3 id="why-isnt-google-maps-or-here-maps-available">Why isn't Google Maps or HERE Maps available?<a class="headerlink" href="#why-isnt-google-maps-or-here-maps-available" title="Permanent link">&para;</a></h3>
 <p>This comes up because other ground stations (Mission Planner, QGroundControl) show Google satellite
 imagery. We looked at both Google and HERE carefully and deliberately chose <strong>not</strong> to integrate them.

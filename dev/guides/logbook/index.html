@@ -1175,6 +1175,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../custom-maps/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Custom maps
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../relay-and-forwarding/" class="md-nav__link">
         
   
@@ -2128,7 +2156,8 @@ flight. The temporary store is also cleared when you restart Kite.</p>
 Blackbox log written by another firmware (Betaflight, for example) is refused with a message that
 names the firmware. A <code>.bbl</code> pulled from the flight controller's flash usually holds <strong>several
 flights</strong> — one per arm / disarm cycle. Kite detects that and offers to import them all, each as its
-own logbook entry. Imported telemetry logs (<code>.tlog</code> / <code>.rawmsp</code>) are
+own logbook entry. A log in the file that cannot be read does not stop the others: Kite imports the
+rest and then lists which logs failed and why. Imported telemetry logs (<code>.tlog</code> / <code>.rawmsp</code>) are
 treated as telemetry recordings and <strong>split into separate flights on the arm / disarm markers</strong> in the
 log, the same way a live recording is.</p>
 <p>PX4 ULog note: PX4 doesn't log a throttle <em>output</em>, so a replayed <code>.ulg</code> flight shows the FC's
