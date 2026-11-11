@@ -25,8 +25,8 @@ Linux and macOS.
 
 ```powershell
 winget install OpenJS.NodeJS.LTS
-winget install Casey.Just.Just
-# Rust: install from https://rustup.rs/
+winget install Casey.Just
+winget install Rustlang.Rustup    # or the installer from https://rustup.rs/
 ```
 
 !!! warning "Restart your terminal"
