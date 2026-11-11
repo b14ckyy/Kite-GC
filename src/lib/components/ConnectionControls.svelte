@@ -184,11 +184,13 @@
       {/each}
     </select>
   {:else if selectedTransport === 'tcp' || selectedTransport === 'udp'}
+    <!-- Blank = this machine (the connect paths send 127.0.0.1): a hint, not pre-filled text, which
+         would have to be deleted first on a touch screen. -->
     <input
       class="tb-input host-input"
       type="text"
       bind:value={tcpHost}
-      placeholder="Host (z.B. 192.168.1.1)"
+      placeholder={$t('connection.hostPlaceholder')}
     />
     <!-- Typing here makes the port the pilot's and the selectors stop moving it, unless what was
          typed is the standard port for the current selection, which hands it back to Kite. -->
@@ -197,7 +199,7 @@
       type="number"
       bind:value={tcpPort}
       oninput={(e) => notePortEdit(Number((e.currentTarget as HTMLInputElement).value))}
-      placeholder="Port"
+      placeholder={$t('connection.portPlaceholder')}
       min="1"
       max="65535"
     />

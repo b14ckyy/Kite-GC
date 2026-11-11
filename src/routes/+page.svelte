@@ -8,7 +8,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
   import { open, save } from "@tauri-apps/plugin-dialog";
-  import { connection, availablePorts, bleDevices, defaultNetPort, hasMsp, isArduPilotLink } from "$lib/stores/connection";
+  import { connection, availablePorts, bleDevices, defaultNetPort, netHostOrLocal, hasMsp, isArduPilotLink } from "$lib/stores/connection";
   import type { FcInfo, PortInfo, BleDeviceInfo, TransportType, ProtocolType } from "$lib/stores/connection";
   import { settings } from "$lib/stores/settings";
   import { isAndroid, isMobile, isTablet, isPhone as isPhoneDevice, hasSerialPorts, hasVideo, logPlayerWidth } from "$lib/platform";
@@ -463,7 +463,7 @@
   let selectedProtocol = $state<ProtocolType>(isMobile ? 'mavlink' : 'msp');
   let selectedPort = $state("");
   let selectedBaud = $state(115200);
-  let tcpHost = $state("192.168.1.1");
+  let tcpHost = $state("");
   /** Port a fresh profile starts on: the MAVLink GCS convention on mobile (Wi-Fi links only),
    *  INAV SITL's MSP port on the desktop. */
   const INITIAL_NET_PORT = isMobile ? 14550 : 5761;
@@ -2782,10 +2782,6 @@
       errorMsg = $t('connection.noPortSelected');
       return;
     }
-    if ((selectedTransport === 'tcp' || selectedTransport === 'udp') && !tcpHost) {
-      errorMsg = $t('connection.noHostSpecified');
-      return;
-    }
     if (selectedTransport === 'ble' && !selectedBleDevice) {
       errorMsg = $t('connection.noBleDeviceSelected');
       return;
@@ -2805,7 +2801,8 @@
         transportType: selectedTransport,
         port: selectedTransport === 'serial' ? selectedPort : undefined,
         baudRate: selectedTransport === 'serial' ? selectedBaud : undefined,
-        host: (selectedTransport === 'tcp' || selectedTransport === 'udp') ? tcpHost : undefined,
+        // A blank host is this machine; `lastHost` above keeps what was typed, so it stays blank.
+        host: (selectedTransport === 'tcp' || selectedTransport === 'udp') ? netHostOrLocal(tcpHost) : undefined,
         tcpPort: (selectedTransport === 'tcp' || selectedTransport === 'udp') ? tcpPort : undefined,
         bleDeviceId: selectedTransport === 'ble' ? selectedBleDevice : undefined,
         attitudeRateHz,

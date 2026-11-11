@@ -18,6 +18,7 @@
   import { settings } from '$lib/stores/settings';
   import { telemetry } from '$lib/stores/telemetry';
   import { vehicles, activeVehicleId, links, type VehicleSummary } from '$lib/stores/vehicles';
+  import { netHostOrLocal } from '$lib/stores/connection';
   import type { PortInfo, BleDeviceInfo, TransportType, ProtocolType } from '$lib/stores/connection';
   import { connectLink, disconnectLink, switchVehicle } from '$lib/controllers/connectionController';
   import { isArmed } from '$lib/helpers/telemetry';
@@ -48,7 +49,7 @@
   let selectedProtocol = $state<ProtocolType>('mavlink');
   let selectedPort = $state('');
   let selectedBaud = $state(115200);
-  let tcpHost = $state('127.0.0.1');
+  let tcpHost = $state('');
   let tcpPort = $state(14550);
   let selectedBleDevice = $state('');
 
@@ -58,7 +59,7 @@
     selectedProtocol = (s.lastProtocol as ProtocolType) || 'mavlink';
     selectedPort = s.lastPort;
     selectedBaud = s.lastBaud || 115200;
-    tcpHost = s.lastHost || '127.0.0.1';
+    tcpHost = s.lastHost;
     tcpPort = s.lastTcpPort || 14550;
     selectedBleDevice = s.lastBleDevice;
   }
@@ -129,7 +130,6 @@
   async function addLink() {
     if (busy) return;
     if (selectedTransport === 'serial' && !selectedPort) { errorMsg = $t('connection.noPortSelected'); return; }
-    if ((selectedTransport === 'tcp' || selectedTransport === 'udp') && !tcpHost) { errorMsg = $t('connection.noHostSpecified'); return; }
     if (selectedTransport === 'ble' && !selectedBleDevice) { errorMsg = $t('connection.noBleDeviceSelected'); return; }
     const s = $settings;
     busy = true;
@@ -140,7 +140,7 @@
         transportType: selectedTransport,
         port: selectedTransport === 'serial' ? selectedPort : undefined,
         baudRate: selectedTransport === 'serial' ? selectedBaud : undefined,
-        host: selectedTransport === 'tcp' || selectedTransport === 'udp' ? tcpHost : undefined,
+        host: selectedTransport === 'tcp' || selectedTransport === 'udp' ? netHostOrLocal(tcpHost) : undefined,
         tcpPort: selectedTransport === 'tcp' || selectedTransport === 'udp' ? tcpPort : undefined,
         bleDeviceId: selectedTransport === 'ble' ? selectedBleDevice : undefined,
         attitudeRateHz: s.attitudeRateHz,

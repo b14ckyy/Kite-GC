@@ -443,7 +443,7 @@ const defaults: AppSettings = {
   lastProtocol: 'msp',
   defaultProtocol: 'last',
   lastTransport: 'serial',
-  lastHost: '192.168.1.1',
+  lastHost: '',
   lastTcpPort: 5761,
   lastBleDevice: '',
   btPortNames: {},
