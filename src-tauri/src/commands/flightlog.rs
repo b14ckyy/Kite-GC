@@ -839,11 +839,13 @@ pub async fn flightlog_import_blackbox(
             if flight.location_name.as_deref().unwrap_or("").trim().is_empty() {
                 if let (Some(lat), Some(lon)) = (flight.start_lat, flight.start_lon) {
                     if let Some(name) = crate::flightlog::geocode::reverse_geocode(lat, lon, lang.as_deref().unwrap_or("en")).await {
-                        conn.execute(
+                        // The flight is stored already: a failed location update must not fail the import.
+                        if let Err(e) = conn.execute(
                             "UPDATE flights SET location_name = ?1 WHERE id = ?2",
                             rusqlite::params![name, flight_id],
-                        )
-                        .map_err(|e| format!("Update error: {}", e))?;
+                        ) {
+                            log::warn!("[flightlog] location name of imported flight {flight_id} not stored: {e}");
+                        }
                     }
                 }
             }
@@ -1004,20 +1006,38 @@ pub fn flightlog_delete_blackbox_file(
     db::delete_blackbox_file(&conn, flight_id).map_err(|e| format!("DB error: {}", e))
 }
 
+/// Error of a compact refused because a flight is being recorded. The `compact-recording:` prefix is a
+/// STABLE marker the frontend matches on (`compactDb` in +page.svelte) — change both together.
+const COMPACT_RECORDING_ERROR: &str =
+    "compact-recording: a flight is being recorded — compact the database after the flight";
+
 /// Compact (defragment) the flight-log database with a full VACUUM. Routine deletes already reclaim
-/// space incrementally; this is the explicit on-demand "Compact Database" maintenance action.
+/// space incrementally; this is the explicit on-demand "Compact Database" maintenance action. It runs
+/// off the main thread (minutes on a slow drive) and is single flight per database file
+/// (`db::compact_database`, `compact-running:` error). Refused while a flight is being recorded: the
+/// VACUUM holds the database for its whole duration and the recording's save would run into it.
 /// Returns the resulting database size in bytes.
 #[tauri::command]
-pub fn flightlog_compact_db(db_path: Option<String>) -> Result<i64, String> {
-    let conn = open_db(&db_path.unwrap_or_default())?;
-    db::compact_database(&conn).map_err(|e| format!("Compact failed: {}", e))?;
-    let page_count: i64 = conn
-        .query_row("PRAGMA page_count", [], |r| r.get(0))
-        .map_err(|e| e.to_string())?;
-    let page_size: i64 = conn
-        .query_row("PRAGMA page_size", [], |r| r.get(0))
-        .map_err(|e| e.to_string())?;
-    Ok(page_count * page_size)
+pub async fn flightlog_compact_db(
+    db_path: Option<String>,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<i64, String> {
+    compact_refusal(&state)?;
+    let db_path = db_path.unwrap_or_default();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = open_db(&db_path)?;
+        db::compact_database(&conn)
+    })
+    .await
+    .map_err(|e| format!("Compact task failed: {}", e))?
+}
+
+/// Why a compact must not start now, if it must not (testable without a Tauri runtime).
+fn compact_refusal(state: &crate::state::AppState) -> Result<(), String> {
+    if state.sessions.has_live_session() {
+        return Err(COMPACT_RECORDING_ERROR.to_string());
+    }
+    Ok(())
 }
 
 /// Export selected flights to a .kflight file
@@ -1723,6 +1743,17 @@ pub fn flightlog_recover_continue(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Without a recording a compact may start, and the refusal text carries the marker the frontend
+    /// matches. (The refusing side — `has_live_session` true while a recorder writes — is covered in
+    /// `recorder::tests::has_live_session_follows_every_recorder`; a live session cannot be registered
+    /// from here without a recorder.)
+    #[test]
+    fn compact_allowed_without_recording_and_refusal_has_marker() {
+        let state = crate::state::AppState::new();
+        assert!(compact_refusal(&state).is_ok());
+        assert!(COMPACT_RECORDING_ERROR.starts_with("compact-recording:"));
+    }
 
     /// A temp session whose commit failed in this run is protected: the discard sweep keeps it.
     #[test]

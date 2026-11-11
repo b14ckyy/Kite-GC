@@ -179,6 +179,23 @@ fn reclaims_in_flight() -> std::sync::MutexGuard<'static, Vec<(PathBuf, bool)>> 
     RECLAIMS_IN_FLIGHT.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// Database files a "Compact Database" (full `VACUUM`, `compact_database`) is running on — single flight
+/// per file. While a file is listed, no background reclaim starts on it and a running one stops before
+/// its next chunk: the VACUUM empties the freelist anyway, and a reclaim chunk waiting for the write lock
+/// the VACUUM holds for minutes would only time out.
+///
+/// Lock order: `RECLAIMS_IN_FLIGHT` → `COMPACTS_IN_FLIGHT`, never the reverse.
+static COMPACTS_IN_FLIGHT: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+
+fn compacts_in_flight() -> std::sync::MutexGuard<'static, Vec<PathBuf>> {
+    COMPACTS_IN_FLIGHT.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Whether a compact is running on the database file `path` (as `Connection::path` names it).
+pub(crate) fn compact_running(path: &Path) -> bool {
+    compacts_in_flight().iter().any(|p| p == path)
+}
+
 fn freelist_pages(conn: &Connection) -> SqlResult<i64> {
     conn.query_row("PRAGMA freelist_count", [], |row| row.get(0))
 }
@@ -203,12 +220,21 @@ struct ReclaimStats {
 /// frees one page per result row it yields, so every call is stepped to the end (`execute_batch` steps
 /// once and frees exactly one page). Loops until `freelist_count` is 0, so pages freed by others while
 /// it runs go too; `pause` is slept before every chunk but the first. Synchronous — the app goes
-/// through `spawn_reclaim`.
-fn reclaim_free_pages(conn: &Connection, chunk_pages: i64, pause: std::time::Duration) -> SqlResult<ReclaimStats> {
+/// through `spawn_reclaim`. `stop` is asked before every chunk; once it says yes the run ends there and
+/// the rest stays on the freelist (a compact took the file over).
+fn reclaim_free_pages(
+    conn: &Connection,
+    chunk_pages: i64,
+    pause: std::time::Duration,
+    stop: &dyn Fn() -> bool,
+) -> SqlResult<ReclaimStats> {
     let mut stats = ReclaimStats::default();
     while freelist_pages(conn)? > 0 {
         if stats.chunks > 0 && !pause.is_zero() {
             std::thread::sleep(pause);
+        }
+        if stop() {
+            break;
         }
         let started = std::time::Instant::now();
         let mut freed = 0;
@@ -234,12 +260,13 @@ fn reclaim_free_pages(conn: &Connection, chunk_pages: i64, pause: std::time::Dur
 /// plain connection (no `open_database`: no migration, no backup). Single flight per file: a trigger
 /// while one runs makes it go round once more instead of starting a second one. Errors are logged
 /// only — whatever stays on the freelist is picked up by the next trigger. A connection without a
-/// file (in-memory, the tests) is reclaimed synchronously right here.
+/// file (in-memory, the tests) is reclaimed synchronously right here. No reclaim starts on a file a
+/// compact is running on (`COMPACTS_IN_FLIGHT`).
 pub(crate) fn spawn_reclaim(conn: &Connection) {
     let path = match conn.path() {
         Some(p) if !p.is_empty() => PathBuf::from(p),
         _ => {
-            if let Err(e) = reclaim_free_pages(conn, RECLAIM_CHUNK_PAGES, std::time::Duration::ZERO) {
+            if let Err(e) = reclaim_free_pages(conn, RECLAIM_CHUNK_PAGES, std::time::Duration::ZERO, &|| false) {
                 log::warn!("[flightlog] free-page reclaim failed: {e}");
             }
             return;
@@ -250,6 +277,9 @@ pub(crate) fn spawn_reclaim(conn: &Connection) {
     }
     {
         let mut running = reclaims_in_flight();
+        if compact_running(&path) {
+            return; // the VACUUM empties the freelist itself
+        }
         if let Some(entry) = running.iter_mut().find(|(p, _)| *p == path) {
             entry.1 = true;
             return;
@@ -300,10 +330,11 @@ fn reclaim_thread(path: &Path) {
                 break;
             }
         }
-        // The file is closed again (`reclaim_file`); go round once more if a trigger came meanwhile.
+        // The file is closed again (`reclaim_file`); go round once more if a trigger came meanwhile —
+        // unless a compact has taken the file over (it waits for this thread to end).
         let mut running = reclaims_in_flight();
         match running.iter().position(|(p, _)| p == path) {
-            Some(i) if running[i].1 => running[i].1 = false,
+            Some(i) if running[i].1 && !compact_running(path) => running[i].1 = false,
             Some(i) => {
                 running.remove(i);
                 entry.armed = false;
@@ -337,7 +368,7 @@ fn reclaim_file(path: &Path) -> SqlResult<(i64, ReclaimStats, i64)> {
     )?;
     conn.busy_timeout(RECLAIM_BUSY_TIMEOUT)?;
     let before = freelist_bytes(&conn)?;
-    let stats = reclaim_free_pages(&conn, RECLAIM_CHUNK_PAGES, RECLAIM_CHUNK_PAUSE)?;
+    let stats = reclaim_free_pages(&conn, RECLAIM_CHUNK_PAGES, RECLAIM_CHUNK_PAUSE, &|| compact_running(path))?;
     Ok((before, stats, freelist_bytes(&conn)?))
 }
 
@@ -391,11 +422,99 @@ fn backup_before_migration(conn: &Connection, db_path: &Path, from_version: u32)
     Ok(())
 }
 
+/// Error of a compact started on a file that is already being compacted. The `compact-running:` prefix
+/// is a STABLE marker the frontend matches on (`compactDb` in +page.svelte) — change both together.
+pub const COMPACT_RUNNING_ERROR: &str = "compact-running: a database compact is already running";
+
+/// How long the compact's VACUUM waits for the write lock another connection holds (an import batch, a
+/// flight being saved) before it fails — the default 5 s is short for a slow drive.
+const COMPACT_BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// How long a compact waits for a background reclaim of its file to stop. The reclaim ends before its
+/// next chunk, and a chunk waits at most `RECLAIM_BUSY_TIMEOUT` for the lock; past this bound the
+/// VACUUM starts anyway and its own busy timeout applies.
+const COMPACT_RECLAIM_WAIT: std::time::Duration = std::time::Duration::from_secs(40);
+
+/// A compact's entry in `COMPACTS_IN_FLIGHT`; removed when dropped (also on an error or a panic).
+pub(crate) struct CompactGuard {
+    path: Option<PathBuf>,
+}
+
+impl Drop for CompactGuard {
+    fn drop(&mut self) {
+        if let Some(path) = &self.path {
+            compacts_in_flight().retain(|p| p != path);
+        }
+    }
+}
+
+/// Register a compact of `conn`'s database file (single flight: a second one gets
+/// `COMPACT_RUNNING_ERROR`) and wait until no background reclaim runs on it any more — a running one
+/// stops before its next chunk, new ones do not start while the guard lives (`spawn_reclaim`). This
+/// covers the reclaim the compact's own `open_database` starts on a large freelist as well. A
+/// connection without a file (in-memory) is unreachable for anyone else and needs no registration.
+/// Crate-visible for tests elsewhere that need a compact "running" on a file.
+pub(crate) fn begin_compact(conn: &Connection) -> Result<CompactGuard, String> {
+    let Some(path) = conn.path().filter(|p| !p.is_empty()).map(PathBuf::from) else {
+        return Ok(CompactGuard { path: None });
+    };
+    {
+        // Under the reclaim lock: `spawn_reclaim` checks for a compact and registers its reclaim in one
+        // step under the same lock, so a reclaim is either visible to the wait below or never starts.
+        let _reclaims = reclaims_in_flight();
+        let mut compacts = compacts_in_flight();
+        if compacts.contains(&path) {
+            return Err(COMPACT_RUNNING_ERROR.to_string());
+        }
+        compacts.push(path.clone());
+    }
+    let guard = CompactGuard { path: Some(path.clone()) };
+    let started = std::time::Instant::now();
+    while reclaims_in_flight().iter().any(|(p, _)| *p == path) {
+        if started.elapsed() > COMPACT_RECLAIM_WAIT {
+            log::warn!(
+                "[flightlog] the background reclaim of {} did not stop within {} s — compacting anyway",
+                path.display(),
+                COMPACT_RECLAIM_WAIT.as_secs()
+            );
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    Ok(guard)
+}
+
 /// Full defragmenting VACUUM — rebuilds the whole DB file to squeeze out fragmentation. Expensive
-/// (cost ∝ DB size); exposed only as an explicit "Compact Database" maintenance action. Routine
-/// deletes use incremental_vacuum instead (see `open_database`).
-pub fn compact_database(conn: &Connection) -> SqlResult<()> {
-    conn.execute_batch("VACUUM;")
+/// (cost ∝ DB size, minutes for a GB-sized archive on a hard disk or SD card); exposed only as the
+/// explicit "Compact Database" maintenance action. Routine deletes use incremental_vacuum instead (see
+/// `open_database`). Single flight per file, and no background reclaim runs on the file meanwhile
+/// (`begin_compact`). Sets `conn`'s busy timeout to `COMPACT_BUSY_TIMEOUT`. Returns the resulting
+/// database size in bytes.
+pub fn compact_database(conn: &Connection) -> Result<i64, String> {
+    let _guard = begin_compact(conn)?;
+    let size = |conn: &Connection| -> SqlResult<i64> {
+        let page_count: i64 = conn.query_row("PRAGMA page_count", [], |r| r.get(0))?;
+        let page_size: i64 = conn.query_row("PRAGMA page_size", [], |r| r.get(0))?;
+        Ok(page_count * page_size)
+    };
+    let before = size(conn).map_err(|e| e.to_string())?;
+    let started = std::time::Instant::now();
+    conn.busy_timeout(COMPACT_BUSY_TIMEOUT).map_err(|e| e.to_string())?;
+    if let Err(e) = conn.execute_batch("VACUUM;") {
+        log::warn!(
+            "[flightlog] database compact failed after {} ms: {e}",
+            started.elapsed().as_millis()
+        );
+        return Err(format!("Compact failed: {e}"));
+    }
+    let after = size(conn).map_err(|e| e.to_string())?;
+    log::info!(
+        "[flightlog] database compacted in {} ms: {:.1} MB -> {:.1} MB",
+        started.elapsed().as_millis(),
+        before as f64 / 1_048_576.0,
+        after as f64 / 1_048_576.0
+    );
+    Ok(after)
 }
 
 /// Resolve the database file path based on settings.
@@ -5470,11 +5589,157 @@ mod tests {
         assert!(before > 1, "the delete must leave more than one free page (got {before})");
         // A chunk smaller than the freelist, so the loop has to go round several times.
         let chunk = before / 4;
-        let stats = reclaim_free_pages(&conn, chunk, std::time::Duration::ZERO).unwrap();
+        let stats = reclaim_free_pages(&conn, chunk, std::time::Duration::ZERO, &|| false).unwrap();
         assert_eq!(free(&conn), 0);
         assert_eq!(stats.pages, before);
         assert!(stats.chunks >= 4, "{stats:?}");
         drop(conn);
         cleanup(&path);
+    }
+
+    fn compact_running_on(path: &str) -> bool {
+        compact_running(Path::new(path))
+    }
+
+    /// Compact is single flight per database file: a second one on the same file is refused with the
+    /// stable marker while the first runs (also through a second connection), another file is not
+    /// affected, and the slot is free again once the first is done.
+    #[test]
+    fn compact_is_single_flight_per_file() {
+        let a = temp_db_path("compact-single-a");
+        let b = temp_db_path("compact-single-b");
+        cleanup(&a);
+        cleanup(&b);
+        let conn_a = open_database(&a).unwrap();
+        let conn_a2 = open_database(&a).unwrap();
+        let conn_b = open_database(&b).unwrap();
+        let file_a = conn_a.path().unwrap().to_string();
+
+        let guard = begin_compact(&conn_a).unwrap();
+        assert!(compact_running_on(&file_a));
+        let err = compact_database(&conn_a2).unwrap_err();
+        assert_eq!(err, COMPACT_RUNNING_ERROR);
+        assert!(err.starts_with("compact-running:"), "the frontend matches this prefix");
+        assert!(compact_running_on(&file_a), "the refused second call must not release the first one's slot");
+        compact_database(&conn_b).expect("another file compacts meanwhile");
+
+        drop(guard);
+        assert!(!compact_running_on(&file_a));
+        compact_database(&conn_a2).expect("the slot is free again");
+        assert!(!compact_running_on(&file_a), "a finished compact releases its slot");
+        drop((conn_a, conn_a2, conn_b));
+        cleanup(&a);
+        cleanup(&b);
+    }
+
+    /// A compact stops a running background reclaim before the VACUUM (the reclaim ends before its next
+    /// chunk — no reclaim thread fights the VACUUM for the write lock), and while it runs no new reclaim
+    /// starts: neither from an open with a large freelist nor from an explicit trigger.
+    #[test]
+    fn compact_stops_a_running_reclaim_and_blocks_new_ones() {
+        let path = db_with_freelist("compact-vs-reclaim", 16_384);
+        let conn = open_database(&path).unwrap(); // starts the background reclaim (freelist > threshold)
+        let file = conn.path().unwrap().to_string();
+        assert!(reclaim_running(&file), "the reclaim must be running for this test to mean anything");
+
+        let guard = begin_compact(&conn).unwrap();
+        assert!(!reclaim_running(&file), "begin_compact returns only once the reclaim has stopped");
+        let left = freelist_pages(&conn).unwrap();
+        assert!(left > 0, "the reclaim was stopped early, not run to the end");
+
+        let second = open_database(&path).unwrap();
+        assert!(!reclaim_running(&file), "an open during the compact must not start a reclaim");
+        spawn_reclaim(&second);
+        assert!(!reclaim_running(&file), "a trigger during the compact must not start a reclaim");
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        assert_eq!(freelist_pages(&conn).unwrap(), left, "nothing reclaimed while the compact holds the file");
+        drop(second);
+
+        drop(guard);
+        spawn_reclaim(&conn);
+        assert!(reclaim_running(&file), "after the compact the reclaim works again");
+        wait_for_reclaim(&file, std::time::Duration::from_secs(30));
+        drop(conn);
+        cleanup(&path);
+    }
+
+    /// The whole compact on a file whose own open started a reclaim (large freelist): it completes
+    /// instead of failing with SQLITE_BUSY, the freelist is empty and the file has shrunk.
+    #[test]
+    fn compact_completes_while_its_open_started_a_reclaim() {
+        let path = db_with_freelist("compact-completes", 16_384);
+        let conn = open_database(&path).unwrap();
+        let file = conn.path().unwrap().to_string();
+        assert!(reclaim_running(&file), "the reclaim must be running for this test to mean anything");
+        let page_size: i64 = conn.query_row("PRAGMA page_size", [], |r| r.get(0)).unwrap();
+        let size = compact_database(&conn).expect("the compact completes");
+        assert_eq!(freelist_pages(&conn).unwrap(), 0);
+        let pages: i64 = conn.query_row("PRAGMA page_count", [], |r| r.get(0)).unwrap();
+        assert_eq!(size, pages * page_size);
+        assert!(pages < 1024, "the dropped table's pages are gone ({pages} pages left)");
+        assert!(!reclaim_running(&file) && !compact_running_on(&file));
+        drop(conn);
+        cleanup(&path);
+    }
+
+    /// Compact timing on a COPY of a real flight database (see `migrates_the_real_database`): opens it
+    /// like the app (which may start a reclaim) and compacts right away.
+    /// `KITE_TEST_DB=<path> cargo test compacts_the_real_database -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn compacts_the_real_database() {
+        let Ok(src) = std::env::var("KITE_TEST_DB") else {
+            eprintln!("KITE_TEST_DB not set — skipping");
+            return;
+        };
+        let src = PathBuf::from(src);
+        let work = src.with_extension("compact-copy.db");
+        let _ = std::fs::remove_file(&work);
+        std::fs::copy(&src, &work).expect("copy fixture");
+        let mb = |p: &Path| std::fs::metadata(p).map(|m| m.len() as f64 / 1_048_576.0).unwrap_or(0.0);
+        let wal = work.with_extension("db-wal");
+        let file_before = mb(&work);
+        let opened = std::time::Instant::now();
+        let conn = open_database(&work).expect("open the real DB");
+        let file = conn.path().unwrap().to_string();
+        let flights: i64 = conn.query_row("SELECT COUNT(*) FROM flights", [], |r| r.get(0)).unwrap();
+        let free_before = freelist_bytes(&conn).unwrap();
+        eprintln!(
+            "real DB: {file_before:.1} MB on disk, freelist {:.1} MB, reclaim on open: {}, open {} ms",
+            free_before as f64 / 1_048_576.0,
+            reclaim_running(&file),
+            opened.elapsed().as_millis()
+        );
+        let started = std::time::Instant::now();
+        let (size, conn) = std::thread::scope(|s| {
+            let compact = s.spawn(|| (compact_database(&conn), conn));
+            // A second compact while the first runs: the app opens the DB first (`open_db`), so that open
+            // must not block on the running VACUUM, and the compact is then refused.
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            let second = std::time::Instant::now();
+            let other = open_database(&work).expect("open during the compact");
+            let refused = compact_database(&other);
+            eprintln!("second compact during the first: {:?} after {} ms", refused, second.elapsed().as_millis());
+            assert_eq!(refused.unwrap_err(), COMPACT_RUNNING_ERROR);
+            drop(other);
+            let (size, conn) = compact.join().unwrap();
+            (size.expect("compact the real DB"), conn)
+        });
+        eprintln!(
+            "compact: {} ms, logical size {:.1} MB; on disk now: db {:.1} MB, wal {:.1} MB",
+            started.elapsed().as_millis(),
+            size as f64 / 1_048_576.0,
+            mb(&work),
+            mb(&wal)
+        );
+        assert_eq!(freelist_pages(&conn).unwrap(), 0);
+        let flights_after: i64 = conn.query_row("SELECT COUNT(*) FROM flights", [], |r| r.get(0)).unwrap();
+        assert_eq!(flights_after, flights);
+        drop(conn);
+        eprintln!("after close: db {:.1} MB, wal {:.1} MB", mb(&work), mb(&wal));
+        let _ = std::fs::remove_file(&work);
+        let _ = std::fs::remove_file(&wal);
+        let _ = std::fs::remove_file(work.with_extension("db-shm"));
+        let _ = std::fs::remove_file(backup_path_for(&work));
     }
 }
