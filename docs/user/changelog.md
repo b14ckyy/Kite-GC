@@ -141,7 +141,7 @@ inside the box of the feature release they belong to, so the notes for one relea
         message that names it (earlier versions imported such logs with wrong values; those flights
         stay, without HI-RES replay). If an import goes wrong, starting Kite with the environment
         variable `KITE_BLACKBOX_LEGACY=1` brings back the old decoder for now — please report the
-        log that failed. [#NNN]
+        log that failed. [#234]
 
     **Added**
 
@@ -476,6 +476,7 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#225]: https://github.com/b14ckyy/Kite-GC/pull/225
 [#228]: https://github.com/b14ckyy/Kite-GC/pull/228
 [#232]: https://github.com/b14ckyy/Kite-GC/pull/232
+[#234]: https://github.com/b14ckyy/Kite-GC/pull/234
 [#143]: https://github.com/b14ckyy/Kite-GC/pull/143
 [#145]: https://github.com/b14ckyy/Kite-GC/pull/145
 [#151]: https://github.com/b14ckyy/Kite-GC/pull/151
