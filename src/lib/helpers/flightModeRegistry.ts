@@ -75,7 +75,7 @@ export const MODE_REGISTRY: Record<string, ModeDef> = {
   flaperon:     { label: 'Flaperon', category: 'other',    short: 'FLAP' },
   autoland:     { label: 'Autoland', category: 'land',     short: 'LAND' },
 
-  // ── ArduPilot (Plane + Copter; shared ids reuse the entries above) ──
+  // ── ArduPilot (Plane + Copter, Rover + Sub below; shared ids reuse the entries above) ──
   ardu_auto:    { label: 'Auto',        category: 'mission' },
   rtl:          { label: 'RTL',         category: 'rth' },
   guided:       { label: 'Guided',      category: 'guided' },
@@ -110,6 +110,19 @@ export const MODE_REGISTRY: Record<string, ModeDef> = {
   qacro:        { label: 'QAcro',       category: 'acro' },
   thermal:      { label: 'Thermal',     category: 'other' },
   loiter_qland: { label: 'Loiter QLand', category: 'land' },
+  initialising: { label: 'Initialising', category: 'other' },
+
+  // ── ArduRover / Boat ──
+  rover_hold:   { label: 'Hold',        category: 'poshold' },
+  steering:     { label: 'Steering',    category: 'stabilized' },
+  simple:       { label: 'Simple',      category: 'stabilized' },
+  dock:         { label: 'Dock',        category: 'land' },
+
+  // ── ArduSub ──
+  depth_hold:   { label: 'Depth Hold',  category: 'althold' },
+  surface:      { label: 'Surface',     category: 'land' },
+  surftrak:     { label: 'Surftrak',    category: 'althold' },
+  motor_detect: { label: 'Motor Detection', category: 'other' },
 
   // ── PX4 (main + sub mode; shared manual/acro/mission/land/takeoff reuse the entries above) ──
   px4_altitude:     { label: 'Altitude',       category: 'althold' },
