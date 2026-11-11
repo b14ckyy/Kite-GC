@@ -304,6 +304,10 @@ inside the box of the feature release they belong to, so the notes for one relea
       failing after the geometry is already on the vehicle. For ArduPilot too: mission, fence and rally
       transfers address the autopilot component, so they pass through a routing relay such as Mission
       Planner's MAVLink mirror. Contributed by dldnjsxo95. [#195] · [#205]
+    - **`.tlog` import: a log that carries several vehicles is no longer mixed into one flight.** When
+      a MAVLink log held frames of more than one aircraft on the same link, their positions and
+      attitudes ended up interleaved in a single track. The import now follows the first autopilot it
+      sees and skips the others.
 
 ??? note "1.0 — Initial release · Live"
 
