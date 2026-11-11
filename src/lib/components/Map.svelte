@@ -1587,6 +1587,8 @@
    *  a mid-flight connect to a vehicle sitting in GUIDED must be commandable without first toggling
    *  the panel button (which would re-send the mode change). */
   function guidedClickArmed(): boolean {
+    // No map target for ArduSub: "Fly Here" sends an altitude above home, which for a Sub is the surface.
+    if (get(autopilotSystem) === "ardupilot" && get(arduVehicleClass) === "sub") return false;
     return get(guidedActive) || get(activeMode)?.guided === true;
   }
 
