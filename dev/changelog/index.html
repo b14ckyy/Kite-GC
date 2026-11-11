@@ -2098,6 +2098,22 @@ flight logbook with replay, FPV video, radar / airspace awareness and telemetry 
   is kept and offered again at the next start. The same holds for <em>Save</em> in the "connection lost"
   and "unfinished recording" prompts. The automatic save when you arm again keeps the recording
   the same way, without a message, and offers it at the next start.</li>
+<li><strong>ArduSub: the control panel sent ArduRover's mode numbers.</strong> On a Sub the mode buttons meant
+  something else to the vehicle: <em>Steering</em> switched to <strong>Auto and started the mission</strong>, <em>Manual</em>
+  switched to Stabilize, and Auto, Loiter, SmartRTL and the Guided toggle were refused. The
+  panel now offers ArduSub's own modes: Guided, Auto, PosHold, Circle and Surface, and with an
+  RC source Stabilize, Acro, Depth Hold, Manual and Surftrak. Clicking a target on the map
+  ("Fly Here") stays unavailable on a Sub.</li>
+<li><strong>ArduRover, Boat and ArduSub: wrong flight-mode names.</strong> Their modes were read with ArduCopter's
+  table, so a rover in Hold showed as "Guided", one in Guided as "AutoTune", a Sub in Manual as
+  "Avoid ADSB" — in the mode widget, the track colours, recordings and imported logs. Each vehicle
+  type is now read with its own table, and ArduCopter's Turtle and ArduPlane's Autoland and
+  Initialising have names instead of a raw number. Flights recorded or imported before this
+  fix keep the names they were stored with.</li>
+<li><strong>ArduRover / Boat: Hold was missing from the mode buttons.</strong> It is offered now.</li>
+<li><strong>QuadPlane: QHover was offered without an RC source.</strong> QHover only holds the altitude; the
+  pilot holds the position. It is now behind <em>Show all modes</em> and locked without an RC source,
+  like the other stick-flown modes.</li>
 </ul>
 <hr />
 <p><strong class="kite-patch">1.0.1</strong> <em class="kite-badge">2026-09-13</em></p>
