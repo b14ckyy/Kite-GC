@@ -62,3 +62,6 @@ See **[Flight logbook](../guides/logbook.md)**.
   **[Flight logbook](../guides/logbook.md#the-database-updates-and-the-automatic-backup)**.
 - **Caches** — 2D map tiles and terrain are cached on disk (also under Settings → Data); these are the
   files that make the 2D map usable offline.
+- **Custom maps** (desktop) — your own map tiles in the custom map location, one `Z/X/Y` folder per
+  map, plus a small `.kite-coverage.json` index Kite writes into each map folder. See
+  **[Custom maps](../guides/custom-maps.md)**.

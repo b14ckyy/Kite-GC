@@ -15,7 +15,8 @@ the 2D map and the 3D globe**:
 - **OpenTopoMap** — topographic map with contour lines.
 - **CartoDB Dark Matter** — a dark, low-contrast basemap.
 
-All of them work **offline** once the tiles have been cached — see below.
+All of them work **offline** once the tiles have been cached — see below. On Windows, Linux and macOS
+the list also offers your own map tiles from a folder on disk — see **[Custom maps](guides/custom-maps.md)**.
 
 ### Can I use the maps offline?
 
@@ -24,6 +25,10 @@ Tile Cache](reference/settings.md)**). Pan and zoom over your flying area **whil
 internet connection**, and those tiles stay available offline afterwards. There is **no bulk
 "pre-download this whole region" button** — the cache fills from what you actually view. The default
 cache is 200 MB and can be raised up to 5 GB.
+
+On the desktop there is a second way: map tiles you already have can be put into a folder and shown as
+a **[custom map](guides/custom-maps.md)**, straight from disk and without any connection. Kite does not
+download those tiles for you.
 
 ### Why isn't Google Maps or HERE Maps available?
 

@@ -26,7 +26,8 @@ The Settings panel — the Interface and Data tabs, each grouped into labelled s
 
 | Setting | What it does | Default |
 |---|---|---|
-| **Tile Provider** | The map imagery source — used by **both the 2D map and the 3D globe**. | ESRI Hybrid |
+| **Tile Provider** | The map imagery source — used by **both the 2D map and the 3D globe**. On the desktop the list ends with your own offline maps under **Custom maps**, each marked **▦**. See **[Custom maps](../guides/custom-maps.md)**. | ESRI Hybrid |
+| **Custom map location** *(desktop only)* | The folder Kite reads custom maps from, one subfolder per map — **Choose** another folder or **Use Default**. Below it: how many maps were found, **Show map area** (moves the map to the area the selected custom map covers; shown only while one is selected) and **Rescan** (read the folder again, e.g. after adding tiles or plugging in the drive). See **[Custom maps](../guides/custom-maps.md)**. | `custom_maps` in Kite's app data folder |
 | **Altitude Curtain (3D)** | Draw the vertical wall from the flight track down to the ground in 3D. See **[3D map](../guides/map-3d.md)**. | On |
 | **3D Buildings (OSM)** | Show OpenStreetMap building extrusions on the 3D globe. The buildings come from Cesium Ion, so the switch stays greyed out until a **Cesium Ion Token** is entered (Data tab). | Off |
 | **Real Daytime and Lighting (3D)** | Light the 3D globe with the real sun position (day / night, shadows). | On |
@@ -62,7 +63,7 @@ Altitude and Compass sit in the bottom dock and Home, RC Link and GPS in the rig
 
 | Setting | What it does | Default |
 |---|---|---|
-| **Tile Cache** | On-disk cache size for the map imagery (off … 5 GB), with a usage bar and **Clear**. Used by **both 2D and 3D**, and what makes the map work **offline**. | 200 MB |
+| **Tile Cache** | On-disk cache size for the map imagery (off … 5 GB), with a usage bar and **Clear**. Used by **both 2D and 3D**, and what makes the map work **offline**. Custom maps are read from disk and never go into this cache. | 200 MB |
 | **Terrain Cache** | Disk cache for the Copernicus terrain used by terrain analysis (size read-out + **Clear**). | — |
 | **Cesium Ion Token** | Your free Cesium Ion token, which enables real-world 3D terrain. See **[3D map](../guides/map-3d.md)**. | (none) |
 | **Airspace Manager** | Enable the aeronautical overlay, pick the **provider** (OpenAIP) and enter its **API key**. See **[Airspace Manager](../guides/airspace.md)**. | On, no provider set |
