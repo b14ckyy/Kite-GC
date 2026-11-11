@@ -1983,6 +1983,13 @@
     // Stop the live BLE scan before connecting — the adapter can't scan and open a GATT link at once.
     if (selectedTransport === 'ble') await stopBleScan();
 
+    await connectAsSelected(true);
+  }
+
+  /** Connect with the current selection. `offerStaleDisconnect`: when the backend answers that it is
+   *  still connected — a link this UI does not know, left over from a reload of the page (a restart of
+   *  the WebView's renderer, the debug reload) — offer to close that link and connect again, once. */
+  async function connectAsSelected(offerStaleDisconnect: boolean) {
     isConnecting = true;
     errorMsg = "";
     connection.update((c) => ({ ...c, status: "connecting" }));
@@ -2010,6 +2017,32 @@
         flightLogRawAlways: flightRecordingEnabled && flightLogRawAlways,
       });
     } catch (e) {
+      // "Already connected" is the backend's refusal in `connect` (commands/connection.rs).
+      if (offerStaleDisconnect && String(e).includes('Already connected')) {
+        isConnecting = false;
+        connection.update((c) => ({ ...c, status: "disconnected" }));
+        const answer = await showDialog({
+          title: $t('connection.staleLinkTitle'),
+          message: $t('connection.staleLinkMessage'),
+          buttons: [{ label: $t('connection.staleLinkReconnect'), value: 'reconnect', primary: true }],
+        });
+        if (answer !== 'reconnect') return;
+        isConnecting = true; // keeps the Connect button off while the old link is being closed
+        try {
+          await disconnectFC(selectedBaud);
+        } catch (err) {
+          // The old link may have dropped by itself meanwhile — then there is nothing left to close.
+          if (!String(err).includes('Not connected')) {
+            errorMsg = String(err);
+            return;
+          }
+        }
+        // The status went back to "disconnected" above, which restarts the BLE discovery; the adapter
+        // can't scan and open a GATT link at once.
+        if (selectedTransport === 'ble') await stopBleScan();
+        await connectAsSelected(false);
+        return;
+      }
       errorMsg = String(e);
       connection.set({ status: "error", protocolType: selectedProtocol, transportType: selectedTransport, port: "", baudRate: selectedBaud, errorMessage: String(e), fcInfo: null });
     } finally {
