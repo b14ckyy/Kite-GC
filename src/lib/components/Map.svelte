@@ -1692,6 +1692,7 @@
     currentBase = cachedTileLayer(provider.url, {
       attribution: provider.attribution,
       maxZoom: provider.maxZoom,
+      maxNativeZoom: provider.maxNativeZoom,
       // Enable over-zoom placeholder detection on flagged base layers (ESRI sat).
       providerId: provider.detectPlaceholders ? provider.id : undefined,
     }).addTo(map);
@@ -1702,6 +1703,7 @@
         const layer = cachedTileLayer(ol.url, {
           attribution: ol.attribution,
           maxZoom: ol.maxZoom,
+          maxNativeZoom: ol.maxNativeZoom,
           pane: "overlayPane",
         }).addTo(map);
         currentOverlays.push(layer);
