@@ -53,7 +53,7 @@ pub enum Compat {
     /// Row for row and field for field what blackbox_decode + Kite's CSV parser produce, including
     /// the frames the tool drops. Logs without GPS field definitions are the exception: the tool's
     /// mAh integration has an off-by-one-frame bug on that path, which is not reproduced.
-    // Only the comparison test decodes in this mode until the import switches over (stage C).
+    // Only the comparison test decodes in this mode; the import and the hi-res parse use `Native`.
     #[cfg_attr(not(test), allow(dead_code))]
     BlackboxDecode,
     /// The same mapping, but every frame the native decoder accepts becomes a row.
@@ -89,40 +89,69 @@ pub(super) fn log_slice(file: &[u8], index: usize) -> Result<(Range<usize>, usiz
     let offsets = log_start_offsets(file);
     let start = *offsets.get(index).ok_or_else(|| {
         if offsets.is_empty() {
-            "no INAV Blackbox log found".to_string()
+            "Not a Blackbox log: the file has no Blackbox header ('H Product:Blackbox flight data recorder')"
+                .to_string()
         } else {
-            format!("log index {index} out of range (the file holds {} logs)", offsets.len())
+            format!(
+                "The file holds {} Blackbox logs; log number {} does not exist",
+                offsets.len(),
+                index + 1
+            )
         }
     })?;
     let end = offsets.get(index + 1).copied().unwrap_or(file.len());
     Ok((start..end, offsets.len()))
 }
 
-/// Decode one log of a Blackbox file into importer rows. `log_index` is 0-based; `None` takes the
-/// only log and fails when the file holds several (blackbox_decode `--stdout` without `--index`).
-/// `target_interval_us` is the importer's decimation (100 000 = 10 Hz, 0 = every row).
+/// Byte range of the log a decode of `log_index` (0-based) reads. `None` takes the only log and
+/// fails when the file holds several (blackbox_decode `--stdout` without `--index`). The importer
+/// reads the header and archives the slice from this same range.
+pub(crate) fn select_log(file: &[u8], log_index: Option<u32>) -> Result<Range<usize>, String> {
+    match log_index {
+        Some(index) => Ok(log_slice(file, index as usize)?.0),
+        None => {
+            let (range, count) = log_slice(file, 0)?;
+            if count > 1 {
+                return Err(format!(
+                    "The file holds {count} Blackbox logs; a log number is required"
+                ));
+            }
+            Ok(range)
+        }
+    }
+}
+
+/// Decode one log of a Blackbox file into importer rows. `log_index` is 0-based (see
+/// [`select_log`]). `target_interval_us` is the importer's decimation (100 000 = 10 Hz, 0 = every
+/// row).
 pub fn decode_rows(
     file: &[u8],
     log_index: Option<u32>,
     compat: Compat,
     target_interval_us: i64,
 ) -> Result<DecodedLog, String> {
-    let range = match log_index {
-        Some(index) => log_slice(file, index as usize)?.0,
-        None => {
-            let (range, count) = log_slice(file, 0)?;
-            if count > 1 {
-                return Err(format!("the file holds {count} Blackbox logs; a log index is required"));
-            }
-            range
-        }
-    };
+    let range = select_log(file, log_index)?;
     let base = range.start;
     let log = &file[range];
-    let header = parse_header(log)?;
+    let header = parse_header(log).map_err(|e| format!("Damaged or empty Blackbox log: {e}"))?;
     let tool = ToolConfig::from_header(&log[..header.data_start]);
-    if !tool.cleanflight || !tool.inav {
-        return Err("not an INAV Blackbox log (Firmware type / Firmware revision)".into());
+    if !tool.inav {
+        // Betaflight, Cleanflight, EmuFlight & co. write the same banner and frame format, but other
+        // fields and predictors — say whose log it is rather than decode it wrongly.
+        return Err(match header.firmware_revision.as_deref().map(str::trim).filter(|r| !r.is_empty()) {
+            Some(revision) => format!(
+                "Not an INAV Blackbox log: it was written by '{revision}'. Only INAV Blackbox logs can be imported."
+            ),
+            None => "Not an INAV Blackbox log: the header names no firmware ('Firmware revision' is missing). \
+                     Only INAV Blackbox logs can be imported."
+                .into(),
+        });
+    }
+    if !tool.cleanflight {
+        return Err(format!(
+            "Damaged Blackbox header: 'Firmware type' is '{}', INAV writes 'Cleanflight'",
+            header.firmware_type.as_deref().unwrap_or("")
+        ));
     }
     check_header(&header)?;
     let (schema, known) = schema_for(header.firmware_version);
@@ -133,7 +162,8 @@ pub fn decode_rows(
             schema.label
         );
     }
-    let mut decoder = FrameDecoder::new(&header, schema, base)?;
+    let mut decoder = FrameDecoder::new(&header, schema, base)
+        .map_err(|e| format!("Unsupported or damaged Blackbox header: {e}"))?;
     let mut sink = RowSink::new(&header, &tool, compat, target_interval_us);
     decoder.run(log, header.data_start, &mut sink);
     sink.flush();
@@ -164,10 +194,10 @@ const MAX_I_INTERVAL: u32 = 65_536;
 /// absurd I interval, which makes its skipped-frame arithmetic run for minutes.
 fn check_header(header: &InavHeader) -> Result<(), String> {
     if header.g.predictor.contains(&PREDICTOR_MOTOR0) || header.h.predictor.contains(&PREDICTOR_MOTOR0) {
-        return Err("damaged Blackbox header: a GPS or home field predicts from motor[0]".into());
+        return Err("Damaged Blackbox header: a GPS or home field predicts from motor[0]".into());
     }
     if header.i_interval > MAX_I_INTERVAL {
-        return Err(format!("damaged Blackbox header: I interval {}", header.i_interval));
+        return Err(format!("Damaged Blackbox header: I interval {}", header.i_interval));
     }
     Ok(())
 }

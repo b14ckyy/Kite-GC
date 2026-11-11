@@ -20,7 +20,7 @@
   import { revealItemInDir, openPath } from '@tauri-apps/plugin-opener';
   import { isAndroid, isMobile } from '$lib/platform';
   import { updatesSupported } from '$lib/controllers/updateCheck';
-  import { blackboxDecoderVersion, downloadBlackboxDecode } from '$lib/stores/flightlog';
+  import { blackboxDecoderVersion, blackboxLegacyMode, downloadBlackboxDecode } from '$lib/stores/flightlog';
   import type { TileCacheStats } from '$lib/cache/tileCache';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
   import UnitStepper from '$lib/components/UnitStepper.svelte';
@@ -168,12 +168,16 @@
     await loadTerrainCache();
   }
 
-  // blackbox_decode (the one external dependency, INAV-only). Show its version so the user can tell
-  // whether it needs updating for a new INAV version, and offer a one-click download/update.
+  // blackbox_decode — only used under the legacy switch (KITE_BLACKBOX_LEGACY=1); INAV logs are
+  // decoded by the built-in decoder otherwise, and the row stays hidden. In legacy mode show its
+  // version so the user can tell whether it needs updating, and offer a one-click download/update.
+  let bbLegacy = $state(false);
   let bbVersion = $state<string | null>(null);
   let bbBusy = $state(false);
   let bbError = $state('');
   async function loadBbVersion() {
+    try { bbLegacy = await blackboxLegacyMode(); } catch { bbLegacy = false; }
+    if (!bbLegacy) return;
     try { bbVersion = await blackboxDecoderVersion(); } catch { bbVersion = null; }
   }
   async function updateBbDecoder() {
@@ -808,7 +812,7 @@
       <!-- Desktop only: blackbox_decode is a separate native executable, and both mobile systems
            forbid executing a downloaded binary (the backend refuses too — decoder_impossible in
            flightlog/decoder.rs — this just spares the user a row that could never work). -->
-      {#if !isMobile}
+      {#if !isMobile && bbLegacy}
         <div class="s-row s-row-stack">
           <span class="s-label">{$t('settings.blackboxDecoder')}</span>
           <div class="path-picker-row">

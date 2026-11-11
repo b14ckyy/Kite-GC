@@ -1231,7 +1231,7 @@
     "multiLogTitle": "Varios registros de vuelo",
     "multiLogMessage": "Este archivo contiene {count, plural, one {# registro de vuelo} other {# registros de vuelo}} — uno por cada ciclo de armado/desarmado. Cada uno se importa como un vuelo independiente.",
     "multiLogImportAll": "Importar todos",
-    "blackboxUnsupportedMobile": "Los registros Blackbox (.txt/.bbl/.bfl) no se pueden importar en este dispositivo: necesitan la herramienta externa blackbox_decode, que los sistemas móviles no permiten ejecutar. Omitidos: {files}",
+    "blackboxUnsupportedMobile": "Los registros Blackbox (.txt/.bbl/.bfl) no se importan en este dispositivo. Impórtalos en Kite en un ordenador y pasa los vuelos como .kflight. Omitidos: {files}",
     "decoderMissingTitle": "No se encontró blackbox_decode",
     "decoderMissingMsg": "Los registros Blackbox de INAV necesitan la herramienta externa 'blackbox_decode', que no está instalada. ¿Descargarla automáticamente de las versiones oficiales de iNavFlight?",
     "decoderDownload": "Descargar",

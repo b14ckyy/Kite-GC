@@ -13,7 +13,7 @@ use rusqlite::Connection;
 use serde_json::json;
 
 use super::db;
-use super::inav::{decode_rows, Compat};
+use super::inav::{decode_rows, select_log, Compat};
 use super::types::{BlackboxImportStatus, Flight, TelemetryRecord};
 
 const WINDOWS_BINARY: &str = "blackbox_decode.exe";
@@ -86,8 +86,10 @@ where
     let file_data = fs::read(file_path)
         .map_err(|e| format!("Failed to read Blackbox file {}: {}", file_path.display(), e))?;
 
-    // Extract header for the specific log index (not always log 0)
-    let header = extract_header_metadata_for_log(&file_data, log_index);
+    // The one log this import is about: its header is read, it is decoded and it is archived from
+    // the same byte range (an out-of-range or missing index on a multi-log file fails here).
+    let log_range = log_byte_range(&file_data, log_index)?;
+    let header = extract_header_metadata(&file_data[log_range.clone()]);
     let craft_name = header
         .craft_name.clone()
         .filter(|value| !value.trim().is_empty())
@@ -107,9 +109,14 @@ where
     // would compare an uncorrected time against the corrected stored one and miss every duplicate of a
     // log whose header carries a non-UTC local time. See the post-correction check below.
 
-    let rows = if native_decoder_requested() {
+    // A flash download imports log by log; an error says which one failed.
+    let numbered = |e: String| match log_index {
+        Some(index) => format!("Log {}: {e}", index + 1),
+        None => e,
+    };
+    let rows = if !legacy_decoder_requested() {
         report(25, "decode", "Decoding Blackbox log...");
-        decode_rows(&file_data, log_index, Compat::Native, 100_000)?.rows
+        decode_rows(&file_data, log_index, Compat::Native, 100_000).map_err(numbered)?.rows
     } else {
         report(10, "decoder", "Searching for blackbox_decode...");
         let decoder = find_decoder().ok_or_else(|| {
@@ -123,7 +130,7 @@ where
         parse_csv_rows(&csv_output, 100_000)?
     };
     if rows.is_empty() {
-        return Err("Blackbox import failed: decoder produced no rows".into());
+        return Err(numbered("Blackbox import failed: the log holds no readable flight data".into()));
     }
 
     let rows_imported = rows.len();
@@ -305,7 +312,6 @@ where
     // Only this log's bytes: a flash download holds every flight, so archiving the whole file per log
     // would store it once per flight. The slice is a valid standalone log — it is cut exactly where
     // blackbox_decode splits — so exporting a flight hands back just that flight.
-    let archived_range = log_byte_range(&file_data, log_index);
     db::insert_blackbox_file(
         conn,
         flight_id,
@@ -314,7 +320,7 @@ where
             .unwrap_or_default()
             .to_string_lossy(),
         log_index.unwrap_or(0),
-        &file_data[archived_range],
+        &file_data[log_range],
     )
     .map_err(|e| format!("Failed to archive original Blackbox file: {}", e))?;
 
@@ -325,15 +331,15 @@ where
     })
 }
 
-/// Full-rate telemetry rows for the hi-res replay cache (Dev-Docs active/HIRES_REPLAY.md): run an
-/// archived log slice through blackbox_decode and the same CSV parser as the importer, but with no
-/// 10 Hz decimation. `scratch_path` is where the blob is spilled first — blackbox_decode is an
-/// external process and can only read a real file; the spill is removed before returning.
+/// Full-rate telemetry rows for the hi-res replay cache (Dev-Docs active/HIRES_REPLAY.md): decode an
+/// archived log slice like the importer, but with no 10 Hz decimation. `scratch_path` is used only
+/// by the legacy path (`KITE_BLACKBOX_LEGACY=1`): blackbox_decode is an external process and can
+/// only read a real file, so the blob is spilled there first and removed before returning.
 pub fn hires_telemetry_rows(
     file_data: &[u8],
     scratch_path: &Path,
 ) -> Result<Vec<TelemetryRecord>, String> {
-    if native_decoder_requested() {
+    if !legacy_decoder_requested() {
         let decoded = decode_rows(file_data, None, Compat::Native, 0)?;
         return Ok(decoded.rows.into_iter().map(|r| r.telemetry).collect());
     }
@@ -354,15 +360,19 @@ pub fn hires_telemetry_rows(
     result
 }
 
-/// Dev switch while the native decoder is validated (Dev-Docs active/NATIVE_BLACKBOX_DECODER.md):
-/// `KITE_BLACKBOX_NATIVE=1` in a debug build makes the importer and the hi-res parse decode with
-/// the native decoder (`Compat::Native`) instead of blackbox_decode. Read once; release builds ignore it.
-fn native_decoder_requested() -> bool {
-    static NATIVE: OnceLock<bool> = OnceLock::new();
-    *NATIVE.get_or_init(|| {
-        let on = cfg!(debug_assertions) && std::env::var("KITE_BLACKBOX_NATIVE").is_ok_and(|v| v == "1");
+/// Fallback while the native decoder proves itself in the release-candidate phase (Dev-Docs
+/// active/NATIVE_BLACKBOX_DECODER.md): `KITE_BLACKBOX_LEGACY=1`, in any build, sends the importer and
+/// the hi-res parse through the external blackbox_decode and its CSV parser instead of the native
+/// decoder (`Compat::Native`, the default). The frontend asks for it (`blackbox_legacy_mode`) to
+/// decide whether to check for, offer or show the tool at all. Read once.
+pub(crate) fn legacy_decoder_requested() -> bool {
+    static LEGACY: OnceLock<bool> = OnceLock::new();
+    *LEGACY.get_or_init(|| {
+        let on = std::env::var("KITE_BLACKBOX_LEGACY").is_ok_and(|v| v == "1");
         if on {
-            log::warn!("KITE_BLACKBOX_NATIVE=1: Blackbox logs are decoded natively, not by blackbox_decode");
+            log::warn!(
+                "KITE_BLACKBOX_LEGACY=1: INAV Blackbox logs are decoded by the external blackbox_decode, not natively"
+            );
         }
         on
     })
@@ -961,41 +971,36 @@ pub(super) fn log_start_offsets(file_data: &[u8]) -> Vec<usize> {
 }
 
 /// How many flight logs a Blackbox file holds. A Configurator flash download contains one per
-/// arm/disarm cycle, and `blackbox_decode --stdout` can only ever emit one of them, so the importer
-/// has to walk them by index. Files without the marker report 1 and import as a single log.
+/// arm/disarm cycle, and a decode only ever covers one of them, so the importer has to walk them by
+/// index. Files without the marker report 1 and import as a single log (which the native decoder
+/// then refuses as "not a Blackbox log").
 pub fn count_logs(file_path: &Path) -> Result<u32, String> {
     let file_data = fs::read(file_path)
         .map_err(|e| format!("Failed to read Blackbox file {}: {}", file_path.display(), e))?;
     Ok(log_start_offsets(&file_data).len().max(1) as u32)
 }
 
-/// Byte range of one log inside the file. Splitting on the product banner rather than on "lines
-/// starting with `H `" matters because the data between headers is binary and can produce such a line
-/// by chance. Single-log files (and files without the banner) return the whole thing, which keeps
-/// their handling byte-identical to before. An out-of-range index falls back to the first log.
-fn log_byte_range(file_data: &[u8], log_index: Option<u32>) -> std::ops::Range<usize> {
-    let offsets = log_start_offsets(file_data);
-    if offsets.len() < 2 {
-        return 0..file_data.len();
+/// Byte range of the log an import reads the header of, decodes and archives: the native decoder's
+/// own choice (`inav::select_log`) — from the log's product banner to the next banner or the end of
+/// the file. Splitting on the banner rather than on "lines starting with `H `" matters because the
+/// data between headers is binary and can produce such a line by chance. Bytes before the first
+/// banner belong to no log and are dropped; an index beyond the last log, or no index on a file
+/// with several, is an error. Only a file without any banner is taken whole, and only by the legacy
+/// path, which leaves the verdict on it to blackbox_decode as before.
+fn log_byte_range(file_data: &[u8], log_index: Option<u32>) -> Result<std::ops::Range<usize>, String> {
+    match select_log(file_data, log_index) {
+        Err(_) if legacy_decoder_requested() && log_start_offsets(file_data).is_empty() => {
+            Ok(0..file_data.len())
+        }
+        range => range,
     }
-    let start = offsets
-        .get(log_index.unwrap_or(0) as usize)
-        .copied()
-        .unwrap_or(offsets[0]);
-    let end = offsets
-        .iter()
-        .find(|&&offset| offset > start)
-        .copied()
-        .unwrap_or(file_data.len());
-    start..end
 }
 
-/// Extract header metadata for one log index within a multi-log Blackbox file.
-fn extract_header_metadata_for_log(file_data: &[u8], log_index: Option<u32>) -> HeaderMetadata {
-    let range = log_byte_range(file_data, log_index);
-    let scan_end = range.end.min(range.start + HEADER_SCAN_BYTES);
+/// Extract header metadata from one log's bytes (its range from `log_byte_range`).
+fn extract_header_metadata(log: &[u8]) -> HeaderMetadata {
+    let scan_end = log.len().min(HEADER_SCAN_BYTES);
 
-    let block = String::from_utf8_lossy(&file_data[range.start..scan_end]);
+    let block = String::from_utf8_lossy(&log[..scan_end]);
     let header_text = block
         .lines()
         .filter(|line| line.starts_with("H "))

@@ -606,6 +606,12 @@ export async function blackboxLogCount(filePath: string): Promise<number> {
   return invoke<number>('flightlog_blackbox_log_count', { filePath });
 }
 
+/** True when INAV Blackbox logs go through the external blackbox_decode (`KITE_BLACKBOX_LEGACY=1`)
+ *  instead of the built-in decoder — the only case in which the tool is checked for, offered or shown. */
+export async function blackboxLegacyMode(): Promise<boolean> {
+  return invoke<boolean>('blackbox_legacy_mode');
+}
+
 /** True when blackbox_decode is available (PATH, exe dir, or the auto-download dir). */
 export async function blackboxDecoderAvailable(): Promise<boolean> {
   return invoke<boolean>('blackbox_decoder_available');

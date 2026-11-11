@@ -22,7 +22,7 @@ mod schema;
 mod stream;
 mod telemetry;
 
-pub(super) use telemetry::{decode_rows, Compat};
+pub(super) use telemetry::{decode_rows, select_log, Compat};
 
 /// Kite Analyzer's `logs::table::DType` (the column types `schema.rs` names), minus its serde
 /// derive: Kite has no table layer, only the schema's own tests compare these.
@@ -41,3 +41,5 @@ pub enum DType {
 mod compare_test;
 #[cfg(test)]
 mod coverage_test;
+#[cfg(test)]
+mod import_test;
