@@ -215,7 +215,7 @@ inside the box of the feature release they belong to, so the notes for one relea
       clears the vehicle; a new vehicle, a changed craft name or a newly entered FC ID offers to link
       the existing flights. An FC ID belongs to one vehicle — moving it to another asks first. Deleting
       a vehicle can transfer its flights to another one. INAV over plain MAVLink and simulators with a
-      placeholder ID (INAV SITL, PX4 SITL as system ID 1) report no FC ID.
+      placeholder ID (INAV SITL, PX4 SITL as system ID 1) report no FC ID. [#228]
 
     **Improved**
 
@@ -307,7 +307,7 @@ inside the box of the feature release they belong to, so the notes for one relea
     - **`.tlog` import: a log that carries several vehicles is no longer mixed into one flight.** When
       a MAVLink log held frames of more than one aircraft on the same link, their positions and
       attitudes ended up interleaved in a single track. The import now follows the first autopilot it
-      sees and skips the others.
+      sees and skips the others. [#228]
 
 ??? note "1.0 — Initial release · Live"
 
@@ -451,6 +451,7 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#140]: https://github.com/b14ckyy/Kite-GC/pull/140
 [#141]: https://github.com/b14ckyy/Kite-GC/pull/141
 [#222]: https://github.com/b14ckyy/Kite-GC/pull/222
+[#228]: https://github.com/b14ckyy/Kite-GC/pull/228
 [#143]: https://github.com/b14ckyy/Kite-GC/pull/143
 [#145]: https://github.com/b14ckyy/Kite-GC/pull/145
 [#151]: https://github.com/b14ckyy/Kite-GC/pull/151
