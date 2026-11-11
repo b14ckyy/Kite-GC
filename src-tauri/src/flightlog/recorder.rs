@@ -81,10 +81,62 @@ pub type PendingSessionHandle = Arc<Mutex<Option<PendingSession>>>;
 /// recovery scan and the discard sweeps never touch a live session (`None` while not recording).
 pub type ActiveTempPathHandle = Arc<Mutex<Option<PathBuf>>>;
 
+/// Temp `.ktmp` files whose commit failed in this run, or which could not be reopened to continue the
+/// flight. Their recording is still on disk and must survive until the next start, where the orphan
+/// scan offers it again — so the discard sweeps and the orphan scan of this run leave them alone.
+/// Shared between app-state and the recorder.
+pub type KeptTempPathsHandle = Arc<Mutex<Vec<PathBuf>>>;
+
+/// Remember a temp session whose commit failed (see `KeptTempPathsHandle`).
+pub fn keep_temp_path(kept: &KeptTempPathsHandle, path: &std::path::Path) {
+    if let Ok(mut list) = kept.lock() {
+        if !list.iter().any(|p| p == path) {
+            list.push(path.to_path_buf());
+        }
+    }
+}
+
+/// A kept temp session is recording again (re-arm within grace): it is the active session now and
+/// gets the normal auto-commit back.
+pub fn release_temp_path(kept: &KeptTempPathsHandle, path: &std::path::Path) {
+    if let Ok(mut list) = kept.lock() {
+        list.retain(|p| p != path);
+    }
+}
+
+/// Whether `path` is a kept temp session (its commit failed earlier in this run).
+pub fn is_kept(kept: &KeptTempPathsHandle, path: &std::path::Path) -> bool {
+    kept.lock().map(|list| list.iter().any(|p| p == path)).unwrap_or(false)
+}
+
+/// A Save whose commit failed must not lose the recording: its temp path is kept (protected for the
+/// rest of this run, whichever slot the session ends up in), and the session goes back into the
+/// pending slot so Save can be retried — unless the slot was refilled in the meantime, then the file
+/// stays on disk for the next start's orphan scan.
+pub fn keep_failed_session(
+    pending: &PendingSessionHandle,
+    kept: &KeptTempPathsHandle,
+    session: PendingSession,
+) {
+    keep_temp_path(kept, &session.temp_path);
+    let path = session.temp_path.clone();
+    if let Ok(mut slot) = pending.lock() {
+        if slot.is_none() {
+            *slot = Some(session);
+            return;
+        }
+    }
+    log::warn!(
+        "Pending slot is taken — the unsaved recording {} stays on disk for the next start",
+        path.display(),
+    );
+}
+
 /// Commit a pending session into the main DB: insert the finalized flight, copy the temp
 /// `telemetry_records`, remove the temp file, and spawn weather/geocode enrichment. Returns the new
-/// flight id. Shared by the Save command and the recorder's grace-lapsed re-arm path.
-pub fn commit_pending_session(session: PendingSession) -> Result<i64, String> {
+/// flight id. Shared by the Save command and the recorder's grace-lapsed re-arm path. On failure the
+/// session is untouched (the commit runs in one transaction) and the caller still owns it.
+pub fn commit_pending_session(session: &PendingSession) -> Result<i64, String> {
     let conn = db::open_database(&session.db_path)
         .map_err(|e| format!("Failed to open flight DB for commit: {}", e))?;
     let flight_id = db::commit_session_to_main(&conn, &session.temp_path, &session.flight)
@@ -384,6 +436,8 @@ pub struct FlightRecorder {
     resume: PendingSessionHandle,
     /// Mirror of the active session's temp path for the command layer (see `ActiveTempPathHandle`).
     active_path: ActiveTempPathHandle,
+    /// Temp sessions kept for the next start (see `KeptTempPathsHandle`).
+    kept: KeptTempPathsHandle,
     /// Whether the first polled status has been seen on this connection (the trustworthy point to
     /// evaluate the continue-on-reconnect decision — past any handshake residual flags).
     first_status_seen: bool,
@@ -405,6 +459,7 @@ impl FlightRecorder {
         pending: PendingSessionHandle,
         resume: PendingSessionHandle,
         active_path: ActiveTempPathHandle,
+        kept: KeptTempPathsHandle,
         msp_raw_sink: MspRawSink,
     ) -> Result<Self, String> {
         let db_path = db::resolve_db_path(&settings.db_path, portable);
@@ -433,6 +488,7 @@ impl FlightRecorder {
             pending,
             resume,
             active_path,
+            kept,
             first_status_seen: false,
         })
     }
@@ -697,8 +753,20 @@ impl FlightRecorder {
                 self.resume_session(p);
                 return;
             }
-            // Grace lapsed → auto-commit the previous flight, then start a fresh session.
-            match commit_pending_session(p) {
+            // Grace lapsed → auto-commit the previous flight, then start a fresh session. A session
+            // whose commit already failed is not retried here: the database is likely still busy, and
+            // blocking the telemetry thread at takeoff would cost the new flight's first seconds. Its
+            // file stays protected and the next start offers it again.
+            if is_kept(&self.kept, &p.temp_path) {
+                log::warn!(
+                    "Re-arm: recording {} failed to save before — not retried now, offered at the next start",
+                    p.temp_path.display(),
+                );
+                drop(p);
+                self.start_fresh_session();
+                return;
+            }
+            match commit_pending_session(&p) {
                 Ok(flight_id) => {
                     if let Err(e) = self
                         .app_handle
@@ -707,7 +775,15 @@ impl FlightRecorder {
                         log::warn!("Failed to emit flight-recording-committed: {}", e);
                     }
                 }
-                Err(e) => log::error!("Auto-commit on re-arm failed: {}", e),
+                Err(e) => {
+                    // The new flight takes the pending slot at its disarm: keep the unsaved file on
+                    // disk for the next start's orphan scan instead.
+                    log::error!(
+                        "Auto-commit on re-arm failed: {} — recording {} kept for the next start",
+                        e, p.temp_path.display(),
+                    );
+                    keep_temp_path(&self.kept, &p.temp_path);
+                }
             }
         }
         self.start_fresh_session();
@@ -721,13 +797,15 @@ impl FlightRecorder {
             Ok(c) => Some(c),
             Err(e) => {
                 log::error!(
-                    "Failed to reopen temp session {}: {} — starting a fresh one",
+                    "Failed to reopen temp session {}: {} — kept for the next start, starting a fresh one",
                     p.temp_path.display(), e,
                 );
+                keep_temp_path(&self.kept, &p.temp_path);
                 self.start_fresh_session();
                 return;
             }
         };
+        release_temp_path(&self.kept, &p.temp_path);
         let start_instant = Instant::now()
             .checked_sub(Duration::from_millis(p.last_timestamp_ms.max(0) as u64))
             .unwrap_or_else(Instant::now);
@@ -1247,5 +1325,88 @@ mod tests {
         for r in derived {
             assert_eq!(r.mode_primary.as_deref(), Some(expected.as_str()));
         }
+    }
+
+    fn test_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("kite-recorder-test-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// A finished `.ktmp` with two samples, summarized into a pending session committing to `db_path`.
+    fn pending_session(temp_path: &std::path::Path, db_path: PathBuf) -> PendingSession {
+        {
+            let conn = db::open_temp_session(temp_path).unwrap();
+            db::write_session_meta(
+                &conn, &Utc::now(), "TestCraft", "INAV", "8.0.0", "TEST", 1, "MSP", None, None,
+            )
+            .unwrap();
+            db::insert_telemetry_batch(&conn, &[record(0), record(100)]).unwrap();
+        }
+        summarize_temp_session(temp_path.to_path_buf(), db_path).unwrap().0
+    }
+
+    /// A commit that fails (the main DB cannot be opened: its folder is a plain file) leaves the
+    /// recording alone; the same session commits once the database is reachable.
+    #[test]
+    fn failed_commit_keeps_the_session_and_its_temp_file() {
+        let dir = test_dir("failed-commit");
+        let blocker = dir.join("not-a-folder");
+        std::fs::write(&blocker, b"x").unwrap();
+        let temp_path = dir.join("sessions").join("active_test.ktmp");
+        let mut session = pending_session(&temp_path, blocker.join("flights.db"));
+
+        assert!(commit_pending_session(&session).is_err());
+        assert!(temp_path.exists(), "a failed commit must not touch the recording");
+
+        let main_db = dir.join("main").join("flights.db");
+        session.db_path = main_db.clone();
+        let flight_id = commit_pending_session(&session).expect("the retry commits");
+        assert!(!temp_path.exists(), "a successful commit removes the temp file");
+        let conn = db::open_database(&main_db).unwrap();
+        let rows: i64 = conn
+            .query_row("SELECT COUNT(*) FROM telemetry_records WHERE flight_id = ?1", [flight_id], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 2);
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A failed Save puts the session back into an empty pending slot; a refilled slot is left as it
+    /// is. Either way the temp path is kept (once).
+    #[test]
+    fn keep_failed_session_puts_it_back_or_keeps_the_path() {
+        let dir = test_dir("keep-failed");
+        let (path_a, path_b) = (dir.join("a.ktmp"), dir.join("b.ktmp"));
+        let pending: PendingSessionHandle = Arc::new(Mutex::new(None));
+        let kept: KeptTempPathsHandle = Arc::new(Mutex::new(Vec::new()));
+
+        keep_failed_session(&pending, &kept, pending_session(&path_a, dir.join("flights.db")));
+        assert_eq!(pending.lock().unwrap().as_ref().map(|s| s.temp_path.clone()), Some(path_a.clone()));
+
+        keep_failed_session(&pending, &kept, pending_session(&path_b, dir.join("flights.db")));
+        assert_eq!(
+            pending.lock().unwrap().as_ref().map(|s| s.temp_path.clone()),
+            Some(path_a.clone()),
+            "a session already in the slot is not displaced",
+        );
+        keep_temp_path(&kept, &path_a);
+        assert_eq!(*kept.lock().unwrap(), [path_a, path_b]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The kept list itself — what the grace-lapsed re-arm in `on_arm` decides by (a kept session is
+    /// not committed at takeoff; one that never failed is auto-committed as before). `on_arm` needs an
+    /// app handle and is not driven here.
+    #[test]
+    fn kept_list_tells_a_failed_session_from_a_fresh_one() {
+        let kept: KeptTempPathsHandle = Arc::new(Mutex::new(Vec::new()));
+        let (failed, fresh) = (PathBuf::from("sessions/a.ktmp"), PathBuf::from("sessions/b.ktmp"));
+        keep_temp_path(&kept, &failed);
+        assert!(is_kept(&kept, &failed), "failed before → keep without trying");
+        assert!(!is_kept(&kept, &fresh), "never failed → auto-commit");
+        release_temp_path(&kept, &failed);
+        assert!(!is_kept(&kept, &failed), "recording again → auto-commit is back");
     }
 }

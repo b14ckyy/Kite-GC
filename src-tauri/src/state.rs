@@ -8,7 +8,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 use crate::aero::AeroCache;
-use crate::flightlog::recorder::{ActiveTempPathHandle, PendingSessionHandle};
+use crate::flightlog::recorder::{ActiveTempPathHandle, KeptTempPathsHandle, PendingSessionHandle};
 use crate::mavlink_proto::MavlinkHandle;
 use crate::msp::FcInfo;
 use crate::passive_telemetry::PassiveHandle;
@@ -56,6 +56,10 @@ pub struct AppState {
     /// Temp `.ktmp` the connected recorder is writing right now (`None` while not recording). The
     /// orphan scan and the discard sweeps leave it alone — it is a live session, not a leftover.
     pub active_temp_path: ActiveTempPathHandle,
+    /// Temp `.ktmp` files whose commit failed in this run (Save, recovery Save, re-arm auto-commit) or
+    /// which could not be reopened to continue a flight.
+    /// The discard sweeps and the orphan scan leave them alone; the next start offers them again.
+    pub kept_temp_paths: KeptTempPathsHandle,
 }
 
 impl AppState {
@@ -74,6 +78,7 @@ impl AppState {
             pending_session: Arc::new(Mutex::new(None)),
             resume_pending: Arc::new(Mutex::new(None)),
             active_temp_path: Arc::new(Mutex::new(None)),
+            kept_temp_paths: Arc::new(Mutex::new(Vec::new())),
         }
     }
 }

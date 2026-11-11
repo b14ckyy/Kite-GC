@@ -1547,7 +1547,11 @@
     "discardConfirmYes": "Verwerfen",
     "cancel": "Abbrechen",
     "close": "Schließen",
-    "notRecordedHint": "Aufzeichnung war aus — nur eine Zusammenfassung."
+    "notRecordedHint": "Aufzeichnung war aus — nur eine Zusammenfassung.",
+    "saveFailedTitle": "Flug nicht gespeichert",
+    "saveFailedMessage": "Der Flug konnte nicht im Logbuch gespeichert werden:\n{error}\n\nJetzt erneut versuchen oder abbrechen: Die Aufnahme bleibt erhalten und Kite bietet sie beim nächsten Start wieder an.",
+    "saveRetry": "Erneut versuchen",
+    "saveKeptMessage": "Die Aufnahme konnte nicht im Logbuch gespeichert werden:\n{error}\n\nSie bleibt erhalten und Kite bietet sie beim nächsten Start wieder an."
   },
   "recovery": {
     "title": "Unvollständige Aufnahme gefunden",

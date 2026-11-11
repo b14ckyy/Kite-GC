@@ -604,6 +604,9 @@
   let disconnectArmedDialog: ReturnType<typeof DisconnectArmedDialog>;
   // True after "Continue on Reconnect" until the next connection resolves the recovered session.
   let awaitingResumeReconnect = $state(false);
+  // Bumped whenever the backend's pending session may change hands (arm, resume, a new end/interrupt
+  // prompt): a Save retry stops then, so it never commits another flight with this dialog's input.
+  let pendingEpoch = 0;
 
   async function showDialog(opts: DialogOptions): Promise<string | null> {
     return confirmDialog.show(opts);
@@ -1939,9 +1942,11 @@
           if (choice === 'discard') {
             await flightlogDiscardPending();
           } else if (choice === 'save') {
-            const flightId = await flightlogCommitPending();
-            await linkEndedMission(flightId, false);
-            void loadLogbook();
+            const flightId = await commitPendingOrReportKept();
+            if (flightId !== null) {
+              await linkEndedMission(flightId, false);
+              void loadLogbook();
+            }
           } else if (choice === 'continue') {
             await flightlogContinuePending();
             awaitingResumeReconnect = true;
@@ -2300,6 +2305,7 @@
 
   // Fresh recording started — clear any stale captured-mission snapshot (defensive).
   function onRecordingStarted(): void {
+    pendingEpoch++;
     endedMission = { system: 'inav', inavWps: [], arduWps: [], fc: false };
   }
 
@@ -2312,7 +2318,53 @@
     if (get(pendingSystemSwitch)) confirmSystemSwitch('keep');
   }
 
+  /** The backend had no pending session to commit (nothing was recorded, or a re-arm resolved it) —
+   *  not a failed save. Matches the unchanged backend error text. */
+  function isNothingPending(e: unknown): boolean {
+    return String(e).includes('No pending recording session to commit');
+  }
+
+  /** End-Flight Save: commit the pending session. A failed commit stays pending in the backend, so the
+   *  pilot can retry until it works; Cancel keeps it for the next start. Null = kept, nothing pending,
+   *  or a re-arm / new prompt took the pending session meanwhile. */
+  async function commitPendingWithRetry(): Promise<number | null> {
+    const epoch = pendingEpoch;
+    for (;;) {
+      try {
+        return await flightlogCommitPending();
+      } catch (e) {
+        console.warn('[end-flight] save failed', e);
+        if (isNothingPending(e)) return null;
+        // ConfirmDialog adds its own Cancel (also Escape / backdrop) — that means "keep".
+        const choice = await showDialog({
+          title: $t('endFlight.saveFailedTitle'),
+          message: $t('endFlight.saveFailedMessage', { values: { error: String(e) } }),
+          buttons: [{ label: $t('endFlight.saveRetry'), value: 'retry', primary: true }],
+        });
+        if (choice !== 'retry' || pendingEpoch !== epoch) return null;
+      }
+    }
+  }
+
+  /** A Save outside the End-Flight dialog failed: the backend kept the recording — say so. */
+  async function showRecordingKept(e: unknown): Promise<void> {
+    console.warn('[recording] save failed — kept', e);
+    await showInfo($t('endFlight.saveFailedTitle'), $t('endFlight.saveKeptMessage', { values: { error: String(e) } }));
+  }
+
+  /** Save from the connection-lost / disconnect prompt; null when it failed (reported, kept). */
+  async function commitPendingOrReportKept(): Promise<number | null> {
+    try {
+      return await flightlogCommitPending();
+    } catch (e) {
+      if (isNothingPending(e)) console.warn('[recording] nothing to save', e);
+      else await showRecordingKept(e);
+      return null;
+    }
+  }
+
   async function onRecordingEnded(stats: EndFlightStats): Promise<void> {
+    pendingEpoch++;
     awaitingResumeReconnect = false; // a recovered session that came back disarmed is now in the dialog
     // Capture the flown mission at disarm, while FC-sync still reflects what the FC flew.
     captureEndedMission();
@@ -2327,7 +2379,8 @@
         return;
       }
       // Save → commit the pending session, then link mission + battery/notes against the new id.
-      const flightId = await flightlogCommitPending();
+      const flightId = await commitPendingWithRetry();
+      if (flightId === null) return;
       if (res.batterySerial) {
         await flightSetBatterySerial(flightId, res.batterySerial, flightLogDbPath);
         // A flight may link several packs (comma-separated). Offer to create each unknown serial; on the
@@ -2389,15 +2442,18 @@
   async function onRecordingInterrupted(info: { temp_path: string; craft_name: string; start_time: string; duration_sec: number; sample_count: number }): Promise<void> {
     // Capture the flown mission (FC-sync) for a later commit.
     captureEndedMission();
+    pendingEpoch++;
     awaitingResumeReconnect = false;
     try {
       const choice = await recoveryPrompt.show(info, { reason: 'lost' });
       if (choice === 'discard') {
         await flightlogDiscardPending();
       } else if (choice === 'save') {
-        const flightId = await flightlogCommitPending();
-        await linkEndedMission(flightId, false);
-        void loadLogbook();
+        const flightId = await commitPendingOrReportKept();
+        if (flightId !== null) {
+          await linkEndedMission(flightId, false);
+          void loadLogbook();
+        }
       } else if (choice === 'continue') {
         await flightlogContinuePending();
         awaitingResumeReconnect = true; // resolved by the next connection's first poll
@@ -2421,7 +2477,12 @@
           await recoverDiscard(orphan.temp_path); // drops every leftover, not just this one
           return;
         } else if (choice === 'save') {
-          await recoverSaveIncomplete(orphan.temp_path, flightLogDbPath);
+          try {
+            await recoverSaveIncomplete(orphan.temp_path, flightLogDbPath);
+          } catch (e) {
+            await showRecordingKept(e); // the backend keeps the file; it comes back at the next start
+            return;
+          }
           void loadLogbook();
         } else if (choice === 'continue') {
           await recoverContinue(orphan.temp_path, flightLogDbPath);
@@ -2523,6 +2584,7 @@
     // Re-arm within grace (or a recovered session resumed on reconnect) continues the same flight —
     // drop the stale summary dialog and exit the awaiting-reconnect state.
     void listen('flight-recording-resumed', () => {
+      pendingEpoch++;
       awaitingResumeReconnect = false;
       endFlightDialog?.close();
     });
