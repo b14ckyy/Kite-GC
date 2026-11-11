@@ -1105,7 +1105,6 @@
     "multiLogTitle": "Viacero letových záznamov",
     "multiLogMessage": "Tento súbor obsahuje viac letových záznamov (počet: {count}), jeden na každý cyklus aktivácie a deaktivácie motorov. Každý sa importuje ako samostatný let.",
     "multiLogImportAll": "Importovať všetky",
-    "blackboxUnsupportedMobile": "Záznamy Blackbox (.txt/.bbl/.bfl) nemožno na tomto zariadení importovať: potrebujú externý nástroj blackbox_decode, ktorého spustenie mobilné systémy nepovoľujú. Preskočené: {files}",
     "decoderMissingTitle": "blackbox_decode sa nenašiel",
     "decoderMissingMsg": "Záznamy INAV Blackbox potrebujú externý nástroj „blackbox_decode“, ktorý nie je nainštalovaný. Stiahnuť ho automaticky z oficiálnych vydaní iNavFlight?",
     "decoderDownload": "Stiahnuť",

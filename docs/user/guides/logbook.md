@@ -119,17 +119,18 @@ Use **Import** to pull in logs from outside Kite (one file or a batch). Supporte
 
 | Format | From |
 |---|---|
-| **INAV Blackbox** (`.bbl`, `.txt`) | INAV onboard flash (`.bbl`) or SD-card (`.txt`) blackbox |
+| **INAV Blackbox** (`.bbl`, `.bfl`, `.txt`) | INAV onboard flash (`.bbl` / `.bfl`) or SD-card (`.txt`) blackbox |
 | **ArduPilot Dataflash** (`.bin`) | ArduPilot (4.1 or newer) onboard logs |
 | **PX4 ULog** (`.ulg`) | PX4 onboard flash / SD-card logs |
 | **MAVLink telemetry** (`.tlog`) | a MAVLink ground-station recording |
 | **MWPTools raw-MSP** (`.rawmsp`) | mwp's raw telemetry capture |
 | **Kite flight** (`.kflight`) | a flight exported from another Kite install |
 
-A progress bar tracks the import. INAV Blackbox needs the **`blackbox_decode`** helper, which Kite
-fetches automatically the first time you import one. A `.bbl` pulled from the flight controller's
-flash usually holds **several flights** — one per arm / disarm cycle. Kite detects that and offers to
-import them all, each as its own logbook entry. Imported telemetry logs (`.tlog` / `.rawmsp`) are
+A progress bar tracks the import. Kite decodes INAV Blackbox logs itself and accepts only those: a
+Blackbox log written by another firmware (Betaflight, for example) is refused with a message that
+names the firmware. A `.bbl` pulled from the flight controller's flash usually holds **several
+flights** — one per arm / disarm cycle. Kite detects that and offers to import them all, each as its
+own logbook entry. Imported telemetry logs (`.tlog` / `.rawmsp`) are
 treated as telemetry recordings and **split into separate flights on the arm / disarm markers** in the
 log, the same way a live recording is.
 

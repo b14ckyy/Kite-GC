@@ -864,8 +864,16 @@ pub async fn flightlog_import_blackbox(
     Ok(result)
 }
 
-/// True when `blackbox_decode` is available (PATH, exe dir, or our download dir). The frontend checks
-/// this before an INAV-blackbox import and offers an auto-download when it's missing.
+/// True when INAV Blackbox logs are decoded by the external `blackbox_decode` (`KITE_BLACKBOX_LEGACY=1`)
+/// instead of the built-in decoder. Only then does the frontend check for, offer or show the tool.
+#[tauri::command]
+pub fn blackbox_legacy_mode() -> Result<bool, String> {
+    Ok(crate::flightlog::blackbox::legacy_decoder_requested())
+}
+
+/// True when `blackbox_decode` is available (PATH, exe dir, or our download dir). In legacy mode
+/// (`blackbox_legacy_mode`) the frontend checks this before an INAV-blackbox import and offers an
+/// auto-download when it's missing.
 #[tauri::command]
 pub fn blackbox_decoder_available() -> bool {
     crate::flightlog::decoder::available()

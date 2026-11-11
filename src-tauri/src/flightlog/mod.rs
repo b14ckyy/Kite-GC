@@ -14,6 +14,7 @@ pub mod geocode;
 pub mod group;
 pub mod group_store;
 pub mod hires;
+mod inav;
 pub mod msp_raw_logger;
 pub mod raw_import;
 pub mod recorder;

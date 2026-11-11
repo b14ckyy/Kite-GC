@@ -150,9 +150,10 @@ The app itself is small. What grows over time is your flight data:
 
 - **Flight database** — grows with recorded telemetry (a time-series per flight). Typical flights are
   modest; a large library built over many flights can reach tens to a few hundred MB.
-- **Imported INAV blackbox logs** can optionally keep the **original log file inside the database** —
-  these are the biggest single contributor. You can **delete the stored original** for a flight at any
-  time (from its logbook entry) to reclaim that space while keeping the decoded data.
+- **Imported onboard logs** (INAV Blackbox, ArduPilot Dataflash, PX4 ULog) keep the **original log file
+  inside the database** — these are the biggest single contributor. You can **delete the stored
+  original** for a flight at any time (from its logbook entry) to reclaim that space while keeping the
+  decoded data.
 - **Raw logs** (`.tlog` / raw-MSP) are written separately under `Documents/KiteGC` and grow with use —
   housekeep them as you like; they're independent of the database.
 
@@ -169,7 +170,6 @@ program, which Kite offers to **download automatically the first time you use th
 
 | Helper | Used for | How it's provided |
 |---|---|---|
-| `blackbox_decode` | Importing **INAV blackbox** logs | auto-download on **Windows & Linux** (macOS: install manually) |
 | `ffmpeg` | **Video** (native capture + fallback decoding for some RTSP sources on the classic path) | auto-download on **Windows & Linux**; **bundled inside the app on macOS** |
 | `mediamtx` | **Video** (the classic RTSP → low-latency engine, used with the *Native RTSP client* toggle off) | auto-download on **Windows, Linux & macOS** |
 
@@ -180,9 +180,9 @@ the desktop when the toggle in the Video panel is on (see **[Video](../guides/vi
   mode) — they don't touch your system.
   Linux auto-downloads cover the common 64-bit CPUs (Intel/AMD `x86_64` and ARM `aarch64`).
 - Kite finds a helper if it's **on your `PATH`**, **next to the app**, or in that tools folder. Where a
-  helper isn't provided automatically — `blackbox_decode` on macOS, or an unsupported CPU like
-  32-bit/armv7 — install it yourself (e.g. `brew install ffmpeg` on macOS, or your package manager /
-  a manual download) and put it on your `PATH` or next to the app; Kite will pick it up.
+  helper isn't provided automatically — on an unsupported CPU like 32-bit/armv7 — install it yourself
+  (e.g. `brew install ffmpeg` on macOS, or your package manager / a manual download) and put it on
+  your `PATH` or next to the app; Kite will pick it up.
 - These downloads need **internet access**. The **map** also needs it: both **2D map tiles** and
   **3D terrain** are streamed on demand and cached after first view — there's no offline map download
   yet (it's under consideration for the future if there's enough demand). Connecting to your aircraft,

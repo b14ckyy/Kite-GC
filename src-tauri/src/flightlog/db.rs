@@ -3907,7 +3907,7 @@ mod tests {
     }
 
     /// Full open/migrate pass over a COPY of a real flight database (Marc's RC2 archive,
-    /// F:\DEVELOPMENT\Kite-GC-testdata\flights-real.db — outside the repo).
+    /// F:\DEVELOPMENT\TEST_DATA\Kite-GC-testdata\flights-real.db — outside the repo).
     /// `KITE_TEST_DB=<path> cargo test migrates_the_real_database -- --ignored --nocapture`
     #[test]
     #[ignore]

@@ -92,7 +92,8 @@ where
     let mut rows = match ext.as_str() {
         "bin" => super::ardupilot::hires_telemetry_rows(&blob)?,
         "ulg" => super::ulog::hires_telemetry_rows(&blob)?,
-        // INAV blackbox (.bbl/.bfl/.txt): blackbox_decode needs a real file → spill the blob.
+        // INAV blackbox (.bbl/.bfl/.txt): decoded natively from the blob; the scratch path is only
+        // where the legacy path (KITE_BLACKBOX_LEGACY=1) spills it for blackbox_decode.
         _ => {
             let scratch = cache_dir.join(format!("hires_{flight_id}.src.tmp"));
             super::blackbox::hires_telemetry_rows(&blob, &scratch)?
