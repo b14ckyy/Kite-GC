@@ -171,15 +171,16 @@ impl Drop for Running {
 
 /// What the link looks like right now, from the app state the connection commands maintain.
 fn link_info(app: &AppHandle) -> LinkInfo {
+    // The active vehicle's link (multi-vehicle: the API still describes one link — see design §5).
     let st = app.state::<AppState>();
-    let protocol = st.protocol.lock().ok().and_then(|p| {
-        p.as_ref().map(|a| match a {
-            ActiveProtocol::Msp(_) => Protocol::Msp,
-            ActiveProtocol::Mavlink(_) => Protocol::Mavlink,
-            ActiveProtocol::PassiveTelemetry(_) => Protocol::Passive,
-        })
+    let reg = st.links.lock().ok();
+    let entry = reg.as_ref().and_then(|r| r.active_entry());
+    let protocol = entry.map(|e| match &e.protocol {
+        ActiveProtocol::Msp(_) => Protocol::Msp,
+        ActiveProtocol::Mavlink(_) => Protocol::Mavlink,
+        ActiveProtocol::PassiveTelemetry(_) => Protocol::Passive,
     });
-    let fc_variant = st.fc_info.lock().ok().and_then(|f| f.as_ref().map(|i| i.fc_variant.clone()));
+    let fc_variant = entry.map(|e| e.fc_info.fc_variant.clone());
     LinkInfo { connected: protocol.is_some(), protocol, fc_variant }
 }
 

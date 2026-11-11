@@ -91,7 +91,7 @@ pub fn download(
     mission_type: MavMissionType,
     mut progress: impl FnMut(u16, u16),
 ) -> Result<Vec<ArduWaypoint>, String> {
-    let rx = register(cmd_tx)?;
+    let rx = register(cmd_tx, fc_sysid)?;
 
     // 1. Request mission list
     send(cmd_tx, MavMessage::MISSION_REQUEST_LIST(MISSION_REQUEST_LIST_DATA {
@@ -171,7 +171,7 @@ pub fn upload(
     px4: bool,
     mut progress: impl FnMut(u16, u16),
 ) -> Result<(), String> {
-    let rx = register(cmd_tx)?;
+    let rx = register(cmd_tx, fc_sysid)?;
     // Progress is reported in real-waypoint terms (the home slot, seq 0 when reserve_home, is excluded),
     // mirroring `download`. `|_, _| {}` is passed when no reporting is wanted (fence/rally).
     let progress_total = waypoints.len() as u16;
@@ -280,7 +280,7 @@ pub fn clear(
     fc_sysid: u8,
     mission_type: MavMissionType,
 ) -> Result<(), String> {
-    let rx = register(cmd_tx)?;
+    let rx = register(cmd_tx, fc_sysid)?;
 
     if let Err(e) = send(cmd_tx, MavMessage::MISSION_CLEAR_ALL(MISSION_CLEAR_ALL_DATA {
         target_system: fc_sysid,
@@ -307,9 +307,9 @@ pub fn clear(
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
-fn register(cmd_tx: &mpsc::Sender<MavlinkCommand>) -> Result<mpsc::Receiver<MavMessage>, String> {
+fn register(cmd_tx: &mpsc::Sender<MavlinkCommand>, sysid: u8) -> Result<mpsc::Receiver<MavMessage>, String> {
     let (tx, rx) = mpsc::channel();
-    cmd_tx.send(MavlinkCommand::RegisterMissionReceiver(tx))
+    cmd_tx.send(MavlinkCommand::RegisterMissionReceiver { sysid, tx })
         .map_err(|_| "MAVLink handler stopped".to_string())?;
     // Small sleep to ensure handler loop picks up the registration before we send the first message.
     // Without this there is a tiny race where the first FC response arrives before registration.

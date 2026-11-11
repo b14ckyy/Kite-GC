@@ -7,6 +7,7 @@ mod android;
 mod child_env;
 mod commands;
 mod debug_mode;
+mod fleet_mode;
 mod flightlog;
 mod flightmode;
 mod github_release;
@@ -36,9 +37,11 @@ mod telemetry_forward;
 mod terrain;
 mod transport;
 mod user_file;
+mod vehicle_registry;
 mod video;
 
 use commands::connection::{connect, disconnect, set_platform_type, inav_set_craft_name, inav_read_stats, scan_ble_devices, ble_scan_start, ble_scan_stop, debug_tunnel_msp_request, debug_tunnel_stats_snapshot};
+use commands::vehicles::{list_links, set_active_vehicle, get_active_vehicle, announce_vehicles, set_fleet_enabled, debug_group_state};
 use commands::connection::list_serial_ports;
 use commands::flightlog::{
     flightlog_list, flightlog_get, flightlog_get_track, flightlog_get_battery_records, flightlog_delete,
@@ -69,6 +72,8 @@ use commands::flightlog::{
     vehicle_db_create, vehicle_db_update, vehicle_db_list, vehicle_db_get,
     vehicle_db_find_by_craft_name, vehicle_db_find_by_fc_uid, vehicle_db_delete, vehicle_db_aggregate, vehicle_db_flights,
     vehicle_db_set_baseline, vehicle_file_write, vehicle_file_read,
+    vehicle_db_resolve, vehicle_db_link_flights, vehicle_db_link_flights_count, vehicle_db_transfer_flights,
+    flight_set_vehicle, vehicle_db_set_fc_uid,
 };
 use commands::aero::{aero_fetch, aero_cache_stats, aero_cache_clear};
 use commands::hid::{
@@ -84,7 +89,7 @@ use commands::safehome::{safehome_read_all, safehome_write_all};
 use commands::geozone::{geozone_read_all, geozone_write_all};
 use commands::fence::{fence_read_all, fence_write_all};
 use commands::rally::{rally_read_all, rally_write_all};
-use commands::info::{get_app_version, is_debug_mode};
+use commands::info::{get_app_version, is_debug_mode, is_fleet_mode, is_fleet_group_recording};
 use commands::system::{system_active_net_is_wifi, system_on_battery};
 use commands::storage::{share_file, storage_pick_folder};
 use commands::video::{
@@ -400,6 +405,23 @@ pub fn run() {
     let log_level = if debug_flag { log::LevelFilter::Debug } else { log::LevelFilter::Warn };
     logging::init(log_level, is_portable());
 
+    // `--fleet` / `KITE_FLEET` turns on the multi-vehicle features (default on in a debug build, off in a
+    // release build — `--debug` does not change that; see fleet_mode). Group recording needs the
+    // KITE_FLEET_RECORDING developer opt-in on top. Logged at the default level so a tester's log shows
+    // which mode ran.
+    let fleet_flag = fleet_mode::flag_present();
+    if fleet_flag {
+        fleet_mode::set(true);
+    }
+    fleet_mode::apply_group_recording();
+    if fleet_mode::enabled() {
+        log::warn!(
+            "Fleet (multi-vehicle) features enabled ({}) — group recording {}",
+            if fleet_flag { "--fleet / KITE_FLEET" } else if cfg!(debug_assertions) { "debug build default" } else { "built with KITE_FLEET" },
+            if fleet_mode::group_recording() { "ON (KITE_FLEET_RECORDING)" } else { "off: only the first vehicle's flights are recorded" },
+        );
+    }
+
     // Linux: the GStreamer decode sink renders through gtkglsink, whose GL context is GDK's — and
     // GTK3 creates a DESKTOP GL context by default (measured on a Pi 5: OpenGL 3.1, legacy). Such a
     // context has no direct DMABuf import (`GL_OES_EGL_image_external`), so a hardware decoder's
@@ -466,6 +488,15 @@ pub fn run() {
             // own idea of it (see `android::log_resolved_dirs`).
             #[cfg(target_os = "android")]
             android::log_resolved_dirs(_app.handle());
+
+            // Group-flight coordinator: its events go out app-wide, its worker drives the group-end
+            // timers (GROUP_FLIGHTS.md §3.2).
+            {
+                use tauri::Manager;
+                _app.state::<AppState>()
+                    .groups
+                    .start(Box::new(flightlog::group::AppSink(_app.handle().clone())));
+            }
 
             // Linux: re-host the WebView over the native video layer (hole-punch decode sink,
             // MOBILE_RTSP.md P2.3). Needs the transparent window from tauri.linux.conf.json.
@@ -623,10 +654,18 @@ pub fn run() {
             connect,
             disconnect,
             set_platform_type,
+            list_links,
+            set_active_vehicle,
+            get_active_vehicle,
+            announce_vehicles,
+            set_fleet_enabled,
+            debug_group_state,
             debug_tunnel_msp_request,
             debug_tunnel_stats_snapshot,
             get_app_version,
             is_debug_mode,
+            is_fleet_mode,
+            is_fleet_group_recording,
             link_status::telemetry_track_since,
             set_log_level,
             get_log_path,
@@ -721,6 +760,12 @@ pub fn run() {
             vehicle_db_set_baseline,
             vehicle_file_write,
             vehicle_file_read,
+            vehicle_db_resolve,
+            vehicle_db_link_flights,
+            vehicle_db_link_flights_count,
+            vehicle_db_transfer_flights,
+            flight_set_vehicle,
+            vehicle_db_set_fc_uid,
             flightlog_update_notes,
             flightlog_update_craft_name,
             flightlog_update_platform_type,

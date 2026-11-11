@@ -17,7 +17,7 @@
   import {
     arduMission, arduSelectedWpIndex, arduSelectedWpIndices, arduEditMode, arduVehicleClass,
     arduSelectWpSingle, arduToggleWpSelection, arduClearWpSelection,
-    arduUpdateWp, arduRemoveWp, arduAddWp, arduRecordUndo,
+    arduUpdateWp, arduRemoveWp, arduAddWp, arduRecordUndo, arduTranslateWps,
     groupArduMission, groupEndIndex, type ArduGroup,
     MAV_CMD_NAV_WAYPOINT,
     MAV_FRAME_GLOBAL, MAV_FRAME_GLOBAL_RELATIVE_ALT, MAV_FRAME_GLOBAL_TERRAIN_ALT,
@@ -72,6 +72,9 @@
 
   // svelte-ignore state_referenced_locally
   const missionGroup = L.layerGroup().addTo(map);
+  // Location markers by mission index for the current render — a group drag moves the other selected
+  // markers live through this map before the store commit on dragend.
+  const markersByIdx = new Map<number, L.Marker>();
   // Shared editor-popup lifecycle (content-signature redraw guard lives in the framework module).
   const popupState = newPopupState();
   // Which "Advanced" param sections are expanded, keyed per section ('primary' / 'mod-<idx>'). Persisted
@@ -428,6 +431,7 @@
     const selGroup = groups.find(g => g.anchorIdx === selIdx || g.modifiers.some(m => m.idx === selIdx)) ?? null;
 
     missionGroup.clearLayers(); // markers/lines only — the editor popup is a separate map layer
+    markersByIdx.clear();
     if (wps.length === 0) { closeEditorPopup(map, popupState); return; }
     // While the survey pattern generator is open the existing mission stays VISIBLE (so the operator
     // can plan where the pattern attaches) but its waypoints go non-interactive — no drag / popup /
@@ -462,6 +466,7 @@
           draggable,
           title: `WP${displayNum}: ${cmdName(wp.command)}`,
         }).addTo(missionGroup);
+        markersByIdx.set(i, marker);
 
         // Edit mode: a plain tap toggles the WP in/out of the selection (touch-friendly multi-select,
         // no modifier key) — mirrors the INAV layer. View mode: tap selects / re-tap deselects.
@@ -478,8 +483,43 @@
           openContextMenu(e.originalEvent.clientX, e.originalEvent.clientY, buildArduWaypointMenu());
         });
         if (draggable) {
+          // Group drag: when the dragged marker is part of a multi-selection, every other selected
+          // marker follows live (same offset) and the store commit moves them all in ONE undo step —
+          // Ctrl+A then drag = move the whole mission.
+          let groupStart: Map<number, L.LatLng> | null = null;
+          let selfStart: L.LatLng | null = null;
+          marker.on('dragstart', () => {
+            const sel = get(arduSelectedWpIndices);
+            if (sel.has(i) && sel.size > 1) {
+              selfStart = marker.getLatLng();
+              groupStart = new Map();
+              for (const j of sel) {
+                if (j === i) continue;
+                const m = markersByIdx.get(j);
+                if (m) groupStart.set(j, m.getLatLng());
+              }
+            } else {
+              groupStart = null;
+              selfStart = null;
+            }
+          });
+          marker.on('drag', () => {
+            if (!groupStart || !selfStart) return;
+            const p = marker.getLatLng();
+            const dLat = p.lat - selfStart.lat;
+            const dLng = p.lng - selfStart.lng;
+            for (const [j, s] of groupStart) markersByIdx.get(j)?.setLatLng([s.lat + dLat, s.lng + dLng]);
+          });
           marker.on('dragend', () => {
             const pos = marker.getLatLng();
+            if (groupStart && selfStart) {
+              const dLat = Math.round((pos.lat - selfStart.lat) * 1e7);
+              const dLon = Math.round((pos.lng - selfStart.lng) * 1e7);
+              arduTranslateWps(new Set(get(arduSelectedWpIndices)), dLat, dLon);
+              groupStart = null;
+              selfStart = null;
+              return;
+            }
             const cur = get(arduMission)[i];
             if (cur) arduUpdateWp(i, { ...cur, lat: Math.round(pos.lat * 1e7), lon: Math.round(pos.lng * 1e7) });
           });

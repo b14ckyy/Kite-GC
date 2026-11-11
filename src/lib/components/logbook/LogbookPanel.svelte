@@ -181,7 +181,11 @@
   const filteredSummaries = $derived.by<FlightSummary[]>(() => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return flightSummaries;
+    // "#170" finds exactly that flight; a bare number matches the flight id as well as the text fields.
+    const idQuery = /^#?\d+$/.test(q) ? Number(q.replace('#', '')) : null;
+    if (idQuery != null && q.startsWith('#')) return flightSummaries.filter((f) => f.id === idQuery);
     return flightSummaries.filter((f) => {
+      if (f.id === idQuery) return true;
       const craft = (f.craft_name || '').toLowerCase();
       const location = (f.location_name || '').toLowerCase();
       const date = (f.start_time || '').toLowerCase();

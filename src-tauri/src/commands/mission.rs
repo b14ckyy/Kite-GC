@@ -25,7 +25,7 @@ fn apply_alt_mode(wp: &mut Waypoint, alt_mode: Option<u8>) {
     }
 }
 use crate::msp::types::{MSP_WP, MSP_WP_GETINFO, MSP_WP_MISSION_LOAD, MSP_WP_MISSION_SAVE, MSP_SET_WP};
-use crate::state::{with_msp, with_msp_blocking, ActiveProtocol, AppState};
+use crate::state::{with_msp, with_msp_blocking, AppState};
 
 /// Waypoint-transfer progress, emitted as `mission-download-progress` / `mission-upload-progress`
 /// during an FC download/upload (both MSP and MAVLink) so the Mission Manager shows an "x of n"
@@ -459,19 +459,12 @@ pub fn mission_load_file(path: String, store: State<'_, MissionStore>) -> Result
 /// MISSION_ITEM (up to seconds each over a slow SiK link). A plain sync command would run on the
 /// main thread and freeze the whole UI for the duration of the download.
 #[tauri::command(async)]
-pub fn ardu_mission_download(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<Vec<ArduWaypoint>, String> {
-    // Clone the command sender + sysid while holding the mutex briefly.
-    // The actual protocol exchange runs after the lock is released.
-    let (cmd_tx, fc_sysid, reserve_home) = {
-        let proto = state.protocol.lock().map_err(|e| e.to_string())?;
-        match proto.as_ref() {
-            // PX4 has no home mission-slot (item 0 is a real waypoint); ArduPilot reserves slot 0 for home.
-            Some(ActiveProtocol::Mavlink(h)) => (h.cmd_tx_clone(), h.fc_sysid, !h.fc_variant.eq_ignore_ascii_case("px4")),
-            Some(ActiveProtocol::Msp(_)) => return Err("FC is not running MAVLink".into()),
-            Some(ActiveProtocol::PassiveTelemetry(_)) => return Err("FC is not running MAVLink".into()),
-            None => return Err("Not connected".into()),
-        }
-    };
+pub fn ardu_mission_download(vehicle_id: Option<String>, app: tauri::AppHandle, state: State<'_, AppState>) -> Result<Vec<ArduWaypoint>, String> {
+    // Resolve the target (frontend "L1:S1" key, None = active vehicle) while holding the registry
+    // mutex briefly. The actual protocol exchange runs after the lock is released.
+    // PX4 has no home mission-slot (item 0 is a real waypoint); ArduPilot reserves slot 0 for home.
+    let t = state.mav_target(vehicle_id.as_deref())?;
+    let (cmd_tx, fc_sysid, reserve_home) = (t.cmd_tx, t.sysid, !t.fc_variant.eq_ignore_ascii_case("px4"));
     mavlink_proto::mission::download(
         &cmd_tx,
         fc_sysid,
@@ -488,6 +481,7 @@ pub fn ardu_mission_download(app: tauri::AppHandle, state: State<'_, AppState>) 
 /// `ardu_mission_download`).
 #[tauri::command(async)]
 pub fn ardu_mission_upload(
+    vehicle_id: Option<String>,
     waypoints: Vec<ArduWaypoint>,
     app: tauri::AppHandle,
     state: State<'_, AppState>,
@@ -495,16 +489,9 @@ pub fn ardu_mission_upload(
     if waypoints.is_empty() {
         return Err("No waypoints to upload".into());
     }
-    let (cmd_tx, fc_sysid, reserve_home) = {
-        let proto = state.protocol.lock().map_err(|e| e.to_string())?;
-        match proto.as_ref() {
-            // PX4 has no home mission-slot (item 0 is a real waypoint); ArduPilot reserves slot 0 for home.
-            Some(ActiveProtocol::Mavlink(h)) => (h.cmd_tx_clone(), h.fc_sysid, !h.fc_variant.eq_ignore_ascii_case("px4")),
-            Some(ActiveProtocol::Msp(_)) => return Err("FC is not running MAVLink".into()),
-            Some(ActiveProtocol::PassiveTelemetry(_)) => return Err("FC is not running MAVLink".into()),
-            None => return Err("Not connected".into()),
-        }
-    };
+    // PX4 has no home mission-slot (item 0 is a real waypoint); ArduPilot reserves slot 0 for home.
+    let t = state.mav_target(vehicle_id.as_deref())?;
+    let (cmd_tx, fc_sysid, reserve_home) = (t.cmd_tx, t.sysid, !t.fc_variant.eq_ignore_ascii_case("px4"));
     mavlink_proto::mission::upload(
         &cmd_tx,
         fc_sysid,

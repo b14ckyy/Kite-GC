@@ -48,6 +48,14 @@
   import LogbookPanel from "$lib/components/logbook/LogbookPanel.svelte";
   import MissionPanel from "$lib/components/mission/MissionPanel.svelte";
   import MavCommandPanel from "$lib/components/control/MavCommandPanel.svelte";
+  import FleetPanel from "$lib/components/FleetPanel.svelte";
+  import GroupCommandBar from "$lib/components/GroupCommandBar.svelte";
+  import { vehicles } from "$lib/stores/vehicles";
+  import { selectedVehicleIds } from "$lib/stores/fleetSelection";
+  import { fleetEnabled, loadFleetMode } from "$lib/stores/fleetMode";
+  import { startFleetRecordingNotice } from "$lib/controllers/fleetRecordingNotice";
+  import { enqueueFlightDialog, dropQueuedFlightDialogs } from "$lib/controllers/flightDialogQueue";
+  import { navTabRequest } from "$lib/stores/navRequest";
   import RcControlPanel from "$lib/components/control/RcControlPanel.svelte";
   import VirtualSticks from "$lib/components/control/VirtualSticks.svelte";
   import VideoPanel from "$lib/components/video/VideoPanel.svelte";
@@ -65,7 +73,7 @@
   import { gcsLocation, gcsAccuracyM } from "$lib/stores/gcsLocation";
   import { fetchAero } from "$lib/stores/airspace";
   import { PlaybackController } from '$lib/controllers/playbackController';
-  import { refreshSerialPorts, connectFC, disconnectFC, startBleScan, stopBleScan, startBleDeviceListener, stopBleDeviceListener, clearBleDevices } from '$lib/controllers/connectionController';
+  import { refreshSerialPorts, connectFC, disconnectFC, startBleScan, stopBleScan, startBleDeviceListener, stopBleDeviceListener, clearBleDevices, disconnectLink, recoverBackendLinks } from '$lib/controllers/connectionController';
   import * as logbookCtrl from '$lib/controllers/logbookController';
   import * as widgetCtrl from '$lib/controllers/widgetController';
   import * as phoneCtrl from '$lib/controllers/phoneWidgetController';
@@ -78,18 +86,21 @@
   import { activeWpNumber, replayWpTotal } from '$lib/stores/navStatus';
   import { missionManagerOpen, missionManagerSelectedId, requestOpenFlightId, requestOpenMissionId } from '$lib/stores/missionManager';
   import { batteryManagerOpen, batteryManagerCreateSerial, normalizeSerial } from '$lib/stores/batteryManager';
-  import { vehicleManagerOpen, vehicleManagerCreateCraft, vehicleManagerSelectedId } from '$lib/stores/vehicleManager';
+  import { vehicleManagerOpen, vehicleManagerCreatePrefill, vehicleManagerSelectedId } from '$lib/stores/vehicleManager';
+  import { settleEndFlightVehicle } from '$lib/controllers/vehicleLinkController';
   import type { BlackboxImportStatus } from '$lib/stores/flightlog';
-  import { missionDbForFlight, flightLoggedWpCount, missionDbSave, flightLinkMission, missionDbGeocode, flightSetBatterySerial, updateFlightNotes, getFlight, flightlogCommitPending, flightlogDiscardPending, flightlogContinuePending, scanOrphanSessions, recoverDiscard, recoverSaveIncomplete, recoverContinue, batteryDbFindBySerial, batteryDbAddUsage, vehicleDbFindByCraftName, blackboxDecoderAvailable, downloadBlackboxDecode, hiresInfo, hiresParse, hiresSample, hiresDrop, hiresCleanup, scratchDir, scratchClear } from '$lib/stores/flightlog';
+  import { missionDbForFlight, flightLoggedWpCount, missionDbSave, flightLinkMission, missionDbGeocode, flightSetBatterySerial, updateFlightNotes, getFlight, flightlogCommitPending, flightlogDiscardPending, flightlogContinuePending, scanOrphanSessions, recoverDiscard, recoverSaveIncomplete, recoverContinue, batteryDbFindBySerial, batteryDbAddUsage, blackboxDecoderAvailable, downloadBlackboxDecode, hiresInfo, hiresParse, hiresSample, hiresDrop, hiresCleanup, scratchDir, scratchClear } from '$lib/stores/flightlog';
   import EndFlightDialog from "$lib/components/logbook/EndFlightDialog.svelte";
-  import type { EndFlightStats } from "$lib/components/logbook/EndFlightDialog.svelte";
+  import type { EndFlightStats, EndFlightIdentity } from "$lib/components/logbook/EndFlightDialog.svelte";
   import RecoveryPrompt from "$lib/components/logbook/RecoveryPrompt.svelte";
   import DisconnectArmedDialog from "$lib/components/logbook/DisconnectArmedDialog.svelte";
   import { haversineDistance, bearing, destinationPoint } from '$lib/utils/geo';
   import { buildMissionInput } from '$lib/helpers/missionLibrary';
   import { buildArduMissionInput } from '$lib/helpers/missionLibraryArdu';
-  import { homePosition } from '$lib/stores/home';
-  import { ingestFcGuidedTarget } from '$lib/controllers/vehicleControl';
+  import { homePosition, setVehicleHome } from '$lib/stores/home';
+  import { isActive, links, activeVehicleId, refreshLinks } from '$lib/stores/vehicles';
+  import { parseVehicleId } from '$lib/helpers/vehicleId';
+  import { ingestFcGuidedTarget, ingestVehicleGuidedTarget } from '$lib/controllers/vehicleControl';
   import { MAP_PROVIDERS } from "$lib/config/mapProviders";
   import { tileCacheStats, setCacheMaxMB, clearCache } from "$lib/cache/tileCache";
   import { weatherTempDisplayFromC, weatherWindDisplayFromMs, weatherTempCFromDisplay, weatherWindMsFromDisplay, canonicalWeatherDescription } from "$lib/helpers/weather";
@@ -210,7 +221,7 @@
   }
   // 2D follow state, lifted here so it survives the 2D map's remount on each 2D↔3D toggle
   // (the 3D camera mode persists on its own since Map3D stays mounted).
-  let map2dViewMode = $state<'free' | 'follow' | 'heading-follow'>('free');
+  let map2dViewMode = $state<'free' | 'follow' | 'heading-follow' | 'fleet'>('free');
 
   function toggleMapView() {
     if (mapViewMode === '3d') {
@@ -402,7 +413,7 @@
   const miniMapLocked = $derived(mapInFrame && (mapInWidget || phoneUi));
   let miniLockActive = false;
   let savedMapViewMode: '2d' | '3d' = '2d';
-  let savedMode2d: 'free' | 'follow' | 'heading-follow' = 'free';
+  let savedMode2d: 'free' | 'follow' | 'heading-follow' | 'fleet' = 'free';
   $effect(() => {
     const lock = miniMapLocked;
     untrack(() => {
@@ -504,6 +515,63 @@
   let accMaxAlt = 0, accMaxSpeed = 0, accMaxDist = 0, accMah = 0, accTotalDist = 0;
   let accStartLat: number | null = null, accStartLon: number | null = null;
   let accLastLat: number | null = null, accLastLon: number | null = null;
+
+  // Multi-vehicle: the arm-edge detector and the flight-stats accumulator belong to ONE vehicle. When
+  // the active vehicle changes, park the current vehicle's state and bring back the new one's — a
+  // switch from a disarmed to an armed aircraft must not read as an arm edge (which would clear its
+  // track, reset its stats and move Home), nor a switch the other way as a disarm (End-Flight dialog).
+  interface FlightStatsSlot {
+    prevArmed: boolean; armEdgeInit: boolean; armStartMs: number;
+    accMaxAlt: number; accMaxSpeed: number; accMaxDist: number; accMah: number; accTotalDist: number;
+    accStartLat: number | null; accStartLon: number | null; accLastLat: number | null; accLastLon: number | null;
+  }
+  const flightStatsSlots = new globalThis.Map<string, FlightStatsSlot>(); // `Map` here is the map component
+  let flightStatsOwner: string | null = null;
+  activeVehicleId.subscribe((id) => {
+    if (id === flightStatsOwner) return;
+    const previous = flightStatsOwner;
+    if (previous) {
+      flightStatsSlots.set(previous, {
+        prevArmed, armEdgeInit, armStartMs, accMaxAlt, accMaxSpeed, accMaxDist, accMah, accTotalDist,
+        accStartLat, accStartLon, accLastLat, accLastLon,
+      });
+    }
+    flightStatsOwner = id;
+    const slot = id ? flightStatsSlots.get(id) : undefined;
+    if (slot) {
+      ({ prevArmed, armEdgeInit, armStartMs, accMaxAlt, accMaxSpeed, accMaxDist, accMah, accTotalDist,
+         accStartLat, accStartLon, accLastLat, accLastLon } = slot);
+      return;
+    }
+    // Unknown vehicle (or none): re-baseline the edge detector on the first status-carrying frame
+    // (no false edge either way).
+    armEdgeInit = false; prevArmed = false;
+    // The flight stats reset only on a switch between two vehicles. Disconnect (→ null) and reconnect
+    // (null → a new key for the same aircraft) keep them, so a flight that lost its link mid-air still
+    // gets its full summary at the disarm after the reconnect.
+    if (previous !== null && id !== null) {
+      armStartMs = 0;
+      accMaxAlt = 0; accMaxSpeed = 0; accMaxDist = 0; accMah = 0; accTotalDist = 0;
+      accStartLat = null; accStartLon = null; accLastLat = null; accLastLon = null;
+    }
+  });
+
+  // Multi-vehicle: the End-Flight dialog, the recovery prompt of an interrupted recording and the
+  // captured flown mission belong to ONE vehicle's session — the one whose `flight-recording-ended` /
+  // `-interrupted` (or, unrecorded, whose disarm) opened them. Lifecycle events of other vehicles (a
+  // secondary re-arming on the same link) must not close or clear them. A reconnect brings the aircraft
+  // back under a new key, so an owner that is gone hands over to the active vehicle.
+  let recordingOwner: string | null = null;
+  function isRecordingOwner(vehicleId: string | null | undefined): boolean {
+    if (vehicleId == null) return true; // payload without a vehicle (not per-vehicle)
+    if (vehicleId === recordingOwner) return true;
+    const ownerGone = recordingOwner === null || !get(vehicles).has(recordingOwner);
+    // A vehicle the frontend does not know yet belongs to the link being connected: its recorder can
+    // report (resumed / committed) before the vehicle is announced — a link that runs the MSP-tunnel
+    // probe announces it only afterwards. Secondaries are announced (`vehicle-discovered`) before
+    // their frames are dispatched, so this never adopts another link's secondary.
+    return ownerGone && (vehicleId === get(activeVehicleId) || !get(vehicles).has(vehicleId));
+  }
   telemetry.subscribe((t) => {
     liveTelem = t;
     // Accumulate the live flown track (RAM) for the Terrain Analyzer
@@ -519,7 +587,8 @@
       armStartMs = t.lastUpdate || Date.now();
       accMaxAlt = 0; accMaxSpeed = 0; accMaxDist = 0; accMah = 0; accTotalDist = 0;
       accStartLat = null; accStartLon = null; accLastLat = null; accLastLon = null;
-      endFlightDialog?.close(); // re-arming dismisses a lingering End-Flight dialog
+      // Re-arming dismisses a lingering End-Flight dialog — of this vehicle, not another one's.
+      if (isRecordingOwner(flightStatsOwner)) endFlightDialog?.close();
       // warm the Copernicus tile for the current area so it's ready
       if (isValidGpsCoordinate(t.lat, t.lon)) {
         void invoke('terrain_elevation', { lat: t.lat, lon: t.lon }).catch(() => {});
@@ -562,6 +631,9 @@
     }
     if (!armed && prevArmed) {
       void handleDisarm(t.lastUpdate || Date.now());
+      // A real disarm (not a telemetry reset) ends the flight: a later connect to an already-armed
+      // aircraft must not reuse this start.
+      if (t.statusSeen) armStartMs = 0;
     }
     prevArmed = armed;
   });
@@ -588,6 +660,7 @@
     const durationSec = armStartMs ? Math.round((disarmMs - armStartMs) / 1000) : 0;
     if (durationSec < 5) return; // ignore trivial bench arm/disarm
     if (flightLoggingEnabled && flightRecordingEnabled) return; // recorded → handled on -ended
+    recordingOwner = flightStatsOwner;
     try {
       await endFlightDialog.show({
         stats: {
@@ -812,6 +885,8 @@
   const ICON_MISSION = '<svg viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" clip-rule="evenodd" d="M12 2.5C8.4 2.5 5.5 5.4 5.5 9c0 4.8 6.5 12.5 6.5 12.5S18.5 13.8 18.5 9c0-3.6-2.9-6.5-6.5-6.5Zm0 4.1A2.4 2.4 0 1 0 12 11.4 2.4 2.4 0 0 0 12 6.6Z"/></svg>';
   // Two solid peaks, slightly raised (Terrain).
   const ICON_TERRAIN = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M1.5 20 8.5 5 13 14 16.5 8.5 22.5 20Z"/></svg>';
+  // Fleet (multi-vehicle list + group commands): three craft arrows inside a corner frame.
+  const ICON_FLEET = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8V4h4M17 4h4v4M21 16v4h-4M7 20H3v-4"/><polygon points="12,7 9.6,13 12,11.8 14.4,13" fill="currentColor" stroke="none"/><polygon points="7.5,12 5.1,18 7.5,16.8 9.9,18" fill="currentColor" stroke="none"/><polygon points="16.5,12 14.1,18 16.5,16.8 18.9,18" fill="currentColor" stroke="none"/></svg>';
   // Solid flat movie camera (Video): two reels + body + lens funnel.
   const ICON_VIDEO = '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="7" cy="7" r="2.9"/><circle cx="12.6" cy="7" r="2.9"/><rect x="2.5" y="9.5" width="13" height="9" rx="1.6"/><path d="M15.5 12 21.5 9.5V18.5L15.5 16Z"/></svg>';
   // Radar dish on a mast with two sweep arcs (Radar / foreign-vehicle tracking).
@@ -861,6 +936,7 @@
     { id: "uav-info", label: () => $t('nav.uavInfo'), icon: ICON_UAV_INFO },
     { id: "mission", label: () => $t('nav.mission'), icon: ICON_MISSION },
     { id: "control", label: () => $t('nav.control'), icon: ICON_CONTROL },
+    { id: "fleet", label: () => $t('nav.fleet'), icon: ICON_FLEET },
     { id: "rc-control", label: () => $t('nav.rc'), icon: ICON_RC },
     { id: "terrain", label: () => $t('nav.terrain'), icon: ICON_TERRAIN },
     { id: "logbook", label: () => $t('nav.logbook'), icon: ICON_LOGBOOK },
@@ -874,10 +950,20 @@
   const geozonesAvailable = $derived($geozoneWorking?.has_geozones ?? false);
   const fenceAvailable = $derived($fenceWorking?.has_fence ?? false);
   const rallyAvailable = $derived($rallyWorking?.has_rally ?? false);
+  // Fleet tab: only once MORE THAN ONE vehicle is connected over the primary links (Marc, 2026-10-01) —
+  // a single-vehicle session must look exactly as before. Protocol-agnostic on purpose: any vehicle
+  // counts, so INAV fleets slot in later without touching this gate. Behind the fleet feature gate.
+  const fleetTabAvailable = $derived($fleetEnabled && $vehicles.size >= 2);
+  // With the gate off, a Fleet tab restored from the last session (or open when it was switched off) must
+  // not stay rendered — the same fallback as the RC tab above.
+  $effect(() => {
+    if (!$fleetEnabled && activeTab === 'fleet') activeTab = 'uav-info';
+  });
   const tabs = $derived(
     allTabs.filter(t =>
       (t.id !== 'logbook' || flightLoggingEnabled) &&
       (t.id !== 'control' || isMavlinkConnected) && // control tab only when connected via MAVLink
+      (t.id !== 'fleet' || fleetTabAvailable) &&
       (t.id !== 'rc-control' || (rcTabAvailable && !isMobile) || mobileRcAvailable) && // RC tab: desktop needs the master switch + a joystick; mobile uses on-screen sticks when a FC is connected
       (t.id !== 'radar' || radarSettings.enabled) && // radar tab only when the master switch is on
       (t.id !== 'airspace' || airspaceSettings.enabled || geozonesAvailable || fenceAvailable || rallyAvailable) // airspace: master switch, or geozone (INAV) / fence+rally (MAVLink) capable FC
@@ -1334,6 +1420,41 @@
     }
   }
 
+  // ── Fleet auto-switch: 2+ vehicles selected → open the Fleet tab; back under 2 → return to where the
+  // operator was. A manual tab change in between cancels the return (selectTab clears the memo).
+  let autoFleetPrevTab: string | null = null;
+  let autoFleetSwitching = false;
+  let lastSelCount = 0;
+  $effect(() => {
+    const n = $selectedVehicleIds.size;
+    untrack(() => {
+      if (n >= 2 && lastSelCount < 2 && activeTab !== 'fleet' && fleetTabAvailable) {
+        autoFleetPrevTab = terrainOpen ? 'terrain' : activeTab;
+        autoFleetSwitching = true;
+        try { selectTab('fleet'); } finally { autoFleetSwitching = false; }
+      } else if (n < 2 && lastSelCount >= 2 && autoFleetPrevTab && activeTab === 'fleet' && !terrainOpen) {
+        const back = autoFleetPrevTab;
+        autoFleetPrevTab = null;
+        autoFleetSwitching = true;
+        try { selectTab(back); } finally { autoFleetSwitching = false; }
+      }
+      lastSelCount = n;
+    });
+  });
+
+  // Tab requests from panels that don't own this state (fleet panel → mission editor).
+  $effect(() => {
+    const r = $navTabRequest;
+    if (!r) return;
+    untrack(() => {
+      // selectTab on the already-visible active tab would HIDE it (the re-click gesture) — a request
+      // means "show it", so only act when it isn't already on screen.
+      const isActive = terrainOpen ? r.tabId === 'terrain' : r.tabId === activeTab;
+      if (isActive && navPanelOpen && !panelHidden) return;
+      selectTab(r.tabId);
+    });
+  });
+
   function selectTab(tabId: string) {
     // Re-clicking the ACTIVE tab's button hides its panel without touching its state (the mission
     // edit mode stays armed, a half-typed form survives): the panel slides out to the left and the
@@ -1353,6 +1474,8 @@
     }
     // Selecting another tab switches away from the terrain overlay
     patchTerrainAnalysis({ open: false });
+    // A manual tab choice ends the fleet auto-switch (see the selection effect below).
+    if (!autoFleetSwitching && tabId !== 'fleet') autoFleetPrevTab = null;
     activeTab = tabId;
     settings.patch({ activeTab });
     if (tabId === 'logbook') {
@@ -2591,6 +2714,12 @@
         if (choice === 'cancel') return; // stay connected
         // Capture the flown mission now (still connected + FC-synced) for a Save/Continue commit.
         captureEndedMission();
+        // The vehicle whose session gets stashed — read before the disconnect clears the active one.
+        // Only a link's PRIMARY recorder parks a pending session (secondaries auto-commit), so a selected
+        // secondary maps to its link's primary; an unknown active vehicle falls back to "the only one".
+        const active = get(activeVehicleId);
+        const ownerLink = active ? get(links).find((l) => l.linkId === parseVehicleId(active)?.link) : undefined;
+        const vid = ownerLink?.primaryVehicleId ?? active;
         try {
           await disconnectFC(selectedBaud); // backend stashes the active flight as the pending session
         } catch (e) {
@@ -2599,14 +2728,13 @@
         }
         try {
           if (choice === 'discard') {
-            await flightlogDiscardPending();
+            await flightlogDiscardPending(vid);
           } else if (choice === 'save') {
-            const flightId = await flightlogCommitPending();
+            const flightId = await flightlogCommitPending(vid);
             await linkEndedMission(flightId, false);
             void loadLogbook();
           } else if (choice === 'continue') {
-            await flightlogContinuePending();
-            awaitingResumeReconnect = true;
+            if (await flightlogContinuePending(vid)) awaitingResumeReconnect = true;
           }
         } catch (e) {
           console.warn('[disconnect-armed] action failed', e);
@@ -2668,7 +2796,11 @@
       });
     } catch (e) {
       errorMsg = String(e);
-      connection.set({ status: "error", protocolType: selectedProtocol, transportType: selectedTransport, port: "", baudRate: selectedBaud, errorMessage: String(e), fcInfo: null, mspTunnel: false });
+      // Multi-vehicle: a failed attempt must not paint the UI "disconnected" while other links are up.
+      const stillUp = await recoverBackendLinks().catch(() => false);
+      if (!stillUp) {
+        connection.set({ status: "error", protocolType: selectedProtocol, transportType: selectedTransport, port: "", baudRate: selectedBaud, errorMessage: String(e), fcInfo: null, mspTunnel: false });
+      }
     } finally {
       isConnecting = false;
     }
@@ -2677,6 +2809,11 @@
   async function initPage() {
     await startBleDeviceListener(); // live BLE discovery → bleDevices store
     await loadInfo();
+    // The `--fleet` launch flag → fleet UI on/off; then the once-per-run "only the first vehicle is
+    // recorded" notice of a fleet session without group recording.
+    void loadFleetMode().then(startFleetRecordingNotice);
+    // Links the backend still holds (page reload / a UI state that drifted) → show them as connected.
+    void recoverBackendLinks().catch(() => {});
     try {
       defaultFlightLogPath = await getDefaultFlightlogPath();
     } catch {
@@ -2998,12 +3135,15 @@
 
   /** Snapshot the flown mission from the active autopilot system (at disarm / interrupt). */
   function captureEndedMission(): void {
+    endedMission = currentMissionSnapshot();
+  }
+
+  function currentMissionSnapshot(): EndedMissionSnapshot {
     const sys = get(autopilotSystem);
     if (sys === 'inav') {
-      endedMission = { system: 'inav', inavWps: [...get(mission).waypoints], arduWps: [], fc: get(missionFlags).fc };
-    } else {
-      endedMission = { system: sys, inavWps: [], arduWps: [...get(arduMission)], fc: false };
+      return { system: 'inav', inavWps: [...get(mission).waypoints], arduWps: [], fc: get(missionFlags).fc };
     }
+    return { system: sys, inavWps: [], arduWps: [...get(arduMission)], fc: false };
   }
 
   function endedMissionHasWps(snap: EndedMissionSnapshot): boolean {
@@ -3049,22 +3189,38 @@
     if (get(pendingSystemSwitch)) confirmSystemSwitch('keep');
   }
 
-  async function onRecordingEnded(stats: EndFlightStats): Promise<void> {
+  /** The planner follows the active vehicle, so only its session gets the flown mission captured;
+   *  another vehicle's session gets an empty snapshot (nothing is linked to it). Without an active
+   *  vehicle (a connecting link's recorder reports before its vehicle is announced) there is no other
+   *  vehicle the planner could belong to, so the mission is captured as well. Taken when the recording
+   *  ends (while FC-sync still reflects what the FC flew); its dialog may open later (flightDialogQueue). */
+  function endedMissionFor(vehicleId: string | null): EndedMissionSnapshot {
+    const active = get(activeVehicleId);
+    if (vehicleId == null || active == null || vehicleId === active) return currentMissionSnapshot();
+    return { system: 'inav', inavWps: [], arduWps: [], fc: false };
+  }
+
+  async function onRecordingEnded(stats: EndFlightStats, identity: EndFlightIdentity, vehicleId: string | null, flown: EndedMissionSnapshot): Promise<void> {
     awaitingResumeReconnect = false; // a recovered session that came back disarmed is now in the dialog
-    // Capture the flown mission at disarm, while FC-sync still reflects what the FC flew.
-    captureEndedMission();
+    recordingOwner = vehicleId;
+    // The flown mission captured at disarm belongs to this dialog's session from now on.
+    endedMission = flown;
     const missionConfirm = endedMissionHasWps(endedMission) && !endedMission.fc;
     try {
-      const res = await endFlightDialog.show({ stats, recorded: true, missionConfirm });
+      const res = await endFlightDialog.show({ stats, recorded: true, missionConfirm, identity });
       // null = the dialog was force-closed by a re-arm (resumed) or a grace auto-commit — the
       // backend already resolved the pending session, so there is nothing to do here.
       if (res === null) return;
       if (res.discard) {
-        await flightlogDiscardPending();
+        await flightlogDiscardPending(vehicleId);
         return;
       }
-      // Save → commit the pending session, then link mission + battery/notes against the new id.
-      const flightId = await flightlogCommitPending();
+      // Save → commit the pending session, then link mission + battery/notes against the new id. The
+      // notes and the mission link are written first: an abandoned follow-up question below (battery /
+      // vehicle) can never lose them.
+      const flightId = await flightlogCommitPending(vehicleId);
+      if (res.notes) await updateFlightNotes(flightId, res.notes, flightLogDbPath);
+      await linkEndedMission(flightId, res.linkMission);
       if (res.batterySerial) {
         await flightSetBatterySerial(flightId, res.batterySerial, flightLogDbPath);
         // A flight may link several packs (comma-separated). Offer to create each unknown serial; on the
@@ -3078,7 +3234,6 @@
             message: $t('endFlight.newBatteryMessage', { values: { serial } }),
             buttons: [
               { label: $t('endFlight.newBatteryCreate'), value: 'create' },
-              { label: $t('endFlight.newBatterySkip'), value: 'skip' },
             ],
           });
           if (choice === 'create') {
@@ -3090,30 +3245,27 @@
           }
         }
       }
-      // Unknown craft name → offer to create a vehicle (opens the Vehicle Manager create form
-      // pre-filled). The FC's craft name is the one just recorded for this flight.
-      const craft = (fcInfo?.craft_name ?? '').trim();
-      if (craft) {
-        const veh = await vehicleDbFindByCraftName(craft, flightLogDbPath).catch(() => null);
-        if (!veh) {
-          const choice = await showDialog({
-            title: $t('endFlight.newVehicleTitle'),
-            message: $t('endFlight.newVehicleMessage', { values: { craft } }),
-            buttons: [
-              { label: $t('endFlight.newVehicleCreate'), value: 'create' },
-              { label: $t('endFlight.newVehicleSkip'), value: 'skip' },
-            ],
-          });
-          if (choice === 'create') {
+      // Library vehicle: apply the dialog's pick to the committed flight and ask what it implies (store
+      // the FC id / FC swapped / a new vehicle / not in the library) — controllers/vehicleLinkController.
+      if (res.vehicle !== undefined) {
+        try {
+          const prefill = await settleEndFlightVehicle(showDialog, {
+            flightId,
+            craftName: identity.craftName,
+            fcUid: identity.fcUid,
+            resolution: res.resolution ?? null,
+            chosen: res.vehicle,
+          }, flightLogDbPath);
+          if (prefill) {
             activeTab = 'logbook';
             settings.patch({ activeTab: 'logbook' });
             vehicleManagerOpen.set(true);
-            vehicleManagerCreateCraft.set(craft);
+            vehicleManagerCreatePrefill.set(prefill);
           }
+        } catch (e) {
+          console.warn('[end-flight] vehicle link failed', e);
         }
       }
-      if (res.notes) await updateFlightNotes(flightId, res.notes, flightLogDbPath);
-      await linkEndedMission(flightId, res.linkMission);
       void loadLogbook();
     } catch (e) {
       console.warn('[end-flight] disarm dialog failed', e);
@@ -3123,21 +3275,22 @@
   // Disconnect while the UAV was still armed (ADR-042): the recovery prompt (Discard / Save /
   // Continue on Reconnect), NOT the End-Flight dialog — the flight may not be over (port change,
   // switch to telemetry). The session is already stashed as pending in the backend.
-  async function onRecordingInterrupted(info: { temp_path: string; craft_name: string; start_time: string; duration_sec: number; sample_count: number }): Promise<void> {
-    // Capture the flown mission (FC-sync) for a later commit.
-    captureEndedMission();
+  async function onRecordingInterrupted(info: { temp_path: string; craft_name: string; start_time: string; duration_sec: number; sample_count: number }, vehicleId: string | null, flown: EndedMissionSnapshot): Promise<void> {
+    recordingOwner = vehicleId;
+    // The flown mission (FC-sync) captured at the interrupt, for a later commit.
+    endedMission = flown;
     awaitingResumeReconnect = false;
     try {
       const choice = await recoveryPrompt.show(info, { reason: 'lost' });
       if (choice === 'discard') {
-        await flightlogDiscardPending();
+        await flightlogDiscardPending(vehicleId);
       } else if (choice === 'save') {
-        const flightId = await flightlogCommitPending();
+        const flightId = await flightlogCommitPending(vehicleId);
         await linkEndedMission(flightId, false);
         void loadLogbook();
       } else if (choice === 'continue') {
-        await flightlogContinuePending();
-        awaitingResumeReconnect = true; // resolved by the next connection's first poll
+        // Resolved by the next connection's first poll — when something was actually queued.
+        if (await flightlogContinuePending(vehicleId)) awaitingResumeReconnect = true;
       }
     } catch (e) {
       console.warn('[interrupted] recovery failed', e);
@@ -3249,28 +3402,43 @@
   });
 
   if (typeof window !== 'undefined') {
-    void listen('flight-recording-started', () => {
-      onRecordingStarted(); // id-less signal — recording started (deferred commit, ADR-041)
+    // Every `flight-recording-*` payload carries the recorder's `vehicleId` / `linkId`.
+    void listen<{ vehicleId?: string }>('flight-recording-started', (event) => {
+      // Recording started (no flight id yet — deferred commit, ADR-041). Only this vehicle's own start
+      // clears its captured-mission snapshot; another aircraft arming must not.
+      if (isRecordingOwner(event.payload?.vehicleId)) onRecordingStarted();
     });
     // Disarm → the summary dialog (stats arrive in the payload; no flight_id yet under deferred
-    // commit). Save commits the pending session, Discard drops it.
-    void listen<{ duration_sec: number; max_alt_m: number; max_speed_ms: number; max_distance_m: number; total_distance_m: number; battery_used_mah: number | null }>(
+    // commit). Save commits the pending session, Discard drops it — of the vehicle that sent it.
+    void listen<{ duration_sec: number; max_alt_m: number; max_speed_ms: number; max_distance_m: number; total_distance_m: number; battery_used_mah: number | null; craft_name?: string; fc_uid?: string | null; vehicleId?: string }>(
       'flight-recording-ended',
       (event) => {
         const p = event.payload;
-        void onRecordingEnded({
+        const vid = p.vehicleId ?? null;
+        const stats: EndFlightStats = {
           durationSec: p.duration_sec,
           maxAltM: p.max_alt_m,
           maxSpeedMs: p.max_speed_ms,
           maxDistM: p.max_distance_m,
           totalDistM: p.total_distance_m,
           batteryUsedMah: p.battery_used_mah,
-        });
+        };
+        // The identity the flight is stored with — its library vehicle is resolved from it.
+        const identity: EndFlightIdentity = { craftName: p.craft_name ?? '', fcUid: p.fc_uid ?? null };
+        // Captured now (at the disarm); the dialog opens once the one before it has settled (§5e M3).
+        const flown = endedMissionFor(vid);
+        enqueueFlightDialog(vid, () => onRecordingEnded(stats, identity, vid, flown));
       },
     );
     // Grace-lapsed re-arm auto-committed the previous flight: close the (now stale) summary and link
     // the mission captured at that disarm.
-    void listen<{ flight_id: number }>('flight-recording-committed', async (event) => {
+    // Secondary vehicles' flights commit by themselves (no End-Flight dialog) — just refresh the list.
+    void listen<{ flight_id: number }>('flight-recording-autocommitted', () => { void loadLogbook(); });
+    void listen<{ flight_id: number; vehicleId?: string }>('flight-recording-committed', async (event) => {
+      // Its End-Flight summary still waiting in the queue is stale — and then the open one is not its.
+      const waited = dropQueuedFlightDialogs(event.payload.vehicleId) > 0;
+      // Another vehicle's grace-lapsed re-arm: its flight is in, but this dialog/snapshot is not its.
+      if (waited || !isRecordingOwner(event.payload.vehicleId)) { void loadLogbook(); return; }
       const snap = endedMission; // snapshot before any await
       endFlightDialog?.close();
       if (endedMissionHasWps(snap) && snap.fc) {
@@ -3280,18 +3448,40 @@
     });
     // Re-arm within grace (or a recovered session resumed on reconnect) continues the same flight —
     // drop the stale summary dialog and exit the awaiting-reconnect state.
-    void listen('flight-recording-resumed', () => {
+    void listen<{ vehicleId?: string }>('flight-recording-resumed', (event) => {
+      // Its End-Flight summary still waiting in the queue is stale — and then the open one is not its.
+      if (dropQueuedFlightDialogs(event.payload?.vehicleId) > 0) return;
+      if (!isRecordingOwner(event.payload?.vehicleId)) return; // e.g. a secondary re-arming within grace
       awaitingResumeReconnect = false;
       endFlightDialog?.close();
     });
     // Connection lost while recording (device gone, e.g. USB unplugged) → recovery prompt.
-    void listen<{ temp_path: string; craft_name: string; start_time: string; duration_sec: number; sample_count: number }>(
+    void listen<{ temp_path: string; craft_name: string; start_time: string; duration_sec: number; sample_count: number; vehicleId?: string }>(
       'flight-recording-interrupted',
-      (event) => { lostWhileHidden = false; void onRecordingInterrupted(event.payload); },
+      (event) => {
+        lostWhileHidden = false;
+        const vid = event.payload.vehicleId ?? null;
+        const flown = endedMissionFor(vid); // captured now, the prompt may open later (§5e M3)
+        enqueueFlightDialog(vid, () => onRecordingInterrupted(event.payload, vid, flown));
+      },
     );
     // The device vanished (fatal transport error) — the backend tore the scheduler down. Clean up the
     // connection state so the UI shows disconnected and the user can simply reconnect.
-    void listen('connection-lost', () => {
+    // MAVLink transport loss arrives as the same `connection-lost` (stamped with `linkId`).
+    void listen<{ linkId?: number }>('connection-lost', async (event) => {
+      const lid = event.payload?.linkId;
+      // Ask the backend, not the mirror: `connectFC` refreshes `links` without awaiting it, so a loss
+      // right after connect would otherwise find its own link missing and be ignored.
+      const known = lid != null ? await refreshLinks().catch(() => get(links)) : get(links);
+      // A loss reported for a link that was never registered — the MSP tunnel probe of a connect that
+      // then fails — has nothing to tear down here; the connect call itself returns the error. Without
+      // this guard the fallback below would close every OTHER link.
+      if (lid != null && !known.some((l) => l.linkId === lid)) return;
+      // Multi-vehicle: with other links still up, only close the one that died.
+      if (lid != null && known.length > 1) {
+        void disconnectLink(lid, selectedBaud).catch(() => {});
+        return;
+      }
       if (document.hidden) lostWhileHidden = true;
       void disconnectFC(selectedBaud).catch(() => {});
     });
@@ -3334,9 +3524,13 @@
     });
     // Home from the FC (MSP_WP 0), pushed once at connect — recovers Home on a mid-flight connect /
     // app restart. The live arm-transition path (Map.svelte) overwrites it on the next arm.
-    void listen<{ lat: number; lon: number; alt: number }>('home-position', (event) => {
+    void listen<{ lat: number; lon: number; alt: number; vehicleId?: string }>('home-position', (event) => {
       const { lat, lon, alt } = event.payload;
       if (lat === 0 && lon === 0) return;
+      // Every vehicle's home is kept by id (fleet map + re-seed on switch); only the active one
+      // drives the singleton home / launch reference below.
+      if (event.payload.vehicleId) setVehicleHome(event.payload.vehicleId, lat, lon, alt);
+      if (!isActive(event.payload)) return;
       // The FC re-broadcasts HOME_POSITION (ArduPilot ~0.2 Hz), often with sub-metre jitter. Re-setting
       // the stores on every tick churns every subscriber — writable stores emit even on an identical
       // value — and the 3D mission overlay rebuilds, flickering its polylines. Only update on a real move.
@@ -3351,7 +3545,11 @@
     });
     // FC-confirmed Guided target (POSITION_TARGET_GLOBAL_INT, 1 Hz) — the controller gates it on the
     // FC actually being in its guided mode (in AUTO/RTL the same message carries the mission WP/home).
-    void listen<{ lat: number; lon: number; alt: number }>('guided-target', (event) => {
+    void listen<{ lat: number; lon: number; alt: number; vehicleId?: string }>('guided-target', (event) => {
+      // Every vehicle's target feeds the fleet map ("who is heading where"); only the active one
+      // drives the Guided UI.
+      if (event.payload.vehicleId) ingestVehicleGuidedTarget(event.payload.vehicleId, event.payload.lat, event.payload.lon);
+      if (!isActive(event.payload)) return;
       ingestFcGuidedTarget(event.payload.lat, event.payload.lon);
     });
   }
@@ -3471,6 +3669,11 @@
     <RadarAlertBanner {interfaceSettings} />
     <!-- FC system messages (MAVLink STATUSTEXT) as top-edge toasts (renders nothing when idle). -->
     <StatusTextToasts />
+    <!-- Multi-vehicle group commands, bottom-centre (renders nothing with fewer than 2 MAVLink vehicles;
+         behind the fleet feature gate). -->
+    {#if $fleetEnabled}
+      <GroupCommandBar />
+    {/if}
   </div>
 
   <!-- Floating-frame map controls — top-level/unzoomed so they sit ABOVE the in-frame map (z2); the
@@ -3629,6 +3832,7 @@
     onOpenRaw={() => (rawTelemetryOpen = true)}
     onOpenRc={() => selectTab('rc-control')}
     onRescanBle={bleScanWindow}
+    fleetEnabled={$fleetEnabled}
   />
     <RelayPanel open={relayPanelOpen} />
   </div>
@@ -3989,6 +4193,8 @@
           <MissionPanel />
         {:else if activeTab === 'control'}
           <MavCommandPanel />
+        {:else if activeTab === 'fleet'}
+          <FleetPanel />
         {:else if activeTab === 'rc-control'}
           {#if isMobile}
             <VirtualSticks />

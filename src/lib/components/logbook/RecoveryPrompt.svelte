@@ -30,7 +30,18 @@
   let confirmingDiscard = $state(false);
   let resolver: ((v: RecoveryChoice) => void) | null = null;
 
+  // A `show()` while the prompt is open (e.g. a link lost during the startup recovery) waits for it to be
+  // answered instead of replacing its pending choice (§5e M3).
+  const waiting: (() => void)[] = [];
+
   export function show(i: RecoveryInfo, opts: { reason?: RecoveryReason } = {}): Promise<RecoveryChoice> {
+    if (open || resolver) {
+      return new Promise((resolve) => { waiting.push(() => { void present(i, opts).then(resolve); }); });
+    }
+    return present(i, opts);
+  }
+
+  function present(i: RecoveryInfo, opts: { reason?: RecoveryReason }): Promise<RecoveryChoice> {
     info = i;
     reason = opts.reason ?? 'orphan';
     confirmingDiscard = false;
@@ -42,6 +53,7 @@
     open = false;
     confirmingDiscard = false;
     if (resolver) { resolver(c); resolver = null; }
+    waiting.shift()?.();
   }
 
   function fmtTime(s: string): string {

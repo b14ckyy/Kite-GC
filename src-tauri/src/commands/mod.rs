@@ -26,4 +26,5 @@ pub mod terrain;
 pub mod tiles;
 pub mod update_check;
 pub mod updater;
+pub mod vehicles;
 pub mod video;

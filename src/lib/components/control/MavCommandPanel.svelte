@@ -271,9 +271,16 @@
             {$t('control.action.missionDownload')}
           </Button>
           <div class="cc-row">
-            <Button variant="standard" full onclick={() => missionStart()}>{$t('control.action.missionStart')}</Button>
+            <!-- Start turns amber when the plan on screen isn't what the FC holds — the vehicle flies the FC's copy. -->
+            <Button variant={!$arduMissionFcSynced && wpCount > 0 ? 'warning' : 'standard'} full onclick={() => missionStart()}
+                    title={!$arduMissionFcSynced && wpCount > 0 ? $t('control.startNotSyncedHint') : ''}>
+              {$t('control.action.missionStart')}
+            </Button>
             <Button variant="standard" full onclick={() => missionRestart()}>{$t('control.action.missionRestart')}</Button>
           </div>
+          {#if !$arduMissionFcSynced && wpCount > 0}
+            <div class="cc-setwp-hint">{$t('control.startNotSyncedHint')}</div>
+          {/if}
 
           <!-- Set active WP — only when the mission is in sync with the FC (no edits since
                download/upload), so the chosen WP number maps to the FC's actual item. -->

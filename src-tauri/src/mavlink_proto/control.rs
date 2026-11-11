@@ -36,7 +36,7 @@ pub fn send_command_long(
     command: MavCmd,
     params: [f32; 7],
 ) -> Result<(), String> {
-    let rx = register(cmd_tx)?;
+    let rx = register(cmd_tx, fc_sysid)?;
     let msg = MavMessage::COMMAND_LONG(COMMAND_LONG_DATA {
         target_system: fc_sysid,
         target_component: AUTOPILOT_COMPONENT,
@@ -73,7 +73,7 @@ pub fn send_command_int(
     y: i32,
     z: f32,
 ) -> Result<(), String> {
-    let rx = register(cmd_tx)?;
+    let rx = register(cmd_tx, fc_sysid)?;
     let msg = MavMessage::COMMAND_INT(COMMAND_INT_DATA {
         target_system: fc_sysid,
         target_component: AUTOPILOT_COMPONENT,
@@ -163,9 +163,9 @@ pub fn send_rc_release(
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
-fn register(cmd_tx: &mpsc::Sender<MavlinkCommand>) -> Result<mpsc::Receiver<MavMessage>, String> {
+fn register(cmd_tx: &mpsc::Sender<MavlinkCommand>, sysid: u8) -> Result<mpsc::Receiver<MavMessage>, String> {
     let (tx, rx) = mpsc::channel();
-    cmd_tx.send(MavlinkCommand::RegisterCommandReceiver(tx))
+    cmd_tx.send(MavlinkCommand::RegisterCommandReceiver { sysid, tx })
         .map_err(|_| "MAVLink handler stopped".to_string())?;
     // Same tiny race guard as mission.rs: let the handler pick up the registration before we send.
     std::thread::sleep(Duration::from_millis(10));

@@ -5,7 +5,9 @@ import { writable, derived, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
 import { connection, linkHasMsp } from './connection';
 import { settings } from './settings';
+import { activeVehicleId, vehicles } from './vehicles';
 import { CMD, cmdDef, cmdHasLocation, type VehicleClass } from '$lib/helpers/arduCommandCatalog';
+import { translateWaypoints } from '$lib/helpers/missionGeo';
 
 // ── MAV_CMD constants ─────────────────────────────────────────────────
 export const MAV_CMD_NAV_WAYPOINT        = 16;
@@ -140,6 +142,21 @@ export function arduClearWpSelection(): void {
   arduSelectedWpIndex.set(-1);
 }
 
+/** Select every item (Ctrl+A in edit mode) — the "move the whole mission" entry point. */
+export function arduSelectAllWps(): void {
+  const n = new Set<number>();
+  get(arduMission).forEach((_, i) => n.add(i));
+  arduSelectedWpIndices.set(n);
+  syncArduPrimary(n);
+}
+
+/** Replace the selection with `indices` (box select on the map). */
+export function arduSetWpSelection(indices: Iterable<number>): void {
+  const n = new Set(indices);
+  arduSelectedWpIndices.set(n);
+  syncArduPrimary(n);
+}
+
 /** Batch-remove all selected waypoints (descending so indices stay valid), as one undo step. */
 export function arduRemoveSelectedWps(): void {
   const ids = [...get(arduSelectedWpIndices)].sort((a, b) => b - a);
@@ -237,7 +254,7 @@ function mavTypeToClass(mavType: number): VehicleClass | null {
  *  the MAV_TYPE (PX4 reports it accurately). For **ArduPilot** the MAV_TYPE is only a reliable QuadPlane
  *  signal (a QuadPlane reports fc_variant "ArduPlane" but a VTOL_* MAV_TYPE); otherwise the per-vehicle
  *  fc_variant string ("ArduPlane"/"ArduCopter"/…) is authoritative. */
-function detectVehicleClass(variant: string, mavType: number | null | undefined): VehicleClass | null {
+export function detectVehicleClass(variant: string, mavType: number | null | undefined): VehicleClass | null {
   if (variant.toLowerCase() === 'px4') return mavType != null ? mavTypeToClass(mavType) : null;
   // MAV_TYPE VTOL range (19–25: tailsitter duo/quad, tiltrotor, …) → QuadPlane.
   if (mavType != null && mavType >= 19 && mavType <= 25) return 'quadplane';
@@ -320,10 +337,11 @@ export function groupEndIndex(g: ArduGroup): number {
 // ── Mutations ─────────────────────────────────────────────────────────
 
 export function arduMissionClear(): void {
+  // Undoable (the confirm dialog promises Ctrl+Z) — a clear is a big, easy-to-regret step.
+  arduRecordUndo();
   arduMission.set([]);
   arduClearWpSelection();
   arduLoadedMissionId.set(null);
-  arduClearUndoHistory(); // a clear is a fresh baseline
 }
 
 export function arduAddWp(wp: ArduWaypoint): void {
@@ -355,6 +373,35 @@ export function arduMoveWp(from: number, to: number): void {
     next.splice(to, 0, item);
     return next;
   });
+}
+
+/** Translate the located waypoints among `indices` by a 1e7-degree delta — a group drag on the map or
+ *  a whole-mission move (Ctrl+A, then drag). One undo step. */
+export function arduTranslateWps(indices: ReadonlySet<number>, dLat1e7: number, dLon1e7: number): void {
+  if (indices.size === 0 || (dLat1e7 === 0 && dLon1e7 === 0)) return;
+  arduRecordUndo();
+  arduMission.update(wps => translateWaypoints(wps, dLat1e7, dLon1e7, indices));
+}
+
+/** Move a whole group (a location command + its trailing modifiers) so that it lands where the group
+ *  anchored at `toAnchorIdx` currently starts (`after` = behind that group instead). List drag-reorder. */
+export function arduMoveGroup(fromAnchorIdx: number, toAnchorIdx: number, after = false): void {
+  if (fromAnchorIdx === toAnchorIdx) return;
+  const wps = get(arduMission);
+  const groups = groupArduMission(wps);
+  const from = groups.find(g => g.anchorIdx === fromAnchorIdx);
+  const to = groups.find(g => g.anchorIdx === toAnchorIdx);
+  if (!from || !to) return;
+  const fromStart = from.anchorIdx;
+  const fromEnd = groupEndIndex(from); // exclusive
+  const block = wps.slice(fromStart, fromEnd);
+  const rest = [...wps.slice(0, fromStart), ...wps.slice(fromEnd)];
+  let insertAt = after ? groupEndIndex(to) : to.anchorIdx;
+  if (insertAt > fromStart) insertAt -= block.length; // indices shift once the block is pulled out
+  if (insertAt < 0 || insertAt > rest.length) return;
+  arduRecordUndo();
+  arduMission.set([...rest.slice(0, insertAt), ...block, ...rest.slice(insertAt)]);
+  arduClearWpSelection();
 }
 
 // ── Undo / redo ────────────────────────────────────────────────────────────
@@ -428,7 +475,7 @@ export function arduClearUndoHistory(): void {
  *  mark it FC-synced (which gates "Set active WP"). Returns the waypoint count. Shared by the mission
  *  panel and the Vehicle Control panel; camera framing stays with the caller (a UI concern). */
 export async function downloadArduMissionFromFc(): Promise<number> {
-  const wps = await invoke<ArduWaypoint[]>('ardu_mission_download');
+  const wps = await invoke<ArduWaypoint[]>('ardu_mission_download', { vehicleId: get(activeVehicleId) });
   arduMission.set(wps);
   arduClearWpSelection();
   arduLoadedMissionId.set(null); // from the FC → not a library mission
@@ -604,3 +651,140 @@ export function parsePlanFile(text: string): ArduWaypoint[] {
   }
   return wps;
 }
+
+// ── Per-vehicle missions (multi-vehicle) ───────────────────────────────
+// The stores above stay the ACTIVE vehicle's planner (every panel / layer reads them unchanged). Each
+// vehicle's mission, provenance snapshots, library id and undo history are parked in a slot when the
+// active vehicle changes and brought back when it is selected again. A vehicle selected for the first
+// time starts from a COPY of the mission currently on screen (the usual fleet workflow: plan once,
+// upload to several aircraft, then diverge per vehicle) with fresh provenance — it has not been synced
+// with THAT aircraft yet. Disconnecting everything (no active vehicle) keeps the planner as it is, so
+// offline planning survives; the next vehicle to become active adopts it.
+interface ArduMissionSlot {
+  wps: ArduWaypoint[];
+  syncRefs: Map<ArduSyncFlag, string>;
+  loadedId: number | null;
+  undo: ArduWaypoint[][];
+  redo: ArduWaypoint[][];
+}
+const arduSlots = new Map<string, ArduMissionSlot>();
+let arduSlotOwner: string | null = null;
+
+/** Every vehicle's mission (the active one live, the others as parked), for the fleet map layers. */
+export const arduMissionsByVehicle = writable<ReadonlyMap<string, ArduWaypoint[]>>(new Map());
+
+/** Per-vehicle plan status for the fleet panel: size + whether it still matches what that aircraft
+ *  holds (`fcSynced`) or has unsaved edits (`modified`). Computed from each slot's own snapshots. */
+export interface ArduVehicleMissionStatus {
+  count: number;
+  locationCount: number;
+  fcSynced: boolean;
+  modified: boolean;
+}
+export const arduMissionStatusByVehicle = writable<ReadonlyMap<string, ArduVehicleMissionStatus>>(new Map());
+
+function statusFor(wps: ArduWaypoint[], refs: Map<ArduSyncFlag, string>): ArduVehicleMissionStatus {
+  const count = wps.length;
+  const locationCount = wps.filter((w) => cmdHasLocation(w.command)).length;
+  if (count === 0) return { count, locationCount, fcSynced: false, modified: false };
+  const h = serializeWaypoints(wps);
+  const fcSynced = refs.get('fc') === h;
+  const modified = !fcSynced && refs.get('file') !== h && refs.get('db') !== h;
+  return { count, locationCount, fcSynced, modified };
+}
+
+function publishArduMissions(): void {
+  const out = new Map<string, ArduWaypoint[]>();
+  const status = new Map<string, ArduVehicleMissionStatus>();
+  for (const [id, slot] of arduSlots) { out.set(id, slot.wps); status.set(id, statusFor(slot.wps, slot.syncRefs)); }
+  if (arduSlotOwner) {
+    const live = get(arduMission);
+    out.set(arduSlotOwner, live);
+    status.set(arduSlotOwner, statusFor(live, arduSyncRefs));
+  }
+  arduMissionsByVehicle.set(out);
+  arduMissionStatusByVehicle.set(status);
+}
+arduProvVersion.subscribe(() => publishArduMissions());
+
+/** Record a plan for `vehicleId` (a group upload landed it on that aircraft): the live planner when it
+ *  is the active vehicle, else its parked slot. `fcSynced` lights the FC badge for that vehicle. */
+export function arduSetVehicleMission(vehicleId: string, wps: ArduWaypoint[], fcSynced: boolean): void {
+  if (vehicleId === arduSlotOwner) {
+    arduUndoSuspend++;
+    arduMission.set(cloneWps(wps));
+    arduUndoSuspend--;
+    if (fcSynced) markArduMissionSynced('fc', wps);
+    return;
+  }
+  const prev = arduSlots.get(vehicleId);
+  const refs = new Map<ArduSyncFlag, string>(prev?.syncRefs ?? []);
+  if (fcSynced) refs.set('fc', serializeWaypoints(wps)); else refs.delete('fc');
+  arduSlots.set(vehicleId, { wps: cloneWps(wps), syncRefs: refs, loadedId: prev?.loadedId ?? null, undo: [], redo: [] });
+  publishArduMissions();
+}
+
+function stashArduSlot(id: string): void {
+  arduSlots.set(id, {
+    wps: get(arduMission),
+    syncRefs: new Map(arduSyncRefs),
+    loadedId: get(arduLoadedMissionId),
+    undo: arduUndoStack,
+    redo: arduRedoStack,
+  });
+}
+
+function restoreArduSlot(id: string, fromNone: boolean): void {
+  const slot = arduSlots.get(id);
+  arduUndoSuspend++;
+  if (slot) {
+    arduMission.set(slot.wps);
+    arduSyncRefs.clear();
+    for (const [k, v] of slot.syncRefs) arduSyncRefs.set(k, v);
+    arduLoadedMissionId.set(slot.loadedId);
+    arduUndoStack = slot.undo;
+    arduRedoStack = slot.redo;
+  } else if (fromNone) {
+    // (Re)connect with no vehicle before: the plan on screen is the user's working copy — keep its
+    // library id, file/db provenance and undo history. Only what this aircraft holds is unknown yet.
+    arduMission.set(cloneWps(get(arduMission)));
+    arduSyncRefs.delete('fc');
+    // Own copies: the stacks may still be shared with a slot parked at the last disconnect.
+    arduUndoStack = [...arduUndoStack];
+    arduRedoStack = [...arduRedoStack];
+  } else {
+    // First time on this vehicle: keep the plan on screen as its starting point, but nothing is synced yet.
+    arduMission.set(cloneWps(get(arduMission)));
+    arduSyncRefs.clear();
+    arduLoadedMissionId.set(null);
+    arduUndoStack = [];
+    arduRedoStack = [];
+  }
+  arduUndoSuspend--;
+  arduProvVersion.update((n) => n + 1);
+  arduSyncUndoFlags();
+  arduClearWpSelection();
+}
+
+activeVehicleId.subscribe((id) => {
+  if (id === arduSlotOwner) return;
+  const prevOwner = arduSlotOwner;
+  if (prevOwner) stashArduSlot(prevOwner);
+  arduSlotOwner = id;
+  if (id) restoreArduSlot(id, prevOwner == null);
+  publishArduMissions();
+});
+arduMission.subscribe(() => publishArduMissions());
+vehicles.subscribe((known) => {
+  if (known.size === 0) {
+    // Disconnect-all keeps the slots for a reconnect in the same session, but what each aircraft holds
+    // is unknown from here on — drop every parked FC snapshot so no stale "FC" badge survives.
+    let cleared = false;
+    for (const slot of arduSlots.values()) if (slot.syncRefs.delete('fc')) cleared = true;
+    if (cleared) publishArduMissions();
+    return;
+  }
+  let changed = false;
+  for (const id of [...arduSlots.keys()]) if (!known.has(id) && id !== arduSlotOwner) { arduSlots.delete(id); changed = true; }
+  if (changed) publishArduMissions();
+});

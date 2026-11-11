@@ -144,17 +144,20 @@ link where Kite can only say *Generic*. The map and the 3D model follow your cho
 recorder stores it with the flight, including a flight that is already being recorded. The override is
 not saved: it lasts for the session, and after a reconnect it comes back only when Kite recognises the
 same flight controller. INAV and MAVLink links report a hardware ID for that, shown as **FC ID**
-(shortened, with a copy button for the full value) and stored with each flight; telemetry-only links
-have none and start from *Generic* again.
+(shortened, with a copy button for the full value) and stored with each flight — it is also how a flight
+finds its [vehicle](vehicles.md#linking-flights). Telemetry-only links, INAV over plain MAVLink (without
+MSP/MAV) and simulators that report a placeholder (INAV SITL, PX4 SITL as system ID 1) have none: there
+the override is not restored after a reconnect, and the type starts from what the link detects.
 
 **Save to vehicle library** creates a [vehicle library](vehicles.md) entry from the connected craft in
 one click — name and craft name, the vehicle type, the board as FC model, firmware and version, the FC
 ID, the sensors the flight controller reports (GPS, compass, airspeed, rangefinder, optical flow; RTK only
 while the GPS has an RTK fix at that moment) and whether blackbox / dataflash logging is enabled. It
 appears on INAV and MAVLink links only. When a vehicle already carries this FC ID the button
-reads **View in vehicle library** instead and jumps straight to that entry. After swapping the flight
-controller of an existing vehicle, copy the new FC ID from here into the vehicle's build sheet and the
-button finds it again.
+reads **View in vehicle library** instead and jumps straight to that entry. After saving, Kite offers to
+link the logged flights of this craft name or FC ID that belong to no vehicle yet. After swapping the
+flight controller of an existing vehicle, copy the new FC ID from here into the vehicle's build sheet —
+the button finds it again and the vehicle's earlier flights stay linked.
 
 ![The UAV Info panel](../assets/guides/telemetry/uav_info.png)
 /// caption

@@ -24,7 +24,7 @@ use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 use std::time::Instant;
 
-use tauri::{AppHandle, Emitter};
+use crate::vehicle_registry::emitter::VehicleEmitter;
 
 use crate::flightlog::recorder::FlightRecorderHandle;
 use crate::flightmode::FlightModeState;
@@ -455,7 +455,7 @@ impl CrsfDecoder {
 
     /// Emit the accumulated state as the unified telemetry events and feed the flight recorder. Each
     /// event is only sent once its relevant fields have been seen (mirrors the FrSky decoder).
-    pub fn publish(&mut self, app: &AppHandle, recorder: Option<&FlightRecorderHandle>) {
+    pub fn publish(&mut self, app: &VehicleEmitter, recorder: Option<&FlightRecorderHandle>) {
         // ArduPilot passthrough (if present) owns status / flight mode / EKF — suppress the native CRSF
         // mode here so the real AP modes win (the native 0x21 string would be misread as an INAV mode).
         let ap_active = self.ap.is_some();

@@ -16,7 +16,7 @@
 // (0x5007 → vehicle variant, bonus), WAYPOINT (0x500D number). The metric fields that use ArduPilot's
 // `prep_number` compact encoding (HDOP, home distance, speeds, rangefinder, terrain, …) are a v2.
 
-use tauri::{AppHandle, Emitter};
+use crate::vehicle_registry::emitter::VehicleEmitter;
 
 use crate::flightlog::recorder::FlightRecorderHandle;
 use crate::flightmode::{classify_ardupilot, FlightModeState};
@@ -179,7 +179,7 @@ impl ApPassthroughDecoder {
 
     /// Emit the AP-unique telemetry: status (armed), flight mode (real AP modes), EKF health, status-text
     /// + waypoint number. GPS/battery/attitude are NOT emitted here — the native host decoder owns those.
-    pub fn publish(&mut self, app: &AppHandle, recorder: Option<&FlightRecorderHandle>) {
+    pub fn publish(&mut self, app: &VehicleEmitter, recorder: Option<&FlightRecorderHandle>) {
         let s = &self.state;
 
         if s.seen_status {

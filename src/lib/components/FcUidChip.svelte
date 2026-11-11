@@ -10,11 +10,11 @@
   // id can be pasted into the existing vehicle entry.
   import { t } from 'svelte-i18n';
   import { copyToClipboard } from '$lib/helpers/clipboard';
+  import { shortFcUid } from '$lib/helpers/fcUid';
 
   let { uid }: { uid: string } = $props();
 
-  const SHOWN = 10;
-  const short = $derived(uid.length > SHOWN ? `${uid.slice(0, SHOWN)}…` : uid);
+  const short = $derived(shortFcUid(uid));
 
   let copied = $state(false);
   let copiedTimer: ReturnType<typeof setTimeout> | null = null;

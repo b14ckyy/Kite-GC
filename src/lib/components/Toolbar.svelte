@@ -8,6 +8,7 @@
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import WindowControls from '$lib/components/WindowControls.svelte';
   import ConnectionControls from '$lib/components/ConnectionControls.svelte';
+  import LinkManager from '$lib/components/LinkManager.svelte';
   import { isLinux, isMacOS, isMobile } from '$lib/platform';
   import ArmingIndicator from '$lib/components/ArmingIndicator.svelte';
   import BatteryIndicator from '$lib/components/BatteryIndicator.svelte';
@@ -40,6 +41,7 @@
     onOpenRaw,
     onOpenRc,
     onRescanBle,
+    fleetEnabled = false,
   }: {
     appVersion: string;
     telem: TelemetryData;
@@ -67,6 +69,8 @@
     onOpenRc?: () => void;
     /** Trigger a fresh bounded BLE scan window — called when the device dropdown is opened. */
     onRescanBle?: () => void;
+    /** Fleet feature gate (`--fleet` launch flag, stores/fleetMode): off = no link manager / multi-connect. */
+    fleetEnabled?: boolean;
   } = $props();
 
   // Sensor-health bar: one tile per sensor the airframe reports (helpers/sensorHealth.ts — shared
@@ -280,6 +284,11 @@
       {onConnect}
       {onRescanBle}
     />
+    <!-- Multi-vehicle: vehicle picker, open links, "Add link" (only meaningful once connected; behind
+         the fleet feature gate). -->
+    {#if connStatus === 'connected' && fleetEnabled}
+      <LinkManager {ports} {bleDeviceList} {isBleScanning} {baudRates} {onRescanBle} />
+    {/if}
   {/snippet}
 
   <div class="toolbar-right" data-tauri-drag-region>

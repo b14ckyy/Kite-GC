@@ -12,7 +12,7 @@
 
 use std::time::Instant;
 
-use tauri::{AppHandle, Emitter};
+use crate::vehicle_registry::emitter::VehicleEmitter;
 
 use crate::flightlog::recorder::FlightRecorderHandle;
 use crate::flightmode::{classify_inav, FlightModeState, ARM_DISABLE_BLOCKED};
@@ -315,7 +315,7 @@ impl FrskyDecoder {
     /// Emit the accumulated state as the unified telemetry events and feed the flight recorder. Each
     /// event is only sent once its relevant fields have been seen, so widgets/recorder aren't fed
     /// placeholder zeros.
-    pub fn publish(&mut self, app: &AppHandle, recorder: Option<&FlightRecorderHandle>) {
+    pub fn publish(&mut self, app: &VehicleEmitter, recorder: Option<&FlightRecorderHandle>) {
         // ArduPilot passthrough (if present) owns flight mode / armed / EKF / status-text; the native
         // INAV status fields are simply never seen for an AP source, so there is no conflict.
         if let Some(ap) = self.ap.as_mut() {

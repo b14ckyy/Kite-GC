@@ -152,6 +152,7 @@ fn snap_to_record(s: &Snap, t_ms: i64) -> TelemetryRecord {
         mode_modifiers: s.mode_modifiers.clone(),
         link_snr: None,
         link_rssi_dbm: None,
+        wall_ms: None,
     }
 }
 
@@ -344,6 +345,11 @@ fn decode_tlog(bytes: &[u8]) -> (Vec<Sample>, Identity) {
                         variant = v;
                         platform = p;
                     }
+                } else if let Some((sysid, _)) = fc_id {
+                    // A tlog of a link shared by several vehicles (fleet mode) carries every vehicle's
+                    // frames: once the autopilot is locked, another system id's telemetry is not this
+                    // flight's — merged, it would replay as one garbled track.
+                    consume = frame.header.system_id == sysid;
                 }
                 if consume && update_from_mav(&frame.message, &mut snap, &mut armed, &variant) {
                     samples.push(Sample { t_ms, rec: snap_to_record(&snap, t_ms), armed });
@@ -640,6 +646,8 @@ pub fn import_raw_log_with_progress<F: Fn(u8, &str, &str)>(
             board_id: id.board.clone(),
             platform_type: id.platform_type,
             fc_uid: None,
+            group_id: None,
+            vehicle_id: None,
             protocol: protocol.to_string(),
             start_lat,
             start_lon,
@@ -745,6 +753,27 @@ mod tests {
         let sample = samples.last().expect("ATTITUDE should emit a sample");
         assert_eq!(sample.rec.mode_primary.as_deref(), Some("guided"));
         assert!(sample.armed, "the autopilot heartbeat is armed");
+    }
+
+    /// A tlog of a link shared by two vehicles (fleet mode): once the first autopilot is locked from its
+    /// HEARTBEAT, the other vehicle's telemetry is skipped — only the first vehicle's samples remain.
+    #[test]
+    fn a_second_vehicle_in_the_tlog_is_skipped() {
+        let att = |roll: f32| MavMessage::ATTITUDE(ATTITUDE_DATA { roll, ..Default::default() });
+        let log = tlog(vec![
+            (1, 1, heartbeat(MavType::MAV_TYPE_FIXED_WING, MavAutopilot::MAV_AUTOPILOT_ARDUPILOTMEGA, 15)),
+            (2, 1, heartbeat(MavType::MAV_TYPE_QUADROTOR, MavAutopilot::MAV_AUTOPILOT_PX4, 0)),
+            (1, 1, att(0.1)),
+            (2, 1, att(0.9)),
+            (1, 1, att(0.2)),
+            (2, 1, att(0.8)),
+        ]);
+        let (samples, identity) = decode_tlog(&log);
+        assert_eq!(identity.fc_variant.as_deref(), Some("ArduPlane"));
+        let rolls: Vec<f64> = samples.iter().map(|s| (s.rec.roll.unwrap() * 100.0).round() / 100.0).collect();
+        let expected: Vec<f64> = [0.1f32, 0.2].iter().map(|r| (r.to_degrees() as f64 * 100.0).round() / 100.0).collect();
+        assert_eq!(rolls, expected);
+        assert_eq!(samples.iter().map(|s| s.t_ms).collect::<Vec<_>>(), [3000, 5000]);
     }
 
     /// A tunnel link records Kite's MSP-over-MAVLink TUNNEL frames (INAV 10.0+) into the tlog. The typed

@@ -25,6 +25,7 @@
   import ManualConfig from '$lib/components/control/ManualConfig.svelte';
   import ManualStates from '$lib/components/control/ManualStates.svelte';
   import { settings } from '$lib/stores/settings';
+  import { activeVehicleId } from '$lib/stores/vehicles';
   import {
     hidDevices,
     hidSnapshot,
@@ -320,7 +321,7 @@
       // instead of waiting out RC_OVERRIDE_TIME. PX4 (MANUAL_CONTROL) and INAV have no release frame —
       // they just stop streaming. The backend stops the stream as part of the release.
       if (connectedArdu) {
-        try { await invoke('mav_rc_release'); } catch (e) { console.warn('[rc] release failed', e); }
+        try { await invoke('mav_rc_release', { vehicleId: get(activeVehicleId) }); } catch (e) { console.warn('[rc] release failed', e); }
       }
       disengage();
     }

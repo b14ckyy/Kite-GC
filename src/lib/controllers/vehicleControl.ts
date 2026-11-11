@@ -10,6 +10,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { writable, derived, get, type Readable } from 'svelte/store';
 import { telemetry } from '$lib/stores/telemetry';
 import { connection, isArduPilotLink } from '$lib/stores/connection';
+import { activeVehicleId } from '$lib/stores/vehicles';
 import { autopilotSystem } from '$lib/stores/autopilotContext';
 import { arduVehicleClass, downloadArduMissionFromFc } from '$lib/stores/missionArdupilot';
 import { rcEngaged } from '$lib/stores/rcEngage';
@@ -30,10 +31,16 @@ export const lastFeedback = writable<CommandFeedback | null>(null);
 /** Name of the action currently in flight (awaiting its ACK), or null. Drives per-button spinners. */
 export const busyAction = writable<string | null>(null);
 
+/** Every vehicle-facing backend command takes an optional `vehicleId`; always name the active vehicle
+ *  explicitly so a selection change between click and dispatch can't retarget a command. */
+function targeted(args?: Record<string, unknown>): Record<string, unknown> {
+  return { vehicleId: get(activeVehicleId), ...(args ?? {}) };
+}
+
 async function runCommand(action: string, cmd: string, args?: Record<string, unknown>): Promise<boolean> {
   busyAction.set(action);
   try {
-    await invoke(cmd, args);
+    await invoke(cmd, targeted(args));
     lastFeedback.set({ action, ok: true, message: '', ts: Date.now() });
     return true;
   } catch (e) {
@@ -93,7 +100,7 @@ async function refreshFcLoiterRadius(): Promise<void> {
   }
   const name = get(autopilotSystem) === 'px4' ? 'NAV_LOITER_RAD' : 'WP_LOITER_RAD';
   try {
-    const v = await invoke<number | null>('mav_read_param', { name });
+    const v = await invoke<number | null>('mav_read_param', targeted({ name }));
     // Negative = counter-clockwise loiter; the ring only needs the magnitude.
     fcLoiterRadius.set(v != null ? Math.abs(v) : null);
   } catch {
@@ -107,6 +114,22 @@ async function refreshFcLoiterRadius(): Promise<void> {
  * carries the current mission waypoint / home, which must not appear as a Guided marker. Keeps the
  * marker on the FC's actual loiter/goto point — including targets set by another GCS.
  */
+/** FC-confirmed guided targets of EVERY vehicle (multi-vehicle), keyed by vehicle id, with the time
+ *  the last POSITION_TARGET_GLOBAL_INT arrived. The map draws "who is heading where" from this; the
+ *  active vehicle additionally goes through `ingestFcGuidedTarget` → `guidedTarget` for the Guided UI. */
+export const guidedTargets = writable<ReadonlyMap<string, { lat: number; lon: number; ts: number }>>(new Map());
+
+export function ingestVehicleGuidedTarget(vehicleId: string, lat: number, lon: number): void {
+  guidedTargets.update((m) => {
+    const cur = m.get(vehicleId);
+    // Same ~0.1 m dedup as the active path, but the timestamp still refreshes so staleness works.
+    if (cur && Math.abs(cur.lat - lat) < 1e-6 && Math.abs(cur.lon - lon) < 1e-6 && Date.now() - cur.ts < 2000) return m;
+    const next = new Map(m);
+    next.set(vehicleId, { lat, lon, ts: Date.now() });
+    return next;
+  });
+}
+
 export function ingestFcGuidedTarget(lat: number, lon: number): void {
   if (get(activeMode)?.guided !== true) return;
   // Connected mid-flight to a vehicle already in guided → the toggle was never pressed, so fetch
@@ -190,7 +213,7 @@ export async function takeoff(altitude: number): Promise<boolean> {
     const g = guidedModeFor('ardupilot', get(arduVehicleClass));
     if (g && get(activeMode)?.key !== g.key) {
       try {
-        await invoke('mav_set_mode', { main: g.main, sub: g.sub });
+        await invoke('mav_set_mode', targeted({ main: g.main, sub: g.sub }));
         guidedActive.set(true);
       } catch {
         // fall through — let the takeoff attempt surface the real error
@@ -374,7 +397,7 @@ export async function setGuided(on: boolean): Promise<boolean> {
  *  the new waypoint — see headingOverrideActive). */
 export async function repositionTo(lat: number, lon: number, p: GuidedParams): Promise<boolean> {
   if (headingOverrideActive) {
-    try { await invoke('mav_guided_clear_heading'); } catch { /* best effort */ }
+    try { await invoke('mav_guided_clear_heading', targeted()); } catch { /* best effort */ }
     headingOverrideActive = false;
   }
   const ok = await runCommand('reposition', 'mav_reposition', {
@@ -388,3 +411,19 @@ export async function repositionTo(lat: number, lon: number, p: GuidedParams): P
   if (ok) guidedTarget.set({ lat, lon }); // drive the map's loiter-target marker
   return ok;
 }
+
+// ── Active-vehicle switch (multi-vehicle) ────────────────────────────────────
+// The Guided UI state above is per vehicle in reality: on a switch, the target shown must be the NEW
+// vehicle's FC-confirmed one (or none), and the toggle / heading-override / loiter-radius bookkeeping
+// restarts — the previous vehicle's Guided session must not leak into commands for this one.
+let guidedSeededFor: string | null = null;
+activeVehicleId.subscribe((id) => {
+  if (id === guidedSeededFor) return;
+  guidedSeededFor = id;
+  const tgt = id ? get(guidedTargets).get(id) : undefined;
+  guidedTarget.set(tgt ? { lat: tgt.lat, lon: tgt.lon } : null);
+  guidedActive.set(false);
+  headingOverrideActive = false;
+  loiterRadiusRequested = false;
+  fcLoiterRadius.set(null);
+});

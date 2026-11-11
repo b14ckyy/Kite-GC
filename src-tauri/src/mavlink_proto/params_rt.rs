@@ -103,7 +103,7 @@ pub fn read_params_typed(
     // unconditional Unregister would then clear the other reader's slot.
     let _slot = PARAM_SLOT.lock().unwrap_or_else(|p| p.into_inner());
     let (tx, rx) = mpsc::channel();
-    if cmd_tx.send(MavlinkCommand::RegisterParamReceiver(tx)).is_err() {
+    if cmd_tx.send(MavlinkCommand::RegisterParamReceiver { sysid: fc_sysid, tx }).is_err() {
         return HashMap::new();
     }
     std::thread::sleep(Duration::from_millis(10)); // let the handler pick up the registration

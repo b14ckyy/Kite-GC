@@ -116,7 +116,7 @@ export interface BatteryAggregate {
   last_used: string | null;
 }
 
-/** A vehicle/aircraft in the library (mirrors the Rust Vehicle). Flights soft-link by craft_name. */
+/** A vehicle/aircraft in the library (mirrors the Rust Vehicle). Flights link by `vehicle_id`. */
 export interface Vehicle {
   id: number;
   name: string;
@@ -157,7 +157,7 @@ export interface Vehicle {
   fc_firmware: string | null;
   fc_firmware_version: string | null;
   blackbox_available: boolean;
-  /** FC hardware id (prefilled from the connected FC; editable; informational). */
+  /** FC hardware id (prefilled from the connected FC; editable). First key when a flight resolves to its vehicle. */
   fc_uid: string | null;
   // Persistent lifetime baseline (adopted on request from the INAV FC `stats` feature).
   base_flight_count: number;
@@ -195,6 +195,14 @@ export interface InavStats {
   total_energy: number;
 }
 
+/** How a flight identity resolves to a library vehicle (`vehicle_db_resolve`, the End-Flight pick). */
+export interface VehicleResolution {
+  vehicle: Vehicle | null;
+  matched_by: 'uid' | 'craft' | null;
+  /** Matched by craft name, but the vehicle stores a different FC id: FC swapped, or a second aircraft? */
+  uid_conflict: boolean;
+}
+
 /** Aggregated flights linked to a vehicle (totals + per-flight records). */
 export interface VehicleAggregate {
   flight_count: number;
@@ -225,6 +233,8 @@ export interface FlightSummary {
   notes: string | null;
   /** Local UTC offset (minutes, east-positive) at the flight location; null → display in UTC (ADR-048). */
   utc_offset_min: number | null;
+  /** Library vehicle the flight belongs to (`vehicles.id`); null = not in the library. */
+  vehicle_id: number | null;
 }
 
 export interface Flight {
@@ -258,8 +268,10 @@ export interface Flight {
   battery_serial: string | null;
   /** Local UTC offset (minutes, east-positive) at the flight location; null → display in UTC (ADR-048). */
   utc_offset_min: number | null;
-  /** FC hardware id that flew (MSP_UID / MAVLink uid); informational, never a link key. */
+  /** FC hardware id that flew (MSP_UID / MAVLink uid2), as flown; null for imports, passive links and the known synthetic ids (INAV SITL, an all-zero id). */
   fc_uid: string | null;
+  /** Library vehicle the flight belongs to (resolved on store: fc_uid first, craft name as fallback). */
+  vehicle_id: number | null;
 }
 
 export interface TelemetryRecord {

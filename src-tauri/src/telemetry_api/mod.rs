@@ -85,18 +85,37 @@ impl TelemetryApi {
         }
         // One listener per unified event → its slot. `stamp` marks FC telemetry (not home / link
         // housekeeping) so `lastUpdate` means "the FC last said something".
+        // Array payloads (`telemetry-batteries`) arrive as `{ value: [...] }` — the backend's
+        // VehicleEmitter can only stamp `vehicleId` onto an object, so it wraps non-objects.
+        #[derive(Deserialize)]
+        struct Wrapped<T> {
+            value: T,
+        }
         macro_rules! tap {
-            ($event:literal, $ty:ty, $field:ident, $stamp:expr) => {{
+            ($event:literal, $ty:ty, $field:ident, $stamp:expr) => {
+                tap!(@store $event, $ty, $field, $stamp, |d: $ty| d)
+            };
+            ($event:literal, wrapped $ty:ty, $field:ident, $stamp:expr) => {
+                tap!(@store $event, Wrapped<$ty>, $field, $stamp, |d: Wrapped<$ty>| d.value)
+            };
+            (@store $event:literal, $ty:ty, $field:ident, $stamp:expr, $unwrap:expr) => {{
                 let state = self.state.clone();
-                app.listen($event, move |ev| match serde_json::from_str::<$ty>(ev.payload()) {
+                let app_for_filter = app.clone();
+                app.listen($event, move |ev| {
+                    // Multi-vehicle: the API serves the ACTIVE vehicle (design §5; per-vehicle frames later).
+                    if !crate::vehicle_registry::payload_is_active(&app_for_filter, ev.payload()) {
+                        return;
+                    }
+                    match serde_json::from_str::<$ty>(ev.payload()) {
                     Ok(d) => {
                         let mut st = state.lock().unwrap();
-                        st.$field = Some(d);
+                        st.$field = Some(($unwrap)(d));
                         if $stamp {
                             st.last_update_ms = Some(now_ms());
                         }
                     }
                     Err(e) => log::debug!("[telemetry-api] {} payload not understood: {e}", $event),
+                    }
                 });
             }};
         }
@@ -106,7 +125,7 @@ impl TelemetryApi {
         tap!("telemetry-altitude", state::Altitude, altitude, true);
         tap!("telemetry-alt-ref", state::AltRef, alt_ref, false);
         tap!("telemetry-analog", state::Analog, analog, true);
-        tap!("telemetry-batteries", Vec<state::BatteryInstance>, batteries, true);
+        tap!("telemetry-batteries", wrapped Vec<state::BatteryInstance>, batteries, true);
         tap!("telemetry-status", state::Status, status, true);
         tap!("telemetry-sensor-status", state::Sensors, sensors, true);
         tap!("telemetry-flightmode", state::FlightMode, flight_mode, true);

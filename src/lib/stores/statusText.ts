@@ -7,10 +7,21 @@
 // audio cue. Severity is MAV_SEVERITY (0 = emergency … 7 = debug).
 
 import { writable, get } from 'svelte/store';
+import { isActive, vehicles } from '$lib/stores/vehicles';
+import { fleetEnabled } from '$lib/stores/fleetMode';
+import { orderedVehicles, vehicleColorFor } from '$lib/helpers/fleetStatus';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { settings } from './settings';
 
 export type StatusTextLevel = 'error' | 'warning' | 'info' | 'debug';
+
+/** Which vehicle a line came from — set only while 2+ vehicles are connected (single-vehicle sessions
+ *  keep the plain banner). Drives the colour chip + name prefix in the toast. */
+export interface StatusTextVehicle {
+  vehicleId: string;
+  name: string;
+  color: string;
+}
 
 export interface StatusTextMsg {
   id: number;
@@ -19,6 +30,7 @@ export interface StatusTextMsg {
   text: string;
   expiresAt: number;     // epoch ms when this line fades out (per-message lifetime)
   repeats: number;       // how many times this identical text has arrived while on screen (1 = once)
+  vehicle?: StatusTextVehicle;
 }
 
 const MAX_BUFFER = 12;          // lines kept (the banner shows a few and scrolls to the newest)
@@ -96,11 +108,12 @@ function scheduleSweep(): void {
   sweepTimer = setTimeout(sweepExpired, Math.max(0, soonest - Date.now()));
 }
 
-function push(severity: number, text: string): void {
+/** Show one line; false when it was not shown (empty, or filtered out by the "System Messages" setting). */
+function push(severity: number, text: string, vehicle?: StatusTextVehicle): boolean {
   const clean = text.trim();
-  if (!clean) return;
+  if (!clean) return false;
   const level = statusLevel(severity);
-  if (!levelAllowed(level)) return; // filtered out by the "System Messages" setting
+  if (!levelAllowed(level)) return false; // filtered out by the "System Messages" setting
 
   const expiresAt = Date.now() + CLEAR_AFTER_MS;
   let repeated = false;
@@ -109,21 +122,23 @@ function push(severity: number, text: string): void {
     // messages (INAV's "UNABLE TO ARM" / "WAITING FOR GPS FIX" while it waits for a fix) never repeats
     // its *last* line, so a last-line-only check appends a fresh row for every nag and fills the banner
     // within seconds. A repeat instead refreshes the existing line's lifetime and bumps its counter,
-    // keeping its position so the banner doesn't reshuffle while you're reading it.
-    const idx = list.findIndex((m) => m.text === clean);
+    // keeping its position so the banner doesn't reshuffle while you're reading it. With several
+    // vehicles the same text from two craft is two lines (keyed by vehicle too).
+    const idx = list.findIndex((m) => m.text === clean && (m.vehicle?.vehicleId ?? null) === (vehicle?.vehicleId ?? null));
     if (idx !== -1) {
       repeated = true;
       const refreshed = [...list];
-      refreshed[idx] = { ...refreshed[idx], severity, level, expiresAt, repeats: refreshed[idx].repeats + 1 };
+      refreshed[idx] = { ...refreshed[idx], severity, level, expiresAt, repeats: refreshed[idx].repeats + 1, vehicle: vehicle ?? refreshed[idx].vehicle };
       return refreshed;
     }
-    return [...list, { id: nextId++, severity, level, text: clean, expiresAt, repeats: 1 }].slice(-MAX_BUFFER);
+    return [...list, { id: nextId++, severity, level, text: clean, expiresAt, repeats: 1, vehicle }].slice(-MAX_BUFFER);
   });
   scheduleSweep();
 
   // Always cue errors/warnings; an INFO line already on screen never re-cues, so a nag loop stays
   // silent. DEBUG lines are never cued — they are on screen because someone is reading, not listening.
   if (level !== 'debug' && (!repeated || level !== 'info')) playTone(level);
+  return true;
 }
 
 // ── Audio cue (Web Audio) — gentle for info, discreetly alarming for warnings/errors ──
@@ -172,17 +187,31 @@ function playTone(level: StatusTextLevel): void {
 }
 
 /** Inject a GCS-local message into the same toast banner (e.g. a geozone/geofence breach the GCS detects
- *  itself). Goes through the same severity filter + audio cue as FC STATUSTEXT. */
-export function pushLocalStatus(severity: number, text: string): void {
-  push(severity, text);
+ *  itself). Goes through the same severity filter + audio cue as FC STATUSTEXT. Returns whether it was
+ *  shown (false: filtered out by the "System Messages" setting). */
+export function pushLocalStatus(severity: number, text: string): boolean {
+  return push(severity, text);
 }
 
 /** Start listening for FC STATUSTEXT messages. Safe to call once on app init. */
 export async function startStatusText(): Promise<void> {
   if (unlisten) return;
-  unlisten = await listen<{ severity: number; text: string }>('mavlink-statustext', (e) => {
-    trackPrearm(e.payload.text); // unfiltered — drives the arming indicator regardless of toast settings
-    push(e.payload.severity, e.payload.text);
+  unlisten = await listen<{ vehicleId?: string; severity: number; text: string }>('mavlink-statustext', (e) => {
+    const active = isActive(e.payload);
+    const known = get(vehicles);
+    // Per-vehicle lines and tags are a fleet feature (behind the `--fleet` gate).
+    const multi = get(fleetEnabled) && known.size > 1;
+    // Single vehicle: the plain banner, active only (unchanged). Fleet: every vehicle's lines, each
+    // tagged with its name + colour so a failing craft is identifiable at a glance.
+    if (!multi && !active) return;
+    if (active) trackPrearm(e.payload.text); // unfiltered — drives the arming indicator regardless of toast settings
+    let vehicle: StatusTextVehicle | undefined;
+    const vid = e.payload.vehicleId;
+    if (multi && typeof vid === 'string') {
+      const v = known.get(vid);
+      if (v) vehicle = { vehicleId: vid, name: v.name, color: vehicleColorFor(orderedVehicles(known), vid) };
+    }
+    push(e.payload.severity, e.payload.text, vehicle);
   });
 }
 
