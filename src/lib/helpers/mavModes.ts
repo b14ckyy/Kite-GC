@@ -108,11 +108,6 @@ const PLANE: MavMode[] = [
   { key: 'qrtl',      name: 'QRTL',      main: 21, sub: 0, stick: false, vtol: true, confirm: true },
   { key: 'qland',     name: 'QLand',     main: 20, sub: 0, stick: false, vtol: true, confirm: true },
   { key: 'loiterqland', name: 'Loiter QLand', main: 25, sub: 0, stick: false, vtol: true, confirm: true },
-  // QHover holds altitude only — the pilot holds position, so it needs sticks like Copter's AltHold.
-  { key: 'qhover',    name: 'QHover',    main: 18, sub: 0, stick: true,  vtol: true },
-  { key: 'qstabilize', name: 'QStabilize', main: 17, sub: 0, stick: true, vtol: true },
-  { key: 'qacro',     name: 'QAcro',     main: 23, sub: 0, stick: true,  vtol: true },
-  { key: 'qautotune', name: 'QAutoTune', main: 22, sub: 0, stick: true,  vtol: true },
   { key: 'manual',    name: 'Manual',    main: 0,  sub: 0, stick: true },
   { key: 'acro',      name: 'Acro',      main: 4,  sub: 0, stick: true },
   { key: 'fbwa',      name: 'FBWA',      main: 5,  sub: 0, stick: true },
@@ -122,6 +117,11 @@ const PLANE: MavMode[] = [
   { key: 'stabilize', name: 'Stabilize', main: 2,  sub: 0, stick: true },
   { key: 'training',  name: 'Training',  main: 3,  sub: 0, stick: true },
   { key: 'autotune',  name: 'AutoTune',  main: 8,  sub: 0, stick: true },
+  // QHover holds altitude only — the pilot holds position, so it needs sticks like Copter's AltHold.
+  { key: 'qhover',    name: 'QHover',    main: 18, sub: 0, stick: true,  vtol: true },
+  { key: 'qstabilize', name: 'QStabilize', main: 17, sub: 0, stick: true, vtol: true },
+  { key: 'qacro',     name: 'QAcro',     main: 23, sub: 0, stick: true,  vtol: true },
+  { key: 'qautotune', name: 'QAutoTune', main: 22, sub: 0, stick: true,  vtol: true },
   { key: 'avoidadsb', name: 'Avoid ADSB', main: 14, sub: 0, stick: false, neverOffer: true },
   { key: 'initialising', name: 'Initialising', main: 16, sub: 0, stick: false, neverOffer: true },
 ];
