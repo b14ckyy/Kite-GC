@@ -484,7 +484,7 @@
       "select": "Modus wählen…",
       "current": "Aktiver Modus"
     },
-    "showAllModes": "Alle Modi anzeigen",
+    "rcModes": "RC-Modi",
     "rcLockHint": "Stick-gesteuerte Modi brauchen eine RC-Quelle — eine verbundene Fernsteuerung oder aktive RC-Control.",
     "noRcLink": "Keine RC-Verbindung",
     "takeoffAlt": "Starthöhe (m)",
@@ -497,6 +497,14 @@
     "guidedTarget": "Guided-Ziel",
     "setWpHint": "Mission mit dem FC synchronisieren (Download/Upload), um zu aktivieren.",
     "startNotSyncedHint": "Der Plan auf dem Bildschirm weicht von der Mission auf dem FC ab — das Fahrzeug fliegt, was auf dem FC liegt.",
+    "planeTakeoffHint": "Schaltet in den TAKEOFF-Modus: Das Flugzeug startet selbstständig, steigt auf TKOFF_ALT und kreist dann. Unscharf wartet es, bis es scharf geschaltet wird.",
+    "takeoffArmWarning": "TAKEOFF-Modus aktiv: Der Motor läuft an, sobald scharf geschaltet wird (mit Standardparametern nach etwa 0,2 s, ohne Wurferkennung).",
+    "guidedUnavailable": "Der Flugcontroller bietet keinen Guided-Modus an.",
+    "guidedGone": "Guided ist nicht mehr aktiv — das Ziel wurde nicht gesendet.",
+    "qrtlHint": "QRTL: fliegt zurück zum Home (oder einem Rally-Punkt) und landet senkrecht.",
+    "qlandHint": "QLand: landet senkrecht genau an der aktuellen Position.",
+    "loiterQlandHint": "Loiter QLand: kreist im Vorwärtsflug auf Q_RTL_ALT herunter und landet dann senkrecht. Im Schwebeflug landet es sofort.",
+    "autolandHint": "AutoLand: automatische Landung am Home in Startrichtung. Geht nur im Flug und nur, wenn der Flugcontroller die Startrichtung erfasst hat.",
     "ack": {
       "ok": "Angenommen"
     },
@@ -2006,6 +2014,32 @@
     "tabPerformance": "3D-Perf",
     "tabVideo": "Video",
     "tabFleet": "Flotte (Gate)",
+    "tabModes": "FC-Modi",
+    "modes": {
+      "vehicle": "Aktives Fahrzeug",
+      "source": "Quelle des Panels",
+      "sourceFc": "FC-Liste ({n} Modi)",
+      "sourceStatic": "Statische Tabelle",
+      "mismatch": "Die FC-Liste wird zurückgehalten: Firmware/Klasse des Panels passen noch nicht zum aktiven Fahrzeug (Fahrzeugwechsel).",
+      "fcList": "FC-Liste (AVAILABLE_MODES)",
+      "noFcList": "Keine FC-Liste für dieses Fahrzeug (PX4, ArduPilot vor 4.7, noch nicht gelesen oder keine Antwort).",
+      "panel": "Kite-Tabelle → Steuerpanel",
+      "colNumber": "Nr.",
+      "colFcName": "FC-Name",
+      "colKiteName": "Kite-Name",
+      "colNotSelectable": "Nicht wählbar",
+      "colStick": "Stick",
+      "colConfirm": "Halten",
+      "colStatus": "Status",
+      "status": {
+        "offered": "angeboten",
+        "unknown": "angeboten (Kite unbekannt)",
+        "neverOffered": "nie angeboten",
+        "notListed": "nicht in der FC-Liste",
+        "notSelectable": "FC: nicht wählbar",
+        "staticHidden": "ausgeblendet (VTOL / nur mit FC-Liste)"
+      }
+    },
     "fleet": {
       "enabled": "Multi-Fahrzeug-Funktionen aktiv",
       "hint": "Startflag --fleet (oder die Umgebungsvariable KITE_FLEET); im Debug-Build standardmäßig an, im Release-Build aus (--debug schaltet ihn nicht ein). Aus: die Einzelfahrzeug-Oberfläche (kein Link-Manager, Flotten-Tab, keine Gruppenbefehle oder Flotten-Kartenebenen), kein zweites Fahrzeug, kein zweiter Link und keine Gruppenflüge. Aufgezeichnet wird nur das erste Fahrzeug, außer KITE_FLEET_RECORDING ist gesetzt. Hier nur im Debug-Build für diese Sitzung umschaltbar.",

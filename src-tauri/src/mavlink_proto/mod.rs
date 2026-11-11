@@ -10,6 +10,7 @@ pub mod control;
 pub mod handler;
 pub mod handshake;
 pub mod mission;
+pub mod modes;
 pub mod params;
 pub mod params_rt;
 pub mod parser;

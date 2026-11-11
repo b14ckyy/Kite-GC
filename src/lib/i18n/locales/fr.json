@@ -338,7 +338,7 @@
       "select": "Choisir un mode…",
       "current": "Mode actif"
     },
-    "showAllModes": "Afficher tous les modes",
+    "rcModes": "Modes RC",
     "rcLockHint": "Les modes au manche nécessitent une source RC — une radiocommande connectée ou le contrôle RC actif.",
     "noRcLink": "Pas de liaison RC",
     "takeoffAlt": "Altitude de décollage (m)",

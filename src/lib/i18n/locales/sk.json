@@ -358,7 +358,7 @@
       "select": "Vyberte režim…",
       "current": "Aktívny režim"
     },
-    "showAllModes": "Zobraziť všetky režimy",
+    "rcModes": "RC režimy",
     "rcLockHint": "Režimy riadené pákami potrebujú zdroj RC: pripojený vysielač alebo aktívne RC ovládanie.",
     "noRcLink": "Bez RC spojenia",
     "takeoffAlt": "Výška po vzlete (m)",

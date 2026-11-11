@@ -239,6 +239,24 @@ inside the box of the feature release they belong to, so the notes for one relea
 
     **Improved**
 
+    - **ArduPilot: the control panel offers the modes your flight controller really has.** From
+      ArduPilot 4.7 on, Kite reads the mode list from the flight controller: modes missing from your
+      firmware or switched off there are no longer offered, and modes the panel did not have before
+      are (Auto RTL, AutoLand, Thermal, Follow, Dock and more). Kite keeps its own names and the RC
+      lock for stick-flown modes; a mode Kite does not know, such as one from a Lua script, shows
+      the flight controller's name. Older ArduPilot versions and PX4 use the built-in list, which
+      is complete for Copter, Plane and Rover now. [#242]
+    - **ArduPlane: a Takeoff button for fixed-wing planes.** It switches the plane to TAKEOFF mode
+      (hold to confirm); the plane climbs to `TKOFF_ALT` and loiters. Until now a plain plane could
+      not be put into that mode from Kite. Mind that in TAKEOFF mode the motor starts as soon as
+      you arm — the panel says so while the plane waits disarmed in that mode. [#242]
+    - **Stick-flown modes fold out from an "RC modes" bar** instead of the small *Show all modes*
+      checkbox. The bar is finger-sized and shows *No RC link* while those modes are locked. [#242]
+    - **ArduPilot: returning and landing in one place, always with a hold.** A QuadPlane has
+      **RTL / QRTL** and **Loiter QLand / QLand** as two pairs of hold-to-confirm buttons instead
+      of QRTL and QLand as single clicks among the mode buttons; a fixed-wing plane on ArduPilot
+      4.7 gets **AutoLand** next to RTL. Among the mode buttons, SmartRTL (Copter, Rover), Auto
+      RTL and Surface (Sub) need a hold too and are listed after the ordinary flight modes. [#242]
     - **Network links: an empty host means this device.** The host field starts empty with a faded
       `localhost` hint instead of a pre-filled address; leave it empty (or type `localhost`) and Kite
       connects to `127.0.0.1` — what a local simulator needs. An address saved earlier is still shown. [#237]
@@ -510,6 +528,7 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#232]: https://github.com/b14ckyy/Kite-GC/pull/232
 [#234]: https://github.com/b14ckyy/Kite-GC/pull/234
 [#237]: https://github.com/b14ckyy/Kite-GC/pull/237
+[#242]: https://github.com/b14ckyy/Kite-GC/pull/242
 [#143]: https://github.com/b14ckyy/Kite-GC/pull/143
 [#145]: https://github.com/b14ckyy/Kite-GC/pull/145
 [#151]: https://github.com/b14ckyy/Kite-GC/pull/151

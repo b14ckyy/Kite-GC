@@ -24,10 +24,16 @@
   import { isLinux } from "$lib/platform";
   import NumberStepper from "$lib/components/NumberStepper.svelte";
   import { mjpegStats, uiJankMs, startJankProbe, stopJankProbe } from "$lib/controllers/mjpegSink";
+  import { activeVehicleId } from "$lib/stores/vehicles";
+  import { activeFcModes } from "$lib/stores/fcModes";
+  import { autopilotSystem } from "$lib/stores/autopilotContext";
+  import { arduVehicleClass } from "$lib/stores/missionArdupilot";
+  import { activeFcModesChecked, modeTableMatchesVehicle } from "$lib/controllers/vehicleControl";
+  import { offeredModes, tableFor, type MavMode, type FcMode } from "$lib/helpers/mavModes";
 
   let { onclose }: { onclose: () => void } = $props();
 
-  type Tab = 'msp' | 'mavlink' | 'tunnel' | 'alerts' | 'telemetry' | 'rc' | 'performance' | 'video' | 'fleet';
+  type Tab = 'msp' | 'mavlink' | 'modes' | 'tunnel' | 'alerts' | 'telemetry' | 'rc' | 'performance' | 'video' | 'fleet';
   let tab = $state<Tab>('msp');
 
   // Linux hole-punch spike (dev, MOBILE_RTSP.md P2.3 stage A) — coloured stand-in below the DOM hole.
@@ -437,6 +443,33 @@
   });
   const yesNo = (v: boolean): string => (v ? '✓' : '—');
 
+  // FC modes tab: the active vehicle's FC list (AVAILABLE_MODES) next to what the control panel offers.
+  const FC_NOT_USER_SELECTABLE = 2;
+  const fcModesOffered = $derived(offeredModes($autopilotSystem, $arduVehicleClass, $activeFcModesChecked));
+  /** Every row of Kite's table plus the FC's unknown modes, with why it is (not) offered. */
+  const fcModeRows = $derived.by(() => {
+    const fc: readonly FcMode[] | null = $activeFcModesChecked;
+    const offered = new Set(fcModesOffered.map((m) => m.main));
+    const byNumber = new Map((fc ?? []).map((m) => [m.customMode >>> 0, m]));
+    const status = (m: MavMode): string => {
+      if (m.neverOffer) return 'neverOffered';
+      if (offered.has(m.main)) return 'offered';
+      if (!fc) return 'staticHidden';
+      const f = byNumber.get(m.main);
+      if (!f) return 'notListed';
+      return (f.properties & FC_NOT_USER_SELECTABLE) ? 'notSelectable' : 'staticHidden';
+    };
+    const table = tableFor($autopilotSystem, $arduVehicleClass);
+    const rows = table.map((m) => ({ main: m.main, sub: m.sub, name: m.name, stick: m.stick, confirm: !!m.confirm, status: status(m) }));
+    const known = new Set(table.map((m) => m.main));
+    for (const m of fcModesOffered) {
+      if (!known.has(m.main)) rows.push({ main: m.main, sub: m.sub, name: m.name, stick: m.stick, confirm: false, status: 'unknown' });
+    }
+    return rows;
+  });
+  const kiteNameFor = (n: number): string =>
+    tableFor($autopilotSystem, $arduVehicleClass).find((m) => m.main === n)?.name ?? '—';
+
   function probeLabel(result: string): string {
     switch (result) {
       case 'ok': return $t('debug.tunProbeOk');
@@ -548,6 +581,7 @@
   <div class="debug-tabs">
     <button class="tab" class:active={tab === 'msp'} onclick={() => tab = 'msp'}>{$t('debug.tabMsp')}</button>
     <button class="tab" class:active={tab === 'mavlink'} onclick={() => tab = 'mavlink'}>{$t('debug.tabMavlink')}</button>
+    <button class="tab" class:active={tab === 'modes'} onclick={() => tab = 'modes'}>{$t('debug.tabModes')}</button>
     <button class="tab" class:active={tab === 'tunnel'} onclick={() => tab = 'tunnel'}>{$t('debug.tabTunnel')}</button>
     <button class="tab" class:active={tab === 'telemetry'} onclick={() => tab = 'telemetry'}>{$t('debug.tabTelemetry')}</button>
     <button class="tab" class:active={tab === 'alerts'} onclick={() => tab = 'alerts'}>{$t('debug.tabAlerts')}</button>
@@ -683,6 +717,74 @@
               <td class="col-num">{msg.count}</td>
               <td class="col-rate">{msg.rate_hz > 0 ? `${msg.rate_hz} Hz` : '—'}</td>
               <td class="col-rate">{msg.last_seen_s.toFixed(1)}s</td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
+  {:else if tab === 'modes'}
+    <!-- The reader's own state (phase, unanswered count) is not exported — its log lines ("AVAILABLE_MODES:
+         sysid=…") carry it. -->
+    <div class="perf-tab">
+      <div class="stat-group">
+        <span class="stat-label">{$t('debug.modes.vehicle')}</span>
+        <span class="stat-value">{$activeVehicleId ?? '—'} · {$autopilotSystem} / {$arduVehicleClass}</span>
+      </div>
+      <div class="stat-group">
+        <span class="stat-label">{$t('debug.modes.source')}</span>
+        <span class="stat-value">
+          {$activeFcModesChecked ? $t('debug.modes.sourceFc', { values: { n: $activeFcModesChecked.length } }) : $t('debug.modes.sourceStatic')}
+        </span>
+      </div>
+      {#if $activeFcModes && !$modeTableMatchesVehicle}
+        <div class="perf-hint">{$t('debug.modes.mismatch')}</div>
+      {/if}
+
+      <div class="perf-section">{$t('debug.modes.fcList')}</div>
+      <table class="debug-table">
+        <thead>
+          <tr>
+            <th class="col-num">#</th>
+            <th class="col-code">{$t('debug.modes.colNumber')}</th>
+            <th class="col-name">{$t('debug.modes.colFcName')}</th>
+            <th class="col-num">{$t('debug.modes.colNotSelectable')}</th>
+            <th class="col-name">{$t('debug.modes.colKiteName')}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {#each $activeFcModes ?? [] as m, i (i)}
+            <tr>
+              <td class="col-num">{i + 1}</td>
+              <td class="col-code">{m.customMode}</td>
+              <td class="col-name">{m.name}</td>
+              <td class="col-num">{yesNo((m.properties & FC_NOT_USER_SELECTABLE) !== 0)}</td>
+              <td class="col-name">{kiteNameFor(m.customMode)}</td>
+            </tr>
+          {:else}
+            <tr><td class="empty-cell" colspan="5">{$t('debug.modes.noFcList')}</td></tr>
+          {/each}
+        </tbody>
+      </table>
+
+      <div class="perf-section">{$t('debug.modes.panel')}</div>
+      <table class="debug-table">
+        <thead>
+          <tr>
+            <th class="col-code">{$t('debug.modes.colNumber')}</th>
+            <th class="col-name">{$t('debug.modes.colKiteName')}</th>
+            <th class="col-num">{$t('debug.modes.colStick')}</th>
+            <th class="col-num">{$t('debug.modes.colConfirm')}</th>
+            <th class="col-name">{$t('debug.modes.colStatus')}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {#each fcModeRows as r (`${r.main}/${r.sub}/${r.status}`)}
+            <tr class:inactive={r.status !== 'offered' && r.status !== 'unknown'}>
+              <td class="col-code">{r.sub ? `${r.main}/${r.sub}` : r.main}</td>
+              <td class="col-name">{r.name}</td>
+              <td class="col-num">{yesNo(r.stick)}</td>
+              <td class="col-num">{yesNo(r.confirm)}</td>
+              <td class="col-name">{$t(`debug.modes.status.${r.status}`)}</td>
             </tr>
           {/each}
         </tbody>
