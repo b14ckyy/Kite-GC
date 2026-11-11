@@ -257,6 +257,15 @@ inside the box of the feature release they belong to, so the notes for one relea
       of QRTL and QLand as single clicks among the mode buttons; a fixed-wing plane on ArduPilot
       4.7 gets **AutoLand** next to RTL. Among the mode buttons, SmartRTL (Copter, Rover), Auto
       RTL and Surface (Sub) need a hold too and are listed after the ordinary flight modes. [#242]
+    - **Compact Database no longer freezes the app, and cannot be started twice.** It runs in the
+      background behind a notice that stays until it is done — on a hard disk or an SD card a large
+      database takes minutes. It is refused while a flight is being recorded or an import is
+      running, and it now works together with the automatic space reclaim instead of colliding
+      with it.
+    - **INAV flash download: one unreadable log no longer ends the import.** A `.bbl` from the
+      flight controller's flash holds one log per flight. If one of them was damaged, the import
+      stopped there and the following flights were never imported. Kite now imports the rest and
+      shows which logs failed and why.
     - **Network links: an empty host means this device.** The host field starts empty with a faded
       `localhost` hint instead of a pre-filled address; leave it empty (or type `localhost`) and Kite
       connects to `127.0.0.1` — what a local simulator needs. An address saved earlier is still shown. [#237]

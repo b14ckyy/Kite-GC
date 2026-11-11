@@ -130,7 +130,8 @@ A progress bar tracks the import. Kite decodes INAV Blackbox logs itself and acc
 Blackbox log written by another firmware (Betaflight, for example) is refused with a message that
 names the firmware. A `.bbl` pulled from the flight controller's flash usually holds **several
 flights** — one per arm / disarm cycle. Kite detects that and offers to import them all, each as its
-own logbook entry. Imported telemetry logs (`.tlog` / `.rawmsp`) are
+own logbook entry. A log in the file that cannot be read does not stop the others: Kite imports the
+rest and then lists which logs failed and why. Imported telemetry logs (`.tlog` / `.rawmsp`) are
 treated as telemetry recordings and **split into separate flights on the arm / disarm markers** in the
 log, the same way a live recording is.
 
