@@ -1702,6 +1702,10 @@ flight logbook with replay, FPV video, radar / airspace awareness and telemetry 
   into one track, so the track was jagged and the HDOP, satellite count and raw GPS altitude
   jumped back and forth during replay. The import now follows the receiver the flight controller
   was actually using, and switches with it if the autopilot changed receivers mid-flight.</li>
+<li><strong><code>.tlog</code> import: a log that carries several vehicles is no longer mixed into one flight.</strong> When
+  a MAVLink log held frames of more than one aircraft on the same link, their positions and
+  attitudes ended up interleaved in a single track. The import now follows the first autopilot it
+  sees and skips the others.</li>
 </ul>
 <hr />
 <p><strong class="kite-patch">1.0.1</strong> <em class="kite-badge">2026-09-13</em></p>
