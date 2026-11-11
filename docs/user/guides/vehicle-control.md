@@ -74,11 +74,12 @@ is not shown. Kite keeps its own mode names and the RC lock. A mode Kite does no
 Lua script, for example — appears under **Show all modes** with the name the flight controller gives
 it, and needs an RC source. Older ArduPilot versions and PX4 get Kite's built-in list.
 
-Not every mode of the list becomes a mode button: Guided, RTL, Land and Takeoff are left to the
-controls further up, and modes that only the firmware itself enters (Avoid ADSB, Initialising) or
-that are for diagnostics (ArduSub's Motor Detection) are never offered. Mode buttons that return or
-land the vehicle are hold-to-confirm, like RTL and Land: **SmartRTL** (Copter, Rover), **Auto RTL**
-(Copter), **AutoLand** (Plane), **QRTL**, **QLand** and **Loiter QLand** (QuadPlane) and
+Not every mode of the list becomes a mode button: Guided, Takeoff, RTL, Land and ArduPlane's QRTL,
+QLand, Loiter QLand and AutoLand have their own controls further up (see [Takeoff, return and
+landing](#takeoff-return-and-landing)), and modes that only the firmware itself enters (Avoid ADSB,
+Initialising) or that are for diagnostics (ArduSub's Motor Detection) are never offered. The mode
+buttons are ordered: ordinary flight modes first, then — as hold-to-confirm buttons — the remaining
+ones that bring the vehicle back or down: **SmartRTL** (Copter, Rover), **Auto RTL** (Copter) and
 **Surface** (Sub).
 If the flight controller's list has no Guided mode, the **Guided** toggle is greyed out.
 
@@ -101,8 +102,18 @@ If the flight controller's list has no Guided mode, the **Guided** toggle is gre
     Hold the plane ready for launch before you arm.
 
 - **RTL** returns to the launch/home point.
-- **Land** lands in place — hidden for plain ArduPlane fixed-wing (which lands via an AUTO sequence or
-  RTL); QuadPlane uses its vertical QLAND path.
+- **Land** lands in place (Copter, PX4).
+- **ArduPilot QuadPlane** — the return and landing modes sit here in two pairs:
+    - **RTL** and **QRTL**: RTL is the fixed-wing return; QRTL returns to home (or a rally point)
+      and lands vertically.
+    - **Loiter QLand** and **QLand**: QLand lands vertically right where the aircraft is. Loiter
+      QLand is for arriving high in forward flight: the aircraft circles down to the altitude of
+      `Q_RTL_ALT` and then lands vertically; in hover it lands at once.
+- **ArduPilot fixed-wing plane** — next to RTL there is **AutoLand** when the firmware has it
+  (ArduPilot 4.7 and newer): an automatic landing at home in the takeoff direction. It works only in
+  flight, and the flight controller must have captured the takeoff direction (it does so at takeoff,
+  once it has enough ground speed); otherwise it refuses and the panel shows its answer. Older firmware has no
+  land-now command for a plane (it lands through an AUTO sequence or RTL), so the place stays empty.
 - **Abort Landing** (go-around) is offered for **fixed-wing** to wave off an approach and climb out.
 - **VTOL transition** (QuadPlane / VTOL only) switches between **hover** and **forward** flight.
 
@@ -162,7 +173,7 @@ The panel hides commands that don't apply to the connected airframe:
 | Command | Copter | Fixed-wing (Plane) | QuadPlane / VTOL | PX4 |
 |---|---|---|---|---|
 | Takeoff | ✓ | ✓ (TAKEOFF mode) | ✓ | ✓ |
-| Land | ✓ | — | ✓ (QLAND) | ✓ |
+| Land | ✓ | AutoLand (ArduPilot 4.7+) | QLand / Loiter QLand | ✓ |
 | Abort Landing (go-around) | — | ✓ | ✓ | ✓ |
 | VTOL transition | — | — | ✓ | ✓ |
 | Set Heading | ✓ (Guided) | — | — | — |
