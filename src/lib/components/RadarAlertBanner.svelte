@@ -12,6 +12,7 @@
   import { radarAlerts, type ContactAlert } from '$lib/controllers/radarAlerts';
   import { radarSelection } from '$lib/stores/radarTracking';
   import { contactTypeKey } from '$lib/helpers/radar3d';
+  import { compassPointKey } from '$lib/helpers/compassPoint';
   import { convertSpeed, convertAltitude, convertDistance, formatConverted, speedDigits } from '$lib/utils/units';
   import type { InterfaceSettings } from '$lib/stores/settings';
 
@@ -22,8 +23,7 @@
   // Worst (nearest-CPA) warning drives the evade callout in the headline (list is sorted worst-first).
   const lead = $derived(warnings.find((a) => a.evadeBearingDeg != null) ?? warnings[0]);
 
-  const COMPASS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
-  const compass = (deg: number) => COMPASS[Math.round(deg / 45) % 8];
+  const compass = (deg: number) => $t(compassPointKey(deg));
 
   const fmtSpeed = (ms: number | null) =>
     ms == null ? '—' : formatConverted(convertSpeed(ms, interfaceSettings.speedUnit), speedDigits(interfaceSettings.speedUnit));

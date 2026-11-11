@@ -196,6 +196,7 @@ inside the box of the feature release they belong to, so the notes for one relea
     - **Patch releases only** — update-check channel that offers bug-fix releases of the running
       version only (2.0.0 → 2.0.1, never 2.1.0). [#162]
     - **Slovak interface language** (Settings → Language), contributed by Sebastian Kumor. [#222]
+    - **Spanish interface language** (Settings → Language). [#225]
 
     **Removed**
 
@@ -451,6 +452,7 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#140]: https://github.com/b14ckyy/Kite-GC/pull/140
 [#141]: https://github.com/b14ckyy/Kite-GC/pull/141
 [#222]: https://github.com/b14ckyy/Kite-GC/pull/222
+[#225]: https://github.com/b14ckyy/Kite-GC/pull/225
 [#228]: https://github.com/b14ckyy/Kite-GC/pull/228
 [#143]: https://github.com/b14ckyy/Kite-GC/pull/143
 [#145]: https://github.com/b14ckyy/Kite-GC/pull/145

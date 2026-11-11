@@ -20,6 +20,7 @@
   import { replayWpTotal } from '$lib/stores/navStatus';
   import { buildMissionInput } from '$lib/helpers/missionLibrary';
   import { buildArduMissionInput } from '$lib/helpers/missionLibraryArdu';
+  import { compassPointKey } from '$lib/helpers/compassPoint';
   import { get } from 'svelte/store';
   import { locale } from 'svelte-i18n';
   import WeatherEditor from './WeatherEditor.svelte';
@@ -476,8 +477,7 @@
   }
 
   function windDegToLabel(deg: number): string {
-    const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
-    return dirs[Math.round(deg / 45) % 8];
+    return $t(compassPointKey(deg));
   }
 
   function formatFlightSource(source: string): string {

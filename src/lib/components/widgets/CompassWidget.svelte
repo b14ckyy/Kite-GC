@@ -34,11 +34,6 @@
   let windDownwind = $derived((telem.windDirFrom + 180) % 360);
   let windSpeedConv = $derived(convertSpeed(telem.windSpeedMs, interfaceSettings.speedUnit));
 
-  function cardinalLabel(heading: number): string {
-    const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
-    return dirs[Math.round(heading / 45) % 8];
-  }
-
   // Tick marks every 10°
   const ticks: { deg: number; major: boolean }[] = [];
   for (let i = 0; i < 360; i += 10) {

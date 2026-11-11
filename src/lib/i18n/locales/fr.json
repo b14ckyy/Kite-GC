@@ -1101,9 +1101,13 @@
   },
   "compass": {
     "n": "N",
+    "ne": "NE",
     "e": "E",
+    "se": "SE",
     "s": "S",
-    "w": "O"
+    "sw": "SO",
+    "w": "O",
+    "nw": "NO"
   },
   "batch": {
     "relAlt": "Variation rel.",
