@@ -132,6 +132,17 @@ inside the box of the feature release they belong to, so the notes for one relea
         handed back to the disk. A real logbook with 44 flights went from 1.2 GB to 0.75 GB. Tracks,
         replay and the stored original logs are untouched. [#232]
 
+    ??? info "INAV Blackbox import without a helper program"
+        Kite now decodes INAV Blackbox logs itself: there is no `blackbox_decode` download any more,
+        and imports are noticeably faster. They are also complete — the old tool lost every frame
+        between a flight-mode change and the next key frame; those stretches are now in the track,
+        with correct mAh and GPS values. **HI-RES** replay uses the same decoder. Only INAV logs are
+        accepted: a Blackbox log from another firmware, Betaflight for example, is refused with a
+        message that names it (earlier versions imported such logs with wrong values; those flights
+        stay, without HI-RES replay). If an import goes wrong, starting Kite with the environment
+        variable `KITE_BLACKBOX_LEGACY=1` brings back the old decoder for now — please report the
+        log that failed. [#NNN]
+
     **Added**
 
     - **Android support** — native app with USB serial, Bluetooth LE and Wi-Fi links, touch layout

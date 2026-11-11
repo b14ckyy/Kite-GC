@@ -17,7 +17,7 @@ both live and replay) and the **parallel data networks** that don't go through t
         │ ByteTransport (Serial/TCP/UDP/BLE)    │                         │
         ▼               ▼                       ▼                         ▼
  ┌──────────────┐ ┌──────────────┐ ┌──────────────────────┐      ┌──────────────────┐
- │ MspScheduler │ │MavlinkHandler│ │ PassiveHandler       │      │ blackbox_decode  │
+ │ MspScheduler │ │MavlinkHandler│ │ PassiveHandler       │      │ Blackbox decoder │
  │ (poll loop)  │ │ (reader+HB)  │ │ (detect + decode)    │      │ / raw parser     │
  └──────┬───────┘ └──────┬───────┘ └──────────┬───────────┘      └────────┬─────────┘
         └────────────────┴─────── same normalized payloads ──────┐        │
@@ -97,7 +97,7 @@ Emitted by all live protocols where applicable (NULL/absent where a protocol doe
 ## Import (Blackbox / raw logs)
 
 ```
-INAV Blackbox .TXT ─► blackbox_decode (external bin) ─► CSV ─► blackbox.rs parser ─┐
+INAV Blackbox .TXT ─► built-in decoder (inav/) ─► blackbox.rs row mapping ─────────┐
 .rawmsp (MWP v2) / .tlog (MAVLink) ─► raw parser ─────────────────────────────────┤
                                                                                    ▼
                                           downsample → telemetry_records (+ blackbox BLOB)
@@ -200,7 +200,8 @@ These subsystems are independent of the inbound `TelemetryData` pipeline:
 | `src-tauri/src/mavlink_proto/handler.rs` | Backend | MAVLink reader/heartbeat, decode → same events |
 | `src-tauri/src/passive_telemetry/` | Backend | Listen-only detect + decode |
 | `src-tauri/src/flightlog/recorder.rs` | Backend | Arm/disarm detection, temp `.ktmp`, DB writes |
-| `src-tauri/src/flightlog/blackbox.rs` | Backend | Blackbox CSV parsing, unit conversion, downsampling |
+| `src-tauri/src/flightlog/inav/` | Backend | Built-in INAV Blackbox decoder (header, frames, per-version schema) |
+| `src-tauri/src/flightlog/blackbox.rs` | Backend | Blackbox import: row mapping, unit conversion, downsampling |
 | `src-tauri/src/flightlog/db.rs` | Backend | SQLite schema, migrations, CRUD |
 | `src/lib/stores/telemetry.ts` | Frontend | `telemetry-*` listeners → reactive `TelemetryData` |
 | `src/lib/adapters/telemetryAdapter.ts` | Frontend | DB record → `TelemetryData` (replay) |

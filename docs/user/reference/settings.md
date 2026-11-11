@@ -107,7 +107,6 @@ leave them off to save bandwidth on a slow over-the-air radio, turn them on when
 | **Compact Database** | Defragment the database to reclaim space (rarely needed). | — |
 | **Database backup (pre-update)** | Shown only once a backup exists: the backup Kite wrote before it last upgraded the database format, with its size and a **Delete** button. See **[Flight logbook](../guides/logbook.md#the-database-updates-and-the-automatic-backup)**. | — |
 | **Raw log path** | Where raw `.rawmsp` / `.tlog` files are written. | default path |
-| **Blackbox decoder** | The INAV `blackbox_decode` helper — shows its version and lets you **download / update** it. Desktop only (Android and iOS cannot run the helper). | — |
 
 See **[Flight logbook](../guides/logbook.md)** for how these are used.
 

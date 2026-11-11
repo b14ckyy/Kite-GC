@@ -74,10 +74,9 @@ These transfers happen only because you trigger them, and you choose the recipie
   you configure. The Telemetry API listens on the local machine only unless you switch *Reachable on the
   network* on.
 - **Helper programs** — when you press *Download* for a helper on the desktop, Kite fetches it from its
-  publisher's GitHub releases: the blackbox decoder from iNavFlight/blackbox-tools, MediaMTX for RTSP
-  video from bluenviron/mediamtx, and ffmpeg from BtbN/FFmpeg-Builds. The request carries only what any
-  download does (your IP address and a user-agent string naming Kite); it is governed by
-  [GitHub's privacy statement](https://docs.github.com/site-policy/privacy-policies).
+  publisher's GitHub releases: MediaMTX for RTSP video from bluenviron/mediamtx, and ffmpeg from
+  BtbN/FFmpeg-Builds. The request carries only what any download does (your IP address and a
+  user-agent string naming Kite); it is governed by [GitHub's privacy statement](https://docs.github.com/site-policy/privacy-policies).
 
 ## Third-party services the app contacts
 

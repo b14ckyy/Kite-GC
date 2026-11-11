@@ -49,8 +49,7 @@ remembers your last connection from then on, as on the desktop. Details:
 - **Import** takes **`.kflight`**, **`.tlog`** and **`.rawmsp`** files. Onboard logs — INAV Blackbox,
   ArduPilot Dataflash, PX4 ULog — are imported on a desktop install and moved over as `.kflight`.
 - The mobile database keeps **no original log files**, so **HI-RES** replay, the original-log export
-  and the **Open** button (replay without importing) are desktop features. The `blackbox_decode`
-  helper does not exist on mobile.
+  and the **Open** button (replay without importing) are desktop features.
 - **Android:** the database and raw logs live in the app's private storage. **Settings → Data** can
   point them at a folder of your own; Kite copies them there, and that copy survives uninstalling the
   app.
