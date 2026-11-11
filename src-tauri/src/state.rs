@@ -150,8 +150,9 @@ impl AppState {
         let radar = RadarManager::new();
         let radar_ingest = radar.ingest_handle();
         let sessions: SessionSlotsHandle = Arc::default();
-        // The fleet gate is the `--fleet` launch flag (`fleet_mode`): off → the coordinator never forms a group.
-        let groups = Arc::new(GroupCoordinator::new(sessions.clone(), Arc::new(SystemClock), crate::fleet_mode::handle()));
+        // Group recording (`fleet_mode::group_recording`: the fleet features plus the KITE_FLEET_RECORDING
+        // developer opt-in): off → the coordinator never forms a group.
+        let groups = Arc::new(GroupCoordinator::new(sessions.clone(), Arc::new(SystemClock), crate::fleet_mode::group_recording_handle()));
         Self {
             links: Mutex::new(LinkRegistry::new()),
             radar: Mutex::new(radar),

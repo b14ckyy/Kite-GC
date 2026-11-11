@@ -53,6 +53,7 @@
   import { vehicles } from "$lib/stores/vehicles";
   import { selectedVehicleIds } from "$lib/stores/fleetSelection";
   import { fleetEnabled, loadFleetMode } from "$lib/stores/fleetMode";
+  import { startFleetRecordingNotice } from "$lib/controllers/fleetRecordingNotice";
   import { enqueueFlightDialog, dropQueuedFlightDialogs } from "$lib/controllers/flightDialogQueue";
   import { navTabRequest } from "$lib/stores/navRequest";
   import RcControlPanel from "$lib/components/control/RcControlPanel.svelte";
@@ -2808,7 +2809,9 @@
   async function initPage() {
     await startBleDeviceListener(); // live BLE discovery → bleDevices store
     await loadInfo();
-    void loadFleetMode(); // the `--fleet` launch flag → fleet UI on/off
+    // The `--fleet` launch flag → fleet UI on/off; then the once-per-run "only the first vehicle is
+    // recorded" notice of a fleet session without group recording.
+    void loadFleetMode().then(startFleetRecordingNotice);
     // Links the backend still holds (page reload / a UI state that drifted) → show them as connected.
     void recoverBackendLinks().catch(() => {});
     try {

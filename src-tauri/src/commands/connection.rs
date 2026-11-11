@@ -209,14 +209,31 @@ pub async fn connect(
     // Multi-vehicle: every connect opens an additional link. Reserve its id now (the handlers stamp
     // their events with it) and, on the first link only, start RC injection from a clean slate — with
     // another link already up, resetting would yank the other vehicle's engaged override.
-    let link_id = {
+    let (link_id, first_link) = {
         let mut reg = state.links.lock().map_err(|e| e.to_string())?;
-        if reg.is_empty() {
+        let first = reg.is_empty();
+        // GATE(fleet): a second link is a multi-vehicle feature.
+        if !crate::fleet_mode::allows(first, crate::fleet_mode::enabled()) {
+            return Err("Already connected — disconnect first (multiple links need fleet mode)".into());
+        }
+        if first {
             if let Ok(mut rc) = state.rc_tx.lock() {
                 *rc = crate::scheduler::rc_tx::RcTxState::default();
             }
         }
-        reg.reserve_id()
+        (reg.reserve_id(), first)
+    };
+    // Group recording off (the default, `fleet_mode::group_recording`): ONE recorded vehicle at a time — a
+    // connecting link records only when no recorder runs right now (the first link; or the recorded one
+    // came back over a new link after a drop, while another link stayed up — its Continue-on-reconnect
+    // resumes then). Any further link records nothing (no recorder, no raw log), so a fleet session never
+    // writes group data into the flight database.
+    let nobody_records = first_link || state.recorders.lock().map(|m| m.is_empty()).unwrap_or(true);
+    let flight_log_enabled = if nobody_records || crate::fleet_mode::group_recording() {
+        flight_log_enabled
+    } else {
+        log::warn!("L{}: flight recording off — another vehicle is being recorded (KITE_FLEET_RECORDING not set)", link_id);
+        Some(false)
     };
 
     let proto = protocol.as_deref().unwrap_or("msp");
@@ -634,7 +651,9 @@ fn connect_mavlink(
     };
     store_recorder(&state, emitter.key(), &recorder_handle);
     // Vehicles discovered later on this link record unattended (DB only) with the same settings.
-    let secondary_recording = if flight_log_settings.enabled && flight_log_settings.db_enabled {
+    // Group recording off (`fleet_mode::group_recording`): vehicles discovered beside the primary get no
+    // recorder — only the first vehicle's flights reach the logbook.
+    let secondary_recording = if flight_log_settings.enabled && flight_log_settings.db_enabled && crate::fleet_mode::group_recording() {
         let portable = std::env::current_exe()
             .ok()
             .and_then(|p| p.parent().map(|p| p.join(".portable").exists()))

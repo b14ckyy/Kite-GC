@@ -11,7 +11,7 @@
   import { radarAlertDebug, type AlertLevel } from "$lib/controllers/radarAlerts";
   import { gpsInject } from "$lib/stores/telemetry";
   import { settings } from "$lib/stores/settings";
-  import { fleetEnabled, setFleetMode } from "$lib/stores/fleetMode";
+  import { fleetEnabled, fleetGroupRecording, setFleetMode } from "$lib/stores/fleetMode";
   import { invoke } from "@tauri-apps/api/core";
   import { hidSnapshot } from "$lib/stores/hid";
   import { currentChannels } from "$lib/stores/rcProfiles";
@@ -1097,12 +1097,14 @@
       {/if}
     </div>
   {:else if tab === 'fleet'}
-    <!-- The multi-vehicle feature gate: the `--fleet` launch flag (stores/fleetMode), switchable here for
-         the running session. -->
+    <!-- The multi-vehicle feature gate (stores/fleetMode): on by default in a debug build, else the
+         `--fleet` launch flag. Switchable here for the running session in a debug build only — a release
+         build (also with --debug) refuses it. Group recording is shown read-only (an env opt-in). -->
     <div class="perf-tab">
       <label class="perf-check">
         <input
           type="checkbox"
+          disabled={!import.meta.env.DEV}
           checked={$fleetEnabled}
           onchange={(e) => {
             const box = e.currentTarget as HTMLInputElement;
@@ -1114,6 +1116,10 @@
         />
         {$t('debug.fleet.enabled')}
       </label>
+      <div class="stat-group">
+        <span class="stat-label">{$t('debug.fleet.groupRecording')}</span>
+        <span class="stat-value">{$fleetGroupRecording ? $t('debug.fleet.on') : $t('debug.fleet.off')}</span>
+      </div>
       <div class="perf-hint">{$t('debug.fleet.hint')}</div>
 
       {#if groupState}

@@ -464,7 +464,8 @@
       "ok": "Angenommen",
       "fail": "Fehlgeschlagen",
       "skipped": "Übersprungen"
-    }
+    },
+    "recordingNotice": "Der Flottenmodus ist experimentell: Nur der Flug eines Fahrzeugs wird im Flugbuch aufgezeichnet (des zuerst verbundenen) — die Flüge der anderen Fahrzeuge werden nicht aufgezeichnet."
   },
   "control": {
     "title": "Fahrzeugsteuerung",
@@ -1998,7 +1999,7 @@
     "tabFleet": "Flotte (Gate)",
     "fleet": {
       "enabled": "Multi-Fahrzeug-Funktionen aktiv",
-      "hint": "Startparameter --fleet (oder die Umgebungsvariable KITE_FLEET), standardmäßig aus. Aus: die Einzelfahrzeug-Oberfläche (kein Link-Manager, kein Flotten-Tab, keine Gruppenbefehle, keine Flotten-Kartenebenen), kein zweites Fahrzeug auf einem gemeinsamen Link und keine Gruppenflüge. Ein Umschalten hier gilt nur für diese Sitzung.",
+      "hint": "Startflag --fleet (oder die Umgebungsvariable KITE_FLEET); im Debug-Build standardmäßig an, im Release-Build aus (--debug schaltet ihn nicht ein). Aus: die Einzelfahrzeug-Oberfläche (kein Link-Manager, Flotten-Tab, keine Gruppenbefehle oder Flotten-Kartenebenen), kein zweites Fahrzeug, kein zweiter Link und keine Gruppenflüge. Aufgezeichnet wird nur das erste Fahrzeug, außer KITE_FLEET_RECORDING ist gesetzt. Hier nur im Debug-Build für diese Sitzung umschaltbar.",
       "coordinator": "Gruppenflug-Koordinator",
       "backendFlag": "Backend-Schalter",
       "on": "an",
@@ -2019,7 +2020,8 @@
       "colGone": "Weg",
       "colLostArmed": "Scharf verloren",
       "colStalled": "Stumm",
-      "colFile": "Mitglieds-Datei"
+      "colFile": "Mitglieds-Datei",
+      "groupRecording": "Gruppenaufzeichnung (KITE_FLEET_RECORDING)"
     },
     "tabTunnel": "Tunnel",
     "tunActive": "Tunnel aktiv",

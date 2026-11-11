@@ -26,6 +26,10 @@ export interface VehicleSummary {
   protocol: string;
   /** The vehicle the link was opened for (handshake target). */
   primary: boolean;
+  /** Its own FC hardware id and firmware version, when known — the primary's from the handshake, a
+   *  vehicle discovered on a shared link from its own AUTOPILOT_VERSION (re-announced on arrival). */
+  fcUid: string | null;
+  fcVersion: string | null;
   /** Display name — `${fcVariant} #${sysid}` until the user renames it (Phase D). */
   name: string;
   lastSeen: number;
@@ -80,6 +84,7 @@ export function isActive(payload: unknown): boolean {
 interface VehicleDiscovered {
   vehicleId: string; linkId: number; sysid: number; compid: number;
   fcVariant: string; platformType: number; mavType: number; protocol: string; primary: boolean;
+  fcUid?: string | null; fcVersion?: string | null;
 }
 
 function defaultName(v: VehicleDiscovered): string {
@@ -103,6 +108,7 @@ export async function startVehicleListeners(): Promise<void> {
           vehicleId: p.vehicleId, linkId: p.linkId, sysid: p.sysid, compid: p.compid,
           fcVariant: p.fcVariant, platformType: p.platformType, mavType: p.mavType,
           protocol: p.protocol, primary: p.primary,
+          fcUid: p.fcUid ?? null, fcVersion: p.fcVersion ?? null,
           name: prev?.name ?? defaultName(p),
           lastSeen: Date.now(),
         });

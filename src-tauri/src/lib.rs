@@ -89,7 +89,7 @@ use commands::safehome::{safehome_read_all, safehome_write_all};
 use commands::geozone::{geozone_read_all, geozone_write_all};
 use commands::fence::{fence_read_all, fence_write_all};
 use commands::rally::{rally_read_all, rally_write_all};
-use commands::info::{get_app_version, is_debug_mode, is_fleet_mode};
+use commands::info::{get_app_version, is_debug_mode, is_fleet_mode, is_fleet_group_recording};
 use commands::system::{system_active_net_is_wifi, system_on_battery};
 use commands::storage::{share_file, storage_pick_folder};
 use commands::video::{
@@ -405,13 +405,21 @@ pub fn run() {
     let log_level = if debug_flag { log::LevelFilter::Debug } else { log::LevelFilter::Warn };
     logging::init(log_level, is_portable());
 
-    // `--fleet` / `KITE_FLEET` turns on the multi-vehicle features (default off in every build, see
-    // fleet_mode). Logged at the default level so a tester's log shows which mode ran.
-    if fleet_mode::flag_present() {
+    // `--fleet` / `KITE_FLEET` turns on the multi-vehicle features (default on in a debug build, off in a
+    // release build — `--debug` does not change that; see fleet_mode). Group recording needs the
+    // KITE_FLEET_RECORDING developer opt-in on top. Logged at the default level so a tester's log shows
+    // which mode ran.
+    let fleet_flag = fleet_mode::flag_present();
+    if fleet_flag {
         fleet_mode::set(true);
     }
+    fleet_mode::apply_group_recording();
     if fleet_mode::enabled() {
-        log::warn!("Fleet (multi-vehicle) features enabled (--fleet / KITE_FLEET)");
+        log::warn!(
+            "Fleet (multi-vehicle) features enabled ({}) — group recording {}",
+            if fleet_flag { "--fleet / KITE_FLEET" } else if cfg!(debug_assertions) { "debug build default" } else { "built with KITE_FLEET" },
+            if fleet_mode::group_recording() { "ON (KITE_FLEET_RECORDING)" } else { "off: only the first vehicle's flights are recorded" },
+        );
     }
 
     // Linux: the GStreamer decode sink renders through gtkglsink, whose GL context is GDK's — and
@@ -657,6 +665,7 @@ pub fn run() {
             get_app_version,
             is_debug_mode,
             is_fleet_mode,
+            is_fleet_group_recording,
             link_status::telemetry_track_since,
             set_log_level,
             get_log_path,

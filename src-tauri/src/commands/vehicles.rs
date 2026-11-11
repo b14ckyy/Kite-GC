@@ -47,17 +47,38 @@ pub fn set_active_vehicle(vehicle_id: String, state: State<'_, AppState>, app_ha
 }
 
 /// Debug Monitor runtime toggle of the multi-vehicle feature gate (normally the `--fleet` / `KITE_FLEET`
-/// launch flag, `fleet_mode`). Refused outside debug mode. Off: no secondary-vehicle discovery from now
-/// on and the group coordinator never forms a group flight; vehicles already discovered stay, and a group
-/// already running records on to its normal end — it is never cut mid-flight.
+/// launch flag, `fleet_mode`). Refused in a release build — `--debug` included: a tester must not reach a
+/// half-finished feature. Off: no secondary-vehicle discovery from now on and the group coordinator never
+/// forms a group flight; vehicles already discovered stay, and a group already running records on to its
+/// normal end — it is never cut mid-flight.
 #[tauri::command]
-pub fn set_fleet_enabled(on: bool) -> Result<(), String> {
-    if !crate::debug_mode::enabled() {
+pub fn set_fleet_enabled(on: bool, state: State<'_, AppState>, app_handle: AppHandle) -> Result<(), String> {
+    if !cfg!(debug_assertions) {
         return Err("The fleet features are switched by the --fleet launch flag".into());
     }
     if crate::fleet_mode::enabled() != on {
         crate::fleet_mode::set(on);
         log::warn!("Fleet features {} (Debug Monitor)", if on { "enabled" } else { "disabled" });
+    }
+    // Off while a secondary vehicle is active: every untargeted command would now be refused — fall back
+    // to its link's primary.
+    if !on {
+        let back = {
+            let mut reg = state.links.lock().map_err(|e| e.to_string())?;
+            let primary = reg.active_entry().map(|e| e.primary.clone());
+            match primary {
+                Some(p) if reg.active() != Some(&p) => {
+                    reg.set_active(p.clone())?;
+                    Some(p)
+                }
+                _ => None,
+            }
+        };
+        if let Some(p) = back {
+            state.retarget_rc(Some(&p));
+            log::info!("Active vehicle → {} (fleet features off)", p);
+            let _ = app_handle.emit("active-vehicle-changed", ActiveVehicleChanged { vehicle_id: Some(p.to_key()) });
+        }
     }
     Ok(())
 }

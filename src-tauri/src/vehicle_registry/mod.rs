@@ -99,6 +99,11 @@ pub struct VehicleInfo {
     pub protocol: String,
     /// True for the vehicle the link was opened for (handshake target).
     pub primary: bool,
+    /// The vehicle's own FC hardware id (`msp::hardware_uid`) and firmware version, when known: the
+    /// primary's from its handshake, a vehicle discovered later on a shared link from its own
+    /// AUTOPILOT_VERSION (re-announced when that arrives). `None` = not known (yet).
+    pub fc_uid: Option<String>,
+    pub fc_version: Option<String>,
 }
 
 impl VehicleInfo {
@@ -114,6 +119,8 @@ impl VehicleInfo {
             mav_type: entry.fc_info.mav_type,
             protocol: entry.protocol_name.to_string(),
             primary: true,
+            fc_uid: entry.fc_info.fc_uid.clone(),
+            fc_version: Some(entry.fc_info.fc_version.clone()).filter(|v| !v.is_empty()),
         }
     }
 }
@@ -121,6 +128,10 @@ impl VehicleInfo {
 /// Error string every command reports when nothing is connected. Kept byte-identical to the
 /// pre-registry code — the frontend surfaces it verbatim.
 pub const ERR_NOT_CONNECTED: &str = "Not connected";
+
+/// Error of a command aimed at a vehicle other than a link's primary while the multi-vehicle features
+/// are off (`fleet_mode`).
+pub const ERR_FLEET_OFF: &str = "Multi-vehicle features are off (fleet mode)";
 
 /// All open links plus the active-vehicle selection.
 pub struct LinkRegistry {
@@ -210,8 +221,12 @@ impl LinkRegistry {
     /// Select the active vehicle. The link must exist; the sysid is not validated here (MAVLink
     /// vehicles discovered mid-session live in the handler thread, not the registry).
     pub fn set_active(&mut self, v: VehicleId) -> Result<(), String> {
-        if !self.links.contains_key(&v.link) {
+        let Some(entry) = self.links.get(&v.link) else {
             return Err(format!("Unknown link L{}", v.link));
+        };
+        // GATE(fleet): only a link's primary vehicle without the multi-vehicle features.
+        if !crate::fleet_mode::allows(v == entry.primary, crate::fleet_mode::enabled()) {
+            return Err(ERR_FLEET_OFF.into());
         }
         self.active = Some(v);
         Ok(())
@@ -228,6 +243,11 @@ impl LinkRegistry {
         let entry = self.links.get(&vid.link).ok_or_else(|| {
             if self.links.is_empty() { ERR_NOT_CONNECTED.to_string() } else { format!("Vehicle {vid} is not connected") }
         })?;
+        // GATE(fleet): without the multi-vehicle features a command reaches a link's primary vehicle only
+        // (a sysid the handler never discovered must not be commanded).
+        if !crate::fleet_mode::allows(vid == entry.primary, crate::fleet_mode::enabled()) {
+            return Err(ERR_FLEET_OFF.into());
+        }
         Ok((entry, vid.sysid))
     }
 

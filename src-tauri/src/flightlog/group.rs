@@ -7,8 +7,8 @@
 //! Protocol-agnostic: it knows recorders by vehicle key (`"L1:S2"`) through `register` and learns arm,
 //! disarm, first status and teardown from the recorders themselves — never a MAVLink or MSP detail.
 //!
-//! Rules (Marc, GROUP_FLIGHTS.md §1, §5, §5b): with the fleet feature enabled
-//! (the `--fleet` launch flag, `crate::fleet_mode`) and at least two recorders registered, the first arm WITH a 3D fix
+//! Rules (Marc, GROUP_FLIGHTS.md §1, §5, §5b): with group recording enabled
+//! (`crate::fleet_mode::group_recording` — the fleet features plus a developer opt-in) and at least two recorders registered, the first arm WITH a 3D fix
 //! starts a group. From then on every registered recorder records (member mode; an unarmed session
 //! where none runs), the group starts at the earliest arm among the recordings already running, and it
 //! ends when the last armed member has disarmed and nothing re-armed within `GROUP_END_GRACE` — or,
@@ -208,7 +208,7 @@ impl PendingGroup {
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GroupDebugState {
-    /// The fleet feature flag as the coordinator sees it.
+    /// The group-recording switch as the coordinator sees it (`crate::fleet_mode::group_recording`).
     pub enabled: bool,
     /// Registered recorders, by key.
     pub recorders: Vec<DebugRecorder>,
@@ -451,7 +451,8 @@ pub struct GroupCoordinator {
     wake: Condvar,
     slots: SessionSlotsHandle,
     clock: Arc<dyn Clock>,
-    /// The fleet feature flag (`crate::fleet_mode::handle()`; tests pass their own): off → never a group.
+    /// The group-recording switch (`crate::fleet_mode::group_recording_handle()` — the fleet features plus
+    /// the `KITE_FLEET_RECORDING` developer opt-in; tests pass their own): off → never a group.
     enabled: Arc<AtomicBool>,
     sink: OnceLock<Box<dyn GroupEventSink>>,
 }

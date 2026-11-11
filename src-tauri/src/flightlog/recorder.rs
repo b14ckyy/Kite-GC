@@ -604,21 +604,25 @@ fn take_where(
 }
 
 /// Whether a recorded session came from the FC `fc` of the recorder `own_key`: the hardware id when both
-/// sides know it; when neither does (a known synthetic id dropped by `msp::hardware_uid`, a secondary,
-/// passive telemetry), the session-local identity: the same vehicle key (`"L{link}:S{sysid}"` — the sysid
-/// on a MAVLink link, the connection-order link id on MSP / passive links) within this app run, with the
-/// same firmware variant; else craft name + variant — never by an empty craft name (§5e M2: two
-/// identity-less vehicles with no craft name, e.g. passive links, are not the same aircraft; the callers'
-/// "only one connected" fallback still covers a lone reconnect).
+/// sides know it; otherwise (a known synthetic id dropped by `msp::hardware_uid`, passive telemetry, or an
+/// id that arrived only after the session was recorded — a vehicle discovered on a shared link answers
+/// its identity request after its recorder started) the session-local identity: the same vehicle key
+/// (`"L{link}:S{sysid}"` — the sysid on a MAVLink link, the connection-order link id on MSP / passive
+/// links) within this app run, with the same firmware variant; else craft name + variant — never by an
+/// empty craft name (§5e M2: two identity-less vehicles with no craft name, e.g. passive links, are not
+/// the same aircraft; the callers' "only one connected" fallback still covers a lone reconnect).
 ///
-/// Known residual (GROUP_FLIGHTS.md step 6): MAVLink secondaries record under the synthetic craft name
-/// `"<variant> #<sysid>"` (`mavlink_proto::handler::secondary_recorder`), so two secondaries with the same
-/// variant and sysid on different links DO match through the craft-name arm.
+/// Known limitation (for 2.1: defer adoption until the identity is known): MAVLink secondaries record
+/// under the synthetic craft name `"<variant> #<sysid>"` (`mavlink_proto::handler::secondary_recorder`).
+/// Two such sessions with real FC ids on both sides are told apart — but a secondary's id arrives after
+/// its recorder's first status, which is when adoption is decided, so in practice the claiming side has
+/// no id yet and two secondaries with the same variant and sysid on different links can still match
+/// through the craft-name arm.
 fn same_fc(s: &PendingSession, own_key: &str, fc: &FcInfo) -> bool {
     let f = &s.flight;
     match (&f.fc_uid, &fc.fc_uid) {
         (Some(a), Some(b)) => a == b,
-        (None, None) if s.vehicle_key.as_deref() == Some(own_key) && f.fc_variant == fc.fc_variant => true,
+        _ if s.vehicle_key.as_deref() == Some(own_key) && f.fc_variant == fc.fc_variant => true,
         _ => !f.craft_name.is_empty() && f.craft_name == fc.craft_name && f.fc_variant == fc.fc_variant,
     }
 }
@@ -1529,6 +1533,21 @@ impl FlightRecorder {
                 log::warn!("Failed to update session_meta platform type: {}", e);
             }
         }
+    }
+
+    /// The FC hardware id and firmware version of a vehicle that reported them only after its recorder
+    /// was built (a vehicle discovered on a shared link answers its identity request then). Applied like
+    /// `set_fc_info` — to the running session (its temp meta, a group member's `.kgrp` row) and every
+    /// later flight; the rest of the identity (craft name, platform, …) stays. `None` keeps the value.
+    pub fn set_fc_identity(&mut self, fc_uid: Option<String>, fc_version: Option<String>) {
+        let mut info = self.fc_info.clone();
+        if fc_uid.is_some() {
+            info.fc_uid = fc_uid;
+        }
+        if let Some(v) = fc_version {
+            info.fc_version = v;
+        }
+        self.set_fc_info(info);
     }
 
     /// Replace the recorded FC identity (craft name, variant, version, board, platform, FC id) — for the
@@ -3324,6 +3343,31 @@ mod tests {
         db::remove_temp_session(&p.temp_path);
     }
 
+    /// A vehicle that reports its FC id / firmware version after the recording started (a secondary on a
+    /// shared link answers its AUTOPILOT_VERSION request then): the running session's meta and the
+    /// finalized flight carry them; the synthetic craft name stays.
+    #[test]
+    fn identity_reported_after_the_start_reaches_the_flight() {
+        let rig = Rig::new("late-identity");
+        let (mut rec, _) = rig.recorder("L1:S2", FcInfo { craft_name: "PX4 #2".into(), fc_variant: "PX4".into(), ..FcInfo::default() });
+        rec.on_status(&status(false));
+        rec.on_gps(&gps(2, 48.1, 11.5));
+        rec.on_status(&status(true));
+        let path = active_path(&rec);
+        rec.set_fc_identity(Some("UIDX".into()), Some("1.15.0".into()));
+        let meta = db::read_session_meta(&Connection::open(&path).unwrap()).unwrap().unwrap();
+        assert_eq!((meta.fc_uid.as_deref(), meta.fc_version.as_str()), (Some("UIDX"), "1.15.0"));
+        // `None` keeps what is known.
+        rec.set_fc_identity(None, None);
+        rig.advance_s(10);
+        rec.on_gps(&gps(2, 48.11, 11.5));
+        rec.on_status(&status(false));
+        let p = rig.slots.take_pending_for("L1:S2").expect("pending after the disarm");
+        assert_eq!((p.flight.fc_uid.as_deref(), p.flight.fc_version.as_str()), (Some("UIDX"), "1.15.0"));
+        assert_eq!(p.flight.craft_name, "PX4 #2");
+        db::remove_temp_session(&p.temp_path);
+    }
+
     /// §5e no-fix rule, exception: with continuous logging on, the arm records without a fix; the home
     /// is the first 3D fix while armed.
     #[test]
@@ -3392,13 +3436,25 @@ mod tests {
         assert!(!same_fc(&recorded(None, ""), "L1:S3", &sim), "recovered from disk: no session identity");
         let ardu = FcInfo { fc_variant: "ArduPlane".into(), ..sim.clone() };
         assert!(!same_fc(&recorded(Some("L1:S3"), ""), "L1:S3", &ardu), "same key, another firmware variant");
-        // A hardware id on one side only never matches through the key.
-        assert!(!same_fc(&recorded(Some("L1:S3"), ""), "L1:S3", &FcInfo { fc_uid: Some("UID1".into()), ..sim.clone() }));
 
         // Secondaries (handler.rs `secondary_recorder`): synthetic craft name "<variant> #<sysid>".
         let secondary = FcInfo { craft_name: "PX4 #3".into(), ..sim.clone() };
-        assert!(same_fc(&recorded(Some("L1:S3"), "PX4 #3"), "L2:S3", &secondary), "residual: matches across links by the synthetic name");
+        assert!(same_fc(&recorded(Some("L1:S3"), "PX4 #3"), "L2:S3", &secondary), "residual without ids: matches across links by the synthetic name");
         assert!(!same_fc(&recorded(Some("L1:S3"), "PX4 #3"), "L2:S4", &FcInfo { craft_name: "PX4 #4".into(), ..sim.clone() }));
+        // With real FC ids on BOTH sides they are told apart — at adoption time the claimant's id is
+        // usually not known yet (it arrives after the first status), see the known limitation on `same_fc`.
+        let with_uid = |key: &str, uid: &str| PendingSession {
+            flight: Flight { fc_uid: Some(uid.into()), ..recorded(Some(key), "PX4 #3").flight },
+            ..recorded(Some(key), "PX4 #3")
+        };
+        let secondary_b = FcInfo { fc_uid: Some("UIDB".into()), ..secondary.clone() };
+        assert!(!same_fc(&with_uid("L1:S3", "UIDA"), "L2:S3", &secondary_b), "different real ids never match");
+        assert!(same_fc(&with_uid("L1:S3", "UIDB"), "L2:S3", &secondary_b));
+        // An id that arrived only after the session was suspended: the same vehicle key still matches,
+        // even without a craft name.
+        let late = FcInfo { fc_uid: Some("UIDA".into()), ..sim.clone() };
+        assert!(same_fc(&recorded(Some("L1:S3"), ""), "L1:S3", &late));
+        assert!(!same_fc(&recorded(Some("L1:S3"), ""), "L2:S3", &late));
 
         // The suspended member of a vehicle that comes back on the same link is adopted.
         let slots = SessionSlots::default();

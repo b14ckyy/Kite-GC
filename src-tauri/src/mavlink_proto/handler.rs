@@ -37,6 +37,11 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 /// its silence is the link's problem and handled by the existing disconnect paths.
 const VEHICLE_TIMEOUT: Duration = Duration::from_secs(10);
 const VEHICLE_SWEEP_INTERVAL: Duration = Duration::from_secs(1);
+/// A vehicle discovered on a shared link is asked for its AUTOPILOT_VERSION (FC hardware id, firmware
+/// version) like the handshake asks the primary — at most this often, this many times, from the handler
+/// loop (never blocking it). An autopilot that does not answer keeps no hardware id.
+const IDENTITY_REQUEST_INTERVAL: Duration = Duration::from_millis(1500);
+const MAX_IDENTITY_REQUESTS: u8 = 4;
 
 /// Read timeout while RC override is streaming. The loop is read-driven, so the idle read timeout (50 ms)
 /// would otherwise quantize the RC send rate (a 25 Hz request landing on a 50 ms grid only managed ~15
@@ -186,6 +191,14 @@ struct VehicleCtx {
     last_seen: Instant,
     /// Unattended flight recorder (secondary vehicles only; the primary's is the link's recorder).
     recorder: Option<FlightRecorderHandle>,
+    /// This vehicle's own identity from its AUTOPILOT_VERSION (secondaries; the primary's comes from the
+    /// handshake): FC hardware id and firmware version. `identity_done` once it answered or the request
+    /// budget is spent.
+    fc_uid: Option<String>,
+    fc_version: Option<String>,
+    identity_requests: u8,
+    last_identity_request: Option<Instant>,
+    identity_done: bool,
 }
 
 impl VehicleCtx {
@@ -202,7 +215,30 @@ impl VehicleCtx {
             quadplane_seen: false,
             last_seen: Instant::now(),
             recorder: None,
+            fc_uid: None,
+            fc_version: None,
+            identity_requests: 0,
+            last_identity_request: None,
+            identity_done: false,
         }
+    }
+
+    /// Take this vehicle's AUTOPILOT_VERSION. Returns whether its identity changed (then the caller
+    /// re-announces it); the recorder gets it for the running session and every later flight.
+    fn apply_identity(&mut self, v: super::handshake::AutopilotVersion) -> bool {
+        self.identity_done = true;
+        let fc_version = Some(v.fc_version);
+        if self.fc_uid == v.fc_uid && self.fc_version == fc_version {
+            return false;
+        }
+        self.fc_uid = v.fc_uid;
+        self.fc_version = fc_version;
+        if let Some(rec) = &self.recorder {
+            if let Ok(mut r) = rec.lock() {
+                r.set_fc_identity(self.fc_uid.clone(), self.fc_version.clone());
+            }
+        }
+        true
     }
 }
 
@@ -218,6 +254,8 @@ impl VehicleCtx {
             mav_type: self.mav_type,
             protocol: "MAVLink".to_string(),
             primary,
+            fc_uid: self.fc_uid.clone(),
+            fc_version: self.fc_version.clone(),
         }
     }
 }
@@ -362,7 +400,9 @@ fn handler_loop(
     // their first autopilot HEARTBEAT (a telemetry radio / UDP port shared by several aircraft). Each
     // carries its own accumulated analog / battery / position state and its own stamped emitter.
     let mut vehicles: std::collections::BTreeMap<u8, VehicleCtx> = std::collections::BTreeMap::new();
-    vehicles.insert(fc_sysid, VehicleCtx::new(fc_compid, fc_variant.clone(), fc_identity.0, fc_identity.1, app_handle.clone()));
+    let mut primary_ctx = VehicleCtx::new(fc_compid, fc_variant.clone(), fc_identity.0, fc_identity.1, app_handle.clone());
+    primary_ctx.identity_done = true; // the handshake asked it already
+    vehicles.insert(fc_sysid, primary_ctx);
     let mut last_sweep = Instant::now();
     // Decoded telemetry feeds the PRIMARY vehicle's recorder (the link's; it also owns the raw .tlog of
     // every frame). Secondary vehicles get their own unattended DB recorder on discovery: their flights
@@ -600,6 +640,34 @@ fn handler_loop(
             last_param_probe = Instant::now();
         }
 
+        // 2c. Ask vehicles discovered on this link for their own identity (FC hardware id, firmware
+        //     version) — the same AUTOPILOT_VERSION request the handshake sends the primary.
+        let now = Instant::now();
+        for (sysid, ctx) in vehicles.iter_mut() {
+            if *sysid == fc_sysid || ctx.identity_done
+                || ctx.last_identity_request.is_some_and(|t| now.duration_since(t) < IDENTITY_REQUEST_INTERVAL)
+            {
+                continue;
+            }
+            if ctx.identity_requests >= MAX_IDENTITY_REQUESTS {
+                ctx.identity_done = true;
+                log::info!("MAVLink: sysid={} did not answer AUTOPILOT_VERSION — no FC hardware id", sysid);
+                continue;
+            }
+            ctx.identity_requests += 1;
+            ctx.last_identity_request = Some(now);
+            let msg = super::handshake::autopilot_version_request(*sysid, ctx.compid);
+            let frame = codec::serialize_v2(&gcs_header, &msg, &mut seq);
+            debug_tracker.on_tx(msg.message_id(), frame.len());
+            link_stats.on_tx(frame.len());
+            if let Some(ref rec) = recorder {
+                if let Ok(mut r) = rec.lock() { r.write_raw_mavlink_frame(&frame); }
+            }
+            if let Err(e) = transport.write_bytes(&frame) {
+                log::warn!("Failed to request AUTOPILOT_VERSION from sysid={}: {}", sysid, e);
+            }
+        }
+
         // 3. Read incoming bytes and parse MAVLink frames
         match transport.read_bytes(&mut buf) {
             Ok(0) => {}
@@ -758,6 +826,21 @@ fn handler_loop(
                     // gimbal feedback, etc. legitimately come from other components on the same sysid).
                     if matches!(frame.message, MavMessage::HEARTBEAT(_)) && frame.header.component_id != ctx.compid {
                         continue;
+                    }
+
+                    // A secondary's own identity (the primary's came from the handshake) — from its
+                    // autopilot component only, not a peripheral on the same system id.
+                    if !primary && frame.header.component_id == ctx.compid {
+                        if let MavMessage::AUTOPILOT_VERSION(ref ver) = frame.message {
+                            let v = super::handshake::parse_autopilot_version(ver);
+                            log::info!(
+                                "MAVLink: sysid={} AUTOPILOT_VERSION v{} — FC id {}",
+                                sysid, v.fc_version, v.fc_uid.as_deref().unwrap_or("none"),
+                            );
+                            if ctx.apply_identity(v) {
+                                let _ = ctx.emitter.emit("vehicle-discovered", ctx.info(sysid, false));
+                            }
+                        }
                     }
 
                     dispatch_message(

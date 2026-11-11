@@ -9,7 +9,7 @@ import type { FcInfo, PortInfo, BleDeviceInfo, TransportType, ProtocolType } fro
 import type { InavStats } from '$lib/stores/flightlogTypes';
 import { connection, connectionProtocol, fcLinkAlive, availablePorts, bleDevices, detectedPlatformType, hasMsp, isArduPilotLink } from '$lib/stores/connection';
 import { startTelemetryListeners, stopTelemetryListeners, resetTelemetry, setFcVariant } from '$lib/stores/telemetry';
-import { startVehicleListeners, activeVehicleId, resetVehicles, refreshLinks, selectVehicle, links, vehicles } from '$lib/stores/vehicles';
+import { startVehicleListeners, activeVehicleId, resetVehicles, refreshLinks, selectVehicle, links, vehicles, type VehicleSummary } from '$lib/stores/vehicles';
 import { parseVehicleId } from '$lib/helpers/vehicleId';
 import { homePosition, vehicleHomes, clearVehicleHomes } from '$lib/stores/home';
 import { launchPoint } from '$lib/stores/mission';
@@ -314,6 +314,35 @@ export async function switchVehicle(vehicleId: string): Promise<void> {
   await applyActiveVehicle(vehicleId);
 }
 
+/** The FC info shown for a secondary vehicle: the link's, with the vehicle's own identity — and none of
+ *  the primary's hardware facts (FC id, version, board, hardware revision) when its own are unknown. */
+function secondaryFcInfo(linkInfo: FcInfo, v: VehicleSummary): FcInfo {
+  return {
+    ...linkInfo,
+    fc_variant: v.fcVariant,
+    platform_type: v.platformType,
+    mav_type: v.mavType,
+    craft_name: '',
+    fc_uid: v.fcUid,
+    fc_version: v.fcVersion ?? '',
+    board_id: '',
+    hardware_revision: 0,
+  };
+}
+
+// A secondary's own identity arrives after its discovery (its AUTOPILOT_VERSION answer): refresh the FC
+// info shown while it is the active vehicle.
+vehicles.subscribe((known) => {
+  const id = get(activeVehicleId);
+  const v = id ? known.get(id) : undefined;
+  if (!v || v.primary) return;
+  const c = get(connection);
+  if (!c.fcInfo) return;
+  const fcVersion = v.fcVersion ?? '';
+  if (c.fcInfo.fc_uid === v.fcUid && c.fcInfo.fc_version === fcVersion) return;
+  connection.update((x) => (x.fcInfo ? { ...x, fcInfo: { ...x.fcInfo, fc_uid: v.fcUid, fc_version: fcVersion } } : x));
+});
+
 /** Re-target every singleton store at the (already selected) active vehicle: drop the previous
  *  vehicle's telemetry/config, describe the new link in the connection store, reload its FC-side
  *  config (fence/rally or safehome/geozone). */
@@ -338,13 +367,15 @@ async function applyActiveVehicle(vehicleId: string): Promise<void> {
   const protocolType: ProtocolType =
     link.protocol === 'MAVLink' ? 'mavlink' : link.protocol === 'MSP' ? 'msp' : 'telemetry';
   // A secondary vehicle on a shared MAVLink link has no handshake of its own — describe it from its
-  // HEARTBEAT identity (variant / platform / MAV_TYPE) on top of the link's FcInfo.
+  // HEARTBEAT identity (variant / platform / MAV_TYPE) and its own AUTOPILOT_VERSION (FC id, version)
+  // on top of the link's FcInfo. The primary's FC id, version and board are never shown for it: unknown
+  // stays empty.
   // Primary-ness comes from the link, not the `vehicles` store — a vehicle not announced yet is not
   // automatically the primary.
   const isPrimary = vehicleId === link.primaryVehicleId;
   const v = get(vehicles).get(vehicleId);
   const fcInfo: FcInfo = !isPrimary && v
-    ? { ...link.fcInfo, fc_variant: v.fcVariant, platform_type: v.platformType, mav_type: v.mavType, craft_name: '' }
+    ? secondaryFcInfo(link.fcInfo, v)
     : link.fcInfo;
   // MSP over MAVLink belongs to the link's handshake (primary) vehicle only — the backend's `with_msp`
   // refuses a secondary vehicle on the same link.

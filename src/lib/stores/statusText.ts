@@ -108,11 +108,12 @@ function scheduleSweep(): void {
   sweepTimer = setTimeout(sweepExpired, Math.max(0, soonest - Date.now()));
 }
 
-function push(severity: number, text: string, vehicle?: StatusTextVehicle): void {
+/** Show one line; false when it was not shown (empty, or filtered out by the "System Messages" setting). */
+function push(severity: number, text: string, vehicle?: StatusTextVehicle): boolean {
   const clean = text.trim();
-  if (!clean) return;
+  if (!clean) return false;
   const level = statusLevel(severity);
-  if (!levelAllowed(level)) return; // filtered out by the "System Messages" setting
+  if (!levelAllowed(level)) return false; // filtered out by the "System Messages" setting
 
   const expiresAt = Date.now() + CLEAR_AFTER_MS;
   let repeated = false;
@@ -137,6 +138,7 @@ function push(severity: number, text: string, vehicle?: StatusTextVehicle): void
   // Always cue errors/warnings; an INFO line already on screen never re-cues, so a nag loop stays
   // silent. DEBUG lines are never cued — they are on screen because someone is reading, not listening.
   if (level !== 'debug' && (!repeated || level !== 'info')) playTone(level);
+  return true;
 }
 
 // ── Audio cue (Web Audio) — gentle for info, discreetly alarming for warnings/errors ──
@@ -185,9 +187,10 @@ function playTone(level: StatusTextLevel): void {
 }
 
 /** Inject a GCS-local message into the same toast banner (e.g. a geozone/geofence breach the GCS detects
- *  itself). Goes through the same severity filter + audio cue as FC STATUSTEXT. */
-export function pushLocalStatus(severity: number, text: string): void {
-  push(severity, text);
+ *  itself). Goes through the same severity filter + audio cue as FC STATUSTEXT. Returns whether it was
+ *  shown (false: filtered out by the "System Messages" setting). */
+export function pushLocalStatus(severity: number, text: string): boolean {
+  return push(severity, text);
 }
 
 /** Start listening for FC STATUSTEXT messages. Safe to call once on app init. */

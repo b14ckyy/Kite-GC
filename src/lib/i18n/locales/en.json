@@ -464,7 +464,8 @@
       "ok": "Accepted",
       "fail": "Failed",
       "skipped": "Skipped"
-    }
+    },
+    "recordingNotice": "Fleet mode is experimental: only one vehicle's flight is recorded in the logbook (the first one connected) — the flights of the other vehicles are not recorded."
   },
   "control": {
     "title": "Vehicle Control",
@@ -1998,7 +1999,7 @@
     "tabFleet": "Fleet (gated)",
     "fleet": {
       "enabled": "Multi-vehicle features enabled",
-      "hint": "Launch flag --fleet (or the KITE_FLEET environment variable), off by default. Off: the single-vehicle UI (no link manager, Fleet tab, group commands or fleet map layers), no second vehicle on a shared link and no group flights. Switching it here lasts for this session only.",
+      "hint": "Launch flag --fleet (or the KITE_FLEET environment variable); on by default in a debug build, off in a release build (--debug does not turn it on). Off: the single-vehicle UI (no link manager, Fleet tab, group commands or fleet map layers), no second vehicle or link and no group flights. Only the first vehicle is recorded unless KITE_FLEET_RECORDING is set. Switchable here for this session in a debug build only.",
       "coordinator": "Group-flight coordinator",
       "backendFlag": "Backend flag",
       "on": "on",
@@ -2019,7 +2020,8 @@
       "colGone": "Gone",
       "colLostArmed": "Lost armed",
       "colStalled": "Stalled",
-      "colFile": "Member file"
+      "colFile": "Member file",
+      "groupRecording": "Group recording (KITE_FLEET_RECORDING)"
     },
     "tabTunnel": "Tunnel",
     "tunActive": "Tunnel active",
