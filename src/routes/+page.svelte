@@ -799,6 +799,23 @@
   let disconnectArmedDialog: ReturnType<typeof DisconnectArmedDialog>;
   // True after "Continue on Reconnect" until the next connection resolves the recovered session.
   let awaitingResumeReconnect = $state(false);
+  // Per vehicle: bumped whenever that vehicle's pending session in the backend may change hands (arm,
+  // resume, a new end/interrupt prompt, a grace auto-commit): a Save retry stops then, so it never
+  // commits a newer flight with this dialog's input (another vehicle's it cannot reach — the commit
+  // names the vehicle). An event without a vehicle bumps every vehicle's epoch.
+  // (A plain record: `Map` is the map component in this file.)
+  const pendingEpochs: Record<string, number> = {};
+  let pendingEpochAll = 0;
+  let pendingEpochTotal = 0;
+  function bumpPendingEpoch(vehicleId: string | null | undefined): void {
+    pendingEpochTotal++;
+    if (vehicleId == null) pendingEpochAll++;
+    else pendingEpochs[vehicleId] = (pendingEpochs[vehicleId] ?? 0) + 1;
+  }
+  /** A dialog without a vehicle (the only pending session) watches every vehicle's events. */
+  function pendingEpochOf(vehicleId: string | null): string {
+    return vehicleId == null ? `*${pendingEpochTotal}` : `${pendingEpochAll}:${pendingEpochs[vehicleId] ?? 0}`;
+  }
 
   async function showDialog(opts: DialogOptions): Promise<string | null> {
     return confirmDialog.show(opts);
@@ -2737,9 +2754,11 @@
           if (choice === 'discard') {
             await flightlogDiscardPending(vid);
           } else if (choice === 'save') {
-            const flightId = await flightlogCommitPending(vid);
-            await linkEndedMission(flightId, false);
-            void loadLogbook();
+            const flightId = await commitPendingOrReportKept(vid);
+            if (flightId !== null) {
+              await linkEndedMission(flightId, false);
+              void loadLogbook();
+            }
           } else if (choice === 'continue') {
             if (await flightlogContinuePending(vid)) awaitingResumeReconnect = true;
           }
@@ -3207,6 +3226,53 @@
     return { system: 'inav', inavWps: [], arduWps: [], fc: false };
   }
 
+  /** The backend had no pending session to commit (nothing was recorded, or a re-arm resolved it) —
+   *  not a failed save. Matches the unchanged backend error text. */
+  function isNothingPending(e: unknown): boolean {
+    return String(e).includes('No pending recording session to commit');
+  }
+
+  /** End-Flight Save: commit `vehicleId`'s pending session. A failed commit stays pending in the
+   *  backend (in that vehicle's slot), so the pilot can retry until it works; Cancel keeps it for the
+   *  next start. Null = kept, nothing pending, or a re-arm / new prompt of that vehicle took the pending
+   *  session meanwhile. */
+  async function commitPendingWithRetry(vehicleId: string | null): Promise<number | null> {
+    const epoch = pendingEpochOf(vehicleId);
+    for (;;) {
+      try {
+        return await flightlogCommitPending(vehicleId);
+      } catch (e) {
+        console.warn('[end-flight] save failed', e);
+        if (isNothingPending(e)) return null;
+        // ConfirmDialog adds its own Cancel (also Escape / backdrop) — that means "keep"; so does a
+        // dialog displaced by another one (resolved with null).
+        const choice = await showDialog({
+          title: $t('endFlight.saveFailedTitle'),
+          message: $t('endFlight.saveFailedMessage', { values: { error: String(e) } }),
+          buttons: [{ label: $t('endFlight.saveRetry'), value: 'retry', primary: true }],
+        });
+        if (choice !== 'retry' || pendingEpochOf(vehicleId) !== epoch) return null;
+      }
+    }
+  }
+
+  /** A Save outside the End-Flight dialog failed: the backend kept the recording — say so. */
+  async function showRecordingKept(e: unknown): Promise<void> {
+    console.warn('[recording] save failed — kept', e);
+    await showInfo($t('endFlight.saveFailedTitle'), $t('endFlight.saveKeptMessage', { values: { error: String(e) } }));
+  }
+
+  /** Save from the connection-lost / disconnect prompt; null when it failed (reported, kept). */
+  async function commitPendingOrReportKept(vehicleId: string | null): Promise<number | null> {
+    try {
+      return await flightlogCommitPending(vehicleId);
+    } catch (e) {
+      if (isNothingPending(e)) console.warn('[recording] nothing to save', e);
+      else await showRecordingKept(e);
+      return null;
+    }
+  }
+
   async function onRecordingEnded(stats: EndFlightStats, identity: EndFlightIdentity, vehicleId: string | null, flown: EndedMissionSnapshot): Promise<void> {
     awaitingResumeReconnect = false; // a recovered session that came back disarmed is now in the dialog
     recordingOwner = vehicleId;
@@ -3224,8 +3290,10 @@
       }
       // Save → commit the pending session, then link mission + battery/notes against the new id. The
       // notes and the mission link are written first: an abandoned follow-up question below (battery /
-      // vehicle) can never lose them.
-      const flightId = await flightlogCommitPending(vehicleId);
+      // vehicle) can never lose them. A failed commit offers Retry; a successful retry continues here
+      // with this dialog's input.
+      const flightId = await commitPendingWithRetry(vehicleId);
+      if (flightId === null) return;
       if (res.notes) await updateFlightNotes(flightId, res.notes, flightLogDbPath);
       await linkEndedMission(flightId, res.linkMission);
       if (res.batterySerial) {
@@ -3292,9 +3360,11 @@
       if (choice === 'discard') {
         await flightlogDiscardPending(vehicleId);
       } else if (choice === 'save') {
-        const flightId = await flightlogCommitPending(vehicleId);
-        await linkEndedMission(flightId, false);
-        void loadLogbook();
+        const flightId = await commitPendingOrReportKept(vehicleId);
+        if (flightId !== null) {
+          await linkEndedMission(flightId, false);
+          void loadLogbook();
+        }
       } else if (choice === 'continue') {
         // Resolved by the next connection's first poll — when something was actually queued.
         if (await flightlogContinuePending(vehicleId)) awaitingResumeReconnect = true;
@@ -3322,7 +3392,12 @@
           await recoverDiscard(orphan.temp_path); // drops every leftover, not just this one
           return;
         } else if (choice === 'save') {
-          await recoverSaveIncomplete(orphan.temp_path, flightLogDbPath);
+          try {
+            await recoverSaveIncomplete(orphan.temp_path, flightLogDbPath);
+          } catch (e) {
+            await showRecordingKept(e); // the backend keeps the file; it comes back at the next start
+            return;
+          }
           void loadLogbook();
         } else if (choice === 'continue') {
           await recoverContinue(orphan.temp_path, flightLogDbPath);
@@ -3411,6 +3486,7 @@
   if (typeof window !== 'undefined') {
     // Every `flight-recording-*` payload carries the recorder's `vehicleId` / `linkId`.
     void listen<{ vehicleId?: string }>('flight-recording-started', (event) => {
+      bumpPendingEpoch(event.payload?.vehicleId);
       // Recording started (no flight id yet — deferred commit, ADR-041). Only this vehicle's own start
       // clears its captured-mission snapshot; another aircraft arming must not.
       if (isRecordingOwner(event.payload?.vehicleId)) onRecordingStarted();
@@ -3422,6 +3498,7 @@
       (event) => {
         const p = event.payload;
         const vid = p.vehicleId ?? null;
+        bumpPendingEpoch(vid);
         const stats: EndFlightStats = {
           durationSec: p.duration_sec,
           maxAltM: p.max_alt_m,
@@ -3442,6 +3519,7 @@
     // Secondary vehicles' flights commit by themselves (no End-Flight dialog) — just refresh the list.
     void listen<{ flight_id: number }>('flight-recording-autocommitted', () => { void loadLogbook(); });
     void listen<{ flight_id: number; vehicleId?: string }>('flight-recording-committed', async (event) => {
+      bumpPendingEpoch(event.payload.vehicleId);
       // Its End-Flight summary still waiting in the queue is stale — and then the open one is not its.
       const waited = dropQueuedFlightDialogs(event.payload.vehicleId) > 0;
       // Another vehicle's grace-lapsed re-arm: its flight is in, but this dialog/snapshot is not its.
@@ -3456,6 +3534,7 @@
     // Re-arm within grace (or a recovered session resumed on reconnect) continues the same flight —
     // drop the stale summary dialog and exit the awaiting-reconnect state.
     void listen<{ vehicleId?: string }>('flight-recording-resumed', (event) => {
+      bumpPendingEpoch(event.payload?.vehicleId);
       // Its End-Flight summary still waiting in the queue is stale — and then the open one is not its.
       if (dropQueuedFlightDialogs(event.payload?.vehicleId) > 0) return;
       if (!isRecordingOwner(event.payload?.vehicleId)) return; // e.g. a secondary re-arming within grace
@@ -3468,6 +3547,7 @@
       (event) => {
         lostWhileHidden = false;
         const vid = event.payload.vehicleId ?? null;
+        bumpPendingEpoch(vid);
         const flown = endedMissionFor(vid); // captured now, the prompt may open later (§5e M3)
         enqueueFlightDialog(vid, () => onRecordingInterrupted(event.payload, vid, flown));
       },
