@@ -497,6 +497,10 @@
     "guidedTarget": "Destino Guided",
     "setWpHint": "Sincroniza la misión con la FC (descargar/subir) para activarlo.",
     "startNotSyncedHint": "El plan en pantalla difiere de la misión de la FC — el vehículo vuela lo que tiene la FC.",
+    "planeTakeoffHint": "Cambia al modo TAKEOFF: el avión despega solo, sube hasta TKOFF_ALT y luego entra en loiter. Desarmado, espera a que se arme.",
+    "takeoffArmWarning": "Modo TAKEOFF activo: el motor arranca en cuanto se arma el vehículo (con los parámetros por defecto tras unos 0,2 s, sin detección de lanzamiento).",
+    "guidedUnavailable": "La FC no ofrece el modo Guided.",
+    "guidedGone": "Guided ya no está activo: el destino no se ha enviado.",
     "ack": {
       "ok": "Aceptado"
     },
@@ -2006,6 +2010,32 @@
     "tabPerformance": "Rend. 3D",
     "tabVideo": "Video",
     "tabFleet": "Flota (con flag)",
+    "tabModes": "Modos FC",
+    "modes": {
+      "vehicle": "Vehículo activo",
+      "source": "Origen del panel",
+      "sourceFc": "Lista de la FC ({n} modos)",
+      "sourceStatic": "Tabla estática",
+      "mismatch": "La lista de la FC se retiene: el firmware/la clase del panel aún no coinciden con el vehículo activo (cambio de vehículo).",
+      "fcList": "Lista de la FC (AVAILABLE_MODES)",
+      "noFcList": "Sin lista de la FC para este vehículo (PX4, ArduPilot anterior a 4.7, aún no leída o sin respuesta).",
+      "panel": "Tabla de Kite → panel de control",
+      "colNumber": "N.º",
+      "colFcName": "Nombre FC",
+      "colKiteName": "Nombre Kite",
+      "colNotSelectable": "No seleccionable",
+      "colStick": "Stick",
+      "colConfirm": "Mantener",
+      "colStatus": "Estado",
+      "status": {
+        "offered": "ofrecido",
+        "unknown": "ofrecido (desconocido para Kite)",
+        "neverOffered": "nunca ofrecido",
+        "notListed": "no está en la lista de la FC",
+        "notSelectable": "FC: no seleccionable",
+        "staticHidden": "oculto (VTOL / solo con lista de la FC)"
+      }
+    },
     "fleet": {
       "enabled": "Funciones multivehículo activadas",
       "hint": "Flag de inicio --fleet (o la variable de entorno KITE_FLEET); activado por defecto en una compilación de depuración, desactivado en una de lanzamiento (--debug no lo activa). Desactivado: la interfaz de un solo vehículo (sin gestor de enlaces, pestaña Flota, comandos de grupo ni capas de flota en el mapa), sin segundo vehículo o enlace y sin vuelos en grupo. Solo se graba el primer vehículo salvo que KITE_FLEET_RECORDING esté definida. Aquí solo se puede cambiar para esta sesión, y solo en una compilación de depuración.",

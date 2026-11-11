@@ -715,6 +715,12 @@ fn connect_mavlink(
     }
     msp_tunnel::stats::emit_now(&app_handle);
 
+    // The FC's own mode list (AVAILABLE_MODES, ArduPilot 4.7+) — only now that the probe has ruled out
+    // INAV, whose HEARTBEAT may carry an ArduPilot identity. The handler starts after a short delay.
+    if !handle.inav_tunnel.load(std::sync::atomic::Ordering::Relaxed) && fc_info.fc_variant.starts_with("Ardu") {
+        handle.start_mode_list();
+    }
+
     Ok(Opened { protocol: ActiveProtocol::Mavlink(handle), protocol_name: "MAVLink", fc_info, sysid: fc_sysid, compid: fc_compid })
 }
 

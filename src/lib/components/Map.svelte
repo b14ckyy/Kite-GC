@@ -48,7 +48,7 @@
   import { autopilotSystem } from "$lib/stores/autopilotContext";
   import { arduMission, arduVehicleClass, arduEditMode, detectVehicleClass, arduMissionsByVehicle, arduSetWpSelection, type ArduWaypoint } from "$lib/stores/missionArdupilot";
   import { activeSurveyPattern } from "$lib/stores/surveyPattern.svelte";
-  import { guidedActive, guidedTarget, guidedTargets, repositionTo, activeMode, guidedParams, fcLoiterRadius, type GuidedParams } from "$lib/controllers/vehicleControl";
+  import { guidedActive, guidedTarget, guidedTargets, repositionTo, activeMode, guidedParams, fcLoiterRadius, lastFeedback, type GuidedParams } from "$lib/controllers/vehicleControl";
   import GuidedTargetForm from "$lib/components/control/GuidedTargetForm.svelte";
   import { cmdHasLocation } from "$lib/helpers/arduCommandCatalog";
   import { connection, linkHasMsp } from "$lib/stores/connection";
@@ -1626,7 +1626,10 @@
       props: {
         lat, lon: lng, multirotor,
         onfly: (flat: number, flon: number, p: GuidedParams) => {
-          void repositionTo(flat, flon, p);
+          // Re-checked at send time: the popup can outlive what armed it — the FC left its guided mode,
+          // or the vehicle is now a Sub (reconnect). Say so instead of dropping the click silently.
+          if (guidedClickArmed()) void repositionTo(flat, flon, p);
+          else lastFeedback.set({ action: 'reposition', ok: false, message: $t('control.guidedGone'), ts: Date.now() });
           // Defer the close so the originating click finishes bubbling first (the popup is still in
           // the DOM, so the in-popup guard above suppresses a stray second popup).
           setTimeout(closeGuidedPopup, 0);
@@ -1655,6 +1658,9 @@
   // Close the Guided target popup as soon as the Guided toggle is switched off in the panel — so a
   // reposition can't be sent while Guided is disabled in the UI.
   $effect(() => { if (!$guidedActive) closeGuidedPopup(); });
+  // …and when the active vehicle changes: a popup opened for one vehicle (e.g. already in GUIDED, toggle
+  // never pressed) must not send its target and params to the next one.
+  $effect(() => { void $activeVehicleId; closeGuidedPopup(); });
 
   // Guided loiter-target marker follows the guided state + the set target (and hides on disconnect).
   $effect(() => { void $guidedActive; void $guidedTarget; void $connection; void $activeMode; void $guidedParams; void $fcLoiterRadius; if (map) updateGuidedTarget(); });

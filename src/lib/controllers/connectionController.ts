@@ -11,6 +11,7 @@ import { connection, connectionProtocol, fcLinkAlive, availablePorts, bleDevices
 import { startTelemetryListeners, stopTelemetryListeners, resetTelemetry, setFcVariant } from '$lib/stores/telemetry';
 import { startVehicleListeners, activeVehicleId, resetVehicles, refreshLinks, selectVehicle, links, vehicles, type VehicleSummary } from '$lib/stores/vehicles';
 import { parseVehicleId } from '$lib/helpers/vehicleId';
+import { startFcModeListeners, clearFcModeLists } from '$lib/stores/fcModes';
 import { homePosition, vehicleHomes, clearVehicleHomes } from '$lib/stores/home';
 import { launchPoint } from '$lib/stores/mission';
 import { applyRelaysOnConnect, clearRelaysOnDisconnect } from '$lib/controllers/relayController';
@@ -196,6 +197,7 @@ export async function connectFC(params: ConnectParams): Promise<FcInfo> {
   // Registry events first, so the backend's active-vehicle announcement (emitted as soon as the link is
   // registered, before `connect` returns) is not missed.
   await startVehicleListeners();
+  await startFcModeListeners();
   let res: ConnectResult;
   try {
     res = await invoke<ConnectResult>("connect", connectArgs(params));
@@ -281,6 +283,7 @@ export async function connectFC(params: ConnectParams): Promise<FcInfo> {
  */
 export async function connectLink(params: ConnectParams): Promise<ConnectResult> {
   await startVehicleListeners();
+  await startFcModeListeners();
   const res = await invoke<ConnectResult>("connect", connectArgs(params));
   await refreshLinks();
   return res;
@@ -421,6 +424,7 @@ async function applyActiveVehicle(vehicleId: string): Promise<void> {
  */
 export async function recoverBackendLinks(): Promise<boolean> {
   await startVehicleListeners();
+  await startFcModeListeners();
   const l = await refreshLinks().catch(() => [] as Awaited<ReturnType<typeof refreshLinks>>);
   if (l.length === 0) return false;
   // The vehicle list is built from live `vehicle-discovered` events; after a reload ask for a replay.
@@ -452,6 +456,7 @@ export async function disconnectFC(baudRate: number): Promise<void> {
   px4RcInModeError.set(null);
   stopTelemetryListeners();
   resetTelemetry();
+  clearFcModeLists();
   connectionProtocol.set({ primary: '', secondary: null });
   fcLinkAlive.set(true);
   // linkId null = every link (the single connect/disconnect toggle's semantics).

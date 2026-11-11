@@ -497,6 +497,10 @@
     "guidedTarget": "Guided target",
     "setWpHint": "Sync the mission with the FC (download/upload) to enable.",
     "startNotSyncedHint": "The plan on screen differs from the mission on the FC — the vehicle flies what the FC holds.",
+    "planeTakeoffHint": "Switches to TAKEOFF mode: the plane takes off by itself, climbs to TKOFF_ALT and then loiters. Disarmed, it waits for arming.",
+    "takeoffArmWarning": "TAKEOFF mode is active: the motor starts as soon as the vehicle is armed (with default parameters after about 0.2 s, without throw detection).",
+    "guidedUnavailable": "The flight controller does not offer Guided mode.",
+    "guidedGone": "Guided is no longer active — the target was not sent.",
     "ack": {
       "ok": "Accepted"
     },
@@ -2006,6 +2010,32 @@
     "tabPerformance": "3D Perf",
     "tabVideo": "Video",
     "tabFleet": "Fleet (gated)",
+    "tabModes": "FC modes",
+    "modes": {
+      "vehicle": "Active vehicle",
+      "source": "Panel source",
+      "sourceFc": "FC list ({n} modes)",
+      "sourceStatic": "Static table",
+      "mismatch": "The FC list is held back: the panel's firmware/class does not match the active vehicle yet (vehicle switch).",
+      "fcList": "FC list (AVAILABLE_MODES)",
+      "noFcList": "No FC list for this vehicle (PX4, ArduPilot before 4.7, not read yet or no answer).",
+      "panel": "Kite table → control panel",
+      "colNumber": "No.",
+      "colFcName": "FC name",
+      "colKiteName": "Kite name",
+      "colNotSelectable": "Not selectable",
+      "colStick": "Stick",
+      "colConfirm": "Hold",
+      "colStatus": "Status",
+      "status": {
+        "offered": "offered",
+        "unknown": "offered (unknown to Kite)",
+        "neverOffered": "never offered",
+        "notListed": "not in the FC list",
+        "notSelectable": "FC: not selectable",
+        "staticHidden": "hidden (VTOL / FC list only)"
+      }
+    },
     "fleet": {
       "enabled": "Multi-vehicle features enabled",
       "hint": "Launch flag --fleet (or the KITE_FLEET environment variable); on by default in a debug build, off in a release build (--debug does not turn it on). Off: the single-vehicle UI (no link manager, Fleet tab, group commands or fleet map layers), no second vehicle or link and no group flights. Only the first vehicle is recorded unless KITE_FLEET_RECORDING is set. Switchable here for this session in a debug build only.",

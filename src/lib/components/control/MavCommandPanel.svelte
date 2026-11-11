@@ -22,18 +22,20 @@
   import NumberStepper from '$lib/components/NumberStepper.svelte';
   import { autopilotSystem } from '$lib/stores/autopilotContext';
   import { arduVehicleClass, arduMission, arduMissionFcSynced, MAV_CMD_SHORT } from '$lib/stores/missionArdupilot';
-  import { modesFor, type MavMode } from '$lib/helpers/mavModes';
+  import { offeredModes, guidedModeFor, type MavMode } from '$lib/helpers/mavModes';
   import {
     controlAvailable, stickModesUnlocked, isArmed, activeMode, busyAction, lastFeedback,
-    guidedActive,
-    setMode, arm, disarm, takeoff, land, rtl, missionStart, missionRestart, missionDownload, missionSetCurrent, setGuided,
+    guidedActive, activeFcModesChecked, modeTableMatchesVehicle,
+    setMode, arm, disarm, takeoff, planeTakeoff, land, rtl, missionStart, missionRestart, missionDownload, missionSetCurrent, setGuided,
     changeAlt, changeSpeed, setLoiterRadius, setHomeHere, abortLanding, setHeading, vtolTransition,
   } from '$lib/controllers/vehicleControl';
   import { frameMissionOnMap } from '$lib/stores/mapCamera';
 
   const sys = $derived($autopilotSystem);
   const cls = $derived($arduVehicleClass);
-  const allModes = $derived(modesFor(sys, cls));
+  // The FC's own mode list (ArduPilot 4.7+) decides which modes exist; without one, Kite's static table.
+  // Checked: during a vehicle switch (system/class not caught up yet) the list is held back.
+  const allModes = $derived(offeredModes(sys, cls, $activeFcModesChecked));
   const safeModes = $derived(allModes.filter((m) => !m.stick));
   const stickModes = $derived(allModes.filter((m) => m.stick));
 
@@ -48,9 +50,16 @@
 
   let takeoffAlt = $state(savedInputs.takeoffAlt);
 
-  // Takeoff via NAV_TAKEOFF only makes sense for multirotors / VTOL / PX4. A fixed-wing plane takes
-  // off through an AUTO mission (takeoff WP) or manually — the command is rejected, so hide it.
+  // Takeoff via NAV_TAKEOFF only makes sense for multirotors / VTOL / PX4 — on a plain ArduPlane it is the
+  // QuadPlane VTOL takeoff and the FC rejects it.
   const takeoffSupported = $derived(sys === 'px4' ? true : (cls === 'copter' || cls === 'quadplane'));
+  // A plain ArduPlane takes off in TAKEOFF mode instead (climbs to the FC's TKOFF_ALT) — its own row,
+  // hidden when the FC's mode list does not offer the mode, and while a vehicle switch has not caught up
+  // (mode 13 of another vehicle type is something else — Copter SPORT).
+  const planeTakeoffMode = $derived(sys === 'ardupilot' && cls === 'plane' && $modeTableMatchesVehicle
+    ? allModes.find((m) => m.key === 'takeoff') : undefined);
+  // The Guided toggle's mode; with the FC's mode list only when the FC offers GUIDED.
+  const guidedMode = $derived(guidedModeFor(sys, cls, $activeFcModesChecked));
 
   // Vehicle-capability gates for the active-flight adjustments. Fixed-wing covers ArduPlane and PX4
   // fixed-wing/VTOL alike (the vehicle class comes from MAV_TYPE for PX4, fc_variant for ArduPilot) —
@@ -83,6 +92,9 @@
   const canSetHeading = $derived(sys === 'ardupilot' && cls === 'copter' && inGuided);
 
   const activeKey = $derived($activeMode?.key ?? '');
+  // In TAKEOFF mode the plane runs its motor up the moment it is armed — say so before arming.
+  const takeoffArmWarning = $derived(sys === 'ardupilot' && (cls === 'plane' || cls === 'quadplane') && $modeTableMatchesVehicle
+    && activeKey === 'takeoff' && !$isArmed);
 
   // ── Set active WP ──────────────────────────────────────────────────────────
   // The FC item index differs from the displayed WP number by the home slot: ArduPilot reserves
@@ -138,6 +150,9 @@
         <!-- 1. Arm / disarm -->
         {#if !$isArmed}
           <ArmSlider label={$t('control.action.arm')} busy={busy('arm')} onconfirm={() => arm()} />
+          {#if takeoffArmWarning}
+            <div class="cc-takeoff-warn">{$t('control.takeoffArmWarning')}</div>
+          {/if}
           {#if armRejected}
             <HoldToConfirm variant="danger" duration={2000} busy={busy('arm')} title={$t('control.action.forceArmHint')} onconfirm={() => arm(true)}>
               {$t('control.action.forceArm')}
@@ -169,6 +184,11 @@
             </div>
             <NumberStepper bind:value={takeoffAlt} min={1} max={1000} step={5} unit="m" />
           </div>
+        {:else if planeTakeoffMode}
+          {@const mode = planeTakeoffMode}
+          <HoldToConfirm busy={busy('takeoff')} title={$t('control.planeTakeoffHint')} onconfirm={() => planeTakeoff(mode)}>
+            {$t('control.action.takeoff')}
+          </HoldToConfirm>
         {/if}
 
         <!-- 4. RTL / Land (+ Abort Landing / go-around for fixed-wing) -->
@@ -205,11 +225,13 @@
 
         <!-- 5. Guided toggle -->
         <div class="cc-guided-btn">
-          <Button variant="mode" active={$guidedActive} full onclick={() => setGuided(!$guidedActive)} title={$t('control.guidedHint')}>
+          <Button variant="mode" active={$guidedActive} full disabled={!guidedMode && !$guidedActive} onclick={() => setGuided(!$guidedActive)}
+                  title={guidedMode ? $t('control.guidedHint') : $t('control.guidedUnavailable')}>
             {$t('control.action.guided')}
           </Button>
         </div>
-        {#if $guidedActive && cls !== 'sub'}
+        <!-- No Fly-Here on ArduSub (Map.svelte guidedClickArmed) — so no "click the map" hint either. -->
+        {#if $guidedActive && !(sys === 'ardupilot' && cls === 'sub')}
           <div class="cc-guided-hint">{$t('control.guidedClickHint')}</div>
         {/if}
 
@@ -245,8 +267,15 @@
         <section class="cc-sec">
           <span class="cc-sec-title">{$t('control.section.modes')}</span>
           <div class="cc-modegrid">
-            {#each quickModes as m}
-              <Button variant="mode" size="sm" active={activeKey === m.key} onclick={() => pickMode(m)}>{m.name}</Button>
+            {#each quickModes as m (m.key)}
+              {#if m.confirm}
+                <!-- Landing modes: hold-to-confirm like the RTL / Land buttons, not a single click. -->
+                <div class="cc-confirm" class:active={activeKey === m.key}>
+                  <HoldToConfirm variant="warning" onconfirm={() => pickMode(m)}>{m.name}</HoldToConfirm>
+                </div>
+              {:else}
+                <Button variant="mode" size="sm" active={activeKey === m.key} onclick={() => pickMode(m)}>{m.name}</Button>
+              {/if}
             {/each}
           </div>
           {#if stickModes.length}
@@ -344,6 +373,11 @@
     gap: 8px;
   }
   .cc-takeoff-btn { flex: 1; }
+  .cc-takeoff-warn {
+    font-size: 11px;
+    color: #d4a017;
+    text-align: center;
+  }
 
   .cc-adjust {
     display: flex;
@@ -384,6 +418,15 @@
     letter-spacing: 0.5px;
     color: #949494;
   }
+  /* A hold-to-confirm mode in the quick grid: Button size="sm" metrics, the active mode outlined. */
+  .cc-confirm :global(.htc) {
+    min-height: 24px;
+    height: 24px;
+    padding: 0 8px;
+    border-radius: 4px;
+    font-size: 11px;
+  }
+  .cc-confirm.active :global(.htc) { box-shadow: inset 0 0 0 1px #37a8db; }
   .cc-modegrid {
     display: grid;
     grid-template-columns: repeat(3, 1fr);

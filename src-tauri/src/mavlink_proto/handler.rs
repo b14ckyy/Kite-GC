@@ -92,6 +92,10 @@ pub enum MavlinkCommand {
     RegisterTunnelReceiver(mpsc::Sender<Vec<u8>>),
     /// Unregister the MSP-tunnel receiver
     UnregisterTunnelReceiver,
+    /// Start reading the handshake vehicle's own mode list (AVAILABLE_MODES, see `modes.rs`). Sent by
+    /// the connect path once the MSP-tunnel probe has ruled out INAV, which reports an ArduPilot identity
+    /// in its HEARTBEAT. Ignored for a non-ArduPilot vehicle.
+    StartModeList,
 }
 
 /// Handle for interacting with the running MAVLink handler
@@ -133,6 +137,11 @@ impl MavlinkHandle {
     /// Ask the handler to re-emit `vehicle-discovered` for every vehicle it knows.
     pub fn announce_vehicles(&self) {
         let _ = self.cmd_tx.send(MavlinkCommand::AnnounceVehicles);
+    }
+
+    /// Start reading the handshake vehicle's mode list (ArduPilot only — see `MavlinkCommand::StartModeList`).
+    pub fn start_mode_list(&self) {
+        let _ = self.cmd_tx.send(MavlinkCommand::StartModeList);
     }
 
     /// Stop the handler and return the transport for cleanup. A tunnel-mode MSP scheduler is stopped
@@ -199,6 +208,9 @@ struct VehicleCtx {
     identity_requests: u8,
     last_identity_request: Option<Instant>,
     identity_done: bool,
+    /// Reader of this vehicle's own mode list (AVAILABLE_MODES) — ArduPilot vehicles only; `None` for
+    /// PX4 / INAV / anything else, and for the primary until the connect path sends `StartModeList`.
+    modes: Option<super::modes::ModeEnumerator>,
 }
 
 impl VehicleCtx {
@@ -220,6 +232,7 @@ impl VehicleCtx {
             identity_requests: 0,
             last_identity_request: None,
             identity_done: false,
+            modes: None,
         }
     }
 
@@ -389,6 +402,8 @@ fn handler_loop(
     // the status bar is told the FC is not being heard (`telemetry-fc-link`, the same signal the MSP
     // scheduler emits) and told again when frames resume. Same threshold as MSP's STALL_WARN_AFTER.
     const STALL_WARN_AFTER: Duration = Duration::from_secs(3);
+    // A silence at least this long may have been an FC reboot → its mode list is read again on recovery.
+    const MODE_REREAD_AFTER_SILENCE: Duration = Duration::from_secs(5);
     let mut last_fc_rx = Instant::now();
     let mut stall_warned = false;
     let mut msg_count: u64 = 0;
@@ -511,6 +526,20 @@ fn handler_loop(
                     n += 1;
                 }
                 log::debug!("MAVLink: re-announced {} secondary vehicle(s)", n);
+                // The FC mode lists read so far (primary included) — a reloaded frontend lost them too.
+                for ctx in vehicles.values() {
+                    if let Some(list) = ctx.modes.as_ref().and_then(|e| e.last_complete()) {
+                        let _ = ctx.emitter.emit("available-modes", super::modes::AvailableModesEvent { modes: list });
+                    }
+                }
+                continue;
+            }
+            Ok(MavlinkCommand::StartModeList) => {
+                if let Some(ctx) = vehicles.get_mut(&fc_sysid) {
+                    if ctx.fc_variant.starts_with("Ardu") && ctx.modes.is_none() {
+                        ctx.modes = Some(super::modes::ModeEnumerator::new(fc_sysid, Instant::now()));
+                    }
+                }
                 continue;
             }
             Ok(MavlinkCommand::SendRaw { msg_id, crc_extra, payload }) => {
@@ -668,6 +697,21 @@ fn handler_loop(
             }
         }
 
+        // 2d. Read each ArduPilot vehicle's own mode list (AVAILABLE_MODES), one index per request and
+        //     at most one in flight per vehicle — see modes.rs. Paused while a mission transfer runs on
+        //     this link (its request/response exchange must not compete with extra traffic).
+        if mission_fwd.is_none() {
+            let now = Instant::now();
+            for (sysid, ctx) in vehicles.iter_mut() {
+                // Component 0 would be a broadcast (forwarded to every peripheral) — never send that.
+                if ctx.compid == 0 { continue; }
+                let Some(index) = ctx.modes.as_mut().and_then(|e| e.poll(now)) else { continue };
+                let msg = super::modes::request_msg(*sysid, ctx.compid, index);
+                send_mav_frame(&mut *transport, &gcs_header, &mut seq, &msg,
+                    &mut debug_tracker, &mut link_stats, &recorder);
+            }
+        }
+
         // 3. Read incoming bytes and parse MAVLink frames
         match transport.read_bytes(&mut buf) {
             Ok(0) => {}
@@ -742,6 +786,10 @@ fn handler_loop(
                             "MAVLink: discovered vehicle sysid={} compid={} ({}) on L{}",
                             sysid, frame.header.component_id, ctx.fc_variant, app_handle.link_id(),
                         );
+                        // Its own mode list, after the start delay (the configure burst below goes first).
+                        if ctx.fc_variant.starts_with("Ardu") {
+                            ctx.modes = Some(super::modes::ModeEnumerator::new(sysid, Instant::now()));
+                        }
                         configure_new_vehicle(&mut *transport, sysid, &ctx.fc_variant, &rates);
                         let _ = ctx.emitter.emit("vehicle-discovered", ctx.info(sysid, false));
                         vehicles.insert(sysid, ctx);
@@ -757,11 +805,21 @@ fn handler_loop(
                     // (handshake) vehicle feeds it: a second vehicle on a shared link must not mask the
                     // primary's silence (secondaries time out via the sweep in 3c).
                     if primary && frame.header.component_id == fc_compid {
+                        let silent_for = last_fc_rx.elapsed();
                         last_fc_rx = Instant::now();
                         if stall_warned {
                             stall_warned = false;
                             log::warn!("Link recovered — MAVLink frames from the FC resumed");
                             let _ = app_handle.emit("telemetry-fc-link", FcLinkAlive { alive: true });
+                            // The FC may have rebooted with another mode set (Q_ENABLE, Lua modes,
+                            // GCSBLOCK), and no MONITOR says so on a link that stayed open — read it
+                            // again. Only after a silence long enough for a reboot: a link flapping
+                            // around the stall threshold must not trigger a full read on every recovery.
+                            if silent_for >= MODE_REREAD_AFTER_SILENCE
+                                && ctx.modes.as_mut().is_some_and(|e| e.restart(Instant::now()))
+                            {
+                                log::info!("AVAILABLE_MODES: sysid={} heard again after a stall — reading the mode list again", sysid);
+                            }
                         }
                     }
                     debug_tracker.on_rx(frame.message.message_id(), frame.raw_bytes.len());
@@ -815,6 +873,29 @@ fn handler_loop(
                                 continue;
                             }
                         }
+                    }
+
+                    // The vehicle's own mode list (modes.rs): accepted only from its autopilot component —
+                    // the same messages from a peripheral (gimbal, camera, companion, radio) are ignored.
+                    // Never dispatched as telemetry.
+                    match frame.message {
+                        MavMessage::AVAILABLE_MODES(ref m) => {
+                            if super::modes::from_autopilot(&frame.header, sysid, ctx.compid) {
+                                if let Some(list) = ctx.modes.as_mut().and_then(|e| e.on_mode(m)) {
+                                    let _ = ctx.emitter.emit("available-modes", super::modes::AvailableModesEvent { modes: &list });
+                                }
+                            } else {
+                                log::debug!("AVAILABLE_MODES from {}/{} ignored (not the autopilot)", sysid, frame.header.component_id);
+                            }
+                            continue;
+                        }
+                        MavMessage::AVAILABLE_MODES_MONITOR(ref m) => {
+                            if super::modes::from_autopilot(&frame.header, sysid, ctx.compid) {
+                                if let Some(e) = ctx.modes.as_mut() { e.on_monitor(m.seq); }
+                            }
+                            continue;
+                        }
+                        _ => {}
                     }
 
                     // Only the autopilot component drives mode + armed. Peripherals sharing the FC's
@@ -947,8 +1028,9 @@ fn manual_control_msg(fc_sysid: u8, m: &rc_tx::ManualControl) -> MavMessage {
     })
 }
 
-/// Serialize + send one streamed RC message (override / manual), with the same send-path bookkeeping as
-/// the command channel (debug stats, link meter, tlog record).
+/// Serialize + send one handler-originated message (streamed RC override / manual control, the mode-list
+/// requests), with the same send-path bookkeeping as the command channel (debug stats, link meter, tlog
+/// record).
 fn send_mav_frame(
     transport: &mut dyn ByteTransport,
     header: &MavHeader,
@@ -965,7 +1047,7 @@ fn send_mav_frame(
         if let Ok(mut r) = rec.lock() { r.write_raw_mavlink_frame(&frame); }
     }
     if let Err(e) = transport.write_bytes(&frame) {
-        log::warn!("Failed to send streamed RC frame: {}", e);
+        log::warn!("Failed to send MAVLink frame (msg_id {}): {}", msg.message_id(), e);
     }
 }
 
