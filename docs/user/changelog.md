@@ -89,7 +89,8 @@ inside the box of the feature release they belong to, so the notes for one relea
       gone. The recording itself was still on disk, but the next *Discard Recording* in the same
       session deleted it. Now Kite shows the error and offers **Retry**; if you cancel, the recording
       is kept and offered again at the next start. The same holds for *Save* in the "connection lost"
-      and "unfinished recording" prompts and for the automatic save when you arm again.
+      and "unfinished recording" prompts. The automatic save when you arm again keeps the recording
+      the same way, without a message, and offers it at the next start.
     ---
 
     **1.0.1**{ .kite-patch } *2026-09-13*{ .kite-badge }
