@@ -130,6 +130,7 @@ In a normal install Kite follows each OS's conventions; in portable mode everyth
 | Flight database (`flights.db`) | `%APPDATA%\kite-gc\` | `~/.local/share/kite-gc/` | `~/Library/Application Support/kite-gc/` | `<app>/data/` |
 | Raw logs (`.tlog`, raw-MSP) | `Documents\KiteGC\` | `~/Documents/KiteGC/` (XDG) | `~/Documents/KiteGC/` | `<app>/data/` |
 | Downloaded helper tools | `%APPDATA%\kite-gc\bin\` | `~/.local/share/kite-gc/bin/` | `~/Library/Application Support/kite-gc/bin/` | `<app>/data/bin/` |
+| [Custom maps](../guides/custom-maps.md) (default location) | `%APPDATA%\kite-gc\custom_maps\` | `~/.local/share/kite-gc/custom_maps/` | `~/Library/Application Support/kite-gc/custom_maps/` | `<app>/data/custom_maps/` |
 | Preferences & layout (settings, widget/panel layout) | web-view storage in your user profile | web-view storage in your user profile | web-view storage in your user profile | `<app>/data/` |
 | Window size & position | `%APPDATA%\com.kitegc.app\` | `~/.config/com.kitegc.app/` | `~/Library/Application Support/com.kitegc.app/` | not saved in portable mode |
 
@@ -185,9 +186,10 @@ the desktop when the toggle in the Video panel is on (see **[Video](../guides/vi
   (e.g. `brew install ffmpeg` on macOS, or your package manager / a manual download) and put it on
   your `PATH` or next to the app; Kite will pick it up.
 - These downloads need **internet access**. The **map** also needs it: both **2D map tiles** and
-  **3D terrain** are streamed on demand and cached after first view — there's no offline map download
-  yet (it's under consideration for the future if there's enough demand). Connecting to your aircraft,
-  live telemetry, and logging all work fully offline.
+  **3D terrain** are streamed on demand and cached after first view — Kite has no offline map download.
+  On the desktop, map tiles you already have can be shown from a folder as a
+  [custom map](../guides/custom-maps.md). Connecting to your aircraft, live telemetry, and logging all
+  work fully offline.
 
 ## First run
 

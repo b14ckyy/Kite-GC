@@ -340,6 +340,9 @@ export interface AppSettings {
   map: MapState;
   mapProvider: string;
   mapCacheMaxMB: number;
+  /** Folder holding the custom (local tile) maps, one subfolder per map; '' = the default
+   *  `<app data>/custom_maps`. Desktop only. */
+  customMapsPath: string;
   /** The swapped-in mini map (video frame / widget tile) follows the aircraft heading-up (true) or
    *  north-up (false); a tap on it toggles (Map.svelte). Remembered across swaps and restarts. */
   miniMapHeadingUp: boolean;
@@ -453,6 +456,7 @@ const defaults: AppSettings = {
   },
   mapProvider: 'esri-hybrid',
   mapCacheMaxMB: 200,
+  customMapsPath: '',
   miniMapHeadingUp: true,
   navPanelOpen: true,
   activeTab: 'uav-info',

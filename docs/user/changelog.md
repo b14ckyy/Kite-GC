@@ -236,6 +236,13 @@ inside the box of the feature release they belong to, so the notes for one relea
       placeholder ID (INAV SITL, PX4 SITL as system ID 1) report no FC ID. [#228]
     - **`.kflight` files of INAV Blackbox flights are smaller** — and a file written by 2.0 still
       imports into Kite 1.0, linked pairs (live recording + onboard log) included. [#232]
+    - **Custom maps: offline map tiles from a folder (desktop).** Put tiles in the usual `Z/X/Y`
+      layout (`.png`, `.jpg`, `.webp`, any tile size) into a subfolder of the custom map location
+      and the folder shows up at the end of the map selector — on the 2D map and the 3D globe,
+      without internet. Gaps are filled from lower zoom levels, and a frame on the 2D map shows
+      where the detailed tiles are: a dashed rectangle from far out, the exact outline once you
+      are close. The location can be moved in Settings. Not on Android and iOS; the 3D terrain
+      still needs the internet. See [Custom maps](guides/custom-maps.md). [#246]
 
     **Improved**
 
@@ -548,6 +555,7 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#237]: https://github.com/b14ckyy/Kite-GC/pull/237
 [#242]: https://github.com/b14ckyy/Kite-GC/pull/242
 [#243]: https://github.com/b14ckyy/Kite-GC/pull/243
+[#246]: https://github.com/b14ckyy/Kite-GC/pull/246
 [#143]: https://github.com/b14ckyy/Kite-GC/pull/143
 [#145]: https://github.com/b14ckyy/Kite-GC/pull/145
 [#151]: https://github.com/b14ckyy/Kite-GC/pull/151

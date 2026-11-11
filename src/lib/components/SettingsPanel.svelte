@@ -11,14 +11,19 @@
   import { invoke } from '@tauri-apps/api/core';
   import { t, locale } from 'svelte-i18n';
   import { SUPPORTED_LOCALES } from '$lib/i18n';
-  import { MAP_PROVIDERS } from '$lib/config/mapProviders';
+  import { MAP_PROVIDERS, getProviderById, isCustomProviderId } from '$lib/config/mapProviders';
+  import { settings } from '$lib/stores/settings';
+  import {
+    customMaps, ensureCustomMapsLoaded, chooseCustomMapsFolder, resetCustomMapsFolder, rescanCustomMaps,
+    focusCustomMap, customMapName,
+  } from '$lib/stores/customMaps';
   import { WIDGET_DEFS } from '$lib/config/widgetRegistry';
   import { DEFAULT_RADAR, DEFAULT_AIRSPACE, DEFAULT_RC_CONTROL, DEFAULT_UPDATE_CHECK, DEFAULT_TELEMETRY_API } from '$lib/stores/settings';
   import { panelState } from '$lib/stores/panelState';
   import { resetGcsManual, gcsManuallySet } from '$lib/stores/gcsLocation';
   import type { AppSettings, InterfaceSettings, RadarSettings, GcsMode, AirspaceSettings, AirspaceProvider, SystemMessagesLevel, LogLevel, RcControlSettings, TelemetryApiSettings, UpdateCheckSettings, UpdateCheckMode, DefaultProtocol } from '$lib/stores/settings';
   import { revealItemInDir, openPath } from '@tauri-apps/plugin-opener';
-  import { isAndroid, isMobile, hasDbCompact } from '$lib/platform';
+  import { isAndroid, isMobile, hasDbCompact, hasCustomMaps } from '$lib/platform';
   import { updatesSupported } from '$lib/controllers/updateCheck';
   import { blackboxDecoderVersion, blackboxLegacyMode, downloadBlackboxDecode } from '$lib/stores/flightlog';
   import type { TileCacheStats } from '$lib/cache/tileCache';
@@ -345,6 +350,49 @@
   function handleMapProviderChange(event: Event) {
     onPatch({ mapProvider: (event.target as HTMLSelectElement).value });
   }
+
+  // ── Custom maps (desktop only, `hasCustomMaps`) ──
+  // The selector lists them after the built-in providers; the row below it holds the folder.
+  if (hasCustomMaps) void ensureCustomMapsLoaded();
+  /** What the selector shows: the provider the maps really use — a custom map whose folder is gone
+   *  falls back like any unknown id. A custom id waits for the first listing instead of flashing it. */
+  const providerSelectValue = $derived.by(() => {
+    const listed = $customMaps;
+    if (!listed.loaded && isCustomProviderId(mapProvider)) return mapProvider;
+    return getProviderById(mapProvider).id;
+  });
+  const activeCustomMap = $derived.by(() => {
+    void $customMaps; // re-resolve after every listing
+    return customMapName(mapProvider);
+  });
+  // Before the first listing the default folder is not known yet — show nothing rather than
+  // "not available".
+  const customMapsPathShown = $derived(
+    $settings.customMapsPath ||
+      $customMaps.defaultRoot ||
+      ($customMaps.loaded ? $t('settings.defaultPathUnknown') : ''),
+  );
+  let customRescanBusy = $state(false);
+  /** Result of the last "Show map area" when it could not jump: no tiles, or a failed scan. */
+  let customAreaProblem = $state<'empty' | 'error' | null>(null);
+  async function rescanCustomMapsClick() {
+    customRescanBusy = true;
+    customAreaProblem = null;
+    try { await rescanCustomMaps(); } finally { customRescanBusy = false; }
+  }
+  // A message about the previous map must not stay under a newly selected one.
+  $effect(() => {
+    void activeCustomMap;
+    customAreaProblem = null;
+  });
+  async function showCustomMapArea() {
+    const name = activeCustomMap;
+    if (!name) return;
+    const r = await focusCustomMap(name);
+    // A late answer must not land under a map selected meanwhile; a re-listing cancels silently.
+    if (activeCustomMap !== name) return;
+    customAreaProblem = r === 'empty' || r === 'error' ? r : null;
+  }
   function handleCacheSizeChange(event: Event) {
     const value = Number((event.target as HTMLSelectElement).value);
     onPatch({ mapCacheMaxMB: value });
@@ -417,10 +465,40 @@
       <h4 class="s-head">{$t('settings.map')}</h4>
       <div class="s-row">
         <label class="s-label" for="map-provider">{$t('settings.tileProvider')}</label>
-        <select id="map-provider" class="s-select" value={mapProvider} onchange={handleMapProviderChange}>
+        <select id="map-provider" class="s-select" value={providerSelectValue} onchange={handleMapProviderChange}>
           {#each MAP_PROVIDERS as p}<option value={p.id}>{p.label}</option>{/each}
+          {#if hasCustomMaps && $customMaps.providers.length > 0}
+            <!-- ▦ marks a custom (local tile folder) map; a <select> option can hold text only. -->
+            <optgroup label={$t('settings.customMaps')}>
+              {#each $customMaps.providers as p}<option value={p.id}>▦ {p.label}</option>{/each}
+            </optgroup>
+          {/if}
         </select>
       </div>
+      {#if hasCustomMaps}
+        <div class="s-row s-row-stack">
+          <span class="s-label" title={$t('settings.customMapsHint')}>{$t('settings.customMapsLocation')}</span>
+          <div class="path-picker-row">
+            <input class="s-input path-input" type="text" readonly value={customMapsPathShown} title={customMapsPathShown} />
+            <Button variant="standard" size="sm" onclick={chooseCustomMapsFolder}>{$t('settings.choose')}</Button>
+            <Button variant="standard" size="sm" disabled={!$settings.customMapsPath} onclick={resetCustomMapsFolder}>{$t('settings.useDefault')}</Button>
+          </div>
+          <div class="path-picker-row">
+            <span class="s-loc-coords custom-maps-status">
+              {$customMaps.scanning || customRescanBusy
+                ? $t('settings.customMapsScanning')
+                : $t('settings.customMapsCount', { values: { count: $customMaps.maps.length } })}
+            </span>
+            {#if activeCustomMap}
+              <Button variant="standard" size="sm" icon="map" onclick={showCustomMapArea} title={$t('settings.customMapsShowAreaHint')}>{$t('settings.customMapsShowArea')}</Button>
+            {/if}
+            <Button variant="standard" size="sm" icon="refresh" disabled={customRescanBusy} onclick={rescanCustomMapsClick} title={$t('settings.customMapsRescanHint')}>{$t('settings.customMapsRescan')}</Button>
+          </div>
+          {#if $customMaps.error}<span class="s-err">{$customMaps.error}</span>{/if}
+          {#if customAreaProblem === 'empty'}<span class="s-err">{$t('settings.customMapsNoArea')}</span>{/if}
+          {#if customAreaProblem === 'error'}<span class="s-err">{$t('settings.customMapsScanFailed')}</span>{/if}
+        </div>
+      {/if}
       <div class="s-row">
         <label class="s-label" for="altitude-curtain">{$t('settings.altitudeCurtain')}</label>
         <Toggle checked={altitudeCurtain3D} id="altitude-curtain" onchange={(c) => onPatch({ altitudeCurtain3D: c })} />
@@ -1005,6 +1083,7 @@
   .s-select { min-width: 80px; }
 
   .path-picker-row { display: flex; gap: 6px; align-items: center; }
+  .custom-maps-status { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .path-input { flex: 1; min-width: 0; }
 
   /* The one kept hint (Cesium token) — bumped up a touch so it's actually readable. */
