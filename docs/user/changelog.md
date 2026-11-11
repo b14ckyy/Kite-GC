@@ -203,6 +203,20 @@ inside the box of the feature release they belong to, so the notes for one relea
       never worked with Kite's own RTSP client and only ever existed on Windows. A real detached
       video window replaces it. [#129]
 
+    **Changed**
+
+    - **Flights belong to their vehicle by FC ID** — every flight now stores the library vehicle it
+      belongs to, recognised when it is saved: by the flight controller's **FC hardware ID** first, by
+      the craft name when the flight has no FC ID or its FC ID matches no vehicle — but never by craft
+      name to a vehicle that stores a different FC ID: when unsure, the flight stays unassigned.
+      Existing flights are linked once during the database upgrade by the same rule. The post-flight
+      summary shows the vehicle with a picker and asks when the pick needs a decision (store the FC ID,
+      FC swapped, a second aircraft, leave unassigned, create a vehicle); the flight detail changes or
+      clears the vehicle; a new vehicle, a changed craft name or a newly entered FC ID offers to link
+      the existing flights. An FC ID belongs to one vehicle — moving it to another asks first. Deleting
+      a vehicle can transfer its flights to another one. INAV over plain MAVLink and simulators with a
+      placeholder ID (INAV SITL, PX4 SITL as system ID 1) report no FC ID.
+
     **Improved**
 
     - **System messages default to *Warning*, and a new *Debug* level shows the firmware's
