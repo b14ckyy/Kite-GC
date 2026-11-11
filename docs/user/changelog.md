@@ -28,6 +28,10 @@ inside the box of the feature release they belong to, so the notes for one relea
       near the left edge of the map moved it under the mission panel instead of into view, and the
       map kept shifting while you edited values. The editor now centres the waypoint in the visible
       map area, the way the INAV tab already did.
+    - **ArduPilot / PX4 mission editor: edit mode stayed on after you left the Mission tab.**
+      Switching to another tab or closing the side panel left the editor active — the thick edit
+      lines stayed, and every click on the map kept adding waypoints until you pressed *Edit*
+      again. Leaving the Mission tab now ends edit mode, as it always did for INAV missions.
     - **MAVLink (ArduPilot / PX4): losing the connection could leave the app stuck on "connected".**
       When the link was really gone — a serial cable unplugged, a socket closed — the status bar
       stayed on "connected" until you clicked Disconnect, and a flight that was being recorded
