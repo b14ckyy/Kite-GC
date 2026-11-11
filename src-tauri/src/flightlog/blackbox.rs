@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::OnceLock;
 
 use chrono::{DateTime, Datelike, Duration, NaiveDateTime, TimeZone, Utc};
 use csv::StringRecord;
@@ -12,6 +13,7 @@ use rusqlite::Connection;
 use serde_json::json;
 
 use super::db;
+use super::inav::{decode_rows, Compat};
 use super::types::{BlackboxImportStatus, Flight, TelemetryRecord};
 
 const WINDOWS_BINARY: &str = "blackbox_decode.exe";
@@ -31,9 +33,13 @@ const HEADER_SCAN_BYTES: usize = 64 * 1024;
 const MIN_PLAUSIBLE_YEAR: i32 = 2010;
 const MAX_PLAUSIBLE_YEAR: i32 = 2040;
 
-struct ParsedRow {
-    timestamp_us: i64,
-    telemetry: TelemetryRecord,
+pub(super) struct ParsedRow {
+    pub(super) timestamp_us: i64,
+    /// The row's `time` cell in µs as decoded (the decimation's clock; `timestamp_us` is whole ms).
+    /// Read by the native decoder's comparison test, which matches rows by it.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(super) source_time_us: i64,
+    pub(super) telemetry: TelemetryRecord,
 }
 
 struct HeaderMetadata {
@@ -101,16 +107,21 @@ where
     // would compare an uncorrected time against the corrected stored one and miss every duplicate of a
     // log whose header carries a non-UTC local time. See the post-correction check below.
 
-    report(10, "decoder", "Searching for blackbox_decode...");
-    let decoder = find_decoder().ok_or_else(|| {
-        "blackbox_decode not found. Place it next to the application executable or add it to PATH.".to_string()
-    })?;
+    let rows = if native_decoder_requested() {
+        report(25, "decode", "Decoding Blackbox log...");
+        decode_rows(&file_data, log_index, Compat::Native, 100_000)?.rows
+    } else {
+        report(10, "decoder", "Searching for blackbox_decode...");
+        let decoder = find_decoder().ok_or_else(|| {
+            "blackbox_decode not found. Place it next to the application executable or add it to PATH.".to_string()
+        })?;
 
-    report(25, "decode", "Running blackbox_decode...");
-    let csv_output = run_decoder_capture_stdout(&decoder, file_path, log_index)?;
+        report(25, "decode", "Running blackbox_decode...");
+        let csv_output = run_decoder_capture_stdout(&decoder, file_path, log_index)?;
 
-    report(55, "parse", "Parsing decoded CSV...");
-    let rows = parse_csv_rows(&csv_output, 100_000)?;
+        report(55, "parse", "Parsing decoded CSV...");
+        parse_csv_rows(&csv_output, 100_000)?
+    };
     if rows.is_empty() {
         return Err("Blackbox import failed: decoder produced no rows".into());
     }
@@ -322,6 +333,10 @@ pub fn hires_telemetry_rows(
     file_data: &[u8],
     scratch_path: &Path,
 ) -> Result<Vec<TelemetryRecord>, String> {
+    if native_decoder_requested() {
+        let decoded = decode_rows(file_data, None, Compat::Native, 0)?;
+        return Ok(decoded.rows.into_iter().map(|r| r.telemetry).collect());
+    }
     fs::write(scratch_path, file_data)
         .map_err(|e| format!("Failed to write hi-res scratch file: {}", e))?;
     let result = (|| {
@@ -339,7 +354,21 @@ pub fn hires_telemetry_rows(
     result
 }
 
-fn run_decoder_capture_stdout(
+/// Dev switch while the native decoder is validated (Dev-Docs active/NATIVE_BLACKBOX_DECODER.md):
+/// `KITE_BLACKBOX_NATIVE=1` in a debug build makes the importer and the hi-res parse decode with
+/// the native decoder (`Compat::Native`) instead of blackbox_decode. Read once; release builds ignore it.
+fn native_decoder_requested() -> bool {
+    static NATIVE: OnceLock<bool> = OnceLock::new();
+    *NATIVE.get_or_init(|| {
+        let on = cfg!(debug_assertions) && std::env::var("KITE_BLACKBOX_NATIVE").is_ok_and(|v| v == "1");
+        if on {
+            log::warn!("KITE_BLACKBOX_NATIVE=1: Blackbox logs are decoded natively, not by blackbox_decode");
+        }
+        on
+    })
+}
+
+pub(super) fn run_decoder_capture_stdout(
     decoder: &Path,
     file_path: &Path,
     log_index: Option<u32>,
@@ -382,7 +411,7 @@ fn build_decoder_command(decoder: &Path, file_path: &Path, log_index: Option<u32
 /// `target_interval_us` = minimum spacing between kept rows (time-based, not row-count, because
 /// blackbox_decode --merge-gps may output at a different rate than the raw header suggests).
 /// The importer passes 100_000 (10 Hz); the hi-res replay parse passes 0 (keep every row).
-fn parse_csv_rows(csv_output: &str, target_interval_us: i64) -> Result<Vec<ParsedRow>, String> {
+pub(super) fn parse_csv_rows(csv_output: &str, target_interval_us: i64) -> Result<Vec<ParsedRow>, String> {
     let mut reader = csv::ReaderBuilder::new()
         .flexible(true)
         .from_reader(csv_output.as_bytes());
@@ -392,50 +421,33 @@ fn parse_csv_rows(csv_output: &str, target_interval_us: i64) -> Result<Vec<Parse
         .clone();
 
     // Pre-build column index map and resolve column positions — done once per file.
-    let index_map = build_index_map(&headers);
+    let index_map = build_index_map(headers.iter());
     let cols = ColumnIndices::from_map(&index_map);
 
     // Debug: log resolved column indices for GPS
     eprintln!("[BBX-COLS] lat={:?}, lon={:?}, alt={:?}, speed={:?}, time={:?}", cols.lat, cols.lon, cols.alt, cols.speed, cols.time);
 
-    let mut rows = Vec::new();
-    let mut raw_row_count: usize = 0;
-    let mut last_kept_us: i64 = i64::MIN;
+    let mut collector = RowCollector::new(target_interval_us);
     let mut gps_debug_count: usize = 0;
 
     for record in reader.records() {
         let record = record.map_err(|e| format!("Failed to read Blackbox CSV row: {}", e))?;
-        raw_row_count += 1;
-
-        // Extract timestamp cheaply for time-based downsampling decision
-        let timestamp_us = cols.time
-            .and_then(|i| record.get(i))
-            .and_then(parse_loose_i64)
-            .unwrap_or(raw_row_count as i64);
-
-        // Keep first row always, then only if ≥ target_interval has elapsed
-        if !rows.is_empty() && (timestamp_us - last_kept_us) < target_interval_us {
+        if !collector.offer(&cols, &record) {
             continue;
         }
-        last_kept_us = timestamp_us;
-
-        let telemetry = build_telemetry_record_indexed(&cols, &record, raw_row_count as i64);
 
         // Debug: log first 5 GPS values to verify parsing
         if gps_debug_count < 5 {
+            let telemetry = &collector.rows[collector.rows.len() - 1].telemetry;
             let raw_lat = cols.lat.and_then(|i| record.get(i)).unwrap_or("<none>");
             let raw_lon = cols.lon.and_then(|i| record.get(i)).unwrap_or("<none>");
             eprintln!("[BBX-GPS-DEBUG] row={} raw_lat={:?} raw_lon={:?} parsed_lat={:?} parsed_lon={:?}",
-                raw_row_count, raw_lat, raw_lon, telemetry.lat, telemetry.lon);
+                collector.raw_rows, raw_lat, raw_lon, telemetry.lat, telemetry.lon);
             gps_debug_count += 1;
         }
-
-        let timestamp_us = telemetry.timestamp_ms * 1000;
-        rows.push(ParsedRow {
-            timestamp_us,
-            telemetry,
-        });
     }
+    let raw_row_count = collector.raw_rows;
+    let rows = collector.rows;
 
     eprintln!("[BBX-DOWNSAMPLE] raw_rows={}, kept_rows={}", raw_row_count, rows.len());
     if let (Some(first), Some(last)) = (rows.first(), rows.last()) {
@@ -465,12 +477,83 @@ fn parse_csv_rows(csv_output: &str, target_interval_us: i64) -> Result<Vec<Parse
 }
 
 /// Pre-compute a mapping from normalized header name -> column index.
-fn build_index_map(headers: &StringRecord) -> HashMap<String, usize> {
+pub(super) fn build_index_map<'a>(headers: impl IntoIterator<Item = &'a str>) -> HashMap<String, usize> {
     headers
-        .iter()
+        .into_iter()
         .enumerate()
         .map(|(i, h)| (normalize_header(h), i))
         .collect()
+}
+
+/// One decoded row as the field mapping reads it: a cell by its column index in blackbox_decode's
+/// CSV header, as Kite's CSV parser reads that cell. Implemented by the CSV record itself and by the
+/// native decoder's rows (`inav::telemetry`), so both paths share one mapping.
+pub(super) trait CellReader {
+    /// `parse_loose_f64` of the cell; `None` for a missing or non-numeric cell.
+    fn f64_at(&self, index: usize) -> Option<f64>;
+    /// `parse_loose_i64` of the cell.
+    fn i64_at(&self, index: usize) -> Option<i64>;
+    /// `map` applied to the cell's text (`|`-joined flag names); `None` for a missing or blank cell.
+    fn flag_bits_at(&self, index: usize, map: fn(&str) -> u32) -> Option<u32>;
+}
+
+impl CellReader for StringRecord {
+    fn f64_at(&self, index: usize) -> Option<f64> {
+        self.get(index).and_then(parse_loose_f64)
+    }
+
+    fn i64_at(&self, index: usize) -> Option<i64> {
+        self.get(index).and_then(parse_loose_i64)
+    }
+
+    fn flag_bits_at(&self, index: usize, map: fn(&str) -> u32) -> Option<u32> {
+        self.get(index).filter(|names| !names.trim().is_empty()).map(map)
+    }
+}
+
+/// The importer's row pipeline, shared by the CSV and the native path: time-based decimation on the
+/// `time` column (first row always kept; `target_interval_us` 0 keeps every row), then the field
+/// mapping for the kept rows only.
+pub(super) struct RowCollector {
+    target_interval_us: i64,
+    last_kept_us: i64,
+    /// Rows offered so far (a row without a `time` cell is timed by its number).
+    pub(super) raw_rows: usize,
+    pub(super) rows: Vec<ParsedRow>,
+}
+
+impl RowCollector {
+    pub(super) fn new(target_interval_us: i64) -> Self {
+        RowCollector {
+            target_interval_us,
+            last_kept_us: i64::MIN,
+            raw_rows: 0,
+            rows: Vec::new(),
+        }
+    }
+
+    /// Offer the next decoded row; `true` when it was kept (it is then the last of `rows`).
+    pub(super) fn offer<R: CellReader + ?Sized>(&mut self, cols: &ColumnIndices, row: &R) -> bool {
+        self.raw_rows += 1;
+
+        // Extract timestamp cheaply for time-based downsampling decision
+        let source_time_us = cols.time.and_then(|i| row.i64_at(i)).unwrap_or(self.raw_rows as i64);
+
+        // Keep first row always, then only if ≥ target_interval has elapsed
+        if !self.rows.is_empty() && (source_time_us - self.last_kept_us) < self.target_interval_us {
+            return false;
+        }
+        self.last_kept_us = source_time_us;
+
+        let telemetry = build_telemetry_record_indexed(cols, row, self.raw_rows as i64);
+        let timestamp_us = telemetry.timestamp_ms * 1000;
+        self.rows.push(ParsedRow {
+            timestamp_us,
+            source_time_us,
+            telemetry,
+        });
+        true
+    }
 }
 
 /// Resolve the first matching column index from a list of candidate names.
@@ -486,7 +569,7 @@ fn resolve_col(index_map: &HashMap<String, usize>, names: &[&str]) -> Option<usi
 }
 
 /// Pre-resolved column indices — built once per CSV file, reused per row.
-struct ColumnIndices {
+pub(super) struct ColumnIndices {
     time: Option<usize>,
     lat: Option<usize>,
     lon: Option<usize>,
@@ -529,7 +612,7 @@ struct ColumnIndices {
 }
 
 impl ColumnIndices {
-    fn from_map(m: &HashMap<String, usize>) -> Self {
+    pub(super) fn from_map(m: &HashMap<String, usize>) -> Self {
         // Time column: "time (us)" normalizes to "time"
         let time = resolve_col(m, &["time"]);
 
@@ -598,24 +681,24 @@ fn resolve_indexed_channels(m: &HashMap<String, usize>, prefix: &str) -> Vec<usi
     channels.into_iter().map(|(_, index)| index).collect()
 }
 
-fn read_f64(cols: Option<usize>, record: &StringRecord) -> Option<f64> {
-    cols.and_then(|i| record.get(i)).and_then(parse_loose_f64)
+fn read_f64<R: CellReader + ?Sized>(cols: Option<usize>, record: &R) -> Option<f64> {
+    cols.and_then(|i| record.f64_at(i))
 }
 
 /// Read one channel (0-based) from an index-sorted channel vector (rcCommand/rcData).
-fn read_channel(channels: &[usize], ch: usize, record: &StringRecord) -> Option<f64> {
-    channels.get(ch).and_then(|&i| record.get(i)).and_then(parse_loose_f64)
+fn read_channel<R: CellReader + ?Sized>(channels: &[usize], ch: usize, record: &R) -> Option<f64> {
+    channels.get(ch).and_then(|&i| record.f64_at(i))
 }
 
-fn read_i32(cols: Option<usize>, record: &StringRecord) -> Option<i32> {
+fn read_i32<R: CellReader + ?Sized>(cols: Option<usize>, record: &R) -> Option<i32> {
     read_f64(cols, record).map(|v| v.round() as i32)
 }
 
-fn read_i64(cols: Option<usize>, record: &StringRecord) -> Option<i64> {
+fn read_i64<R: CellReader + ?Sized>(cols: Option<usize>, record: &R) -> Option<i64> {
     read_f64(cols, record).map(|v| v.round() as i64)
 }
 
-fn read_u8(cols: Option<usize>, record: &StringRecord) -> Option<u8> {
+fn read_u8<R: CellReader + ?Sized>(cols: Option<usize>, record: &R) -> Option<u8> {
     read_f64(cols, record).map(|v| v.round() as u8)
 }
 
@@ -703,14 +786,14 @@ fn state_flag_bits_from_names(names: &str) -> u32 {
     bits
 }
 
-fn read_json_array(indices: &[usize], record: &StringRecord) -> Option<String> {
+fn read_json_array<R: CellReader + ?Sized>(indices: &[usize], record: &R) -> Option<String> {
     if indices.is_empty() {
         return None;
     }
 
     let values: Vec<i32> = indices
         .iter()
-        .filter_map(|&idx| record.get(idx).and_then(parse_loose_f64).map(|v| v.round() as i32))
+        .filter_map(|&idx| record.f64_at(idx).map(|v| v.round() as i32))
         .collect();
 
     if values.is_empty() {
@@ -720,24 +803,22 @@ fn read_json_array(indices: &[usize], record: &StringRecord) -> Option<String> {
     }
 }
 
-fn build_telemetry_record_indexed(
+fn build_telemetry_record_indexed<R: CellReader + ?Sized>(
     cols: &ColumnIndices,
-    record: &StringRecord,
+    record: &R,
     row_fallback: i64,
 ) -> TelemetryRecord {
 
     let timestamp_us = cols
         .time
-        .and_then(|i| record.get(i))
-        .and_then(parse_loose_i64)
+        .and_then(|i| record.i64_at(i))
         .unwrap_or(row_fallback);
 
     // Course over ground. blackbox_decode emits gps_ground_course in degrees (decimals preserved).
     // Keep the >360 fallback for any source that hands us decidegrees, but never round (full precision).
     let heading = cols
         .heading
-        .and_then(|i| record.get(i))
-        .and_then(parse_loose_f64)
+        .and_then(|i| record.f64_at(i))
         .map(|v| if v > 360.0 { v / 10.0 } else { v });
 
     let alt = read_f64(cols.alt, record).map(|v| if v > 10_000.0 { v / 100.0 } else { v });
@@ -757,9 +838,8 @@ fn build_telemetry_record_indexed(
     // all those logs carry (see flight_mode_bits_from_names).
     let mode_flags = read_i64(cols.active_flight_mode_flags, record).or_else(|| {
         cols.flight_mode_boxes
-            .and_then(|i| record.get(i))
-            .filter(|names| !names.trim().is_empty())
-            .map(|names| flight_mode_bits_from_names(names) as i64)
+            .and_then(|i| record.flag_bits_at(i, flight_mode_bits_from_names))
+            .map(|bits| bits as i64)
     });
     let (mode_primary, mode_modifiers) = match mode_flags {
         Some(f) => {
@@ -803,9 +883,8 @@ fn build_telemetry_record_indexed(
         // Decoded to names by default, so the numeric read never resolved (see the helper).
         state_flags: read_i64(cols.state_flags, record).or_else(|| {
             cols.state_flags
-                .and_then(|i| record.get(i))
-                .filter(|names| !names.trim().is_empty())
-                .map(|names| state_flag_bits_from_names(names) as i64)
+                .and_then(|i| record.flag_bits_at(i, state_flag_bits_from_names))
+                .map(|bits| bits as i64)
         }),
         nav_state: read_i32(cols.nav_state, record),
         nav_flags: read_i64(cols.nav_flags, record),
@@ -842,7 +921,7 @@ fn build_telemetry_record_indexed(
 /// Parse `H looptime:<us>` and `H P interval:1/<N>` from the raw log file header,
 /// then compute the effective interval between logged samples in microseconds.
 ///
-fn parse_loose_i64(raw: &str) -> Option<i64> {
+pub(super) fn parse_loose_i64(raw: &str) -> Option<i64> {
     let cleaned: String = raw
         .chars()
         .take_while(|ch| ch.is_ascii_digit() || *ch == '-' || *ch == '+')
@@ -850,7 +929,7 @@ fn parse_loose_i64(raw: &str) -> Option<i64> {
     cleaned.parse::<i64>().ok()
 }
 
-fn parse_loose_f64(raw: &str) -> Option<f64> {
+pub(super) fn parse_loose_f64(raw: &str) -> Option<f64> {
     let cleaned: String = raw
         .chars()
         .take_while(|ch| ch.is_ascii_digit() || matches!(ch, '-' | '+' | '.'))
@@ -868,7 +947,7 @@ fn normalize_header(value: &str) -> String {
 }
 
 /// Byte offset of every log in a (possibly multi-log) Blackbox file.
-fn log_start_offsets(file_data: &[u8]) -> Vec<usize> {
+pub(super) fn log_start_offsets(file_data: &[u8]) -> Vec<usize> {
     let mut offsets = Vec::new();
     let mut from = 0usize;
     while let Some(pos) = file_data[from..]
