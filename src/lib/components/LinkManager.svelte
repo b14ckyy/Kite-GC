@@ -98,7 +98,6 @@
         message: $t('connection.switchArmedBody', { values: { name: v.name } }),
         buttons: [
           { label: $t('connection.switchArmedConfirm'), value: 'switch', danger: true },
-          { label: $t('connection.btNameCancel'), value: 'cancel' },
         ],
       });
       if (choice !== 'switch') return;

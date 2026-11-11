@@ -314,7 +314,7 @@
         `Current mission has ${currentCount}/${MAX_WAYPOINTS_TOTAL} waypoints.\n` +
         `This pattern would add ${wps.length} waypoints, exceeding the limit by ${wps.length - remaining}.\n\n` +
         `Only the first ${remaining} waypoints will be added (truncated). Continue?`,
-        [{ label: 'Cancel', value: 'cancel' }, { label: 'Truncate & Add', value: 'proceed', primary: true }]
+        [{ label: 'Truncate & Add', value: 'proceed', primary: true }]
       );
       if (result !== 'proceed') return;
       wps = wps.slice(0, remaining);
