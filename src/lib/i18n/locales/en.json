@@ -501,6 +501,10 @@
     "takeoffArmWarning": "TAKEOFF mode is active: the motor starts as soon as the vehicle is armed (with default parameters after about 0.2 s, without throw detection).",
     "guidedUnavailable": "The flight controller does not offer Guided mode.",
     "guidedGone": "Guided is no longer active — the target was not sent.",
+    "qrtlHint": "QRTL: returns to home (or a rally point) and lands vertically.",
+    "qlandHint": "QLand: lands vertically right where the aircraft is.",
+    "loiterQlandHint": "Loiter QLand: circles down in forward flight to Q_RTL_ALT, then lands vertically. In hover it lands at once.",
+    "autolandHint": "AutoLand: automatic landing at home in the takeoff direction. Works only in flight, and only if the flight controller captured the takeoff direction.",
     "ack": {
       "ok": "Accepted"
     },

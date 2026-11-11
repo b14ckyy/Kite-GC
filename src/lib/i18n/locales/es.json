@@ -501,6 +501,10 @@
     "takeoffArmWarning": "Modo TAKEOFF activo: el motor arranca en cuanto se arma el vehículo (con los parámetros por defecto tras unos 0,2 s, sin detección de lanzamiento).",
     "guidedUnavailable": "La FC no ofrece el modo Guided.",
     "guidedGone": "Guided ya no está activo: el destino no se ha enviado.",
+    "qrtlHint": "QRTL: vuelve al origen (o a un punto de reunión) y aterriza en vertical.",
+    "qlandHint": "QLand: aterriza en vertical justo donde está la aeronave.",
+    "loiterQlandHint": "Loiter QLand: desciende en círculos en vuelo de avance hasta Q_RTL_ALT y luego aterriza en vertical. En estacionario aterriza de inmediato.",
+    "autolandHint": "AutoLand: aterrizaje automático en el origen en la dirección del despegue. Solo funciona en vuelo y si la FC ha registrado la dirección del despegue.",
     "ack": {
       "ok": "Aceptado"
     },

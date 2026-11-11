@@ -42,6 +42,8 @@ export interface MavMode {
   /** Returns or lands the vehicle — the quick grid asks for hold-to-confirm, like the RTL
    *  and Land buttons, instead of a single click. */
   confirm?: boolean;
+  /** Refused by the firmware on a VTOL (QuadPlane) — not offered when the FC's list carries VTOL modes. */
+  notOnVtol?: boolean;
 }
 
 /** One mode of the FC's own list (AVAILABLE_MODES, ArduPilot 4.7+) — the backend's `available-modes`. */
@@ -99,10 +101,11 @@ const PLANE: MavMode[] = [
   { key: 'cruise',    name: 'Cruise',    main: 7,  sub: 0, stick: false },
   { key: 'circle',    name: 'Circle',    main: 1,  sub: 0, stick: false },
   { key: 'takeoff',   name: 'Takeoff',   main: 13, sub: 0, stick: false },
-  { key: 'autoland',  name: 'AutoLand',  main: 26, sub: 0, stick: false, listedOnly: true, confirm: true },
   { key: 'thermal',   name: 'Thermal',   main: 24, sub: 0, stick: false },
-  { key: 'qrtl',      name: 'QRTL',      main: 21, sub: 0, stick: false, vtol: true, confirm: true },
+  // The firmware refuses AutoLand on a QuadPlane ("autoland not available") although it lists the mode.
+  { key: 'autoland',  name: 'AutoLand',  main: 26, sub: 0, stick: false, listedOnly: true, confirm: true, notOnVtol: true },
   { key: 'qloiter',   name: 'QLoiter',   main: 19, sub: 0, stick: false, vtol: true },
+  { key: 'qrtl',      name: 'QRTL',      main: 21, sub: 0, stick: false, vtol: true, confirm: true },
   { key: 'qland',     name: 'QLand',     main: 20, sub: 0, stick: false, vtol: true, confirm: true },
   { key: 'loiterqland', name: 'Loiter QLand', main: 25, sub: 0, stick: false, vtol: true, confirm: true },
   // QHover holds altitude only — the pilot holds position, so it needs sticks like Copter's AltHold.
@@ -218,7 +221,10 @@ export function offeredModes(system: AutopilotSystem, cls: VehicleClass, fc: rea
   }
   const table = tableFor(system, cls);
   const known = new Set(table.map((m) => m.main));
-  const offered = table.filter((m) => !m.neverOffer && selectable.has(m.main));
+  // ArduPlane lists its Q modes only when the QuadPlane is enabled — the firmware's own "is a VTOL".
+  const listed = new Set(fc.map((m) => m.customMode >>> 0));
+  const isVtol = table.some((m) => m.vtol && listed.has(m.main));
+  const offered = table.filter((m) => !m.neverOffer && selectable.has(m.main) && !(m.notOnVtol && isVtol));
   for (const [n, m] of selectable) {
     if (!known.has(n)) offered.push(unknownFcMode(m));
   }

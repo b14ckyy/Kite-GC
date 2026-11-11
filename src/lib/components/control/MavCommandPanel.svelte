@@ -42,8 +42,13 @@
   // Modes with their own dedicated control (Guided toggle, RTL/Land hold buttons, Takeoff command,
   // PX4 mission mode) are not repeated as quick mode buttons. The Guided toggle's mode is matched by
   // its flag, not its key: PX4's Hold is that mode, ArduRover's Hold is an ordinary mode with no other button.
-  const DEDICATED = new Set(['guided', 'rtl', 'return', 'land', 'takeoff', 'mission']);
-  const quickModes = $derived(safeModes.filter((m) => !m.guided && !DEDICATED.has(m.key)));
+  // ArduPlane's return / land modes (QRTL, QLand, Loiter QLand, AutoLand) sit beside RTL — see `landModes`.
+  const DEDICATED = new Set(['guided', 'rtl', 'return', 'land', 'takeoff', 'mission', 'qrtl', 'qland', 'loiterqland', 'autoland']);
+  // Hold-to-confirm modes (return / land) go last, as one block under the ordinary flight modes.
+  const quickModes = $derived.by(() => {
+    const grid = safeModes.filter((m) => !m.guided && !DEDICATED.has(m.key));
+    return [...grid.filter((m) => !m.confirm), ...grid.filter((m) => m.confirm)];
+  });
 
   let showAllModes = $state(false);
   const stickUnlocked = $derived($stickModesUnlocked); // RC transmitter OR engaged RC control
@@ -58,6 +63,15 @@
   // (mode 13 of another vehicle type is something else — Copter SPORT).
   const planeTakeoffMode = $derived(sys === 'ardupilot' && cls === 'plane' && $modeTableMatchesVehicle
     ? allModes.find((m) => m.key === 'takeoff') : undefined);
+  // ArduPlane returns and lands through modes, and they have their place beside RTL instead of the mode
+  // grid: a QuadPlane pairs RTL with QRTL and gets Loiter QLand + QLand below; a plain plane gets AutoLand
+  // (ArduPilot 4.7+, refused on a QuadPlane). Driven by what is offered, so a QuadPlane whose class was not
+  // detected still gets its buttons from the FC's list. Empty while a vehicle switch has not caught up.
+  const landModes = $derived.by(() => {
+    if (sys !== 'ardupilot' || !$modeTableMatchesVehicle) return { qrtl: undefined, qland: undefined, loiterQland: undefined, autoland: undefined };
+    const by = (key: string) => allModes.find((m) => m.key === key);
+    return { qrtl: by('qrtl'), qland: by('qland'), loiterQland: by('loiterqland'), autoland: by('autoland') };
+  });
   // The Guided toggle's mode; with the FC's mode list only when the FC offers GUIDED.
   const guidedMode = $derived(guidedModeFor(sys, cls, $activeFcModesChecked));
 
@@ -70,6 +84,8 @@
   // Plain ArduPlane fixed-wing has no land-now command (landing = AUTO sequence / RTL) → hide Land.
   // Copter, QuadPlane (→ QLAND) and PX4 (Land mode) all support it.
   const landSupported = $derived(!(sys === 'ardupilot' && cls === 'plane'));
+  // The plain Land command (NAV_LAND) is not a QuadPlane's landing — QLand is, on its own button.
+  const landCommand = $derived(landSupported && !(sys === 'ardupilot' && cls === 'quadplane'));
   // Change Alt is a reposition (DO_REPOSITION) → only works while the FC is in the guided/reposition-
   // ready mode. In Loiter/Cruise/Auto the altitude is held / pilot- / mission-controlled, so hide it.
   const inGuided = $derived($activeMode?.guided === true);
@@ -196,12 +212,38 @@
           <HoldToConfirm variant="warning" busy={busy('rtl')} onconfirm={() => rtl()}>
             {$t('control.action.rtl')}
           </HoldToConfirm>
-          {#if landSupported}
+          {#if landModes.qrtl}
+            {@const mode = landModes.qrtl}
+            <HoldToConfirm variant="warning" busy={busy('setMode')} title={$t('control.qrtlHint')} onconfirm={() => pickMode(mode)}>
+              {mode.name}
+            </HoldToConfirm>
+          {:else if landModes.autoland}
+            {@const mode = landModes.autoland}
+            <HoldToConfirm variant="warning" busy={busy('setMode')} title={$t('control.autolandHint')} onconfirm={() => pickMode(mode)}>
+              {mode.name}
+            </HoldToConfirm>
+          {:else if landCommand}
             <HoldToConfirm variant="warning" busy={busy('land')} onconfirm={() => land()}>
               {$t('control.action.land')}
             </HoldToConfirm>
           {/if}
         </div>
+        {#if landModes.loiterQland || landModes.qland}
+          <div class="cc-row">
+            {#if landModes.loiterQland}
+              {@const mode = landModes.loiterQland}
+              <HoldToConfirm variant="warning" busy={busy('setMode')} title={$t('control.loiterQlandHint')} onconfirm={() => pickMode(mode)}>
+                {mode.name}
+              </HoldToConfirm>
+            {/if}
+            {#if landModes.qland}
+              {@const mode = landModes.qland}
+              <HoldToConfirm variant="warning" busy={busy('setMode')} title={$t('control.qlandHint')} onconfirm={() => pickMode(mode)}>
+                {mode.name}
+              </HoldToConfirm>
+            {/if}
+          </div>
+        {/if}
         {#if isFixedWing}
           <HoldToConfirm variant="warning" busy={busy('abortLanding')} onconfirm={() => abortLanding()}>
             {$t('control.action.abortLanding')}

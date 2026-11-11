@@ -501,6 +501,10 @@
     "takeoffArmWarning": "TAKEOFF-Modus aktiv: Der Motor läuft an, sobald scharf geschaltet wird (mit Standardparametern nach etwa 0,2 s, ohne Wurferkennung).",
     "guidedUnavailable": "Der Flugcontroller bietet keinen Guided-Modus an.",
     "guidedGone": "Guided ist nicht mehr aktiv — das Ziel wurde nicht gesendet.",
+    "qrtlHint": "QRTL: fliegt zurück zum Home (oder einem Rally-Punkt) und landet senkrecht.",
+    "qlandHint": "QLand: landet senkrecht genau an der aktuellen Position.",
+    "loiterQlandHint": "Loiter QLand: kreist im Vorwärtsflug auf Q_RTL_ALT herunter und landet dann senkrecht. Im Schwebeflug landet es sofort.",
+    "autolandHint": "AutoLand: automatische Landung am Home in Startrichtung. Geht nur im Flug und nur, wenn der Flugcontroller die Startrichtung erfasst hat.",
     "ack": {
       "ok": "Angenommen"
     },
