@@ -248,6 +248,7 @@ where
         platform_type: header.platform_type,
         fc_uid: None,
         group_id: None,
+        vehicle_id: None,
         protocol: "BLACKBOX".into(),
         start_lat,
         start_lon,

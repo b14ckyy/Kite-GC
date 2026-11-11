@@ -73,14 +73,20 @@ pub struct Flight {
     /// `start_time` is always true UTC; this offset shifts it to flight-local time for display.
     /// `None` (old rows / no GPS) → display in UTC.
     pub utc_offset_min: Option<i32>,
-    /// Hardware id of the FC that flew (MSP_UID / MAVLink AUTOPILOT_VERSION uid). Informational only —
-    /// flights link to vehicles by craft name, never by this. `None` for imports and passive telemetry.
+    /// Hardware id of the FC that flew (MSP_UID / MAVLink AUTOPILOT_VERSION uid2), as flown — never
+    /// rewritten. `None` for imports, passive telemetry and the known synthetic ids (INAV SITL, an all-zero
+    /// id — see `msp::hardware_uid`).
     #[serde(default)]
     pub fc_uid: Option<String>,
     /// Group flight this flight is a member of (`flight_groups.id`, schema v20). `None` = a single
     /// flight. Changeable (unlink / relink); the group id itself never changes.
     #[serde(default)]
     pub group_id: Option<String>,
+    /// Library vehicle the flight belongs to (`vehicles.id`, schema v20; `ON DELETE SET NULL`). Resolved
+    /// when the flight is stored (`db::resolve_vehicle_id`: `fc_uid` first, craft name as fallback)
+    /// unless set explicitly; changeable afterwards. `None` = not in the library.
+    #[serde(default)]
+    pub vehicle_id: Option<i64>,
 }
 
 /// A group flight (row in `flight_groups`, schema v20): the header that ties the member flights of a
@@ -270,16 +276,17 @@ pub struct BatteryAggregate {
 
 // ── Vehicle library ─────────────────────────────────────────────────
 
-/// A vehicle/aircraft stored in the library (row in `vehicles` table). Flights soft-link by
-/// `craft_name` (no FK) — the same craft name already recorded per flight. INAV provides the
-/// craft name automatically; ArduPilot/PX4 are linked manually post-flight.
+/// A vehicle/aircraft stored in the library (row in `vehicles` table). Flights link by
+/// `flights.vehicle_id` (schema v20), resolved when a flight is stored from its `fc_uid`, else its
+/// craft name; ArduPilot/PX4 without a matching UID are linked manually post-flight.
 /// Records (max flight time / distance / altitude) are NOT stored here — they are derived live
 /// from the linked flights (see `VehicleAggregate`), so they stay correct after relink/delete.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Vehicle {
     pub id: i64,
     pub name: String,
-    /// Soft-link key to `flights.craft_name` (trimmed; case-insensitive match). May differ from `name`.
+    /// Fallback resolution key against `flights.craft_name` (trimmed; case-insensitive match) for
+    /// flights without a matching `fc_uid`. May differ from `name`.
     pub craft_name: Option<String>,
     /// `fixed_wing` | `flying_wing` | `vtol` | `multirotor` | `helicopter` | `rover` | `boat` | `other`
     pub vehicle_type: String,
@@ -321,7 +328,8 @@ pub struct Vehicle {
     pub fc_firmware_version: Option<String>,
     pub blackbox_available: bool,
     /// FC hardware id (see `Flight::fc_uid`) — prefilled when the vehicle is created from the connected
-    /// FC, freely editable, never used for linking.
+    /// FC, freely editable (an FC swap = a new UID here). The first key when a flight is resolved to
+    /// its vehicle.
     pub fc_uid: Option<String>,
     // Persistent lifetime baseline (adopted on request from the INAV FC `stats` feature). Additive to
     // the logged flights — the displayed lifetime = baseline + Σ(linked flights). Never auto-updated.
@@ -403,7 +411,20 @@ pub struct InavStats {
     pub total_energy: i64,
 }
 
-/// Aggregated contribution of the flights linked to a vehicle (by craft name). Totals + the
+/// How a flight's identity resolves to a library vehicle (the End-Flight screen's vehicle pick).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct VehicleResolution {
+    /// The resolved vehicle, `None` when nothing matches.
+    pub vehicle: Option<Vehicle>,
+    /// `"uid"` | `"craft"` | `None` (no match).
+    pub matched_by: Option<String>,
+    /// Matched by craft name, but the vehicle stores a different hardware FC id while the flight has
+    /// one: either the FC was swapped or a second aircraft carries the same craft name — the UI asks
+    /// which. The automatic link (`db::resolve_vehicle_id`) leaves such a flight unlinked.
+    pub uid_conflict: bool,
+}
+
+/// Aggregated contribution of the flights linked to a vehicle (`flights.vehicle_id`). Totals + the
 /// per-flight records (max flight time / distance / altitude, each with the achieving flight id).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct VehicleAggregate {
@@ -543,6 +564,9 @@ pub struct FlightSummary {
     /// Group flight membership (see `Flight::group_id`).
     #[serde(default)]
     pub group_id: Option<String>,
+    /// Library vehicle (see `Flight::vehicle_id`).
+    #[serde(default)]
+    pub vehicle_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

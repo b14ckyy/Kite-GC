@@ -13,8 +13,10 @@ use rusqlite::{params, Connection, OptionalExtension, Result as SqlResult};
 use super::types::{
     BatteryAggregate, BatteryPack, BatteryPackInput, BatteryRecord, Flight, FlightEvent, FlightGroup,
     FlightSummary, Mission,
-    MissionInput, TelemetryRecord, Vehicle, VehicleAggregate, VehicleInput,
+    MissionInput, TelemetryRecord, Vehicle, VehicleAggregate, VehicleInput, VehicleResolution,
 };
+use crate::msp::hardware_uid;
+use crate::msp::types::INAV_SITL_UID;
 
 const CURRENT_SCHEMA_VERSION: u32 = 20;
 
@@ -562,9 +564,9 @@ fn migrate_v14_to_v15(conn: &Connection) -> SqlResult<()> {
 }
 
 /// v16: the vehicle library — a `vehicles` table holding the per-aircraft build sheet. Flights
-/// soft-link by the existing `flights.craft_name` (no FK, no flight-row change), so the link works
-/// retroactively. Idempotent; only creates the table if missing. Records (max time/dist/alt) are
-/// derived from the linked flights, not stored here.
+/// soft-linked by the existing `flights.craft_name` until v20 stored the link (`flights.vehicle_id`).
+/// Idempotent; only creates the table if missing. Records (max time/dist/alt) are derived from the
+/// linked flights, not stored here.
 fn ensure_v16_schema(conn: &Connection) -> SqlResult<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS vehicles (
@@ -667,7 +669,7 @@ fn migrate_v17_to_v18(conn: &Connection) -> SqlResult<()> {
 }
 
 /// v19: the FC hardware id (`fc_uid`) on flights and vehicles — MSP_UID / MAVLink AUTOPILOT_VERSION
-/// uid, informational only (flights keep linking to vehicles by craft name). Additive + idempotent.
+/// uid; from v20 the first key of the flight → vehicle link. Additive + idempotent.
 fn ensure_v19_schema(conn: &Connection) -> SqlResult<()> {
     if !column_exists(conn, "flights", "fc_uid")? {
         conn.execute_batch("ALTER TABLE flights ADD COLUMN fc_uid TEXT;")?;
@@ -688,8 +690,9 @@ fn migrate_v18_to_v19(conn: &Connection) -> SqlResult<()> {
 /// the member flights of a multi-vehicle flight together; no track, no telemetry), `flights.group_id`
 /// (deleting a group dissolves it: members stay as single flights), the per-flight event timeline
 /// `flight_events` (arm/disarm; the column set of INAV_PUSH_TELEMETRY §6.4) and a wall-clock stamp per
-/// telemetry row (`telemetry_records.wall_ms`, UTC epoch ms; NULL for imports and older rows).
-/// Additive + idempotent.
+/// telemetry row (`telemetry_records.wall_ms`, UTC epoch ms; NULL for imports and older rows), and the
+/// flight → library vehicle link `flights.vehicle_id` (Dev-Docs active/MULTI_VEHICLE.md §9.1; deleting a
+/// vehicle un-links its flights). Additive + idempotent.
 fn ensure_v20_schema(conn: &Connection) -> SqlResult<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS flight_groups (
@@ -731,7 +734,58 @@ fn ensure_v20_schema(conn: &Connection) -> SqlResult<()> {
     if !column_exists(conn, "telemetry_records", "wall_ms")? {
         conn.execute_batch("ALTER TABLE telemetry_records ADD COLUMN wall_ms INTEGER;")?;
     }
+    if !column_exists(conn, "flights", "vehicle_id")? {
+        // The column and its one-time back-fill commit together: a savepoint nests inside the
+        // migration step's transaction and also covers the self-heal call (no transaction there). The
+        // back-fill runs only here, when the column is born — later opens never re-link a flight the
+        // user un-linked.
+        conn.execute_batch("SAVEPOINT v20_vehicle_id;")?;
+        let added = conn
+            .execute_batch(
+                "ALTER TABLE flights ADD COLUMN vehicle_id INTEGER REFERENCES vehicles(id) ON DELETE SET NULL;",
+            )
+            .and_then(|_| backfill_flight_vehicle_ids(conn));
+        match added {
+            Ok(linked) => {
+                conn.execute_batch("RELEASE v20_vehicle_id;")?;
+                log::info!("[flightlog] flights.vehicle_id added — {linked} existing flight(s) linked to library vehicles");
+            }
+            Err(e) => {
+                let _ = conn.execute_batch("ROLLBACK TO v20_vehicle_id; RELEASE v20_vehicle_id;");
+                return Err(e);
+            }
+        }
+    }
+    conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_flights_vehicle ON flights(vehicle_id);")?;
     Ok(())
+}
+
+/// Link every flight without a vehicle to the one the resolution rule names (`resolve_vehicle_id`:
+/// `fc_uid` first, craft name as the fallback, the newest vehicle on a tie). On a database without FC
+/// ids that is exactly what the logbook showed through its craft-name match before v20; a flight whose
+/// FC id matches a vehicle goes to that vehicle instead. Only touches `vehicle_id IS NULL` rows, so it
+/// is re-entrant. Returns the number of flights linked.
+fn backfill_flight_vehicle_ids(conn: &Connection) -> SqlResult<usize> {
+    let has_vehicles: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM vehicles)", [], |r| r.get(0))?;
+    if !has_vehicles {
+        return Ok(0);
+    }
+    let unlinked: Vec<(i64, Option<String>, Option<String>)> = {
+        let mut stmt = conn.prepare("SELECT id, fc_uid, craft_name FROM flights WHERE vehicle_id IS NULL")?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        rows.collect::<SqlResult<_>>()?
+    };
+    let mut linked = 0;
+    for (flight_id, fc_uid, craft) in unlinked {
+        if let Some(vehicle_id) = resolve_vehicle_id(conn, fc_uid.as_deref(), craft.as_deref().unwrap_or(""))? {
+            conn.execute(
+                "UPDATE flights SET vehicle_id = ?1 WHERE id = ?2",
+                params![vehicle_id, flight_id],
+            )?;
+            linked += 1;
+        }
+    }
+    Ok(linked)
 }
 
 fn migrate_v19_to_v20(conn: &Connection) -> SqlResult<()> {
@@ -890,8 +944,24 @@ fn migrate_v1_to_v2(conn: &Connection) -> SqlResult<()> {
 
 // ── CRUD operations ─────────────────────────────────────────────────
 
-/// Insert a new flight, returns the row ID.
+/// Insert a new flight, returns the row ID. Every flight insert goes through here (live commit,
+/// crash recovery, every importer, `.kflight` import): a flight without an explicit `vehicle_id` is
+/// linked to the library vehicle `resolve_vehicle_id` names (none → NULL).
 pub fn insert_flight(conn: &Connection, flight: &Flight) -> SqlResult<i64> {
+    let vehicle_id = match flight.vehicle_id {
+        Some(id) => Some(id),
+        None => resolve_vehicle_id(conn, flight.fc_uid.as_deref(), &flight.craft_name)?,
+    };
+    insert_flight_row(conn, flight, vehicle_id)
+}
+
+/// `insert_flight` without the vehicle resolution — `flight.vehicle_id` is written as it is. For a
+/// database without a vehicle library (the `.kflight` export file).
+pub fn insert_flight_unresolved(conn: &Connection, flight: &Flight) -> SqlResult<i64> {
+    insert_flight_row(conn, flight, flight.vehicle_id)
+}
+
+fn insert_flight_row(conn: &Connection, flight: &Flight, vehicle_id: Option<i64>) -> SqlResult<i64> {
     conn.execute(
         "INSERT INTO flights (
             start_time, end_time, duration_sec, source,
@@ -900,10 +970,10 @@ pub fn insert_flight(conn: &Connection, flight: &Flight) -> SqlResult<i64> {
             weather_temp_c, weather_wind_ms, weather_wind_deg, weather_desc,
             max_alt_m, max_speed_ms, max_distance_m, total_distance_m,
             battery_used_mah, notes, pilot_name, pilot_id, battery_serial, utc_offset_min, fc_uid,
-            group_id
+            group_id, vehicle_id
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-            ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29
+            ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30
         )",
         params![
             flight.start_time.to_rfc3339(),
@@ -935,6 +1005,7 @@ pub fn insert_flight(conn: &Connection, flight: &Flight) -> SqlResult<i64> {
             flight.utc_offset_min,
             flight.fc_uid,
             flight.group_id,
+            vehicle_id,
         ],
     )?;
     Ok(conn.last_insert_rowid())
@@ -1538,7 +1609,7 @@ pub fn list_flights(conn: &Connection) -> SqlResult<Vec<FlightSummary>> {
     let mut stmt = conn.prepare(
         "SELECT id, start_time, duration_sec, source, craft_name, location_name,
             max_alt_m, max_speed_ms, total_distance_m, platform_type, linked_flight_id, notes,
-            utc_offset_min, group_id
+            utc_offset_min, group_id, vehicle_id
          FROM flights ORDER BY start_time DESC",
     )?;
 
@@ -1563,6 +1634,7 @@ pub fn list_flights(conn: &Connection) -> SqlResult<Vec<FlightSummary>> {
             notes: row.get(11)?,
             utc_offset_min: row.get(12)?,
             group_id: row.get(13)?,
+            vehicle_id: row.get(14)?,
         })
     })?;
 
@@ -1578,7 +1650,7 @@ pub fn get_flight(conn: &Connection, flight_id: i64) -> SqlResult<Option<Flight>
                 weather_temp_c, weather_wind_ms, weather_wind_deg, weather_desc,
                 max_alt_m, max_speed_ms, max_distance_m, total_distance_m,
                 battery_used_mah, notes, linked_flight_id, pilot_name, pilot_id, battery_serial,
-                utc_offset_min, fc_uid, group_id
+                utc_offset_min, fc_uid, group_id, vehicle_id
          FROM flights WHERE id = ?1",
     )?;
 
@@ -1627,6 +1699,7 @@ pub fn get_flight(conn: &Connection, flight_id: i64) -> SqlResult<Option<Flight>
             utc_offset_min: row.get(28)?,
             fc_uid: row.get(29)?,
             group_id: row.get(30)?,
+            vehicle_id: row.get(31)?,
         })
     })?;
 
@@ -1851,7 +1924,7 @@ pub fn list_flights_for_mission(conn: &Connection, mission_id: i64) -> SqlResult
     let mut stmt = conn.prepare(
         "SELECT id, start_time, duration_sec, source, craft_name, location_name,
             max_alt_m, max_speed_ms, total_distance_m, platform_type, linked_flight_id, notes,
-            utc_offset_min, group_id
+            utc_offset_min, group_id, vehicle_id
          FROM flights WHERE mission_id = ?1 ORDER BY start_time DESC",
     )?;
     let rows = stmt.query_map(params![mission_id], |row| {
@@ -1874,6 +1947,7 @@ pub fn list_flights_for_mission(conn: &Connection, mission_id: i64) -> SqlResult
             notes: row.get(11)?,
             utc_offset_min: row.get(12)?,
             group_id: row.get(13)?,
+            vehicle_id: row.get(14)?,
         })
     })?;
     rows.collect()
@@ -2075,7 +2149,7 @@ pub fn list_flights_for_serial(conn: &Connection, serial: &str) -> SqlResult<Vec
     let mut stmt = conn.prepare(
         "SELECT id, start_time, duration_sec, source, craft_name, location_name,
             max_alt_m, max_speed_ms, total_distance_m, platform_type, linked_flight_id, notes,
-            utc_offset_min, group_id
+            utc_offset_min, group_id, vehicle_id
          FROM flights WHERE (',' || battery_serial || ',') LIKE ('%,' || ?1 || ',%')
          ORDER BY start_time DESC",
     )?;
@@ -2099,6 +2173,7 @@ pub fn list_flights_for_serial(conn: &Connection, serial: &str) -> SqlResult<Vec
             notes: row.get(11)?,
             utc_offset_min: row.get(12)?,
             group_id: row.get(13)?,
+            vehicle_id: row.get(14)?,
         })
     })?;
     rows.collect()
@@ -2192,6 +2267,7 @@ pub fn normalize_craft_name(s: &str) -> Option<String> {
 /// Create a vehicle. Returns the new row id.
 pub fn create_vehicle(conn: &Connection, v: &VehicleInput) -> SqlResult<i64> {
     let craft = v.craft_name.as_deref().and_then(normalize_craft_name);
+    let fc_uid = v.fc_uid.as_deref().map(str::trim).filter(|s| !s.is_empty());
     conn.execute(
         "INSERT INTO vehicles (
             name, craft_name, vehicle_type, status, image, notes,
@@ -2211,7 +2287,7 @@ pub fn create_vehicle(conn: &Connection, v: &VehicleInput) -> SqlResult<i64> {
             v.rx, v.vtx, v.camera, v.gimbal_camera, v.datalink,
             v.sensor_airspeed, v.sensor_rangefinder, v.sensor_optical_flow, v.sensor_gps, v.sensor_rtk, v.sensor_compass,
             v.fc_model, v.fc_manufacturer, v.fc_firmware, v.fc_firmware_version, v.blackbox_available,
-            v.fc_uid,
+            fc_uid,
         ],
     )?;
     Ok(conn.last_insert_rowid())
@@ -2220,6 +2296,7 @@ pub fn create_vehicle(conn: &Connection, v: &VehicleInput) -> SqlResult<i64> {
 /// Update a vehicle's fields (bumps `updated_at`).
 pub fn update_vehicle(conn: &Connection, id: i64, v: &VehicleInput) -> SqlResult<()> {
     let craft = v.craft_name.as_deref().and_then(normalize_craft_name);
+    let fc_uid = v.fc_uid.as_deref().map(str::trim).filter(|s| !s.is_empty());
     conn.execute(
         "UPDATE vehicles SET
             name = ?1, craft_name = ?2, vehicle_type = ?3, status = ?4, image = ?5, notes = ?6,
@@ -2238,7 +2315,7 @@ pub fn update_vehicle(conn: &Connection, id: i64, v: &VehicleInput) -> SqlResult
             v.rx, v.vtx, v.camera, v.gimbal_camera, v.datalink,
             v.sensor_airspeed, v.sensor_rangefinder, v.sensor_optical_flow, v.sensor_gps, v.sensor_rtk, v.sensor_compass,
             v.fc_model, v.fc_manufacturer, v.fc_firmware, v.fc_firmware_version, v.blackbox_available, id,
-            v.fc_uid,
+            fc_uid,
         ],
     )?;
     Ok(())
@@ -2254,7 +2331,7 @@ pub fn find_vehicle_by_fc_uid(conn: &Connection, fc_uid: &str) -> SqlResult<Opti
     conn.query_row(
         &format!(
             "SELECT {} FROM vehicles WHERE TRIM(fc_uid) = ?1 COLLATE NOCASE \
-             ORDER BY created_at DESC LIMIT 1",
+             ORDER BY created_at DESC, id DESC LIMIT 1",
             VEHICLE_COLS
         ),
         params![uid],
@@ -2266,7 +2343,7 @@ pub fn find_vehicle_by_fc_uid(conn: &Connection, fc_uid: &str) -> SqlResult<Opti
 /// List all vehicles (newest first).
 pub fn list_vehicles(conn: &Connection) -> SqlResult<Vec<Vehicle>> {
     let mut stmt =
-        conn.prepare(&format!("SELECT {} FROM vehicles ORDER BY created_at DESC", VEHICLE_COLS))?;
+        conn.prepare(&format!("SELECT {} FROM vehicles ORDER BY created_at DESC, id DESC", VEHICLE_COLS))?;
     let rows = stmt.query_map([], row_to_vehicle)?;
     rows.collect()
 }
@@ -2290,7 +2367,7 @@ pub fn find_vehicle_by_craft_name(conn: &Connection, craft: &str) -> SqlResult<O
     conn.query_row(
         &format!(
             "SELECT {} FROM vehicles WHERE TRIM(craft_name) = ?1 COLLATE NOCASE \
-             ORDER BY created_at DESC LIMIT 1",
+             ORDER BY created_at DESC, id DESC LIMIT 1",
             VEHICLE_COLS
         ),
         params![craft],
@@ -2299,10 +2376,199 @@ pub fn find_vehicle_by_craft_name(conn: &Connection, craft: &str) -> SqlResult<O
     .optional()
 }
 
-/// Delete a vehicle. Flights keep their `craft_name` and fall back to "not in library".
+/// Delete a vehicle. Its flights are un-linked (`vehicle_id` NULL → "not in library"), never deleted;
+/// they keep their craft name and FC id. Done explicitly as well as by the FK's `ON DELETE SET NULL`,
+/// so a connection without `foreign_keys` cannot leave dangling ids.
 pub fn delete_vehicle(conn: &Connection, id: i64) -> SqlResult<()> {
-    conn.execute("DELETE FROM vehicles WHERE id = ?1", params![id])?;
-    Ok(())
+    let tx = conn.unchecked_transaction()?;
+    tx.execute("UPDATE flights SET vehicle_id = NULL WHERE vehicle_id = ?1", params![id])?;
+    tx.execute("DELETE FROM vehicles WHERE id = ?1", params![id])?;
+    tx.commit()
+}
+
+/// The newest vehicle (by `created_at`, then id) storing this FC hardware id — never for an empty or
+/// synthetic id (`hardware_uid`).
+fn vehicle_id_by_fc_uid(conn: &Connection, fc_uid: &str) -> SqlResult<Option<i64>> {
+    let Some(uid) = hardware_uid(fc_uid) else {
+        return Ok(None);
+    };
+    conn.prepare_cached(
+        "SELECT id FROM vehicles WHERE TRIM(fc_uid) = ?1 COLLATE NOCASE \
+         ORDER BY created_at DESC, id DESC LIMIT 1",
+    )?
+    .query_row(params![uid], |r| r.get(0))
+    .optional()
+}
+
+/// The newest vehicle (by `created_at`, then id) carrying this craft name (trimmed, case-insensitive) —
+/// never for an empty one.
+fn vehicle_id_by_craft_name(conn: &Connection, craft: &str) -> SqlResult<Option<i64>> {
+    let Some(craft) = normalize_craft_name(craft) else {
+        return Ok(None);
+    };
+    conn.prepare_cached(
+        "SELECT id FROM vehicles WHERE TRIM(craft_name) = ?1 COLLATE NOCASE \
+         ORDER BY created_at DESC, id DESC LIMIT 1",
+    )?
+    .query_row(params![craft], |r| r.get(0))
+    .optional()
+}
+
+/// Where a flight flown with `fc_uid` / `craft_name` points in the library: the vehicle storing the FC
+/// hardware id, else the newest vehicle carrying the craft name — then `conflict` is set when the flight
+/// has a hardware id and that vehicle stores a different one (FC swapped, or a second aircraft with the
+/// same craft name). Shared by `resolve_vehicle_id` and `resolve_vehicle`.
+fn vehicle_candidate(conn: &Connection, fc_uid: Option<&str>, craft_name: &str) -> SqlResult<Option<(i64, &'static str, bool)>> {
+    let uid = fc_uid.and_then(hardware_uid);
+    if let Some(u) = uid.as_deref() {
+        if let Some(id) = vehicle_id_by_fc_uid(conn, u)? {
+            return Ok(Some((id, "uid", false)));
+        }
+    }
+    let Some(id) = vehicle_id_by_craft_name(conn, craft_name)? else {
+        return Ok(None);
+    };
+    // The vehicle's stored id counts only as a hardware id (a stored synthetic id is no identity).
+    let stored: Option<String> = conn
+        .query_row("SELECT fc_uid FROM vehicles WHERE id = ?1", params![id], |r| r.get(0))
+        .optional()?
+        .flatten();
+    let stored = stored.as_deref().and_then(hardware_uid);
+    let conflict = matches!((uid.as_deref(), stored.as_deref()), (Some(a), Some(b)) if !a.eq_ignore_ascii_case(b));
+    Ok(Some((id, "craft", conflict)))
+}
+
+/// The library vehicle a flight flown with `fc_uid` / `craft_name` belongs to, for every automatic
+/// link (flight insert, the v20 back-fill, `.kflight` import): the vehicle storing the FC hardware id
+/// first, else the one carrying the craft name (vehicles and flights without a UID — 1.0 data, passive
+/// telemetry); the newest vehicle when several match. When unsure, unlinked (Marc, 2026-11-11): a
+/// flight with a hardware id never links by craft name to a vehicle that stores a DIFFERENT one — it
+/// stays unlinked until the user decides. `None` = not in the library.
+pub fn resolve_vehicle_id(conn: &Connection, fc_uid: Option<&str>, craft_name: &str) -> SqlResult<Option<i64>> {
+    Ok(match vehicle_candidate(conn, fc_uid, craft_name)? {
+        Some((id, _, false)) => Some(id),
+        _ => None,
+    })
+}
+
+/// The post-flight summary's pick: the vehicle `resolve_vehicle_id` names, how it matched — and, unlike
+/// the automatic link, also a craft-name candidate whose stored FC id differs from the flight's, reported
+/// with `uid_conflict` so the summary can ask (see `VehicleResolution::uid_conflict`).
+pub fn resolve_vehicle(conn: &Connection, fc_uid: Option<&str>, craft_name: &str) -> SqlResult<VehicleResolution> {
+    let Some((id, matched_by, uid_conflict)) = vehicle_candidate(conn, fc_uid, craft_name)? else {
+        return Ok(VehicleResolution::default());
+    };
+    Ok(VehicleResolution { vehicle: get_vehicle(conn, id)?, matched_by: Some(matched_by.into()), uid_conflict })
+}
+
+/// Give vehicle `vehicle_id` the FC hardware id `fc_uid` (`None` / empty clears it) and take it off
+/// every other vehicle that stores it (trimmed, case-insensitive) — an FC id belongs to one vehicle.
+/// Returns how many other vehicles lost it.
+pub fn set_vehicle_fc_uid(conn: &Connection, vehicle_id: i64, fc_uid: Option<&str>) -> SqlResult<usize> {
+    let uid = fc_uid.map(str::trim).filter(|s| !s.is_empty());
+    let tx = conn.unchecked_transaction()?;
+    let moved = match uid {
+        Some(u) => tx.execute(
+            "UPDATE vehicles SET fc_uid = NULL, updated_at = datetime('now') \
+             WHERE id != ?1 AND TRIM(fc_uid) = ?2 COLLATE NOCASE",
+            params![vehicle_id, u],
+        )?,
+        None => 0,
+    };
+    let set = tx.execute(
+        "UPDATE vehicles SET fc_uid = ?2, updated_at = datetime('now') WHERE id = ?1",
+        params![vehicle_id, uid],
+    )?;
+    if set == 0 {
+        // Unknown vehicle: dropping `tx` rolls the removal from the other vehicles back.
+        return Err(rusqlite::Error::QueryReturnedNoRows);
+    }
+    tx.commit()?;
+    Ok(moved)
+}
+
+/// Link a flight to a library vehicle, or un-link it (`None`). Returns whether the flight exists. An
+/// unknown vehicle id fails on the foreign key.
+pub fn set_flight_vehicle(conn: &Connection, flight_id: i64, vehicle_id: Option<i64>) -> SqlResult<bool> {
+    let n = conn.execute(
+        "UPDATE flights SET vehicle_id = ?1 WHERE id = ?2",
+        params![vehicle_id, flight_id],
+    )?;
+    Ok(n > 0)
+}
+
+/// The flights a link-by-identity moves to vehicle `?1`: those flown with the craft name `?2` (trimmed,
+/// case-insensitive) or with the FC hardware id `?3`, not linked to that vehicle yet — with `?4`
+/// (only_unlinked), only flights without any vehicle. With an FC id key the craft-name arm never
+/// crosses a different FC id: a flight matches by name only when it has no hardware id of its own
+/// (none, empty, all zero or the INAV SITL constant `?5` — `msp::hardware_uid`) or the same one.
+const LINKABLE_FLIGHTS_WHERE: &str = "((?2 IS NOT NULL AND TRIM(craft_name) = ?2 COLLATE NOCASE \
+         AND (?3 IS NULL OR fc_uid IS NULL OR REPLACE(TRIM(fc_uid), '0', '') = '' \
+              OR TRIM(fc_uid) = ?5 COLLATE NOCASE OR TRIM(fc_uid) = ?3 COLLATE NOCASE)) \
+       OR (?3 IS NOT NULL AND TRIM(fc_uid) = ?3 COLLATE NOCASE)) \
+     AND vehicle_id IS NOT ?1 \
+     AND (?4 = 0 OR vehicle_id IS NULL)";
+
+/// The normalized keys of a link-by-identity (craft name, FC hardware id); `None` when neither is
+/// usable (absent, empty or a synthetic id) — such a link touches no flight.
+fn link_keys(craft_name: Option<&str>, fc_uid: Option<&str>) -> Option<(Option<String>, Option<String>)> {
+    let craft = craft_name.and_then(normalize_craft_name);
+    let uid = fc_uid.and_then(hardware_uid);
+    if craft.is_none() && uid.is_none() {
+        return None;
+    }
+    Some((craft, uid))
+}
+
+/// How many flights `link_flights_to_vehicle` would link (the "link N flights?" question).
+pub fn count_linkable_flights(
+    conn: &Connection,
+    vehicle_id: i64,
+    craft_name: Option<&str>,
+    fc_uid: Option<&str>,
+    only_unlinked: bool,
+) -> SqlResult<usize> {
+    let Some((craft, uid)) = link_keys(craft_name, fc_uid) else {
+        return Ok(0);
+    };
+    let n: i64 = conn.query_row(
+        &format!("SELECT COUNT(*) FROM flights WHERE {LINKABLE_FLIGHTS_WHERE}"),
+        params![vehicle_id, craft, uid, only_unlinked, INAV_SITL_UID],
+        |r| r.get(0),
+    )?;
+    Ok(n as usize)
+}
+
+/// Link every flight flown with `craft_name` and/or `fc_uid` to vehicle `vehicle_id` (back-filling old
+/// flights on the user's approval; see `LINKABLE_FLIGHTS_WHERE`). Returns the number linked. The
+/// flights keep their craft name and FC id.
+pub fn link_flights_to_vehicle(
+    conn: &Connection,
+    vehicle_id: i64,
+    craft_name: Option<&str>,
+    fc_uid: Option<&str>,
+    only_unlinked: bool,
+) -> SqlResult<usize> {
+    let Some((craft, uid)) = link_keys(craft_name, fc_uid) else {
+        return Ok(0);
+    };
+    conn.execute(
+        &format!("UPDATE flights SET vehicle_id = ?1 WHERE {LINKABLE_FLIGHTS_WHERE}"),
+        params![vehicle_id, craft, uid, only_unlinked, INAV_SITL_UID],
+    )
+}
+
+/// Move every flight of vehicle `from_id` to vehicle `to_id` (a replaced aircraft's flights stay with
+/// the pilot's new one). Returns the number moved; `from_id == to_id` moves nothing. An unknown target
+/// fails on the foreign key.
+pub fn transfer_vehicle_flights(conn: &Connection, from_id: i64, to_id: i64) -> SqlResult<usize> {
+    if from_id == to_id {
+        return Ok(0);
+    }
+    conn.execute(
+        "UPDATE flights SET vehicle_id = ?2 WHERE vehicle_id = ?1",
+        params![from_id, to_id],
+    )
 }
 
 /// Set the persistent lifetime baseline to absolute values (adopt the INAV FC `stats` totals, or
@@ -2324,17 +2590,14 @@ pub fn set_vehicle_baseline(
     Ok(())
 }
 
-/// Aggregate the flights linked to a craft name: totals + the per-flight records (max flight
-/// time / distance / altitude, each with the achieving flight id). Trimmed + case-insensitive.
-pub fn vehicle_aggregate(conn: &Connection, craft: &str) -> SqlResult<VehicleAggregate> {
-    let Some(craft) = normalize_craft_name(craft) else {
-        return Ok(VehicleAggregate::default());
-    };
+/// Aggregate the flights linked to a vehicle (`flights.vehicle_id`): totals + the per-flight records
+/// (max flight time / distance / altitude, each with the achieving flight id).
+pub fn vehicle_aggregate(conn: &Connection, vehicle_id: i64) -> SqlResult<VehicleAggregate> {
     let mut agg = conn.query_row(
         "SELECT COUNT(*), COALESCE(SUM(duration_sec), 0), COALESCE(SUM(total_distance_m), 0),
                 MIN(start_time), MAX(start_time)
-         FROM flights WHERE TRIM(craft_name) = ?1 COLLATE NOCASE",
-        params![craft],
+         FROM flights WHERE vehicle_id = ?1",
+        params![vehicle_id],
         |row| {
             Ok(VehicleAggregate {
                 flight_count: row.get(0)?,
@@ -2351,9 +2614,9 @@ pub fn vehicle_aggregate(conn: &Connection, craft: &str) -> SqlResult<VehicleAgg
     if let Some((id, v)) = conn
         .query_row(
             "SELECT id, duration_sec FROM flights
-             WHERE TRIM(craft_name) = ?1 COLLATE NOCASE AND duration_sec IS NOT NULL
+             WHERE vehicle_id = ?1 AND duration_sec IS NOT NULL
              ORDER BY duration_sec DESC LIMIT 1",
-            params![craft],
+            params![vehicle_id],
             |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
         )
         .optional()?
@@ -2364,9 +2627,9 @@ pub fn vehicle_aggregate(conn: &Connection, craft: &str) -> SqlResult<VehicleAgg
     if let Some((id, v)) = conn
         .query_row(
             "SELECT id, total_distance_m FROM flights
-             WHERE TRIM(craft_name) = ?1 COLLATE NOCASE AND total_distance_m IS NOT NULL
+             WHERE vehicle_id = ?1 AND total_distance_m IS NOT NULL
              ORDER BY total_distance_m DESC LIMIT 1",
-            params![craft],
+            params![vehicle_id],
             |row| Ok((row.get::<_, i64>(0)?, row.get::<_, f64>(1)?)),
         )
         .optional()?
@@ -2377,9 +2640,9 @@ pub fn vehicle_aggregate(conn: &Connection, craft: &str) -> SqlResult<VehicleAgg
     if let Some((id, v)) = conn
         .query_row(
             "SELECT id, max_alt_m FROM flights
-             WHERE TRIM(craft_name) = ?1 COLLATE NOCASE AND max_alt_m IS NOT NULL
+             WHERE vehicle_id = ?1 AND max_alt_m IS NOT NULL
              ORDER BY max_alt_m DESC LIMIT 1",
-            params![craft],
+            params![vehicle_id],
             |row| Ok((row.get::<_, i64>(0)?, row.get::<_, f64>(1)?)),
         )
         .optional()?
@@ -2390,18 +2653,16 @@ pub fn vehicle_aggregate(conn: &Connection, craft: &str) -> SqlResult<VehicleAgg
     Ok(agg)
 }
 
-/// List the flight summaries linked to a craft name (Manager detail + delete reference warning).
-pub fn list_flights_for_craft(conn: &Connection, craft: &str) -> SqlResult<Vec<FlightSummary>> {
-    let Some(craft) = normalize_craft_name(craft) else {
-        return Ok(Vec::new());
-    };
+/// List the flight summaries linked to a vehicle (Manager detail + the delete warning's
+/// "N linked flights").
+pub fn list_flights_for_vehicle(conn: &Connection, vehicle_id: i64) -> SqlResult<Vec<FlightSummary>> {
     let mut stmt = conn.prepare(
         "SELECT id, start_time, duration_sec, source, craft_name, location_name,
             max_alt_m, max_speed_ms, total_distance_m, platform_type, linked_flight_id, notes,
-            utc_offset_min, group_id
-         FROM flights WHERE TRIM(craft_name) = ?1 COLLATE NOCASE ORDER BY start_time DESC",
+            utc_offset_min, group_id, vehicle_id
+         FROM flights WHERE vehicle_id = ?1 ORDER BY start_time DESC",
     )?;
-    let rows = stmt.query_map(params![craft], |row| {
+    let rows = stmt.query_map(params![vehicle_id], |row| {
         let ts_str: String = row.get(1)?;
         let start_time = DateTime::parse_from_rfc3339(&ts_str)
             .map(|dt| dt.with_timezone(&Utc))
@@ -2421,6 +2682,7 @@ pub fn list_flights_for_craft(conn: &Connection, craft: &str) -> SqlResult<Vec<F
             notes: row.get(11)?,
             utc_offset_min: row.get(12)?,
             group_id: row.get(13)?,
+            vehicle_id: row.get(14)?,
         })
     })?;
     rows.collect()
@@ -2650,6 +2912,7 @@ pub fn find_duplicate_flight(
                     utc_offset_min: None,
                     fc_uid: None,
                     group_id: None,
+                    vehicle_id: None,
                 })
             },
         )
@@ -2867,7 +3130,8 @@ pub fn update_flight_notes(
     Ok(())
 }
 
-/// Update the craft_name field of a flight.
+/// Update the craft_name field of a flight (the logbook's manual correction). The vehicle link
+/// (`vehicle_id`) is not touched — it is changed explicitly (`set_flight_vehicle`).
 pub fn update_flight_craft_name(
     conn: &Connection,
     flight_id: i64,
@@ -2988,7 +3252,7 @@ pub fn find_linkable_live_flight(
         .query_row(
             "SELECT id, start_time, duration_sec, source, craft_name, location_name,
                                         max_alt_m, max_speed_ms, total_distance_m, platform_type, linked_flight_id,
-                    group_id
+                    group_id, vehicle_id
              FROM flights
              WHERE source = 'live' AND linked_flight_id IS NULL
                AND start_time >= ?2 AND start_time <= ?3
@@ -3016,6 +3280,7 @@ pub fn find_linkable_live_flight(
                     notes: None,
                     utc_offset_min: None,
                     group_id: row.get(11)?,
+                    vehicle_id: row.get(12)?,
                 })
             },
         )
@@ -3343,6 +3608,26 @@ mod tests {
             .unwrap();
         assert_eq!(grouped, 0);
         assert!(list_flight_groups(&conn).unwrap().is_empty());
+        // flights.vehicle_id landed and was back-filled by the resolution rule: every link names an
+        // existing vehicle and is exactly what `resolve_vehicle_id` picks for the flight.
+        assert!(column_exists(&conn, "flights", "vehicle_id").unwrap());
+        assert!(object_exists(&conn, "index", "idx_flights_vehicle"));
+        let vehicles = list_vehicles(&conn).unwrap().len();
+        let rows: Vec<(i64, Option<String>, String, Option<i64>)> = conn
+            .prepare("SELECT id, fc_uid, craft_name, vehicle_id FROM flights")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+            .unwrap()
+            .collect::<SqlResult<_>>()
+            .unwrap();
+        let linked = rows.iter().filter(|r| r.3.is_some()).count();
+        for (id, uid, craft, vehicle_id) in &rows {
+            assert_eq!(*vehicle_id, resolve_vehicle_id(&conn, uid.as_deref(), craft).unwrap(), "flight {id}");
+            if let Some(v) = vehicle_id {
+                assert!(get_vehicle(&conn, *v).unwrap().is_some(), "flight {id} links a missing vehicle {v}");
+            }
+        }
+        eprintln!("real DB: {vehicles} vehicles, {linked} of {flights} flights linked by the back-fill");
         drop(conn);
         let _ = std::fs::remove_file(&work);
         let _ = std::fs::remove_file(backup_path_for(&work));
@@ -3384,6 +3669,7 @@ mod tests {
             battery_serial: None,
             utc_offset_min: None,
             group_id: None,
+            vehicle_id: None,
         };
         let id = insert_flight(&conn, &flight).unwrap();
         let loaded = get_flight(&conn, id).unwrap().unwrap();
@@ -3426,6 +3712,7 @@ mod tests {
             battery_serial: None,
             utc_offset_min: None,
             group_id: None,
+            vehicle_id: None,
         };
         let fid = insert_flight(&conn, &flight).unwrap();
 
@@ -3524,6 +3811,7 @@ mod tests {
             battery_serial: None,
             utc_offset_min: None,
             group_id: None,
+            vehicle_id: None,
         };
         let fid = insert_flight(&conn, &flight).unwrap();
         let rec = TelemetryRecord {
@@ -3620,6 +3908,7 @@ mod tests {
             battery_serial: None,
             utc_offset_min: None,
             group_id: None,
+            vehicle_id: None,
         };
         let flight_id = insert_flight(&conn, &flight).unwrap();
         insert_blackbox_records(&conn, flight_id, &[(123_000, "{}".into())]).unwrap();
@@ -3715,6 +4004,7 @@ mod tests {
             battery_serial: None,
             utc_offset_min: Some(120),
             group_id: group_id.map(String::from),
+            vehicle_id: None,
         }
     }
 
@@ -4018,5 +4308,366 @@ mod tests {
         assert!(track[0].wall_ms.is_none());
         remove_temp_session(&temp);
         cleanup(&temp);
+    }
+
+    // ── Schema v20: flight → library vehicle (`flights.vehicle_id`) ─────────────────────────
+
+    /// INAV SITL's MSP_UID as the MSP handshake renders it (see `msp::hardware_uid`).
+    const SITL_UID: &str = "000000000100000002000000";
+
+    /// A library vehicle with an explicit `created_at` (the "newest wins" order), by raw SQL so it
+    /// works on a v19 database too. Returns its id.
+    fn vehicle(conn: &Connection, name: &str, craft: Option<&str>, uid: Option<&str>, created_at: &str) -> i64 {
+        conn.execute(
+            "INSERT INTO vehicles (name, craft_name, fc_uid, created_at) VALUES (?1, ?2, ?3, ?4)",
+            params![name, craft, uid, created_at],
+        )
+        .unwrap();
+        conn.last_insert_rowid()
+    }
+
+    fn flight_with(craft: &str, uid: Option<&str>) -> Flight {
+        Flight { fc_uid: uid.map(String::from), ..flight(craft, None) }
+    }
+
+    fn vehicle_of(conn: &Connection, flight_id: i64) -> Option<i64> {
+        get_flight(conn, flight_id).unwrap().unwrap().vehicle_id
+    }
+
+    /// The v19 → v20 step adds `flights.vehicle_id` + its index and links the existing flights the way
+    /// the craft-name display did, with the FC id first: UID beats craft name, the newest vehicle wins,
+    /// synthetic ids never match, unmatched flights stay NULL. The back-fill only runs when the column is
+    /// born — a later open never re-links a flight the user un-linked — and is itself re-entrant.
+    #[test]
+    fn v20_backfills_flight_vehicle_ids() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        migrate_to(&conn, 19);
+        assert!(!column_exists(&conn, "flights", "vehicle_id").unwrap());
+
+        let by_uid = vehicle(&conn, "By UID", Some("Other"), Some(" uida "), "2026-01-01 10:00:00");
+        let wing_old = vehicle(&conn, "Wing old", Some("Wing"), None, "2026-01-01 10:00:00");
+        let wing_new = vehicle(&conn, "Wing new", Some(" wing"), None, "2026-01-03 10:00:00");
+        // Created later by id, but older by created_at — must lose against `wing_new`.
+        let _wing_stale = vehicle(&conn, "Wing stale", Some("WING"), None, "2026-01-02 10:00:00");
+        let sitl = vehicle(&conn, "SITL", None, Some(SITL_UID), "2026-01-05 10:00:00");
+
+        let raw = |craft: &str, uid: Option<&str>| {
+            conn.execute(
+                "INSERT INTO flights (start_time, craft_name, fc_uid) VALUES ('2026-09-01T10:00:00+00:00', ?1, ?2)",
+                params![craft, uid],
+            )
+            .unwrap();
+            conn.last_insert_rowid()
+        };
+        let uid_and_craft = raw("Wing", Some("UIDA"));
+        let craft_only = raw(" wing ", None);
+        let unmatched = raw("Nobody", None);
+        let synthetic = raw("", Some(SITL_UID));
+        let unknown_uid = raw("Wing", Some("UIDX"));
+
+        migrate(&conn).unwrap();
+        assert!(column_exists(&conn, "flights", "vehicle_id").unwrap());
+        assert!(object_exists(&conn, "index", "idx_flights_vehicle"));
+        let fk: (String, String) = conn
+            .query_row(
+                "SELECT \"table\", on_delete FROM pragma_foreign_key_list('flights') WHERE \"from\" = 'vehicle_id'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(fk, ("vehicles".to_string(), "SET NULL".to_string()));
+        assert_eq!(vehicle_of(&conn, uid_and_craft), Some(by_uid), "the FC id beats the craft name");
+        assert_eq!(vehicle_of(&conn, craft_only), Some(wing_new), "the newest vehicle with the craft name");
+        assert_eq!(vehicle_of(&conn, unmatched), None);
+        assert_eq!(vehicle_of(&conn, synthetic), None, "a synthetic id matches no vehicle (not even {sitl})");
+        assert_eq!(vehicle_of(&conn, unknown_uid), Some(wing_new), "unknown FC id → craft-name fallback");
+        assert_ne!(wing_old, wing_new);
+        // The flights keep what they were flown with.
+        let f = get_flight(&conn, uid_and_craft).unwrap().unwrap();
+        assert_eq!((f.craft_name.as_str(), f.fc_uid.as_deref()), ("Wing", Some("UIDA")));
+
+        // Re-entrant: a second back-fill changes nothing.
+        assert_eq!(backfill_flight_vehicle_ids(&conn).unwrap(), 0);
+        // A flight the user un-linked stays un-linked across a reopen.
+        set_flight_vehicle(&conn, craft_only, None).unwrap();
+        migrate(&conn).unwrap();
+        assert_eq!(vehicle_of(&conn, craft_only), None);
+        let tx = conn.unchecked_transaction().unwrap();
+        migrate_v19_to_v20(&tx).unwrap();
+        tx.commit().unwrap();
+        assert_eq!(vehicle_of(&conn, craft_only), None);
+    }
+
+    /// A database already stamped v20 without the column (a dev build of the branch before
+    /// `flights.vehicle_id`) gets column, index and back-fill from the self-heal pass.
+    #[test]
+    fn v20_stamped_database_without_the_column_self_heals() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        migrate_to(&conn, 19);
+        set_user_version(&conn, 20).unwrap();
+        let wing = vehicle(&conn, "Wing", Some("Wing"), None, "2026-01-01 10:00:00");
+        conn.execute(
+            "INSERT INTO flights (start_time, craft_name) VALUES ('2026-09-01T10:00:00+00:00', 'Wing')",
+            [],
+        )
+        .unwrap();
+        let id = conn.last_insert_rowid();
+        assert!(!column_exists(&conn, "flights", "vehicle_id").unwrap());
+
+        migrate(&conn).unwrap();
+        assert_eq!(get_user_version(&conn).unwrap(), 20);
+        assert!(column_exists(&conn, "flights", "vehicle_id").unwrap());
+        assert!(object_exists(&conn, "index", "idx_flights_vehicle"));
+        assert_eq!(vehicle_of(&conn, id), Some(wing));
+    }
+
+    /// Deleting a vehicle un-links its flights — they stay, with their craft name and FC id.
+    #[test]
+    fn deleting_a_vehicle_unlinks_its_flights() {
+        let conn = test_db();
+        let v = vehicle(&conn, "Wing", Some("Wing"), Some("UID1"), "2026-01-01 10:00:00");
+        let keep = vehicle(&conn, "Quad", Some("Quad"), None, "2026-01-01 10:00:00");
+        let a = insert_flight(&conn, &flight_with("Wing", Some("UID1"))).unwrap();
+        let b = insert_flight(&conn, &flight_with("Quad", None)).unwrap();
+        assert_eq!(vehicle_of(&conn, a), Some(v));
+
+        delete_vehicle(&conn, v).unwrap();
+        let f = get_flight(&conn, a).unwrap().expect("the flight survives its vehicle");
+        assert_eq!((f.vehicle_id, f.craft_name.as_str(), f.fc_uid.as_deref()), (None, "Wing", Some("UID1")));
+        assert_eq!(vehicle_of(&conn, b), Some(keep));
+        assert!(list_flights_for_vehicle(&conn, v).unwrap().is_empty());
+        // The FK alone (ON DELETE SET NULL) un-links as well.
+        conn.execute("DELETE FROM vehicles WHERE id = ?1", params![keep]).unwrap();
+        assert_eq!(vehicle_of(&conn, b), None);
+        assert!(get_flight(&conn, b).unwrap().is_some());
+    }
+
+    #[test]
+    fn transfer_moves_every_flight_of_a_vehicle() {
+        let conn = test_db();
+        let old = vehicle(&conn, "Old", Some("Wing"), None, "2026-01-01 10:00:00");
+        let new = vehicle(&conn, "New", None, None, "2026-01-02 10:00:00");
+        let other = vehicle(&conn, "Other", Some("Quad"), None, "2026-01-01 10:00:00");
+        let a = insert_flight(&conn, &flight("Wing", None)).unwrap();
+        let b = insert_flight(&conn, &flight("Wing", None)).unwrap();
+        let c = insert_flight(&conn, &flight("Quad", None)).unwrap();
+
+        assert_eq!(transfer_vehicle_flights(&conn, old, old).unwrap(), 0);
+        assert_eq!(transfer_vehicle_flights(&conn, old, new).unwrap(), 2);
+        assert_eq!((vehicle_of(&conn, a), vehicle_of(&conn, b), vehicle_of(&conn, c)), (Some(new), Some(new), Some(other)));
+        assert_eq!(get_flight(&conn, a).unwrap().unwrap().craft_name, "Wing");
+        assert_eq!(vehicle_aggregate(&conn, new).unwrap().flight_count, 2);
+        assert_eq!(vehicle_aggregate(&conn, old).unwrap().flight_count, 0);
+        assert!(transfer_vehicle_flights(&conn, new, 9_999).is_err(), "unknown target (FK)");
+        assert_eq!(vehicle_of(&conn, a), Some(new));
+    }
+
+    /// Link-by-identity: craft name (trimmed, case-insensitive) and/or FC id; `only_unlinked` leaves
+    /// other vehicles' flights alone; the dry-run count matches what the link changes.
+    #[test]
+    fn link_flights_by_craft_name_and_uid() {
+        let conn = test_db();
+        // Flights stored before the target vehicle existed → unlinked.
+        let a = insert_flight(&conn, &flight("Wing", None)).unwrap();
+        let b = insert_flight(&conn, &flight("WING ", None)).unwrap();
+        let other = vehicle(&conn, "Other", None, None, "2026-01-01 10:00:00");
+        let c = insert_flight(&conn, &Flight { vehicle_id: Some(other), ..flight("Wing", None) }).unwrap();
+        let d = insert_flight(&conn, &flight("Quad", None)).unwrap();
+        let e = insert_flight(&conn, &flight_with("", Some("UIDZ"))).unwrap();
+        let s = insert_flight(&conn, &flight_with("", Some(SITL_UID))).unwrap();
+        let target = vehicle(&conn, "Target", None, None, "2026-01-02 10:00:00");
+
+        assert_eq!(count_linkable_flights(&conn, target, Some("wing"), None, true).unwrap(), 2);
+        assert_eq!(link_flights_to_vehicle(&conn, target, Some("wing"), None, true).unwrap(), 2);
+        assert_eq!((vehicle_of(&conn, a), vehicle_of(&conn, b), vehicle_of(&conn, c)), (Some(target), Some(target), Some(other)));
+        // Without only_unlinked the other vehicle's flight moves too; the already linked ones don't count.
+        assert_eq!(count_linkable_flights(&conn, target, Some("Wing"), None, false).unwrap(), 1);
+        assert_eq!(link_flights_to_vehicle(&conn, target, Some("Wing"), None, false).unwrap(), 1);
+        assert_eq!(vehicle_of(&conn, c), Some(target));
+        assert_eq!(vehicle_of(&conn, d), None);
+        // By FC id; nothing for no key, an empty key or a synthetic id.
+        assert_eq!(link_flights_to_vehicle(&conn, target, None, Some(" uidz "), true).unwrap(), 1);
+        assert_eq!(vehicle_of(&conn, e), Some(target));
+        assert_eq!(count_linkable_flights(&conn, target, None, None, false).unwrap(), 0);
+        assert_eq!(link_flights_to_vehicle(&conn, target, Some("  "), Some(""), false).unwrap(), 0);
+        assert_eq!(link_flights_to_vehicle(&conn, target, None, Some(SITL_UID), false).unwrap(), 0);
+        assert_eq!(vehicle_of(&conn, s), None);
+        // The flights keep their craft name.
+        assert_eq!(get_flight(&conn, b).unwrap().unwrap().craft_name, "WING ");
+        assert_eq!(list_flights_for_vehicle(&conn, target).unwrap().len(), 4);
+    }
+
+    #[test]
+    fn resolve_reports_how_it_matched_and_uid_conflicts() {
+        let conn = test_db();
+        let by_uid = vehicle(&conn, "U", Some("Wing"), Some("UID1"), "2026-01-01 10:00:00");
+        let quad = vehicle(&conn, "Q", Some("Quad"), Some("UID9"), "2026-01-01 10:00:00");
+        let plane = vehicle(&conn, "P", Some("Plane"), Some("  "), "2026-01-01 10:00:00");
+
+        let r = resolve_vehicle(&conn, Some("uid1"), "Quad").unwrap();
+        assert_eq!((r.vehicle.map(|v| v.id), r.matched_by.as_deref(), r.uid_conflict), (Some(by_uid), Some("uid"), false));
+        // Craft-name match, the vehicle stores another FC id → FC swapped or a second aircraft.
+        let r = resolve_vehicle(&conn, Some("UID2"), "quad").unwrap();
+        assert_eq!((r.vehicle.map(|v| v.id), r.matched_by.as_deref(), r.uid_conflict), (Some(quad), Some("craft"), true));
+        // No hardware id on the flight (passive, 1.0 data, a simulator) → no conflict to ask about.
+        let r = resolve_vehicle(&conn, None, "Quad").unwrap();
+        assert_eq!((r.vehicle.map(|v| v.id), r.uid_conflict), (Some(quad), false));
+        let r = resolve_vehicle(&conn, Some(SITL_UID), "Quad").unwrap();
+        assert_eq!((r.matched_by.as_deref(), r.uid_conflict), (Some("craft"), false));
+        // The vehicle stores no (only a blank) FC id → nothing to replace.
+        let r = resolve_vehicle(&conn, Some("UID2"), "Plane").unwrap();
+        assert_eq!((r.vehicle.map(|v| v.id), r.uid_conflict), (Some(plane), false));
+        let r = resolve_vehicle(&conn, Some("UID2"), "Nothing").unwrap();
+        assert_eq!((r.vehicle.is_none(), r.matched_by, r.uid_conflict), (true, None, false));
+        assert_eq!(resolve_vehicle_id(&conn, Some("UID2"), "Nothing").unwrap(), None);
+    }
+
+    /// When unsure, unlinked: a flight with a hardware FC id does not link by craft name to a vehicle that
+    /// stores a different one — on insert, in the back-fill and on `.kflight` import (see exchange.rs) —
+    /// while the post-flight summary still reports that candidate with `uid_conflict`. Without an FC id
+    /// on the flight or on the vehicle the craft-name link still works.
+    #[test]
+    fn craft_name_fallback_never_crosses_a_different_fc_id() {
+        let conn = test_db();
+        let other_fc = vehicle(&conn, "Wing A", Some("Wing"), Some("UIDA"), "2026-01-01 10:00:00");
+        let quad = vehicle(&conn, "Quad", Some("Quad"), None, "2026-01-01 10:00:00");
+
+        assert_eq!(vehicle_of(&conn, insert_flight(&conn, &flight_with("Wing", Some("UIDB"))).unwrap()), None);
+        let r = resolve_vehicle(&conn, Some("UIDB"), "Wing").unwrap();
+        assert_eq!((r.vehicle.map(|v| v.id), r.uid_conflict), (Some(other_fc), true));
+        // No FC id on the flight / on the vehicle → the craft name links.
+        assert_eq!(vehicle_of(&conn, insert_flight(&conn, &flight_with("Wing", None)).unwrap()), Some(other_fc));
+        assert_eq!(vehicle_of(&conn, insert_flight(&conn, &flight_with("Quad", Some("UIDQ"))).unwrap()), Some(quad));
+        // A synthetic id on the flight is no hardware id → links by craft name.
+        assert_eq!(vehicle_of(&conn, insert_flight(&conn, &flight_with("Wing", Some(SITL_UID))).unwrap()), Some(other_fc));
+        // A synthetic id stored on the vehicle is no hardware id either → no conflict.
+        let sim = vehicle(&conn, "Sim", Some("Sim"), Some(SITL_UID), "2026-01-01 10:00:00");
+        assert_eq!(vehicle_of(&conn, insert_flight(&conn, &flight_with("Sim", Some("UIDS"))).unwrap()), Some(sim));
+    }
+
+    /// The v20 back-fill follows the same rule: a conflicting craft-name vehicle leaves the flight NULL.
+    #[test]
+    fn v20_backfill_leaves_fc_id_conflicts_unlinked() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        migrate_to(&conn, 19);
+        let wing = vehicle(&conn, "Wing", Some("Wing"), Some("UIDA"), "2026-01-01 10:00:00");
+        let raw = |uid: Option<&str>| {
+            conn.execute(
+                "INSERT INTO flights (start_time, craft_name, fc_uid) VALUES ('2026-09-01T10:00:00+00:00', 'Wing', ?1)",
+                params![uid],
+            )
+            .unwrap();
+            conn.last_insert_rowid()
+        };
+        let conflicting = raw(Some("UIDB"));
+        let no_uid = raw(None);
+        migrate(&conn).unwrap();
+        assert_eq!(vehicle_of(&conn, conflicting), None);
+        assert_eq!(vehicle_of(&conn, no_uid), Some(wing));
+    }
+
+    /// Setting a vehicle's FC id takes it off every other vehicle: afterwards exactly one carries it.
+    #[test]
+    fn set_vehicle_fc_uid_moves_the_id() {
+        let conn = test_db();
+        let a = vehicle(&conn, "A", None, None, "2026-01-01 10:00:00");
+        let b = vehicle(&conn, "B", None, Some(" uid1 "), "2026-01-01 10:00:00");
+        let c = vehicle(&conn, "C", None, Some("UID1"), "2026-01-01 10:00:00");
+        let d = vehicle(&conn, "D", None, Some("UID2"), "2026-01-01 10:00:00");
+        let b_flight = insert_flight(&conn, &Flight { vehicle_id: Some(b), ..flight_with("", Some("UID1")) }).unwrap();
+        assert_eq!(set_vehicle_fc_uid(&conn, a, Some("UID1")).unwrap(), 2);
+        // The ID moves, the flights do not: B's flight stays B's.
+        assert_eq!(vehicle_of(&conn, b_flight), Some(b));
+        let carriers: i64 = conn
+            .query_row("SELECT COUNT(*) FROM vehicles WHERE TRIM(fc_uid) = 'UID1' COLLATE NOCASE", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(carriers, 1);
+        assert_eq!(get_vehicle(&conn, a).unwrap().unwrap().fc_uid.as_deref(), Some("UID1"));
+        assert_eq!(get_vehicle(&conn, b).unwrap().unwrap().fc_uid, None);
+        assert_eq!(get_vehicle(&conn, c).unwrap().unwrap().fc_uid, None);
+        assert_eq!(get_vehicle(&conn, d).unwrap().unwrap().fc_uid.as_deref(), Some("UID2"));
+        // An unknown vehicle fails and rolls the removal back: D keeps its id.
+        assert!(set_vehicle_fc_uid(&conn, 9_999, Some("UID2")).is_err());
+        assert_eq!(get_vehicle(&conn, d).unwrap().unwrap().fc_uid.as_deref(), Some("UID2"));
+        // Clearing touches nobody else.
+        assert_eq!(set_vehicle_fc_uid(&conn, a, Some("  ")).unwrap(), 0);
+        assert_eq!(get_vehicle(&conn, a).unwrap().unwrap().fc_uid, None);
+        assert_eq!(get_vehicle(&conn, d).unwrap().unwrap().fc_uid.as_deref(), Some("UID2"));
+    }
+
+    /// Two aircraft with the same craft name and different FC ids, all flights unlinked: the link offer
+    /// for UID1's vehicle (craft name + UID1) takes UID1's flights and the id-less ones (none, empty,
+    /// synthetic), never UID2's.
+    #[test]
+    fn link_by_craft_name_never_crosses_a_different_fc_id() {
+        let conn = test_db();
+        let ids: Vec<i64> = [Some("UID1"), Some("uid1 "), Some("UID2"), None, Some(""), Some(SITL_UID), Some("UID2")]
+            .iter()
+            .map(|u| insert_flight(&conn, &flight_with("Wing", *u)).unwrap())
+            .collect();
+        let v1 = vehicle(&conn, "Wing 1", Some("Wing"), Some("UID1"), "2026-01-01 10:00:00");
+        assert_eq!(count_linkable_flights(&conn, v1, Some("Wing"), Some("UID1"), true).unwrap(), 5);
+        assert_eq!(link_flights_to_vehicle(&conn, v1, Some("Wing"), Some("UID1"), true).unwrap(), 5);
+        let linked: Vec<Option<i64>> = ids.iter().map(|id| vehicle_of(&conn, *id)).collect();
+        assert_eq!(linked, [Some(v1), Some(v1), None, Some(v1), Some(v1), Some(v1), None]);
+        // Without an FC id key the craft name alone links the rest (the vehicle has no id to protect).
+        let v2 = vehicle(&conn, "Wing 2", Some("Wing"), None, "2026-01-02 10:00:00");
+        assert_eq!(link_flights_to_vehicle(&conn, v2, Some("Wing"), None, true).unwrap(), 2);
+    }
+
+    /// Every insert resolves the vehicle unless the caller names one: the plain insert (importers,
+    /// `.kflight` import) and the live / recovery commit; the unresolved variant writes what it gets.
+    #[test]
+    fn inserts_resolve_the_vehicle() {
+        let conn = test_db();
+        let wing = vehicle(&conn, "Wing", Some("Wing"), None, "2026-01-01 10:00:00");
+        let by_uid = vehicle(&conn, "U", Some("Other"), Some("UID1"), "2026-01-01 10:00:00");
+
+        assert_eq!(vehicle_of(&conn, insert_flight(&conn, &flight("wing", None)).unwrap()), Some(wing));
+        assert_eq!(vehicle_of(&conn, insert_flight(&conn, &flight_with("Wing", Some("UID1"))).unwrap()), Some(by_uid));
+        assert_eq!(vehicle_of(&conn, insert_flight(&conn, &flight("Nobody", None)).unwrap()), None);
+        let explicit = Flight { vehicle_id: Some(by_uid), ..flight("Wing", None) };
+        assert_eq!(vehicle_of(&conn, insert_flight(&conn, &explicit).unwrap()), Some(by_uid));
+        assert_eq!(vehicle_of(&conn, insert_flight_unresolved(&conn, &flight("Wing", None)).unwrap()), None);
+
+        let temp = temp_db_path("vehicle-commit").with_file_name("active_test_L1-S1.ktmp");
+        remove_temp_session(&temp);
+        {
+            let t = open_temp_session(&temp).unwrap();
+            insert_telemetry_batch(&t, &[telemetry(0, 0, None)]).unwrap();
+        }
+        let committed = commit_session_to_main(&conn, &temp, &flight_with("", Some("uid1"))).unwrap();
+        assert_eq!(vehicle_of(&conn, committed), Some(by_uid));
+        remove_temp_session(&temp);
+        cleanup(&temp);
+    }
+
+    #[test]
+    fn set_flight_vehicle_links_and_unlinks() {
+        let conn = test_db();
+        let v = vehicle(&conn, "V", None, None, "2026-01-01 10:00:00");
+        let id = insert_flight(&conn, &flight("Wing", None)).unwrap();
+        assert!(set_flight_vehicle(&conn, id, Some(v)).unwrap());
+        assert_eq!(vehicle_of(&conn, id), Some(v));
+        assert!(set_flight_vehicle(&conn, id, None).unwrap());
+        assert_eq!(vehicle_of(&conn, id), None);
+        assert!(set_flight_vehicle(&conn, id, Some(9_999)).is_err(), "unknown vehicle (FK)");
+        assert!(!set_flight_vehicle(&conn, 9_999, Some(v)).unwrap(), "unknown flight");
+    }
+
+    /// The logbook's craft-name edit corrects the name only — the vehicle link stays.
+    #[test]
+    fn craft_name_edit_keeps_the_vehicle_link() {
+        let conn = test_db();
+        let wing = vehicle(&conn, "Wing", Some("Wing"), None, "2026-01-01 10:00:00");
+        vehicle(&conn, "Quad", Some("Quad"), None, "2026-01-01 10:00:00");
+        let id = insert_flight(&conn, &flight("Wing", None)).unwrap();
+        assert_eq!(vehicle_of(&conn, id), Some(wing));
+        update_flight_craft_name(&conn, id, "quad").unwrap();
+        assert_eq!(vehicle_of(&conn, id), Some(wing));
+        assert_eq!(get_flight(&conn, id).unwrap().unwrap().craft_name, "quad");
     }
 }

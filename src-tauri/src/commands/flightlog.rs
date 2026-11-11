@@ -10,7 +10,7 @@ use crate::flightlog::exchange;
 use crate::flightlog::types::{
     BatteryAggregate, BatteryFile, BatteryPack, BatteryPackInput, BlackboxImportProgress,
     BlackboxImportStatus, Flight, FlightSummary, Mission, MissionInput, TelemetryRecord, Vehicle,
-    VehicleAggregate, VehicleFile, VehicleInput,
+    VehicleAggregate, VehicleFile, VehicleInput, VehicleResolution,
 };
 
 /// Whether the app runs in portable mode (`.portable` marker next to the executable).
@@ -447,31 +447,97 @@ pub fn vehicle_db_find_by_fc_uid(
     db::find_vehicle_by_fc_uid(&conn, &fc_uid).map_err(|e| format!("Query error: {}", e))
 }
 
-/// Delete a vehicle (flights keep their craft name → "not in library").
+/// Delete a vehicle. Its flights are un-linked (→ "not in library"), never deleted.
 #[tauri::command]
 pub fn vehicle_db_delete(id: i64, db_path: Option<String>) -> Result<(), String> {
     let conn = open_db(&db_path.unwrap_or_default())?;
     db::delete_vehicle(&conn, id).map_err(|e| format!("Delete error: {}", e))
 }
 
-/// Aggregate the flights linked to a craft name (totals + records).
+/// Aggregate the flights linked to a vehicle (totals + records).
 #[tauri::command]
-pub fn vehicle_db_aggregate(
-    craft_name: String,
-    db_path: Option<String>,
-) -> Result<VehicleAggregate, String> {
+pub fn vehicle_db_aggregate(vehicle_id: i64, db_path: Option<String>) -> Result<VehicleAggregate, String> {
     let conn = open_db(&db_path.unwrap_or_default())?;
-    db::vehicle_aggregate(&conn, &craft_name).map_err(|e| format!("Query error: {}", e))
+    db::vehicle_aggregate(&conn, vehicle_id).map_err(|e| format!("Query error: {}", e))
 }
 
-/// List the flights linked to a craft name (Manager detail + delete warning).
+/// List the flights linked to a vehicle (Manager detail + the delete warning's count).
 #[tauri::command]
-pub fn vehicle_db_flights(
-    craft_name: String,
-    db_path: Option<String>,
-) -> Result<Vec<FlightSummary>, String> {
+pub fn vehicle_db_flights(vehicle_id: i64, db_path: Option<String>) -> Result<Vec<FlightSummary>, String> {
     let conn = open_db(&db_path.unwrap_or_default())?;
-    db::list_flights_for_craft(&conn, &craft_name).map_err(|e| format!("Query error: {}", e))
+    db::list_flights_for_vehicle(&conn, vehicle_id).map_err(|e| format!("Query error: {}", e))
+}
+
+/// Resolve a flight identity to its library vehicle (the End-Flight screen): the vehicle storing the
+/// FC hardware id, else the one carrying the craft name, with how it matched and whether a craft-name
+/// match conflicts with the vehicle's stored FC id.
+#[tauri::command]
+pub fn vehicle_db_resolve(
+    fc_uid: Option<String>,
+    craft_name: Option<String>,
+    db_path: Option<String>,
+) -> Result<VehicleResolution, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::resolve_vehicle(&conn, fc_uid.as_deref(), craft_name.as_deref().unwrap_or(""))
+        .map_err(|e| format!("Query error: {}", e))
+}
+
+/// Link every flight flown with `craft_name` and/or `fc_uid` to vehicle `vehicle_id` (back-filling old
+/// flights after the user agreed); `only_unlinked` leaves flights of other vehicles alone. Returns the
+/// number linked.
+#[tauri::command]
+pub fn vehicle_db_link_flights(
+    vehicle_id: i64,
+    craft_name: Option<String>,
+    fc_uid: Option<String>,
+    only_unlinked: bool,
+    db_path: Option<String>,
+) -> Result<usize, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::link_flights_to_vehicle(&conn, vehicle_id, craft_name.as_deref(), fc_uid.as_deref(), only_unlinked)
+        .map_err(|e| format!("Link error: {}", e))
+}
+
+/// Dry run of `vehicle_db_link_flights`: how many flights it would link ("link N flights?").
+#[tauri::command]
+pub fn vehicle_db_link_flights_count(
+    vehicle_id: i64,
+    craft_name: Option<String>,
+    fc_uid: Option<String>,
+    only_unlinked: bool,
+    db_path: Option<String>,
+) -> Result<usize, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::count_linkable_flights(&conn, vehicle_id, craft_name.as_deref(), fc_uid.as_deref(), only_unlinked)
+        .map_err(|e| format!("Query error: {}", e))
+}
+
+/// Give vehicle `vehicle_id` the FC hardware id `fc_uid` (null / empty clears it) and take it off every
+/// other vehicle that stores it — an FC id belongs to one vehicle. Returns how many other vehicles lost it.
+#[tauri::command]
+pub fn vehicle_db_set_fc_uid(vehicle_id: i64, fc_uid: Option<String>, db_path: Option<String>) -> Result<usize, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::set_vehicle_fc_uid(&conn, vehicle_id, fc_uid.as_deref()).map_err(|e| format!("Update error: {}", e))
+}
+
+/// Move all flights of vehicle `from_id` to vehicle `to_id` (before deleting a replaced aircraft).
+/// Returns the number moved.
+#[tauri::command]
+pub fn vehicle_db_transfer_flights(from_id: i64, to_id: i64, db_path: Option<String>) -> Result<usize, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::transfer_vehicle_flights(&conn, from_id, to_id).map_err(|e| format!("Transfer error: {}", e))
+}
+
+/// Link a flight to a library vehicle, or un-link it (`vehicle_id` null). Its craft name and FC id
+/// stay as flown.
+#[tauri::command]
+pub fn flight_set_vehicle(flight_id: i64, vehicle_id: Option<i64>, db_path: Option<String>) -> Result<(), String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    match db::set_flight_vehicle(&conn, flight_id, vehicle_id) {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(format!("Flight {} not found", flight_id)),
+        Err(e) => Err(format!("Link error: {}", e)),
+    }
 }
 
 /// Write a vehicle to a `.kvehicle` file (one vehicle per file; self-contained incl. image).
@@ -570,7 +636,7 @@ pub fn flightlog_update_notes(
     db::update_flight_notes(&conn, flight_id, &notes).map_err(|e| format!("Update error: {}", e))
 }
 
-/// Update craft name on a flight
+/// Update craft name on a flight (a correction; the vehicle link stays — see `flight_set_vehicle`).
 #[tauri::command]
 pub fn flightlog_update_craft_name(
     flight_id: i64,

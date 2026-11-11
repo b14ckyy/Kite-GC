@@ -983,6 +983,7 @@ where
         platform_type,
         fc_uid: None,
         group_id: None,
+        vehicle_id: None,
         protocol: "DATAFLASH".into(),
         start_lat,
         start_lon,

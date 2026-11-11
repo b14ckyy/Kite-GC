@@ -146,10 +146,15 @@ pub fn run(transport: &mut dyn Transport, attempts: u32) -> Result<MspHandshake,
     }
 
     // 6b) MSP_UID → the MCU's 96-bit unique id (three little-endian u32 words), rendered as 24 hex
-    // chars. Informational: reconnect identity for the platform-type override, stored per flight.
+    // chars. Reconnect identity for the platform-type override, stored per flight, first key of the
+    // flight → library vehicle link. INAV SITL's constant id is no hardware id (`hardware_uid`).
     match request(transport, MSP_UID, &[], attempts) {
         Ok(resp) if resp.payload.len() >= 12 => {
-            fc_info.fc_uid = Some(resp.payload[..12].iter().map(|b| format!("{:02X}", b)).collect());
+            let raw: String = resp.payload[..12].iter().map(|b| format!("{:02X}", b)).collect();
+            fc_info.fc_uid = super::types::hardware_uid(&raw);
+            if fc_info.fc_uid.is_none() {
+                log::info!("MSP_UID {} is a synthetic id (all-zero or the INAV SITL constant) — no hardware id", raw);
+            }
         }
         Ok(_) => log::warn!("MSP_UID: short reply"),
         Err(e) => log::warn!("Failed to query MSP_UID: {}", e),

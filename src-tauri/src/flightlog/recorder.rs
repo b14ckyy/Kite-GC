@@ -199,6 +199,10 @@ struct RecordingEndedEvent {
     max_distance_m: f64,
     total_distance_m: f64,
     battery_used_mah: Option<u32>,
+    /// The identity the flight is stored with — the End-Flight screen resolves its library vehicle
+    /// from these (`vehicle_db_resolve`), whichever vehicle is active in the UI meanwhile.
+    craft_name: String,
+    fc_uid: Option<String>,
 }
 
 /// Payload for `flight-recording-interrupted` — a disconnect while the UAV was still armed (ADR-042).
@@ -228,6 +232,10 @@ pub struct PendingSession {
     pub armed_segments: Vec<ArmedSegment>,
     /// Set when the session belongs to a group flight (then `flight.group_id` is set too).
     pub membership: Option<GroupMembership>,
+    /// Vehicle key of the recorder that finalized the session in this process (`"L1:S2"`): the
+    /// session-local identity of a vehicle without a hardware id (`same_fc`). `None` for a session
+    /// recovered from disk — its key belonged to an earlier run.
+    pub vehicle_key: Option<String>,
 }
 
 impl PendingSession {
@@ -381,7 +389,7 @@ impl SessionSlots {
         let detached: Vec<String> = map.keys().filter(|k| !attached.contains(*k)).cloned().collect();
         let key = detached
             .iter()
-            .find(|k| map.get(*k).is_some_and(|s| same_fc(&s.flight, fc)))
+            .find(|k| map.get(*k).is_some_and(|s| same_fc(s, own_key, fc)))
             .or_else(|| if alone && detached.len() == 1 { detached.first() } else { None })?
             .clone();
         map.remove(&key)
@@ -454,7 +462,7 @@ impl SessionSlots {
         let mut map = self.resume.lock().ok()?;
         let key = map
             .iter()
-            .find(|(_, s)| same_fc(&s.flight, fc))
+            .find(|(_, s)| same_fc(s, own_key, fc))
             .or_else(|| if alone { map.iter().min_by_key(|(_, s)| s.flight.start_time) } else { None })
             .map(|(k, _)| k.clone())?;
         map.remove(&key)
@@ -525,13 +533,14 @@ impl SessionSlots {
         }
     }
 
-    /// The suspended member session recorded by the FC `fc` (same identity rule as `take_resume_for`,
-    /// never a guess: the group has other aircraft by definition). The oldest one when several match.
-    fn take_suspended_for(&self, fc: &FcInfo) -> Option<PendingSession> {
+    /// The suspended member session recorded by the FC `fc` on the recorder `own_key` (same identity rule
+    /// as `take_resume_for`, never a guess: the group has other aircraft by definition). The oldest one
+    /// when several match.
+    fn take_suspended_for(&self, own_key: &str, fc: &FcInfo) -> Option<PendingSession> {
         let mut map = self.suspended.lock().ok()?;
         let key = map
             .iter()
-            .filter(|(_, s)| same_fc(&s.flight, fc))
+            .filter(|(_, s)| same_fc(s, own_key, fc))
             .min_by_key(|(_, s)| s.flight.start_time)
             .map(|(k, _)| k.clone())?;
         map.remove(&key)
@@ -594,13 +603,22 @@ fn take_where(
     out
 }
 
-/// Whether a recorded flight came from the FC `fc`: the hardware id when both sides know it, else
-/// craft name + variant — never by an empty craft name (§5e M2: two identity-less vehicles, e.g. passive
-/// links or same-sysid secondaries, are not the same aircraft; the callers' "only one connected"
-/// fallback still covers a lone reconnect).
-fn same_fc(f: &Flight, fc: &FcInfo) -> bool {
+/// Whether a recorded session came from the FC `fc` of the recorder `own_key`: the hardware id when both
+/// sides know it; when neither does (a known synthetic id dropped by `msp::hardware_uid`, a secondary,
+/// passive telemetry), the session-local identity: the same vehicle key (`"L{link}:S{sysid}"` — the sysid
+/// on a MAVLink link, the connection-order link id on MSP / passive links) within this app run, with the
+/// same firmware variant; else craft name + variant — never by an empty craft name (§5e M2: two
+/// identity-less vehicles with no craft name, e.g. passive links, are not the same aircraft; the callers'
+/// "only one connected" fallback still covers a lone reconnect).
+///
+/// Known residual (GROUP_FLIGHTS.md step 6): MAVLink secondaries record under the synthetic craft name
+/// `"<variant> #<sysid>"` (`mavlink_proto::handler::secondary_recorder`), so two secondaries with the same
+/// variant and sysid on different links DO match through the craft-name arm.
+fn same_fc(s: &PendingSession, own_key: &str, fc: &FcInfo) -> bool {
+    let f = &s.flight;
     match (&f.fc_uid, &fc.fc_uid) {
         (Some(a), Some(b)) => a == b,
+        (None, None) if s.vehicle_key.as_deref() == Some(own_key) && f.fc_variant == fc.fc_variant => true,
         _ => !f.craft_name.is_empty() && f.craft_name == fc.craft_name && f.fc_variant == fc.fc_variant,
     }
 }
@@ -695,7 +713,8 @@ pub fn summarize_temp_session(
         fc_version: meta.fc_version,
         board_id: meta.board_id,
         platform_type: meta.platform_type,
-        fc_uid: meta.fc_uid,
+        // A `.ktmp` written before `msp::hardware_uid` may still carry a synthetic id.
+        fc_uid: meta.fc_uid.as_deref().and_then(crate::msp::hardware_uid),
         protocol: meta.protocol,
         start_lat,
         start_lon,
@@ -718,6 +737,7 @@ pub fn summarize_temp_session(
         // offset (ADR-048).
         utc_offset_min: Some(super::timezone::local_offset_min_now()),
         group_id: meta.group_id,
+        vehicle_id: None,
     };
     let count = rows.len() as i64;
     Ok((
@@ -730,6 +750,7 @@ pub fn summarize_temp_session(
             last_timestamp_ms,
             armed_segments,
             membership,
+            vehicle_key: None,
         },
         count,
     ))
@@ -1648,7 +1669,7 @@ impl FlightRecorder {
         if !self.first_status_seen {
             self.first_status_seen = true;
             // Without DB recording there is no group membership to continue (a member is a temp file).
-            let suspended = if self.settings.db_enabled { self.slots.take_suspended_for(&self.fc_info) } else { None };
+            let suspended = if self.settings.db_enabled { self.slots.take_suspended_for(self.key(), &self.fc_info) } else { None };
             if let Some(p) = suspended {
                 self.adopt_member(p, is_armed);
                 self.was_armed = is_armed;
@@ -1695,6 +1716,8 @@ impl FlightRecorder {
             max_distance_m: session.flight.max_distance_m.unwrap_or(0.0),
             total_distance_m: session.flight.total_distance_m.unwrap_or(0.0),
             battery_used_mah: session.flight.battery_used_mah,
+            craft_name: session.flight.craft_name.clone(),
+            fc_uid: session.flight.fc_uid.clone(),
         };
         self.slots.park_pending(self.key(), session);
         self.emit("flight-recording-ended", ev);
@@ -2113,6 +2136,7 @@ impl FlightRecorder {
             // flight-local offset (ADR-048).
             utc_offset_min: Some(super::timezone::local_offset_min_now()),
             group_id: self.membership.as_ref().map(|m| m.group_id.clone()),
+            vehicle_id: None,
         };
         Some((
             PendingSession {
@@ -2124,6 +2148,7 @@ impl FlightRecorder {
                 last_timestamp_ms,
                 armed_segments,
                 membership: self.membership.clone(),
+                vehicle_key: Some(self.key().to_string()),
             },
             sample_count,
         ))
@@ -2532,12 +2557,14 @@ mod tests {
                 battery_serial: None,
                 utc_offset_min: None,
                 group_id: None,
+                vehicle_id: None,
             },
             disarm_instant: Instant::now(),
             start_mah: None,
             last_timestamp_ms: 0,
             armed_segments: Vec::new(),
             membership: None,
+            vehicle_key: None,
         }
     }
 
@@ -3324,10 +3351,10 @@ mod tests {
     #[test]
     fn identity_less_sessions_are_never_the_same_aircraft() {
         let anon = FcInfo { fc_variant: "INAV".into(), ..FcInfo::default() };
-        let anon_flight = pending("anon.ktmp", "", None, 0).flight;
-        assert!(!same_fc(&anon_flight, &anon));
-        assert!(same_fc(&pending("uid.ktmp", "", Some("UID1"), 0).flight, &FcInfo { fc_uid: Some("UID1".into()), ..anon.clone() }));
-        assert!(same_fc(&pending("named.ktmp", "Wing", None, 0).flight, &FcInfo { craft_name: "Wing".into(), ..anon.clone() }));
+        let anon_session = pending("anon.ktmp", "", None, 0);
+        assert!(!same_fc(&anon_session, "L2:S0", &anon));
+        assert!(same_fc(&pending("uid.ktmp", "", Some("UID1"), 0), "L2:S0", &FcInfo { fc_uid: Some("UID1".into()), ..anon.clone() }));
+        assert!(same_fc(&pending("named.ktmp", "Wing", None, 0), "L2:S0", &FcInfo { craft_name: "Wing".into(), ..anon.clone() }));
 
         let slots = SessionSlots::default();
         slots.attach("L2:S0");
@@ -3338,9 +3365,46 @@ mod tests {
         assert!(slots.take_detached_pending_for("L2:S0", &anon).is_some(), "the lone recorder still takes it");
 
         slots.park_suspended(pending("susp.ktmp", "", None, 0));
-        assert!(slots.take_suspended_for(&anon).is_none());
+        assert!(slots.take_suspended_for("L2:S0", &anon).is_none());
         slots.park_suspended(pending("susp-uid.ktmp", "", Some("UID1"), 0));
-        assert!(slots.take_suspended_for(&FcInfo { fc_uid: Some("UID1".into()), ..anon }).is_some());
+        assert!(slots.take_suspended_for("L2:S0", &FcInfo { fc_uid: Some("UID1".into()), ..anon }).is_some());
+    }
+
+    /// A vehicle without a hardware id is the same aircraft within this app run under the same vehicle
+    /// key and firmware variant — the same sysid on the same MAVLink link, the same MSP link. Without a
+    /// craft name (a PX4 SITL primary) another link with the same sysid, or a session recovered from disk,
+    /// is not. A MAVLink secondary records under the synthetic craft name "<variant> #<sysid>", so on
+    /// another link with the same variant and sysid it DOES match, through the craft-name arm — the
+    /// residual GROUP_FLIGHTS.md step 6 removes (secondaries get their own FC id).
+    #[test]
+    fn identity_less_sessions_match_by_vehicle_key_within_the_run() {
+        let sim = FcInfo { fc_variant: "PX4".into(), ..FcInfo::default() };
+        let recorded = |key: Option<&str>, craft: &str| {
+            let mut p = pending("sim.ktmp", craft, None, 0);
+            p.flight.fc_variant = "PX4".into();
+            PendingSession { vehicle_key: key.map(String::from), ..p }
+        };
+
+        assert!(same_fc(&recorded(Some("L1:S3"), ""), "L1:S3", &sim), "same link, same sysid");
+        assert!(!same_fc(&recorded(Some("L1:S3"), ""), "L1:S4", &sim), "another sysid on the link");
+        assert!(!same_fc(&recorded(Some("L1:S3"), ""), "L2:S3", &sim), "the same sysid on another link");
+        assert!(!same_fc(&recorded(Some("L1:S0"), ""), "L2:S0", &sim), "MSP: a reconnect is a new link");
+        assert!(!same_fc(&recorded(None, ""), "L1:S3", &sim), "recovered from disk: no session identity");
+        let ardu = FcInfo { fc_variant: "ArduPlane".into(), ..sim.clone() };
+        assert!(!same_fc(&recorded(Some("L1:S3"), ""), "L1:S3", &ardu), "same key, another firmware variant");
+        // A hardware id on one side only never matches through the key.
+        assert!(!same_fc(&recorded(Some("L1:S3"), ""), "L1:S3", &FcInfo { fc_uid: Some("UID1".into()), ..sim.clone() }));
+
+        // Secondaries (handler.rs `secondary_recorder`): synthetic craft name "<variant> #<sysid>".
+        let secondary = FcInfo { craft_name: "PX4 #3".into(), ..sim.clone() };
+        assert!(same_fc(&recorded(Some("L1:S3"), "PX4 #3"), "L2:S3", &secondary), "residual: matches across links by the synthetic name");
+        assert!(!same_fc(&recorded(Some("L1:S3"), "PX4 #3"), "L2:S4", &FcInfo { craft_name: "PX4 #4".into(), ..sim.clone() }));
+
+        // The suspended member of a vehicle that comes back on the same link is adopted.
+        let slots = SessionSlots::default();
+        slots.park_suspended(recorded(Some("L1:S3"), ""));
+        assert!(slots.take_suspended_for("L1:S4", &sim).is_none());
+        assert!(slots.take_suspended_for("L1:S3", &sim).is_some());
     }
 
     /// m4: a single flight's session exists only while armed — an arm never replaces a running session

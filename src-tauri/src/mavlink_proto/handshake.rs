@@ -252,12 +252,16 @@ pub fn perform_handshake(transport: &mut dyn ByteTransport) -> Result<(FcInfo, u
                         }
 
                         // Hardware identity: uid2 (MAVLink 2 extension — the MCU serial on ArduPilot /
-                        // PX4) preferred, else the legacy 64-bit uid. All-zero = not provided.
+                        // PX4). An all-zero uid2 means no hardware id: the legacy 64-bit `uid` is not
+                        // used — INAV fills it with the sysid, PX4 SITL with a constant + sysid.
                         uid2_valid = ver.uid2.iter().any(|b| *b != 0);
-                        if uid2_valid {
-                            fc_info.fc_uid = Some(ver.uid2.iter().map(|b| format!("{:02X}", b)).collect());
-                        } else if ver.uid != 0 {
-                            fc_info.fc_uid = Some(format!("{:016X}", ver.uid));
+                        let uid2: String = ver.uid2.iter().map(|b| format!("{:02X}", b)).collect();
+                        fc_info.fc_uid = crate::msp::types::hardware_uid(&uid2);
+                        if fc_info.fc_uid.is_none() && ver.uid != 0 {
+                            log::info!(
+                                "AUTOPILOT_VERSION: uid2 is zero — uid {:016X} is not used as a hardware id",
+                                ver.uid
+                            );
                         }
 
                         log::info!(

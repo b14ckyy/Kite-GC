@@ -1150,6 +1150,7 @@ where
         platform_type: meta.platform_type,
         fc_uid: None,
         group_id: None,
+        vehicle_id: None,
         protocol: "ULOG".into(),
         start_lat,
         start_lon,

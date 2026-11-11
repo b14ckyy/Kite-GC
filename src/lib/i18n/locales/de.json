@@ -1188,7 +1188,7 @@
     "openBattery": "Diesen Akku im Battery Manager öffnen",
     "openVehicle": "Dieses Fahrzeug im Vehicle Manager öffnen",
     "createVehicle": "Fahrzeug anlegen",
-    "createVehicleTip": "Aus diesem Craft-Namen ein Fahrzeug im Vehicle Manager anlegen",
+    "createVehicleTip": "Aus diesem Flug (Craft-Name und FC-ID) ein Fahrzeug im Vehicle Manager anlegen",
     "openMission": "Diese Mission im Mission Manager öffnen",
     "linkBattery": "Verknüpfen",
     "linkBatteryTip": "Akku per Seriennummer verknüpfen",
@@ -1247,7 +1247,11 @@
     "deleteBlackboxOnly": "Nur Blackbox löschen",
     "deleteBoth": "Beide löschen",
     "importAnyway": "Trotzdem importieren",
-    "linkYes": "Verknüpfen"
+    "linkYes": "Verknüpfen",
+    "vehicle": "Fahrzeug",
+    "vehicleNone": "— keins —",
+    "editVehicle": "Fahrzeug dieses Flugs ändern",
+    "notInLibrary": "Nicht in der Fahrzeugbibliothek"
   },
   "dialog": {
     "cancel": "Abbrechen"
@@ -1549,8 +1553,8 @@
     "deleted": "Fahrzeug gelöscht.",
     "deleteFailed": "Löschen fehlgeschlagen: {error}",
     "deleteTitle": "Fahrzeug löschen",
-    "deleteMsg": "Dieses Fahrzeug löschen? Die verknüpften Flüge bleiben erhalten.",
-    "deleteMsgLinked": "Dieses Fahrzeug hat {count} verknüpfte(n) Flug/Flüge. Die Flüge bleiben erhalten (sie behalten ihren Craft-Namen). Fahrzeug löschen?",
+    "deleteMsg": "Dieses Fahrzeug löschen? Es sind keine Flüge damit verknüpft.",
+    "deleteMsgLinked": "Mit diesem Fahrzeug {count, plural, one {ist # Flug} other {sind # Flüge}} verknüpft. Auf ein anderes Fahrzeug übertragen oder ohne Übertragung löschen — die Flüge bleiben erhalten, gehören dann aber zu keinem Fahrzeug.",
     "deleteYes": "Löschen",
     "loadFailed": "Fahrzeuge konnten nicht geladen werden: {error}",
     "exported": "Fahrzeug exportiert.",
@@ -1633,7 +1637,6 @@
     "openFlight": "Flug öffnen",
     "unnamed": "Unbenannt",
     "noFlights": "Noch keine verknüpften Flüge.",
-    "noCraftLink": "Craft-Namen setzen, um Flüge zu verknüpfen.",
     "typeVal": {
       "fixed_wing": "Starrflügler",
       "flying_wing": "Nurflügler",
@@ -1650,7 +1653,18 @@
       "retired": "Ausgemustert",
       "damaged": "Beschädigt",
       "crashed": "Abgestürzt"
-    }
+    },
+    "deleteTransferTo": "Flüge übertragen auf",
+    "deleteTransferPick": "— Fahrzeug wählen —",
+    "deleteTransferNoTarget": "Kein anderes Fahrzeug in der Bibliothek",
+    "deleteTransferYes": "Übertragen und löschen",
+    "deleteNoTransfer": "Ohne Übertragung löschen",
+    "deletedTransferred": "Fahrzeug gelöscht — {count, plural, one {# Flug} other {# Flüge}} auf „{name}“ übertragen.",
+    "savedLinked": "Fahrzeug gespeichert — {count, plural, one {# Flug} other {# Flüge}} verknüpft.",
+    "importedLinked": "Fahrzeug importiert — {count, plural, one {# Flug} other {# Flüge}} verknüpft.",
+    "uidMoveTitle": "FC-ID schon vergeben",
+    "uidMoveMessage": "Diese FC-ID ist bei „{name}“ gespeichert. Hierher verschieben? „{name}“ hat dann keine FC-ID mehr.",
+    "uidMoveYes": "FC-ID hierher verschieben"
   },
   "batteryMgr": {
     "toBatteries": "Akkus",
@@ -1770,11 +1784,9 @@
     "newBatteryTitle": "Akku anlegen?",
     "newBatteryMessage": "Es existiert noch kein Akku mit der Seriennummer \"{serial}\". Jetzt anlegen?",
     "newBatteryCreate": "Akku anlegen",
-    "newBatterySkip": "Jetzt nicht",
     "newVehicleTitle": "Fahrzeug anlegen?",
     "newVehicleMessage": "Es existiert noch kein Fahrzeug mit dem Craft-Namen \"{craft}\". Jetzt anlegen?",
     "newVehicleCreate": "Fahrzeug anlegen",
-    "newVehicleSkip": "Jetzt nicht",
     "linkMission": "Geladene Mission mit diesem Flug verknüpfen",
     "save": "Speichern",
     "discard": "Aufnahme verwerfen",
@@ -1782,7 +1794,24 @@
     "discardConfirmYes": "Verwerfen",
     "cancel": "Abbrechen",
     "close": "Schließen",
-    "notRecordedHint": "Aufzeichnung war aus — nur eine Zusammenfassung."
+    "notRecordedHint": "Aufzeichnung war aus — nur eine Zusammenfassung.",
+    "vehicle": "Fahrzeug",
+    "vehicleNone": "— keins —",
+    "vehicleMatchedUid": "An der FC-Hardware-ID erkannt.",
+    "vehicleMatchedCraft": "Am Craft-Namen erkannt.",
+    "vehicleUnmatched": "Nicht in der Fahrzeugbibliothek — Fahrzeug wählen oder nach dem Speichern anlegen.",
+    "vehicleConflictHint": "Gleicher Craft-Name, aber dieses Fahrzeug hat eine andere FC-ID — nach dem Speichern wird nachgefragt.",
+    "newVehicleMessageNoCraft": "Dieses Fluggerät ist noch nicht in der Fahrzeugbibliothek. Jetzt ein Fahrzeug dafür anlegen?",
+    "storeUidTitle": "FC-ID speichern?",
+    "storeUidMessage": "Die Hardware-ID dieses Flugcontrollers in „{name}“ speichern? Künftige Flüge werden dann daran erkannt.{count, plural, =0 {} one { Der # vorhandene Flug mit dieser FC-ID oder dem Craft-Namen des Fahrzeugs, der noch zu keinem Fahrzeug gehört, wird mitverknüpft.} other { Die # vorhandenen Flüge mit dieser FC-ID oder dem Craft-Namen des Fahrzeugs, die noch zu keinem Fahrzeug gehören, werden mitverknüpft.}}",
+    "storeUidYes": "FC-ID speichern",
+    "uidConflictTitle": "Andere FC-ID",
+    "uidConflictMessage": "Für „{name}“ ist eine andere FC-Hardware-ID gespeichert. Wurde der Flugcontroller getauscht (gespeicherte ID ersetzen — die früheren Flüge bleiben verknüpft) oder ist das ein zweites Fluggerät (für diesen Flug ein neues Fahrzeug anlegen)? Im Zweifel den Flug ohne Fahrzeug lassen und später im Flugbuch zuordnen.",
+    "uidConflictReplace": "FC getauscht — ID ersetzen",
+    "uidConflictNew": "Neues Fahrzeug anlegen",
+    "uidConflictLeave": "Ohne Fahrzeug lassen",
+    "uidMovesFrom": "Diese FC-ID ist derzeit bei „{name}“ gespeichert; speichern oder ersetzen entfernt sie dort.",
+    "vehicleUnmatchedNoId": "Nicht in der Fahrzeugbibliothek — bei Bedarf ein Fahrzeug wählen."
   },
   "recovery": {
     "title": "Unvollständige Aufnahme gefunden",
@@ -2253,5 +2282,13 @@
       "fcVariant": "FC-Variante",
       "lastUpdate": "Letztes Update"
     }
+  },
+  "vehicleLink": {
+    "title": "Vorhandene Flüge verknüpfen?",
+    "message": "{count, plural, one {# geloggter Flug} other {# geloggte Flüge}} mit {keys} {count, plural, one {gehört} other {gehören}} noch zu keinem Fahrzeug. Mit diesem Fahrzeug verknüpfen?",
+    "byCraft": "dem Craft-Namen „{craft}“",
+    "byUid": "dieser FC-Hardware-ID",
+    "or": " oder ",
+    "link": "Flüge verknüpfen"
   }
 }

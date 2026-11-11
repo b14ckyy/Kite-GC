@@ -85,11 +85,12 @@
   import { activeWpNumber, replayWpTotal } from '$lib/stores/navStatus';
   import { missionManagerOpen, missionManagerSelectedId, requestOpenFlightId, requestOpenMissionId } from '$lib/stores/missionManager';
   import { batteryManagerOpen, batteryManagerCreateSerial, normalizeSerial } from '$lib/stores/batteryManager';
-  import { vehicleManagerOpen, vehicleManagerCreateCraft, vehicleManagerSelectedId } from '$lib/stores/vehicleManager';
+  import { vehicleManagerOpen, vehicleManagerCreatePrefill, vehicleManagerSelectedId } from '$lib/stores/vehicleManager';
+  import { settleEndFlightVehicle } from '$lib/controllers/vehicleLinkController';
   import type { BlackboxImportStatus } from '$lib/stores/flightlog';
-  import { missionDbForFlight, flightLoggedWpCount, missionDbSave, flightLinkMission, missionDbGeocode, flightSetBatterySerial, updateFlightNotes, getFlight, flightlogCommitPending, flightlogDiscardPending, flightlogContinuePending, scanOrphanSessions, recoverDiscard, recoverSaveIncomplete, recoverContinue, batteryDbFindBySerial, batteryDbAddUsage, vehicleDbFindByCraftName, blackboxDecoderAvailable, downloadBlackboxDecode, hiresInfo, hiresParse, hiresSample, hiresDrop, hiresCleanup, scratchDir, scratchClear } from '$lib/stores/flightlog';
+  import { missionDbForFlight, flightLoggedWpCount, missionDbSave, flightLinkMission, missionDbGeocode, flightSetBatterySerial, updateFlightNotes, getFlight, flightlogCommitPending, flightlogDiscardPending, flightlogContinuePending, scanOrphanSessions, recoverDiscard, recoverSaveIncomplete, recoverContinue, batteryDbFindBySerial, batteryDbAddUsage, blackboxDecoderAvailable, downloadBlackboxDecode, hiresInfo, hiresParse, hiresSample, hiresDrop, hiresCleanup, scratchDir, scratchClear } from '$lib/stores/flightlog';
   import EndFlightDialog from "$lib/components/logbook/EndFlightDialog.svelte";
-  import type { EndFlightStats } from "$lib/components/logbook/EndFlightDialog.svelte";
+  import type { EndFlightStats, EndFlightIdentity } from "$lib/components/logbook/EndFlightDialog.svelte";
   import RecoveryPrompt from "$lib/components/logbook/RecoveryPrompt.svelte";
   import DisconnectArmedDialog from "$lib/components/logbook/DisconnectArmedDialog.svelte";
   import { haversineDistance, bearing, destinationPoint } from '$lib/utils/geo';
@@ -3196,14 +3197,14 @@
     return { system: 'inav', inavWps: [], arduWps: [], fc: false };
   }
 
-  async function onRecordingEnded(stats: EndFlightStats, vehicleId: string | null, flown: EndedMissionSnapshot): Promise<void> {
+  async function onRecordingEnded(stats: EndFlightStats, identity: EndFlightIdentity, vehicleId: string | null, flown: EndedMissionSnapshot): Promise<void> {
     awaitingResumeReconnect = false; // a recovered session that came back disarmed is now in the dialog
     recordingOwner = vehicleId;
     // The flown mission captured at disarm belongs to this dialog's session from now on.
     endedMission = flown;
     const missionConfirm = endedMissionHasWps(endedMission) && !endedMission.fc;
     try {
-      const res = await endFlightDialog.show({ stats, recorded: true, missionConfirm });
+      const res = await endFlightDialog.show({ stats, recorded: true, missionConfirm, identity });
       // null = the dialog was force-closed by a re-arm (resumed) or a grace auto-commit — the
       // backend already resolved the pending session, so there is nothing to do here.
       if (res === null) return;
@@ -3211,8 +3212,12 @@
         await flightlogDiscardPending(vehicleId);
         return;
       }
-      // Save → commit the pending session, then link mission + battery/notes against the new id.
+      // Save → commit the pending session, then link mission + battery/notes against the new id. The
+      // notes and the mission link are written first: an abandoned follow-up question below (battery /
+      // vehicle) can never lose them.
       const flightId = await flightlogCommitPending(vehicleId);
+      if (res.notes) await updateFlightNotes(flightId, res.notes, flightLogDbPath);
+      await linkEndedMission(flightId, res.linkMission);
       if (res.batterySerial) {
         await flightSetBatterySerial(flightId, res.batterySerial, flightLogDbPath);
         // A flight may link several packs (comma-separated). Offer to create each unknown serial; on the
@@ -3226,7 +3231,6 @@
             message: $t('endFlight.newBatteryMessage', { values: { serial } }),
             buttons: [
               { label: $t('endFlight.newBatteryCreate'), value: 'create' },
-              { label: $t('endFlight.newBatterySkip'), value: 'skip' },
             ],
           });
           if (choice === 'create') {
@@ -3238,30 +3242,27 @@
           }
         }
       }
-      // Unknown craft name → offer to create a vehicle (opens the Vehicle Manager create form
-      // pre-filled). The FC's craft name is the one just recorded for this flight.
-      const craft = (fcInfo?.craft_name ?? '').trim();
-      if (craft) {
-        const veh = await vehicleDbFindByCraftName(craft, flightLogDbPath).catch(() => null);
-        if (!veh) {
-          const choice = await showDialog({
-            title: $t('endFlight.newVehicleTitle'),
-            message: $t('endFlight.newVehicleMessage', { values: { craft } }),
-            buttons: [
-              { label: $t('endFlight.newVehicleCreate'), value: 'create' },
-              { label: $t('endFlight.newVehicleSkip'), value: 'skip' },
-            ],
-          });
-          if (choice === 'create') {
+      // Library vehicle: apply the dialog's pick to the committed flight and ask what it implies (store
+      // the FC id / FC swapped / a new vehicle / not in the library) — controllers/vehicleLinkController.
+      if (res.vehicle !== undefined) {
+        try {
+          const prefill = await settleEndFlightVehicle(showDialog, {
+            flightId,
+            craftName: identity.craftName,
+            fcUid: identity.fcUid,
+            resolution: res.resolution ?? null,
+            chosen: res.vehicle,
+          }, flightLogDbPath);
+          if (prefill) {
             activeTab = 'logbook';
             settings.patch({ activeTab: 'logbook' });
             vehicleManagerOpen.set(true);
-            vehicleManagerCreateCraft.set(craft);
+            vehicleManagerCreatePrefill.set(prefill);
           }
+        } catch (e) {
+          console.warn('[end-flight] vehicle link failed', e);
         }
       }
-      if (res.notes) await updateFlightNotes(flightId, res.notes, flightLogDbPath);
-      await linkEndedMission(flightId, res.linkMission);
       void loadLogbook();
     } catch (e) {
       console.warn('[end-flight] disarm dialog failed', e);
@@ -3406,7 +3407,7 @@
     });
     // Disarm → the summary dialog (stats arrive in the payload; no flight_id yet under deferred
     // commit). Save commits the pending session, Discard drops it — of the vehicle that sent it.
-    void listen<{ duration_sec: number; max_alt_m: number; max_speed_ms: number; max_distance_m: number; total_distance_m: number; battery_used_mah: number | null; vehicleId?: string }>(
+    void listen<{ duration_sec: number; max_alt_m: number; max_speed_ms: number; max_distance_m: number; total_distance_m: number; battery_used_mah: number | null; craft_name?: string; fc_uid?: string | null; vehicleId?: string }>(
       'flight-recording-ended',
       (event) => {
         const p = event.payload;
@@ -3419,9 +3420,11 @@
           totalDistM: p.total_distance_m,
           batteryUsedMah: p.battery_used_mah,
         };
+        // The identity the flight is stored with — its library vehicle is resolved from it.
+        const identity: EndFlightIdentity = { craftName: p.craft_name ?? '', fcUid: p.fc_uid ?? null };
         // Captured now (at the disarm); the dialog opens once the one before it has settled (§5e M3).
         const flown = endedMissionFor(vid);
-        enqueueFlightDialog(vid, () => onRecordingEnded(stats, vid, flown));
+        enqueueFlightDialog(vid, () => onRecordingEnded(stats, identity, vid, flown));
       },
     );
     // Grace-lapsed re-arm auto-committed the previous flight: close the (now stale) summary and link

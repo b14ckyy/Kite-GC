@@ -34,7 +34,7 @@ export {
 
 // ── Tauri command wrappers ───────────────────────────────────────────
 
-import type { FlightSummary, Flight, TelemetryRecord, BatteryRecord, BlackboxImportStatus, KflightImportResult, LibraryMission, LibraryMissionInput, BatteryPack, BatteryPackInput, BatteryAggregate, BatteryFile, Vehicle, VehicleInput, VehicleAggregate, VehicleFile } from './flightlogTypes';
+import type { FlightSummary, Flight, TelemetryRecord, BatteryRecord, BlackboxImportStatus, KflightImportResult, LibraryMission, LibraryMissionInput, BatteryPack, BatteryPackInput, BatteryAggregate, BatteryFile, Vehicle, VehicleInput, VehicleAggregate, VehicleFile, VehicleResolution } from './flightlogTypes';
 import type { BatteryInstance } from './telemetry';
 
 /** Save a mission to the library (dedup by content hash). Returns the mission id. */
@@ -270,19 +270,62 @@ export async function vehicleDbFindByFcUid(fcUid: string, dbPath: string): Promi
   return invoke<Vehicle | null>('vehicle_db_find_by_fc_uid', { fcUid, dbPath: dbPath || undefined });
 }
 
-/** Delete a vehicle (flights keep their craft name → "not in library"). */
+/** Delete a vehicle (its flights are un-linked → "not in library", never deleted). */
 export async function vehicleDbDelete(id: number, dbPath: string): Promise<void> {
   return invoke<void>('vehicle_db_delete', { id, dbPath: dbPath || undefined });
 }
 
-/** Aggregate the flights linked to a craft name (totals + records). */
-export async function vehicleDbAggregate(craftName: string, dbPath: string): Promise<VehicleAggregate> {
-  return invoke<VehicleAggregate>('vehicle_db_aggregate', { craftName, dbPath: dbPath || undefined });
+/** Aggregate the flights linked to a vehicle (totals + records). */
+export async function vehicleDbAggregate(vehicleId: number, dbPath: string): Promise<VehicleAggregate> {
+  return invoke<VehicleAggregate>('vehicle_db_aggregate', { vehicleId, dbPath: dbPath || undefined });
 }
 
-/** List the flights linked to a craft name. */
-export async function vehicleDbFlights(craftName: string, dbPath: string): Promise<FlightSummary[]> {
-  return invoke<FlightSummary[]>('vehicle_db_flights', { craftName, dbPath: dbPath || undefined });
+/** List the flights linked to a vehicle. */
+export async function vehicleDbFlights(vehicleId: number, dbPath: string): Promise<FlightSummary[]> {
+  return invoke<FlightSummary[]>('vehicle_db_flights', { vehicleId, dbPath: dbPath || undefined });
+}
+
+/** Resolve a flight identity to its library vehicle: FC id first, craft name as fallback. */
+export async function vehicleDbResolve(fcUid: string | null, craftName: string | null, dbPath: string): Promise<VehicleResolution> {
+  return invoke<VehicleResolution>('vehicle_db_resolve', { fcUid, craftName, dbPath: dbPath || undefined });
+}
+
+/** Link every flight flown with this craft name and/or FC id to the vehicle. Returns the number linked. */
+export async function vehicleDbLinkFlights(
+  vehicleId: number,
+  craftName: string | null,
+  fcUid: string | null,
+  onlyUnlinked: boolean,
+  dbPath: string,
+): Promise<number> {
+  return invoke<number>('vehicle_db_link_flights', { vehicleId, craftName, fcUid, onlyUnlinked, dbPath: dbPath || undefined });
+}
+
+/** Dry run of `vehicleDbLinkFlights`: how many flights it would link. */
+export async function vehicleDbLinkFlightsCount(
+  vehicleId: number,
+  craftName: string | null,
+  fcUid: string | null,
+  onlyUnlinked: boolean,
+  dbPath: string,
+): Promise<number> {
+  return invoke<number>('vehicle_db_link_flights_count', { vehicleId, craftName, fcUid, onlyUnlinked, dbPath: dbPath || undefined });
+}
+
+/** Give a vehicle an FC hardware id (null clears it) and take it off every other vehicle that stores it.
+ *  Returns how many other vehicles lost it. */
+export async function vehicleDbSetFcUid(vehicleId: number, fcUid: string | null, dbPath: string): Promise<number> {
+  return invoke<number>('vehicle_db_set_fc_uid', { vehicleId, fcUid, dbPath: dbPath || undefined });
+}
+
+/** Move all flights of one vehicle to another. Returns the number moved. */
+export async function vehicleDbTransferFlights(fromId: number, toId: number, dbPath: string): Promise<number> {
+  return invoke<number>('vehicle_db_transfer_flights', { fromId, toId, dbPath: dbPath || undefined });
+}
+
+/** Link a flight to a library vehicle, or un-link it (`null`). */
+export async function flightSetVehicle(flightId: number, vehicleId: number | null, dbPath: string): Promise<void> {
+  return invoke<void>('flight_set_vehicle', { flightId, vehicleId, dbPath: dbPath || undefined });
 }
 
 /** Set a vehicle's lifetime baseline to absolute values (adopt FC stats / `.kvehicle` import). */

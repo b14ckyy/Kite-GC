@@ -1188,7 +1188,7 @@
     "openBattery": "Open this battery in the Battery Manager",
     "openVehicle": "Open this vehicle in the Vehicle Manager",
     "createVehicle": "Add vehicle",
-    "createVehicleTip": "Create a vehicle from this craft name in the Vehicle Manager",
+    "createVehicleTip": "Create a vehicle from this flight (craft name and FC ID) in the Vehicle Manager",
     "openMission": "Open this mission in the Mission Manager",
     "linkBattery": "Link",
     "linkBatteryTip": "Link a battery by serial",
@@ -1247,7 +1247,11 @@
     "deleteBlackboxOnly": "Delete Blackbox",
     "deleteBoth": "Delete Both",
     "importAnyway": "Import Anyway",
-    "linkYes": "Link"
+    "linkYes": "Link",
+    "vehicle": "Vehicle",
+    "vehicleNone": "— none —",
+    "editVehicle": "Change the vehicle of this flight",
+    "notInLibrary": "Not in the vehicle library"
   },
   "dialog": {
     "cancel": "Cancel"
@@ -1549,8 +1553,8 @@
     "deleted": "Vehicle deleted.",
     "deleteFailed": "Delete failed: {error}",
     "deleteTitle": "Delete vehicle",
-    "deleteMsg": "Delete this vehicle? Its linked flights are kept.",
-    "deleteMsgLinked": "This vehicle has {count} linked flight(s). The flights are kept (they keep their craft name). Delete the vehicle?",
+    "deleteMsg": "Delete this vehicle? No flights are linked to it.",
+    "deleteMsgLinked": "{count, plural, one {# flight is} other {# flights are}} linked to this vehicle. Transfer them to another vehicle, or delete without a transfer — the flights are kept, but then belong to no vehicle.",
     "deleteYes": "Delete",
     "loadFailed": "Failed to load vehicles: {error}",
     "exported": "Vehicle exported.",
@@ -1633,7 +1637,6 @@
     "openFlight": "Open flight",
     "unnamed": "Unnamed",
     "noFlights": "No linked flights yet.",
-    "noCraftLink": "Set a craft name to link flights.",
     "typeVal": {
       "fixed_wing": "Fixed wing",
       "flying_wing": "Flying wing",
@@ -1650,7 +1653,18 @@
       "retired": "Retired",
       "damaged": "Damaged",
       "crashed": "Crashed"
-    }
+    },
+    "deleteTransferTo": "Transfer the flights to",
+    "deleteTransferPick": "— choose a vehicle —",
+    "deleteTransferNoTarget": "No other vehicle in the library",
+    "deleteTransferYes": "Transfer and delete",
+    "deleteNoTransfer": "Delete without transfer",
+    "deletedTransferred": "Vehicle deleted — {count, plural, one {# flight} other {# flights}} moved to \"{name}\".",
+    "savedLinked": "Vehicle saved — {count, plural, one {# flight} other {# flights}} linked.",
+    "importedLinked": "Vehicle imported — {count, plural, one {# flight} other {# flights}} linked.",
+    "uidMoveTitle": "FC ID already in use",
+    "uidMoveMessage": "This FC ID is stored on \"{name}\". Move it here? \"{name}\" then has no FC ID.",
+    "uidMoveYes": "Move FC ID here"
   },
   "batteryMgr": {
     "toBatteries": "Batteries",
@@ -1770,11 +1784,9 @@
     "newBatteryTitle": "Create Battery?",
     "newBatteryMessage": "No battery with serial \"{serial}\" exists yet. Create one now?",
     "newBatteryCreate": "Create battery",
-    "newBatterySkip": "Not now",
     "newVehicleTitle": "Create vehicle?",
     "newVehicleMessage": "No vehicle with craft name \"{craft}\" exists yet. Create one now?",
     "newVehicleCreate": "Create vehicle",
-    "newVehicleSkip": "Not now",
     "linkMission": "Link the loaded mission to this flight",
     "save": "Save",
     "discard": "Discard Recording",
@@ -1782,7 +1794,24 @@
     "discardConfirmYes": "Discard",
     "cancel": "Cancel",
     "close": "Close",
-    "notRecordedHint": "Recording was off — this is a summary only."
+    "notRecordedHint": "Recording was off — this is a summary only.",
+    "vehicle": "Vehicle",
+    "vehicleNone": "— none —",
+    "vehicleMatchedUid": "Recognized by its FC hardware ID.",
+    "vehicleMatchedCraft": "Recognized by its craft name.",
+    "vehicleUnmatched": "Not in the vehicle library — pick a vehicle, or create one after saving.",
+    "vehicleConflictHint": "Same craft name, but this vehicle has a different FC ID — you will be asked after saving.",
+    "newVehicleMessageNoCraft": "This aircraft is not in the vehicle library yet. Create a vehicle for it now?",
+    "storeUidTitle": "Store the FC ID?",
+    "storeUidMessage": "Store this flight controller's hardware ID in \"{name}\"? Its future flights are then recognized by it.{count, plural, =0 {} one { The # existing flight flown with this FC ID or the vehicle's craft name that belongs to no vehicle yet is linked too.} other { The # existing flights flown with this FC ID or the vehicle's craft name that belong to no vehicle yet are linked too.}}",
+    "storeUidYes": "Store FC ID",
+    "uidConflictTitle": "Different FC ID",
+    "uidConflictMessage": "\"{name}\" has a different FC hardware ID stored. Was its flight controller swapped (replace the stored ID — its earlier flights stay linked), or is this a second aircraft (create a new vehicle for this flight)? If unsure, leave the flight unassigned and link it later in the logbook.",
+    "uidConflictReplace": "FC swapped — replace ID",
+    "uidConflictNew": "Create new vehicle",
+    "uidConflictLeave": "Leave unassigned",
+    "uidMovesFrom": "This FC ID is stored on \"{name}\" now; storing or replacing it here removes it there.",
+    "vehicleUnmatchedNoId": "Not in the vehicle library — pick a vehicle if you like."
   },
   "recovery": {
     "title": "Unfinished recording found",
@@ -2253,5 +2282,13 @@
       "fcVariant": "FC variant",
       "lastUpdate": "Last update"
     }
+  },
+  "vehicleLink": {
+    "title": "Link existing flights?",
+    "message": "{count, plural, one {# logged flight} other {# logged flights}} flown with {keys} {count, plural, one {belongs} other {belong}} to no vehicle yet. Link {count, plural, one {it} other {them}} to this vehicle?",
+    "byCraft": "the craft name \"{craft}\"",
+    "byUid": "this FC hardware ID",
+    "or": " or ",
+    "link": "Link flights"
   }
 }

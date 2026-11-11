@@ -642,6 +642,7 @@ pub fn import_raw_log_with_progress<F: Fn(u8, &str, &str)>(
             platform_type: id.platform_type,
             fc_uid: None,
             group_id: None,
+            vehicle_id: None,
             protocol: protocol.to_string(),
             start_lat,
             start_lon,
