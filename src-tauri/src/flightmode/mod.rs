@@ -183,17 +183,24 @@ pub fn classify_px4_nav_state(nav_state: u8) -> FlightModeState {
     FlightModeState::primary(id)
 }
 
-/// Classify an ArduPilot HEARTBEAT custom_mode into the canonical model (no modifiers). The id set
-/// mirrors the old frontend `ARDU_PLANE_MODES` / `ARDU_COPTER_MODES` tables; the registry resolves
-/// label + category. Plane vs Copter is selected from the fc_variant string.
+/// Classify an ArduPilot HEARTBEAT custom_mode into the canonical model (no modifiers). The registry
+/// resolves label + category. The per-vehicle table is selected from the fc_variant string, in every
+/// spelling that reaches here: "ArduPlane"/"ArduRover"/"ArduSub"/"ArduCopter" (live handshake, tlog,
+/// stored flights), "Plane"/"Copter"/"ArduBlimp"/"ArduPilot" (DataFlash), "plane"/"rover"/"sub"/
+/// "copter" (passthrough telemetry). Anything else uses the Copter table.
 pub fn classify_ardupilot(custom_mode: u32, variant: &str) -> FlightModeState {
-    let is_plane = variant.to_ascii_lowercase().contains("plane");
-    let id = if is_plane {
-        ardu_plane_mode_id(custom_mode)
+    let v = variant.trim().to_ascii_lowercase();
+    let table: fn(u32) -> Option<&'static str> = if v.contains("plane") {
+        ardu_plane_mode_id
     } else {
-        ardu_copter_mode_id(custom_mode)
+        match v.strip_prefix("ardu").unwrap_or(&v) {
+            // A boat is a Rover frame and runs the Rover mode table.
+            "rover" | "boat" => ardu_rover_mode_id,
+            "sub" => ardu_sub_mode_id,
+            _ => ardu_copter_mode_id,
+        }
     };
-    match id {
+    match table(custom_mode) {
         Some(id) => FlightModeState::primary(id),
         None => FlightModeState::primary(&format!("ardu_mode_{}", custom_mode)),
     }
@@ -216,6 +223,7 @@ fn ardu_plane_mode_id(mode: u32) -> Option<&'static str> {
         13 => "takeoff",
         14 => "avoid_adsb",
         15 => "guided",
+        16 => "initialising",
         17 => "qstabilize",
         18 => "qhover",
         19 => "qloiter",
@@ -225,6 +233,7 @@ fn ardu_plane_mode_id(mode: u32) -> Option<&'static str> {
         23 => "qacro",
         24 => "thermal",
         25 => "loiter_qland",
+        26 => "autoland", // AUTOLAND, Plane 4.7+
         _ => return None,
     })
 }
@@ -256,6 +265,46 @@ fn ardu_copter_mode_id(mode: u32) -> Option<&'static str> {
         25 => "systemid",
         26 => "autorotate",
         27 => "autortl",
+        28 => "turtle",
+        _ => return None,
+    })
+}
+
+/// ArduRover Mode::Number (also Boat).
+fn ardu_rover_mode_id(mode: u32) -> Option<&'static str> {
+    Some(match mode {
+        0 => "manual",
+        1 => "acro",
+        3 => "steering",
+        4 => "rover_hold",
+        5 => "loiter",
+        6 => "follow",
+        7 => "simple",
+        8 => "dock",
+        9 => "circle",
+        10 => "ardu_auto",
+        11 => "rtl",
+        12 => "smartrtl",
+        15 => "guided",
+        16 => "initialising",
+        _ => return None,
+    })
+}
+
+/// ArduSub Mode::Number.
+fn ardu_sub_mode_id(mode: u32) -> Option<&'static str> {
+    Some(match mode {
+        0 => "stabilize",
+        1 => "acro",
+        2 => "depth_hold", // ALT_HOLD, named "Depth Hold" by the firmware
+        3 => "ardu_auto",
+        4 => "guided",
+        7 => "circle",
+        9 => "surface",
+        16 => "poshold",
+        19 => "manual",
+        20 => "motor_detect",
+        21 => "surftrak",
         _ => return None,
     })
 }
@@ -304,5 +353,90 @@ mod tests {
         assert_eq!(classify_mavlink(4, "ArduCopter").primary, "guided");
         // The same raw value 4 under PX4 is main_mode 0 (no high bytes) → unknown.
         assert_eq!(classify_mavlink(4, "PX4").primary, "px4_mode_0_0");
+    }
+
+    fn ap(mode: u32, variant: &str) -> String {
+        classify_ardupilot(mode, variant).primary
+    }
+
+    #[test]
+    fn rover_modes_use_the_rover_table() {
+        assert_eq!(ap(4, "ArduRover"), "rover_hold"); // was "guided" through the Copter table
+        assert_eq!(ap(3, "ArduRover"), "steering");
+        assert_eq!(ap(10, "ArduRover"), "ardu_auto");
+        assert_eq!(ap(15, "ArduRover"), "guided");
+        assert_eq!(ap(0, "ArduRover"), "manual");
+        assert_eq!(ap(11, "ArduRover"), "rtl");
+        assert_eq!(ap(12, "ArduRover"), "smartrtl");
+        assert_eq!(ap(16, "ArduRover"), "initialising");
+    }
+
+    #[test]
+    fn sub_modes_use_the_sub_table() {
+        assert_eq!(ap(19, "ArduSub"), "manual"); // was "avoid_adsb" through the Copter table
+        assert_eq!(ap(4, "ArduSub"), "guided");
+        assert_eq!(ap(3, "ArduSub"), "ardu_auto");
+        assert_eq!(ap(2, "ArduSub"), "depth_hold");
+        assert_eq!(ap(9, "ArduSub"), "surface");
+        assert_eq!(ap(16, "ArduSub"), "poshold");
+        assert_eq!(ap(21, "ArduSub"), "surftrak");
+        // Rover-only numbers do not exist on a Sub.
+        assert_eq!(ap(15, "ArduSub"), "ardu_mode_15");
+    }
+
+    #[test]
+    fn copter_and_plane_tables() {
+        assert_eq!(ap(4, "ArduCopter"), "guided");
+        assert_eq!(ap(2, "ArduCopter"), "althold");
+        assert_eq!(ap(19, "ArduCopter"), "avoid_adsb");
+        assert_eq!(ap(27, "ArduCopter"), "autortl");
+        assert_eq!(ap(28, "ArduCopter"), "turtle");
+        assert_eq!(ap(15, "ArduPlane"), "guided");
+        assert_eq!(ap(19, "ArduPlane"), "qloiter");
+        assert_eq!(ap(25, "ArduPlane"), "loiter_qland");
+        assert_eq!(ap(16, "ArduPlane"), "initialising");
+        assert_eq!(ap(26, "ArduPlane"), "autoland");
+    }
+
+    #[test]
+    fn unknown_numbers_keep_the_raw_form() {
+        assert_eq!(ap(99, "ArduCopter"), "ardu_mode_99");
+        assert_eq!(ap(99, "ArduPlane"), "ardu_mode_99");
+        assert_eq!(ap(2, "ArduRover"), "ardu_mode_2");
+        assert_eq!(ap(5, "ArduSub"), "ardu_mode_5");
+    }
+
+    /// Every variant spelling a caller passes: live handshake / tlog / stored flights ("Ardu*" from
+    /// `vehicle::identify`), DataFlash ("Plane", "Copter", "ArduBlimp", fallback "ArduPilot"),
+    /// passthrough telemetry (lower case). Rover 4 = Hold, Sub 19 = Manual, Plane 19 = QLoiter and
+    /// Copter 4 = Guided tell the tables apart.
+    #[test]
+    fn variant_spellings_select_the_right_table() {
+        for v in ["ArduRover", "rover", "boat", "ARDUROVER"] {
+            assert_eq!(ap(4, v), "rover_hold", "{v}");
+        }
+        for v in ["ArduSub", "sub"] {
+            assert_eq!(ap(19, v), "manual", "{v}");
+        }
+        for v in ["ArduPlane", "Plane", "plane"] {
+            assert_eq!(ap(19, v), "qloiter", "{v}");
+        }
+        for v in ["ArduCopter", "Copter", "copter", "ArduBlimp", "ArduPilot", "Generic", ""] {
+            assert_eq!(ap(4, v), "guided", "{v}");
+        }
+        // Through the MAVLink dispatcher, as the live handler, tlog import and stored-flight read do.
+        assert_eq!(classify_mavlink(4, "ArduRover").primary, "rover_hold");
+        assert_eq!(classify_mavlink(19, "ArduSub").primary, "manual");
+    }
+
+    /// The live handshake and the tlog importer derive the variant from HEARTBEAT; a rover, boat and
+    /// sub must reach their own tables end to end.
+    #[test]
+    fn heartbeat_identity_reaches_the_vehicle_table() {
+        use ::mavlink::ardupilotmega::{MavAutopilot, MavType};
+        let id = |t| crate::mavlink_proto::vehicle::identify(MavAutopilot::MAV_AUTOPILOT_ARDUPILOTMEGA, t).0;
+        assert_eq!(classify_mavlink(4, &id(MavType::MAV_TYPE_GROUND_ROVER)).primary, "rover_hold");
+        assert_eq!(classify_mavlink(4, &id(MavType::MAV_TYPE_SURFACE_BOAT)).primary, "rover_hold");
+        assert_eq!(classify_mavlink(19, &id(MavType::MAV_TYPE_SUBMARINE)).primary, "manual");
     }
 }

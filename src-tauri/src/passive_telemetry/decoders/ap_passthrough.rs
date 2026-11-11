@@ -32,12 +32,14 @@ const ID_PARAM: u16 = 0x5007;
 const ID_WAYPOINT: u16 = 0x500D;
 
 /// Best-effort map of the PARAM frame-type value (≈ MAV_TYPE) to the variant string `classify_ardupilot`
-/// expects ("plane" → plane table, else copter). Bonus only — verify against a real AP source.
+/// expects (plane / rover / sub table, else copter). Bonus only — verify against a real AP source.
 fn variant_from_frame_type(mav_type: u32) -> &'static str {
     match mav_type {
         1 => "plane",                         // FIXED_WING
         19..=25 => "plane", // VTOL variants
-        _ => "copter",                        // quad/hexa/octo/heli/tri/... (rover unhandled → copter)
+        10 | 11 => "rover",                   // GROUND_ROVER, SURFACE_BOAT (Rover firmware)
+        12 => "sub",                          // SUBMARINE
+        _ => "copter",                        // quad/hexa/octo/heli/tri/...
     }
 }
 
@@ -223,5 +225,21 @@ impl ApPassthroughDecoder {
                 serde_json::json!({ "severity": severity, "text": text }),
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Rover, boat and sub frame types used to fall through to the Copter table (Rover Hold showed
+    /// as "Guided", Sub Manual as "Avoid ADSB").
+    #[test]
+    fn surface_and_sub_frame_types_select_their_mode_tables() {
+        assert_eq!(classify_ardupilot(4, variant_from_frame_type(10)).primary, "rover_hold");
+        assert_eq!(classify_ardupilot(4, variant_from_frame_type(11)).primary, "rover_hold");
+        assert_eq!(classify_ardupilot(19, variant_from_frame_type(12)).primary, "manual");
+        assert_eq!(classify_ardupilot(19, variant_from_frame_type(1)).primary, "qloiter");
+        assert_eq!(classify_ardupilot(4, variant_from_frame_type(2)).primary, "guided");
     }
 }

@@ -7,7 +7,7 @@
 //   - ArduPilot: `main` = the flat Mode::Number, `sub` = 0.
 //   - PX4: `main` = PX4_CUSTOM_MAIN_MODE_*, `sub` = PX4_CUSTOM_SUB_MODE_AUTO_* (0 if none).
 //
-// Numbers verified against ArduCopter mode.h, ArduPlane/Rover mode tables, and PX4 px4_custom_mode.h.
+// Numbers verified against ArduCopter mode.h, ArduPlane/Rover/Sub mode tables, and PX4 px4_custom_mode.h.
 // `stick` flags modes that need transmitter sticks to fly — locked unless an RC link is present
 // (a GCS-only switch into one of these without a TX is an instant crash). See docs/active/VEHICLE_CONTROL.md.
 
@@ -60,7 +60,8 @@ const PLANE: MavMode[] = [
   { key: 'qrtl',      name: 'QRTL',      main: 21, sub: 0, stick: false, vtol: true },
   { key: 'qloiter',   name: 'QLoiter',   main: 19, sub: 0, stick: false, vtol: true },
   { key: 'qland',     name: 'QLand',     main: 20, sub: 0, stick: false, vtol: true },
-  { key: 'qhover',    name: 'QHover',    main: 18, sub: 0, stick: false, vtol: true },
+  // QHover holds altitude only — the pilot holds position, so it needs sticks like Copter's AltHold.
+  { key: 'qhover',    name: 'QHover',    main: 18, sub: 0, stick: true,  vtol: true },
   { key: 'manual',    name: 'Manual',    main: 0,  sub: 0, stick: true },
   { key: 'acro',      name: 'Acro',      main: 4,  sub: 0, stick: true },
   { key: 'fbwa',      name: 'FBWA',      main: 5,  sub: 0, stick: true },
@@ -81,6 +82,21 @@ const ROVER: MavMode[] = [
   { key: 'manual',    name: 'Manual',   main: 0,  sub: 0, stick: true },
   { key: 'acro',      name: 'Acro',     main: 1,  sub: 0, stick: true },
   { key: 'steering',  name: 'Steering', main: 3,  sub: 0, stick: true },
+];
+
+// ── ArduSub (Mode::Number) ───────────────────────────────────────────────────
+// Motor Detection (20) is a diagnostic mode and is deliberately not offered.
+const SUB: MavMode[] = [
+  { key: 'guided',    name: 'Guided',     main: 4,  sub: 0, stick: false, guided: true },
+  { key: 'auto',      name: 'Auto',       main: 3,  sub: 0, stick: false },
+  { key: 'poshold',   name: 'PosHold',    main: 16, sub: 0, stick: false },
+  { key: 'circle',    name: 'Circle',     main: 7,  sub: 0, stick: false },
+  { key: 'surface',   name: 'Surface',    main: 9,  sub: 0, stick: false },
+  { key: 'stabilize', name: 'Stabilize',  main: 0,  sub: 0, stick: true },
+  { key: 'acro',      name: 'Acro',       main: 1,  sub: 0, stick: true },
+  { key: 'depthhold', name: 'Depth Hold', main: 2,  sub: 0, stick: true },
+  { key: 'manual',    name: 'Manual',     main: 19, sub: 0, stick: true },
+  { key: 'surftrak',  name: 'Surftrak',   main: 21, sub: 0, stick: true },
 ];
 
 // ── PX4 (main_mode / auto sub_mode) ──────────────────────────────────────────
@@ -108,7 +124,7 @@ export function modesFor(system: AutopilotSystem, cls: VehicleClass): MavMode[] 
     case 'plane':     return PLANE.filter((m) => !m.vtol);   // hide VTOL-only modes on a plain plane
     case 'rover':
     case 'boat':      return ROVER;
-    case 'sub':       return ROVER;                          // base set; Sub-specific modes TBD
+    case 'sub':       return SUB;
     default:          return PLANE;
   }
 }

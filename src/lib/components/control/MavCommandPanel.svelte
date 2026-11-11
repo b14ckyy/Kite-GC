@@ -38,9 +38,10 @@
   const stickModes = $derived(allModes.filter((m) => m.stick));
 
   // Modes with their own dedicated control (Guided toggle, RTL/Land hold buttons, Takeoff command,
-  // PX4 mission/hold modes) are not repeated as quick mode buttons.
-  const DEDICATED = new Set(['guided', 'hold', 'rtl', 'return', 'land', 'takeoff', 'mission']);
-  const quickModes = $derived(safeModes.filter((m) => !DEDICATED.has(m.key)));
+  // PX4 mission mode) are not repeated as quick mode buttons. The Guided toggle's mode is matched by
+  // its flag, not its key: PX4's Hold is that mode, ArduRover's Hold is an ordinary mode with no other button.
+  const DEDICATED = new Set(['guided', 'rtl', 'return', 'land', 'takeoff', 'mission']);
+  const quickModes = $derived(safeModes.filter((m) => !m.guided && !DEDICATED.has(m.key)));
 
   let showAllModes = $state(false);
   const stickUnlocked = $derived($stickModesUnlocked); // RC transmitter OR engaged RC control
@@ -208,7 +209,7 @@
             {$t('control.action.guided')}
           </Button>
         </div>
-        {#if $guidedActive}
+        {#if $guidedActive && cls !== 'sub'}
           <div class="cc-guided-hint">{$t('control.guidedClickHint')}</div>
         {/if}
 
