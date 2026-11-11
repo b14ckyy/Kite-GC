@@ -20,7 +20,7 @@ You can also drag a mission file straight onto the map. See **[Missions](../guid
 | Format | Extension | Notes |
 |---|---|---|
 | **INAV Blackbox** | `.bbl`, `.txt` | Onboard-flash (`.bbl`) or SD-card (`.txt`) blackbox. Needs the `blackbox_decode` helper, which Kite fetches automatically on first use. |
-| **ArduPilot Dataflash** | `.bin` | ArduPilot onboard logs. |
+| **ArduPilot Dataflash** | `.bin` | ArduPilot (4.1 or newer) onboard logs. |
 | **PX4 ULog** | `.ulg` | PX4 onboard flash / SD-card logs. PX4 logs no throttle output, so replayed throttle shows the thrust setpoint. |
 | **MAVLink telemetry** | `.tlog` | A MAVLink ground-station recording. |
 | **MWPTools raw-MSP** | `.rawmsp` | mwp's raw telemetry capture. |

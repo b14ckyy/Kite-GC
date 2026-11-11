@@ -73,6 +73,11 @@ These transfers happen only because you trigger them, and you choose the recipie
   send live data to other devices *only after you enable them* under Settings, and only to the addresses
   you configure. The Telemetry API listens on the local machine only unless you switch *Reachable on the
   network* on.
+- **Helper programs** — when you press *Download* for a helper on the desktop, Kite fetches it from its
+  publisher's GitHub releases: the blackbox decoder from iNavFlight/blackbox-tools, MediaMTX for RTSP
+  video from bluenviron/mediamtx, and ffmpeg from BtbN/FFmpeg-Builds. The request carries only what any
+  download does (your IP address and a user-agent string naming Kite); it is governed by
+  [GitHub's privacy statement](https://docs.github.com/site-policy/privacy-policies).
 
 ## Third-party services the app contacts
 
@@ -108,8 +113,7 @@ Each provider handles the request under its own privacy policy, which we link be
 !!! note "Weather and place-name lookup"
     The logbook enrichment sends the take-off position to Open-Meteo and Nominatim automatically when
     a recorded flight starts. If you fly without internet, the lookup simply fails and the entry stays
-    without weather and place name. *(Draft note for the maintainers: if a setting to disable this lookup
-    is added, replace this paragraph with the setting's name.)*
+    without weather and place name.
 
 ## Device permissions
 

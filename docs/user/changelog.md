@@ -304,10 +304,6 @@ inside the box of the feature release they belong to, so the notes for one relea
       failing after the geometry is already on the vehicle. For ArduPilot too: mission, fence and rally
       transfers address the autopilot component, so they pass through a routing relay such as Mission
       Planner's MAVLink mirror. Contributed by dldnjsxo95. [#195] · [#205]
-    - **`.tlog` import: a log that carries several vehicles is no longer mixed into one flight.** When
-      a MAVLink log held frames of more than one aircraft on the same link, their positions and
-      attitudes ended up interleaved in a single track. The import now follows the first autopilot it
-      sees and skips the others. [#228]
 
 ??? note "1.0 — Initial release · Live"
 
@@ -357,6 +353,8 @@ inside the box of the feature release they belong to, so the notes for one relea
       a timeout, an item the FC refused — nothing was shown and the Save button simply came back,
       while what the vehicle actually held might not have matched the panel. The panel now shows the
       error under the Save button.
+    - **Two Cancel buttons in a confirmation dialog.** Deleting a vehicle and the survey generator's
+      "waypoint limit exceeded" question showed *Cancel* twice. Each dialog now has one.
     - **Relay and GPS fix state: one fix scale for every link.** Passive links (LTM, CRSF, SmartPort)
       reported the fix on a different scale than MSP and MAVLink, so the Relay re-encoded an INAV or
       ArduPilot 3D fix as 2D on its LTM and MAVLink outputs and as "no fix" on SmartPort, the map's
@@ -378,6 +376,10 @@ inside the box of the feature release they belong to, so the notes for one relea
       into one track, so the track was jagged and the HDOP, satellite count and raw GPS altitude
       jumped back and forth during replay. The import now follows the receiver the flight controller
       was actually using, and switches with it if the autopilot changed receivers mid-flight.
+    - **`.tlog` import: a log that carries several vehicles is no longer mixed into one flight.** When
+      a MAVLink log held frames of more than one aircraft on the same link, their positions and
+      attitudes ended up interleaved in a single track. The import now follows the first autopilot it
+      sees and skips the others.
     ---
 
     **1.0.1**{ .kite-patch } *2026-09-13*{ .kite-badge }
