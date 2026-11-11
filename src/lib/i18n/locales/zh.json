@@ -349,7 +349,7 @@
       "select": "选择模式…",
       "current": "当前模式"
     },
-    "showAllModes": "显示所有模式",
+    "rcModes": "RC模式",
     "rcLockHint": "摇杆飞行模式需要RC源 — 已连接的发射机或激活的RC控制。",
     "noRcLink": "无RC链路",
     "takeoffAlt": "起飞高度 (m)",

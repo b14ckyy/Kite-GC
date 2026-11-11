@@ -484,7 +484,7 @@
       "select": "Seleccionar modo…",
       "current": "Modo activo"
     },
-    "showAllModes": "Mostrar todos los modos",
+    "rcModes": "Modos RC",
     "rcLockHint": "Los modos pilotados con sticks necesitan una fuente RC — un transmisor conectado o el control RC activo.",
     "noRcLink": "Sin enlace RC",
     "takeoffAlt": "Altitud de despegue (m)",

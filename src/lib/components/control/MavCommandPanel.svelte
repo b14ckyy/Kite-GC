@@ -6,8 +6,9 @@
 <script module lang="ts">
   // Persisted across panel close/reopen: the module scope outlives the component instance, so the
   // last-entered command values (guided altitude, speed, loiter radius, heading, takeoff altitude)
-  // stick like every other panel's state instead of resetting to their defaults each reopen.
-  const savedInputs = { takeoffAlt: 50, changeAlt: 50, changeSpeed: 10, loiterRad: 80, heading: 0 };
+  // stick like every other panel's state instead of resetting to their defaults each reopen. So does
+  // the fold state of the RC modes.
+  const savedInputs = { takeoffAlt: 50, changeAlt: 50, changeSpeed: 10, loiterRad: 80, heading: 0, rcModesOpen: false };
 </script>
 
 <script lang="ts">
@@ -50,7 +51,7 @@
     return [...grid.filter((m) => !m.confirm), ...grid.filter((m) => m.confirm)];
   });
 
-  let showAllModes = $state(false);
+  let rcModesOpen = $state(savedInputs.rcModesOpen);
   const stickUnlocked = $derived($stickModesUnlocked); // RC transmitter OR engaged RC control
 
   let takeoffAlt = $state(savedInputs.takeoffAlt);
@@ -101,6 +102,7 @@
     savedInputs.changeSpeed = changeSpeedVal;
     savedInputs.loiterRad = loiterRadVal;
     savedInputs.heading = headingVal;
+    savedInputs.rcModesOpen = rcModesOpen;
   });
   // Set Heading is Copter-only (CONDITION_YAW). The fixed-wing GUIDED_CHANGE_HEADING path is removed:
   // ArduPlane's guided heading slew is buggy — it locks heading + bypasses waypoint nav and isn't
@@ -321,12 +323,14 @@
             {/each}
           </div>
           {#if stickModes.length}
-            <label class="cc-allmodes" title={stickUnlocked ? '' : $t('control.rcLockHint')}>
-              <input type="checkbox" bind:checked={showAllModes} />
-              <span>{$t('control.showAllModes')}</span>
-              {#if showAllModes && !stickUnlocked}<span class="cc-warn">{$t('control.noRcLink')}</span>{/if}
-            </label>
-            {#if showAllModes}
+            <!-- Fold-out bar for the stick-flown modes: closed by default, because they need an RC source. -->
+            <button type="button" class="cc-fold" aria-expanded={rcModesOpen} onclick={() => (rcModesOpen = !rcModesOpen)}
+                    title={stickUnlocked ? '' : $t('control.rcLockHint')}>
+              <span class="cc-fold-chevron" class:open={rcModesOpen} aria-hidden="true">▸</span>
+              <span class="cc-fold-label">{$t('control.rcModes')}</span>
+              {#if !stickUnlocked}<span class="cc-warn">{$t('control.noRcLink')}</span>{/if}
+            </button>
+            {#if rcModesOpen}
               <div class="cc-modegrid">
                 {#each stickModes as m}
                   <Button variant="mode" size="sm" active={activeKey === m.key} disabled={!stickUnlocked} onclick={() => pickMode(m)}>{m.name}</Button>
@@ -474,15 +478,29 @@
     grid-template-columns: repeat(3, 1fr);
     gap: 5px;
   }
-  .cc-allmodes {
+  /* Fold-out bar: a full-width, finger-sized divider that opens the stick-flown modes. */
+  .cc-fold {
     display: flex;
     align-items: center;
-    gap: 6px;
-    font-size: 11px;
-    color: #949494;
+    gap: 8px;
+    width: 100%;
+    min-height: 34px;
+    padding: 0 10px;
+    border: 1px solid #333;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.04);
+    color: #c8c8c8;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    text-align: left;
     cursor: pointer;
   }
-  .cc-warn { color: #d4a017; }
+  .cc-fold:hover { border-color: #37a8db; color: #fff; }
+  .cc-fold-chevron { display: inline-block; color: #949494; transition: transform 0.15s; }
+  .cc-fold-chevron.open { transform: rotate(90deg); }
+  .cc-fold-label { flex: 1; }
+  .cc-warn { color: #d4a017; font-weight: 400; }
 
   .cc-setwp {
     display: flex;

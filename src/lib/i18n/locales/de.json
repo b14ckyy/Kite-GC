@@ -484,7 +484,7 @@
       "select": "Modus wählen…",
       "current": "Aktiver Modus"
     },
-    "showAllModes": "Alle Modi anzeigen",
+    "rcModes": "RC-Modi",
     "rcLockHint": "Stick-gesteuerte Modi brauchen eine RC-Quelle — eine verbundene Fernsteuerung oder aktive RC-Control.",
     "noRcLink": "Keine RC-Verbindung",
     "takeoffAlt": "Starthöhe (m)",
