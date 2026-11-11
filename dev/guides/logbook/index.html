@@ -2099,8 +2099,8 @@ flight. The temporary store is also cleared when you restart Kite.</p>
 </thead>
 <tbody>
 <tr>
-<td><strong>INAV Blackbox</strong> (<code>.bbl</code>, <code>.txt</code>)</td>
-<td>INAV onboard flash (<code>.bbl</code>) or SD-card (<code>.txt</code>) blackbox</td>
+<td><strong>INAV Blackbox</strong> (<code>.bbl</code>, <code>.bfl</code>, <code>.txt</code>)</td>
+<td>INAV onboard flash (<code>.bbl</code> / <code>.bfl</code>) or SD-card (<code>.txt</code>) blackbox</td>
 </tr>
 <tr>
 <td><strong>ArduPilot Dataflash</strong> (<code>.bin</code>)</td>
@@ -2124,10 +2124,11 @@ flight. The temporary store is also cleared when you restart Kite.</p>
 </tr>
 </tbody>
 </table>
-<p>A progress bar tracks the import. INAV Blackbox needs the <strong><code>blackbox_decode</code></strong> helper, which Kite
-fetches automatically the first time you import one. A <code>.bbl</code> pulled from the flight controller's
-flash usually holds <strong>several flights</strong> — one per arm / disarm cycle. Kite detects that and offers to
-import them all, each as its own logbook entry. Imported telemetry logs (<code>.tlog</code> / <code>.rawmsp</code>) are
+<p>A progress bar tracks the import. Kite decodes INAV Blackbox logs itself and accepts only those: a
+Blackbox log written by another firmware (Betaflight, for example) is refused with a message that
+names the firmware. A <code>.bbl</code> pulled from the flight controller's flash usually holds <strong>several
+flights</strong> — one per arm / disarm cycle. Kite detects that and offers to import them all, each as its
+own logbook entry. Imported telemetry logs (<code>.tlog</code> / <code>.rawmsp</code>) are
 treated as telemetry recordings and <strong>split into separate flights on the arm / disarm markers</strong> in the
 log, the same way a live recording is.</p>
 <p>PX4 ULog note: PX4 doesn't log a throttle <em>output</em>, so a replayed <code>.ulg</code> flight shows the FC's

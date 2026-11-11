@@ -2361,8 +2361,8 @@ up itself, so only the bare <code>cargo check</code> needs it. (On Windows the p
 </tr>
 <tr>
 <td>Blackbox import (.txt / .bbl / .bfl)</td>
-<td>❌ impossible</td>
-<td>Needs the external <code>blackbox_decode</code> tool, and Android forbids executing a downloaded binary. Import on a desktop and bring flights over as <code>.kflight</code>.</td>
+<td>❌ desktop-only</td>
+<td>Not offered, like ArduPilot <code>.bin</code> and PX4 <code>.ulg</code> — the mobile database keeps no original log files. Import on a desktop and bring flights over as <code>.kflight</code>.</td>
 </tr>
 <tr>
 <td>Video: camera / OTG capture device</td>
@@ -2455,13 +2455,12 @@ Installer.</p>
 <h2 id="linux-runtime-notes">Linux runtime notes<a class="headerlink" href="#linux-runtime-notes" title="Permanent link">&para;</a></h2>
 <p>These are things to know when <strong>running</strong> the packaged Linux app (not build errors):</p>
 <ul>
-<li><strong>Three helpers are fetched at runtime, not bundled</strong>: <code>blackbox_decode</code> (Blackbox import shells out
-  to INAV's decoder), <code>ffmpeg</code> (the classic video image path) and <code>mediamtx</code> (the classic RTSP → WebRTC
-  engine) — the native RTSP client needs neither. Kite
-  looks for each next to the executable, then in its own app-data <code>bin/</code> directory, then on <code>PATH</code>, and
-  offers to download it on first use. Each failure is local to its feature — without <code>blackbox_decode</code>
-  only Blackbox import is affected, live recording and replay still work. On macOS <code>ffmpeg</code> is bundled
-  as a universal sidecar instead; the other two are fetched the same way as everywhere else.</li>
+<li><strong>Two helpers are fetched at runtime, not bundled</strong>: <code>ffmpeg</code> (the classic video image path) and
+  <code>mediamtx</code> (the classic RTSP → WebRTC engine) — the native RTSP client needs neither. Kite looks for
+  each next to the executable, then in its own app-data <code>bin/</code> directory, then on <code>PATH</code>, and offers to
+  download it on first use. Each failure is local to its feature. On macOS <code>ffmpeg</code> is bundled as a
+  universal sidecar instead; <code>mediamtx</code> is fetched the same way as everywhere else. INAV Blackbox logs
+  are decoded in-process — no helper.</li>
 <li><strong>Serial permissions:</strong> add yourself to the <code>dialout</code> group (<code>sudo usermod -aG dialout "$USER"</code>, then
   log out/in). Some distros use <code>uucp</code>.</li>
 <li><strong>Blank 3D globe / WebView (WebKitGTK):</strong> the 3D map runs in WebKitGTK, which is more fragile than
