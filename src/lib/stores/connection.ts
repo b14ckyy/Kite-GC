@@ -29,6 +29,15 @@ export function defaultNetPort(protocol: string, transport: string): number | un
   return NET_PORT_DEFAULTS[`${protocol}:${transport}`];
 }
 
+/** The address a network link actually uses. A blank host field means this machine, and so does a
+ *  typed "localhost" (the field's own placeholder): both become the literal IPv4 loopback, because the
+ *  TCP transport takes IP literals only and a resolved "localhost" may come back as IPv6 `::1`. Any
+ *  other host is passed on without its surrounding whitespace (touch keyboards append a space). */
+export function netHostOrLocal(host: string): string {
+  const h = host.trim();
+  return h === '' || h.toLowerCase() === 'localhost' ? '127.0.0.1' : h;
+}
+
 export interface InavVersion {
   major: number;
   minor: number;

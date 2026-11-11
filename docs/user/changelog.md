@@ -239,6 +239,10 @@ inside the box of the feature release they belong to, so the notes for one relea
 
     **Improved**
 
+    - **Network links: an empty host means this device.** The host field starts empty with a faded
+      `localhost` hint instead of a pre-filled address; leave it empty (or type `localhost`) and Kite
+      connects to `127.0.0.1` — what a local simulator needs. An address saved earlier is still shown. [#237]
+    - **The second battery widget is labelled "BAT 2".** [#237]
     - **System messages default to *Warning*, and a new *Debug* level shows the firmware's
       developer chatter.** ArduPilot sends some texts at its DEBUG severity — "Sending unknown
       message (44)" twice a second when a ground station in the loop asks for a message the board's
@@ -485,6 +489,7 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#228]: https://github.com/b14ckyy/Kite-GC/pull/228
 [#232]: https://github.com/b14ckyy/Kite-GC/pull/232
 [#234]: https://github.com/b14ckyy/Kite-GC/pull/234
+[#237]: https://github.com/b14ckyy/Kite-GC/pull/237
 [#143]: https://github.com/b14ckyy/Kite-GC/pull/143
 [#145]: https://github.com/b14ckyy/Kite-GC/pull/145
 [#151]: https://github.com/b14ckyy/Kite-GC/pull/151
