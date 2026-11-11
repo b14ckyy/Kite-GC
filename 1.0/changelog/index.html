@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../assets/branding/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
     
     
       
@@ -1679,6 +1679,8 @@ flight logbook with replay, FPV video, radar / airspace awareness and telemetry 
   a timeout, an item the FC refused — nothing was shown and the Save button simply came back,
   while what the vehicle actually held might not have matched the panel. The panel now shows the
   error under the Save button.</li>
+<li><strong>Two Cancel buttons in a confirmation dialog.</strong> Deleting a vehicle and the survey generator's
+  "waypoint limit exceeded" question showed <em>Cancel</em> twice. Each dialog now has one.</li>
 <li><strong>Relay and GPS fix state: one fix scale for every link.</strong> Passive links (LTM, CRSF, SmartPort)
   reported the fix on a different scale than MSP and MAVLink, so the Relay re-encoded an INAV or
   ArduPilot 3D fix as 2D on its LTM and MAVLink outputs and as "no fix" on SmartPort, the map's
@@ -1827,7 +1829,7 @@ flight logbook with replay, FPV video, radar / airspace awareness and telemetry 
       <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["announce.dismiss", "navigation.top", "navigation.instant", "navigation.tracking", "toc.follow", "search.suggest", "search.highlight", "content.code.copy", "content.action.edit"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
     
     
-      <script src="../assets/javascripts/bundle.c21346df.min.js"></script>
+      <script src="../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
         <script src="../assets/nav.js"></script>
       
