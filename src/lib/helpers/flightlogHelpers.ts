@@ -148,6 +148,14 @@ export function buildFlightTree(flights: FlightSummary[], mode: LogbookSortMode)
   return { dimensions, groups };
 }
 
+/** The reason of a failed log of a multi-log Blackbox file without the backend's own `Log N: ` prefix
+ *  (1-based, `blackbox.rs`) — the caller puts the number in front once, through the locale. Errors
+ *  without the prefix (legacy decoder, storage) come back unchanged. */
+export function stripLogNumber(error: string, logNumber: number): string {
+  const own = `Log ${logNumber}: `;
+  return error.startsWith(own) ? error.slice(own.length) : error;
+}
+
 export function formatDurationSec(durationSec: number | null): string {
   if (durationSec == null || durationSec <= 0) return '0m';
   const h = Math.floor(durationSec / 3600);

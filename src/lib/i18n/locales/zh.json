@@ -869,6 +869,7 @@
     "dbBackupDelete": "删除",
     "compactDbHint": "整理数据库以回收空间。自动删除已释放的空间 — 很少需要此操作。",
     "compactDbDone": "数据库已压缩 ({size})。",
+    "compactDbFreed": "已释放 {freed}。",
     "rawLogPath": "原始日志文件夹",
     "blackboxDecoder": "INAV 黑盒子解码器",
     "bbDecoderMissing": "未安装",

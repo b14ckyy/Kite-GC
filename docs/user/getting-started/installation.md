@@ -160,7 +160,8 @@ The app itself is small. What grows over time is your flight data:
 Keeping it tidy:
 
 - Deleting flights reclaims space incrementally (the database auto-shrinks over time).
-- **Settings → Data → Compact Database** runs a full defragmentation for maximum reclaim.
+- **Settings → Data → Compact Database** (desktop) rebuilds the whole file for maximum reclaim.
+  Kite is blocked while it runs (minutes on a slow drive), so do it between flights.
 - Move the database to another drive via **Settings** if space is tight.
 
 ## External dependencies & automatic downloads

@@ -517,6 +517,13 @@ impl SessionSlots {
         map.remove(&key)
     }
 
+    /// Whether any recorder — primary or secondary, any link — is writing a temp session right now, or a
+    /// session is being committed into the main DB (the live-path registry). "Compact Database" is
+    /// refused then: its VACUUM holds the main DB for minutes, and the commit at disarm would run into it.
+    pub fn has_live_session(&self) -> bool {
+        self.live.lock().map(|set| !set.is_empty()).unwrap_or_else(|e| !e.into_inner().is_empty())
+    }
+
     /// Swap a recorder's registered live file (`old` → `new`; either may be `None`).
     fn set_live(&self, old: Option<&PathBuf>, new: Option<&PathBuf>) {
         if let Ok(mut set) = self.live.lock() {
@@ -689,13 +696,23 @@ fn file_key(vehicle_key: &str) -> String {
     vehicle_key.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect()
 }
 
+/// Error of a commit refused because "Compact Database" is running on the main DB.
+const COMPACT_COMMIT_ERROR: &str =
+    "the flight database is being compacted — the recording is kept; save it again once the compact has finished";
+
 /// Commit a pending session into the main DB: insert the finalized flight, copy the temp
 /// `telemetry_records`, remove the temp file, and spawn weather/geocode enrichment. Returns the new
 /// flight id. Shared by the Save command and the recorder's grace-lapsed re-arm path. On failure the
 /// session is untouched (the commit runs in one transaction) and the caller still owns it.
+/// While "Compact Database" runs on that file it fails at once instead of waiting out the busy timeout
+/// on the VACUUM's lock — the recorder's commits run on telemetry threads (MSP scheduler, MAVLink
+/// handler); the callers' keep / Retry paths take over.
 pub fn commit_pending_session(session: &PendingSession) -> Result<i64, String> {
     let conn = db::open_database(&session.db_path)
         .map_err(|e| format!("Failed to open flight DB for commit: {}", e))?;
+    if conn.path().is_some_and(|p| db::compact_running(Path::new(p))) {
+        return Err(COMPACT_COMMIT_ERROR.to_string());
+    }
     let flight_id = db::commit_session_to_main(&conn, &session.temp_path, &session.flight)
         .map_err(|e| format!("Failed to commit session: {}", e))?;
     db::remove_temp_session(&session.temp_path);
@@ -2719,6 +2736,30 @@ mod tests {
         assert!(!slots.protected_paths().contains(&PathBuf::from("live_a.ktmp")));
     }
 
+    /// `has_live_session` (the Compact refusal) is true exactly while some recorder — the primary or a
+    /// secondary — writes a temp session; a finished flight awaiting Save is not a live recording.
+    #[test]
+    fn has_live_session_follows_every_recorder() {
+        let rig = Rig::new("live-session");
+        let (mut primary, _) = rig.recorder("L1:S1", fc("Primary", None));
+        let (mut secondary, _) = rig.recorder("L1:S2", fc("Secondary", None));
+        for rec in [&mut primary, &mut secondary] {
+            rec.on_gps(&gps(2, 48.1, 11.5)); // a 3D fix: a single flight records only with one (§5e)
+            rec.on_status(&status(false));
+        }
+        assert!(!rig.slots.has_live_session());
+        secondary.on_status(&status(true));
+        assert!(rig.slots.has_live_session(), "a secondary's recording counts");
+        primary.on_status(&status(true));
+        rig.advance_s(2);
+        secondary.on_gps(&gps(2, 48.1, 11.5));
+        secondary.on_status(&status(false));
+        assert!(rig.slots.has_live_session(), "the primary still records");
+        primary.on_gps(&gps(2, 48.1, 11.5));
+        primary.on_status(&status(false));
+        assert!(!rig.slots.has_live_session(), "pending sessions awaiting Save are not live");
+    }
+
     #[test]
     fn take_pending_addresses_one_vehicle_and_refuses_to_guess() {
         let slots = SessionSlots::default();
@@ -3793,6 +3834,53 @@ mod tests {
         rec.on_status(&status(false));
         assert!(rec.active_flight.is_none());
         path
+    }
+
+    /// A commit while "Compact Database" runs on the main DB fails at once — no busy-timeout wait on the
+    /// VACUUM's lock — and keeps the recording; once the compact is over the same session commits.
+    #[test]
+    fn commit_during_a_compact_fails_at_once_and_keeps_the_recording() {
+        let rig = Rig::new("commit-during-compact");
+        let main_db = rig.dir.join("main").join("flights.db");
+        let main = db::open_database(&main_db).unwrap();
+        let temp_path = rig.dir.join("sessions").join("active_test.ktmp");
+        write_ktmp(&temp_path, None, None, &[row(0, 48.0, 5.0, 10), row(100, 48.001, 6.0, 20)], &[]);
+        let (session, _) = summarize_temp_session(temp_path.clone(), main_db.clone(), rig.clock.as_ref()).unwrap();
+
+        let compact = db::begin_compact(&main).unwrap();
+        let started = Instant::now();
+        let err = rig.slots.commit_protected(&session).unwrap_err();
+        assert!(started.elapsed() < Duration::from_secs(1), "it must not wait for the lock");
+        assert_eq!(err, COMPACT_COMMIT_ERROR);
+        assert!(temp_path.exists() && rig.slots.is_kept(&temp_path), "the recording is kept");
+
+        drop(compact);
+        rig.slots.commit_protected(&session).expect("the retry after the compact commits");
+        assert!(!temp_path.exists());
+    }
+
+    /// The telemetry-thread commits — the re-arm after the grace with the End-Flight dialog unanswered
+    /// (attended, MSP scheduler / MAVLink handler) and a secondary's auto-commit (unattended) — return at
+    /// once during a compact: the new flight starts without a stall, the previous one is kept on disk.
+    #[test]
+    fn rearm_commit_during_a_compact_does_not_stall_the_telemetry_thread() {
+        for unattended in [false, true] {
+            let rig = Rig::new(if unattended { "rearm-compact-auto" } else { "rearm-compact-attended" });
+            let main = db::open_database(&rig.dir.join("flights.db")).unwrap();
+            let (mut rec, _) = rig.recorder("L1:S2", fc("Wing", None));
+            rec.set_auto_commit(unattended);
+            let first = fly_and_disarm(&rig, &mut rec);
+
+            let compact = db::begin_compact(&main).unwrap();
+            rig.advance_s(REARM_GRACE.as_secs() + 1);
+            rec.on_gps(&gps(2, 48.1, 11.5));
+            let started = Instant::now();
+            rec.on_status(&status(true));
+            assert!(started.elapsed() < Duration::from_secs(1), "unattended={unattended}: the commit stalled");
+            assert!(first.exists() && rig.slots.is_kept(&first), "unattended={unattended}: the first flight is kept");
+            assert_ne!(active_path(&rec), first, "unattended={unattended}: the new flight records");
+            drop(compact);
+        }
     }
 
     /// A commit that fails (the main DB cannot be opened) leaves the recording alone and keeps its path

@@ -910,6 +910,7 @@
     "dbBackupDelete": "Odstrániť",
     "compactDbHint": "Defragmentuje databázu a uvoľní miesto. Voľné miesto sa uvoľňuje automaticky, takže to treba len zriedka.",
     "compactDbDone": "Databáza zhutnená ({size}).",
+    "compactDbFreed": "Uvoľnené: {freed}.",
     "rawLogPath": "Priečinok surových záznamov",
     "blackboxDecoder": "Dekodér INAV Blackbox",
     "bbDecoderMissing": "Nenainštalovaný",

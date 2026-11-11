@@ -45,6 +45,12 @@ export const hasSerialPorts = !isIOS;
 /** Video sources exist. Not on iPhone: on iOS video is iPad-only (RTSP_APPLE.md). */
 export const hasVideo = !(isIOS && isPhone);
 
+/** "Compact Database" (a full VACUUM) is offered: desktop only. On Android SQLite keeps the VACUUM's
+ *  working copy of the whole database in memory (no usable temp folder), which a large database on a
+ *  small tablet may not survive; and a mobile database holds no log blobs — deleting flights already
+ *  gives its pages back. The backend refuses the command on mobile too. */
+export const hasDbCompact = !isMobile;
+
 /** True when running inside the macOS WebView (WKWebView) — used to mirror native window-control
  *  placement and drive the native-capture backend (AVFoundation). Excludes iPadOS, which shares the
  *  "Macintosh" user-agent. */
