@@ -103,8 +103,8 @@ export interface VideoState {
   rtspTransport: RtspTransport;
   /** Saved, named RTSP connections the user can recall (explicit save — never auto-added). */
   rtspConnections: RtspConnection[];
-  /** Experimental: use Kite's own in-process RTSP client — no MediaMTX, no ffmpeg (MJPEG
-   *  sources only until the P2.1 native decode sinks land). Persisted. */
+  /** Use Kite's own in-process RTSP client — no MediaMTX, no ffmpeg. On by default; off falls back
+   *  to the classic engine path. Persisted. */
   rtspNativeClient: boolean;
   /** Active RTSP reader once live (native engine client vs ffmpeg fallback); runtime-only. */
   rtspEngine: RtspEngine;
@@ -195,6 +195,8 @@ interface VideoPrefs {
   rtspConnections: RtspConnection[];
   rtspBufferFrames: number;
   rtspNativeClient: boolean;
+  /** Set once the 2.0 default (native client on) has been applied to this installation. */
+  rtspNativeDefaultApplied: boolean;
   nativeDevice: string | null;
   nativeCodec: string;
   nativeDeviceName: string | null;
@@ -225,7 +227,8 @@ const PREF_DEFAULTS: VideoPrefs = {
   rtspTransport: 'auto',
   rtspConnections: [],
   rtspBufferFrames: 0,
-  rtspNativeClient: false,
+  rtspNativeClient: true,
+  rtspNativeDefaultApplied: true,
   nativeDevice: null,
   nativeCodec: 'mjpeg',
   nativeDeviceName: null,
@@ -267,7 +270,11 @@ function loadPrefs(): VideoPrefs {
         rtspConnections: Array.isArray(p.rtspConnections) ? p.rtspConnections : [],
         // Clamped to the stepper's range — a hand-edited pref must not park the buffer at 4000 ms.
         rtspBufferFrames: Math.min(3, Math.max(0, Math.round(p.rtspBufferFrames ?? 0))),
-        rtspNativeClient: p.rtspNativeClient ?? false,
+        // The native client became the default with 2.0. An installation from before that has either
+        // no value (1.0.x) or a stored `false` (2.0 dev builds write the prefs whole) — the old
+        // default, not a choice — so it is switched on once; from then on the stored value is the user's.
+        rtspNativeClient: p.rtspNativeDefaultApplied ? (p.rtspNativeClient ?? true) : true,
+        rtspNativeDefaultApplied: true,
         nativeDevice: p.nativeDevice ?? p.v4l2Device ?? null,
         nativeCodec: p.nativeCodec ?? 'mjpeg',
         nativeDeviceName: p.nativeDeviceName ?? null,
@@ -302,6 +309,7 @@ function savePrefs(): void {
         rtspConnections: s.rtspConnections,
         rtspBufferFrames: get(rtspBufferFrames),
         rtspNativeClient: s.rtspNativeClient,
+        rtspNativeDefaultApplied: true,
         nativeDevice: s.nativeDevice,
         nativeCodec: s.nativeSel.codec,
         nativeDeviceName: s.nativeDeviceName,
@@ -1625,7 +1633,7 @@ export async function startRtsp(opts?: { reconnect?: boolean }): Promise<void> {
     // connectivity failure: WebRTC can never carry this stream (HEVC being the field case
     // — see the H.265 decision history) and the MJPEG copy above was already refused, so
     // reconnecting forever would just repeat both answers. Hard stop, pointing at the
-    // native client, which decodes H.264/HEVC in hardware on Windows.
+    // native client, which decodes H.264/HEVC in hardware.
     if (message.includes('codecs not supported')) {
       patch({ status: 'error', error: get(t)('video.webrtcCodecUnsupported'), reconnecting: false, reconnectAttempt: 0 });
       return;
@@ -1791,8 +1799,8 @@ export async function setRtspTransport(transport: RtspTransport): Promise<void> 
   if (st.enabled && st.kind === 'rtsp') await startRtsp();
 }
 
-/** Toggle the experimental in-process RTSP client (no MediaMTX/ffmpeg; MJPEG sources only for
- *  now); restarts a live RTSP feed so the choice applies immediately. */
+/** Toggle the in-process RTSP client (no MediaMTX/ffmpeg); restarts a live RTSP feed so the choice
+ *  applies immediately. */
 export async function setRtspNativeClient(on: boolean): Promise<void> {
   // Detaching is a feature of the native client alone (D2) — switching it off brings an open
   // detached window home instead of leaving a dead frame on the desktop.
