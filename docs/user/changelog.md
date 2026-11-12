@@ -267,6 +267,10 @@ inside the box of the feature release they belong to, so the notes for one relea
       The 3D **Altitude Curtain** is off by default for new installations, because it costs a lot of
       performance; an installation that already has the setting keeps it. See
       [Settings](reference/settings.md). [#250]
+    - **3D map: leaving FPV puts the camera back at a normal viewpoint.** Switching from the FPV
+      view to the free camera left the camera in the cockpit — banked with the aircraft and
+      looking at the horizon — and on a touch screen it could then hardly be tilted or turned.
+      The free camera now starts behind and above the aircraft, looking down at it. [#262]
     - **Local radar devices over the network.** An ADS-B receiver and the FormationFlight module can
       be connected over **TCP** or **UDP** as well as over a serial port — on Android, where serial
       ports are limited, and on iPhone and iPad, which have none and now offer the network links
@@ -618,6 +622,7 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#258]: https://github.com/b14ckyy/Kite-GC/pull/258
 [#260]: https://github.com/b14ckyy/Kite-GC/pull/260
 [#261]: https://github.com/b14ckyy/Kite-GC/pull/261
+[#262]: https://github.com/b14ckyy/Kite-GC/pull/262
 [#256]: https://github.com/b14ckyy/Kite-GC/pull/256
 [#259]: https://github.com/b14ckyy/Kite-GC/pull/259
 [#143]: https://github.com/b14ckyy/Kite-GC/pull/143
