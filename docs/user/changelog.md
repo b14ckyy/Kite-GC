@@ -279,6 +279,9 @@ inside the box of the feature release they belong to, so the notes for one relea
       strip below them. [#264]
     - **Android: the background notification shows the Kite icon** instead of a blank placeholder.
       [#264]
+    - **The bottom widget dock uses the room next to the video window.** With the floating video
+      window in its corner the dock gave up more width than the window takes, which squeezed
+      the widgets and left a gap beside the video button. [#264]
     - **Panels no longer flicker when they open over video in Power Saving.** With Power Saving
       active and a video running, a panel disappeared for an instant right after it opened.
       [#264]
