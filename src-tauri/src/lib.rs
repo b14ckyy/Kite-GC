@@ -37,6 +37,7 @@ mod telemetry_api;
 mod telemetry_forward;
 mod terrain;
 mod transport;
+mod user_agent;
 mod user_file;
 mod vehicle_registry;
 mod video;
