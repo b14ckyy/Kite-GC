@@ -21,7 +21,6 @@ const REPO: &str = "BtbN/FFmpeg-Builds";
 const RELEASES_PAGE: &str = "https://github.com/BtbN/FFmpeg-Builds/releases";
 /// The pinned ffmpeg release branch (BtbN `n<branch>-latest` assets follow it). See `download`.
 const FFMPEG_BRANCH: &str = "9.0";
-const HTTP_USER_AGENT: &str = "Kite-GC ffmpeg-fetch";
 
 /// Filename of ffmpeg for the current platform.
 pub fn binary_name() -> &'static str {
@@ -327,7 +326,7 @@ pub async fn download<F: FnMut(u8, &str)>(mut report: F) -> Result<PathBuf, Stri
     let url = crate::github_release::latest_asset_url(REPO, &asset_name);
 
     let client = reqwest::Client::builder()
-        .user_agent(HTTP_USER_AGENT)
+        .user_agent(crate::user_agent::user_agent("ffmpeg-fetch"))
         .build()
         .map_err(|e| format!("HTTP client error: {e}"))?;
 

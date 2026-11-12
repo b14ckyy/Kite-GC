@@ -110,7 +110,7 @@ impl TerrainProvider {
         std::fs::create_dir_all(&cache_dir).ok();
         TerrainProvider {
             client: reqwest::Client::builder()
-                .user_agent("KiteGC/terrain")
+                .user_agent(crate::user_agent::user_agent("terrain"))
                 // Bound every DEM fetch: a stalled connection must NOT hang forever while
                 // holding `load_lock` (which serializes all tile loads) — that would freeze
                 // every terrain call (both HUD widgets + mission + geoid) for the whole replay.

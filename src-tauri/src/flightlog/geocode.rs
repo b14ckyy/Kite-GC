@@ -7,7 +7,6 @@
 use serde::Deserialize;
 
 const NOMINATIM_URL: &str = "https://nominatim.openstreetmap.org/reverse";
-const USER_AGENT: &str = "KiteGC/0.3.0 (flight-logging)";
 
 #[derive(Debug, Deserialize)]
 struct NominatimResponse {
@@ -33,7 +32,7 @@ struct NominatimAddress {
 /// Returns None on error (network, parse, etc.) — never blocks the recorder.
 pub async fn reverse_geocode(lat: f64, lon: f64, lang: &str) -> Option<String> {
     let client = reqwest::Client::builder()
-        .user_agent(USER_AGENT)
+        .user_agent(crate::user_agent::user_agent("flight-logging"))
         .build()
         .ok()?;
 

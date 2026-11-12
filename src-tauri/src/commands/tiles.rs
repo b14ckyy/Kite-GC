@@ -31,7 +31,7 @@ fn client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT.get_or_init(|| {
         reqwest::Client::builder()
-            .user_agent("KiteGroundControl/1.0 (+https://github.com/b14ckyy/Kite-GC)")
+            .user_agent(crate::user_agent::user_agent("tiles"))
             .timeout(Duration::from_secs(15))
             .build()
             .expect("failed to build tile HTTP client")

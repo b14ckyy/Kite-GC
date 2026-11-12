@@ -102,6 +102,10 @@ async fn install_bundle(app: &AppHandle, tag: &str) -> Result<(), String> {
         .updater_builder()
         .endpoints(vec![manifest])
         .map_err(|e| format!("Updater setup failed: {e}"))?
+        // The plugin's clients default to `tauri-plugin-updater/<ver>`; a request header wins over
+        // that default, for the manifest check and the package download alike.
+        .header("User-Agent", crate::user_agent::user_agent("update"))
+        .map_err(|e| format!("Updater setup failed: {e}"))?
         .build()
         .map_err(|e| format!("Updater setup failed: {e}"))?;
     let update = updater
