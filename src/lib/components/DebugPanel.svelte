@@ -31,6 +31,8 @@
   import { activeFcModesChecked, modeTableMatchesVehicle } from "$lib/controllers/vehicleControl";
   import { offeredModes, tableFor, type MavMode, type FcMode } from "$lib/helpers/mavModes";
   import { customMaps, customMapCoverage, customMapName, customTileDebug, type CustomTileDebugEntry } from "$lib/stores/customMaps";
+  import { normalizeTileSize } from "$lib/config/mapProviders";
+  import { customLayerZoom } from "$lib/helpers/tileTemplate";
 
   let { onclose }: { onclose: () => void } = $props();
 
@@ -44,6 +46,18 @@
   });
   const cmInfo = $derived($customMaps.maps.find((mp) => mp.name === cmName) ?? null);
   const cmCov = $derived(cmName ? ($customMapCoverage[cmName] ?? null) : null);
+  /** Detected tile size, with the sample tile's real pixels behind it. */
+  const cmTileSize = $derived.by(() => {
+    if (!cmInfo) return '—';
+    const px = cmInfo.tilePx ? `${cmInfo.tilePx[0]}×${cmInfo.tilePx[1]}` : $t('debug.customMaps.tileSizeUnread');
+    return `${cmInfo.tileSize} px (${px})`;
+  });
+  /** The map zooms that show the file levels natively (file level − the layer's zoomOffset). */
+  const cmNative = $derived.by(() => {
+    if (!cmInfo) return '—';
+    const off = customLayerZoom(cmInfo.maxZoom, normalizeTileSize(cmInfo.tileSize)).zoomOffset;
+    return `${Math.max(0, cmInfo.minZoom - off)}–${cmInfo.maxZoom - off}`;
+  });
   function cmPlan(e: CustomTileDebugEntry): string {
     switch (e.kind) {
       case 'exact': return $t('debug.customMaps.planExact');
@@ -1240,6 +1254,13 @@
           <span class="stat-sep">|</span>
           <span class="stat-label">{$t('debug.customMaps.levels')}</span>
           <span class="stat-value">{cmInfo ? `${cmInfo.minZoom}–${cmInfo.maxZoom}` : '—'}</span>
+        </div>
+        <div class="stat-group">
+          <span class="stat-label">{$t('debug.customMaps.tileSize')}</span>
+          <span class="stat-value">{cmTileSize}</span>
+          <span class="stat-sep">|</span>
+          <span class="stat-label">{$t('debug.customMaps.nativeZoom')}</span>
+          <span class="stat-value">{cmNative}</span>
         </div>
         {#if cmCov}
           {@const cov = cmCov}

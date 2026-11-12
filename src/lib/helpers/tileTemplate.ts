@@ -116,6 +116,15 @@ export function userLayerZoom(
   };
 }
 
+/** Leaflet layer options for a custom (offline folder) map whose tiles are `tileSize` px and whose
+ *  highest FILE level is `maxLevel`: the same level shift as an online source (`userLayerZoom` — file
+ *  level = map zoom + `zoomOffset`, so a 512 px map's level Z is native at map zoom Z+1, a 128 px one's
+ *  at Z−1), and over-zoom up to two map zooms past the highest native one (at least 20). */
+export function customLayerZoom(maxLevel: number, tileSize: 128 | 256 | 512): ReturnType<typeof userLayerZoom> {
+  const zoom = userLayerZoom(maxLevel, tileSize);
+  return { ...zoom, maxZoom: Math.max(20, zoom.maxNativeZoom + 2) };
+}
+
 /** The Web Mercator (XYZ) tile containing a position at zoom `z`. */
 export function tileAt(lat: number, lon: number, z: number): { z: number; x: number; y: number } {
   const n = 1 << z;

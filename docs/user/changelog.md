@@ -156,9 +156,10 @@ inside the box of the feature release they belong to, so the notes for one relea
         enlarges them instead of stopping. [#249]
 
         **Custom maps: offline tiles from a folder (desktop).** Put tiles in the usual `Z/X/Y` layout
-        (`.png`, `.jpg`, `.webp`, any tile size) into a subfolder of the custom map location and the
-        folder shows up at the end of the map selector — on the 2D map and the 3D globe, without
-        internet. Gaps are filled from lower zoom levels, and a frame on the 2D map shows where the
+        (`.png`, `.jpg`, `.webp`) into a subfolder of the custom map location and the folder shows up
+        at the end of the map selector — on the 2D map and the 3D globe, without internet. Kite
+        detects the tile size by itself, so 128 px and 512 px tile sets are drawn at their real size.
+        [#253] Gaps are filled from lower zoom levels, and a frame on the 2D map shows where the
         detailed tiles are: a dashed rectangle from far out, the exact outline once you are close.
         The location can be moved in Settings. Not on Android and iOS; the 3D terrain still needs the
         internet. [#246]
@@ -585,6 +586,7 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#246]: https://github.com/b14ckyy/Kite-GC/pull/246
 [#249]: https://github.com/b14ckyy/Kite-GC/pull/249
 [#250]: https://github.com/b14ckyy/Kite-GC/pull/250
+[#253]: https://github.com/b14ckyy/Kite-GC/pull/253
 [#143]: https://github.com/b14ckyy/Kite-GC/pull/143
 [#145]: https://github.com/b14ckyy/Kite-GC/pull/145
 [#151]: https://github.com/b14ckyy/Kite-GC/pull/151
