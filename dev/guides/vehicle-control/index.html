@@ -2064,13 +2064,12 @@ firmware, or that the firmware has switched off (Follow without its parameter en
 is not shown. Kite keeps its own mode names and the RC lock. A mode Kite does not know — one added by a
 Lua script, for example — appears under <strong>RC modes</strong> with the name the flight controller gives
 it, and needs an RC source. Older ArduPilot versions and PX4 get Kite's built-in list.</p>
-<p>Not every mode of the list becomes a mode button: Guided, Takeoff, RTL, Land and ArduPlane's QRTL,
-QLand, Loiter QLand and AutoLand have their own controls further up (see <a href="#takeoff-return-and-landing">Takeoff, return and
+<p>Not every mode of the list becomes a mode button: Guided, Takeoff, RTL, Land, ArduPlane's QRTL,
+QLand, Loiter QLand and AutoLand and ArduSub's Surface have their own controls further up (see <a href="#takeoff-return-and-landing">Takeoff, return and
 landing</a>), and modes that only the firmware itself enters (Avoid ADSB,
 Initialising) or that are for diagnostics (ArduSub's Motor Detection) are never offered. The mode
 buttons are ordered: ordinary flight modes first, then — as hold-to-confirm buttons — the remaining
-ones that bring the vehicle back or down: <strong>SmartRTL</strong> (Copter, Rover), <strong>Auto RTL</strong> (Copter) and
-<strong>Surface</strong> (Sub).
+ones that bring the vehicle back: <strong>SmartRTL</strong> (Copter, Rover) and <strong>Auto RTL</strong> (Copter).
 If the flight controller's list has no Guided mode, the <strong>Guided</strong> toggle is greyed out.</p>
 <h2 id="takeoff-return-and-landing">Takeoff, return and landing<a class="headerlink" href="#takeoff-return-and-landing" title="Permanent link">&para;</a></h2>
 <ul>
@@ -2092,8 +2091,9 @@ the plane sits disarmed in TAKEOFF mode, the panel shows a warning line under th
 Hold the plane ready for launch before you arm.</p>
 </div>
 <ul>
-<li><strong>RTL</strong> returns to the launch/home point.</li>
-<li><strong>Land</strong> lands in place (Copter, PX4).</li>
+<li><strong>RTL</strong> returns to the launch/home point. Not on ArduSub, which has no such mode.</li>
+<li><strong>Land</strong> lands in place (Copter, PX4). A rover or boat has no Land button.</li>
+<li><strong>ArduSub</strong> — instead of RTL and Land there is <strong>Surface</strong>: the vehicle rises to the surface.</li>
 <li><strong>ArduPilot QuadPlane</strong> — the return and landing modes sit here in two pairs:<ul>
 <li><strong>RTL</strong> and <strong>QRTL</strong>: RTL is the fixed-wing return; QRTL returns to home (or a rally point)
   and lands vertically.</li>
