@@ -279,6 +279,9 @@ inside the box of the feature release they belong to, so the notes for one relea
       strip below them. [#264]
     - **Android: the background notification shows the Kite icon** instead of a blank placeholder.
       [#264]
+    - **Panels no longer flicker when they open over video in Power Saving.** With Power Saving
+      active and a video running, a panel disappeared for an instant right after it opened.
+      [#264]
     - **3D map: leaving FPV puts the camera back at a normal viewpoint.** Switching from the FPV
       view to the free camera left the camera in the cockpit — banked with the aircraft and
       looking at the horizon — and on a touch screen it could then hardly be tilted or turned.
