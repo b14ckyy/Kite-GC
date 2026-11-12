@@ -1990,10 +1990,11 @@ internet. <a href="https://github.com/b14ckyy/Kite-GC/pull/246">#246</a></p>
   Nominatim for the place name of a flight's take-off point. Requests are now at least a second
   apart, as the service demands, and flights from the same field reuse the name instead of
   asking again — a batch import from one site asks once, not once per flight. <a href="https://github.com/b14ckyy/Kite-GC/pull/255">#255</a></li>
-<li><strong>3D map: fewer tiles with High-Resolution 3D switched off.</strong> At half the render resolution
-  the globe kept loading map tiles as fine as for the full resolution. It now takes them one
-  zoom level coarser — a quarter of the tiles and requests for the same picture, which matters
-  on a phone, a slow link or a tile service with a quota. <a href="https://github.com/b14ckyy/Kite-GC/pull/254">#254</a></li>
+<li><strong>3D map: fewer tiles with High-Resolution 3D switched off.</strong> On a standard-density screen
+  the globe kept loading online map tiles as fine as for the full resolution although it
+  renders at half of it. It now takes them up to one zoom level coarser — as few as a quarter
+  of the tiles and requests for the same picture, which matters on a slow link or with a tile
+  service that has a quota. High-density screens keep their tiles. <a href="https://github.com/b14ckyy/Kite-GC/pull/254">#254</a> · <a href="https://github.com/b14ckyy/Kite-GC/pull/256">#256</a></li>
 <li><strong>ArduPilot: the control panel offers the modes your flight controller really has.</strong> From
   ArduPilot 4.7 on, Kite reads the mode list from the flight controller: modes missing from your
   firmware or switched off there are no longer offered, and modes the panel did not have before
