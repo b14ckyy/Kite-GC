@@ -2238,27 +2238,27 @@ Altitude and Compass sit in the bottom dock and Home, RC Link and GPS in the rig
 </thead>
 <tbody>
 <tr>
-<td><strong>Speed</strong></td>
+<td><strong>Speed Unit</strong></td>
 <td>km/h · mi/h · m/s · ft/s · kt</td>
 <td>km/h</td>
 </tr>
 <tr>
-<td><strong>Altitude</strong></td>
+<td><strong>Altitude Unit</strong></td>
 <td>m · ft</td>
 <td>m</td>
 </tr>
 <tr>
-<td><strong>Distance</strong></td>
+<td><strong>Distance Unit</strong></td>
 <td>m / km · ft / mi</td>
 <td>m / km</td>
 </tr>
 <tr>
-<td><strong>Vertical speed</strong></td>
+<td><strong>Vertical Speed Unit</strong></td>
 <td>m/s · ft/s</td>
 <td>m/s</td>
 </tr>
 <tr>
-<td><strong>Temperature</strong></td>
+<td><strong>Temperature Unit</strong></td>
 <td>°C · °F</td>
 <td>°C</td>
 </tr>
@@ -2285,9 +2285,9 @@ Altitude and Compass sit in the bottom dock and Home, RC Link and GPS in the rig
 <td>30 %</td>
 </tr>
 <tr>
-<td><strong>System messages</strong></td>
-<td>How many in-app notifications to show — Off / Error / Warning / All / Debug. <em>All</em> shows everything up to the firmware's info level; <em>Debug</em> adds its developer-level texts (MAVLink severity <em>debug</em> — ArduPilot's "Sending unknown message …", for example), without a sound. <strong>Currently MAVLink (ArduPilot / PX4) only</strong> — INAV has no equivalent message source.</td>
-<td>Warning</td>
+<td><strong>System Messages</strong></td>
+<td>How many in-app notifications to show — Off / Errors / Warnings / All / Debug (verbose). <em>All</em> shows everything up to the firmware's info level; <em>Debug (verbose)</em> adds its developer-level texts (MAVLink severity <em>debug</em> — ArduPilot's "Sending unknown message …", for example), without a sound. <strong>Currently MAVLink (ArduPilot / PX4) only</strong> — INAV has no equivalent message source.</td>
+<td>Warnings</td>
 </tr>
 </tbody>
 </table>
@@ -2382,7 +2382,7 @@ App Store tell you about new versions themselves, and GitHub releases have no iO
 </tr>
 <tr>
 <td><strong>High-Resolution 3D</strong></td>
-<td>Render the 3D globe at the display's native pixel density (on) or at half of it (off) to save GPU and battery. Switched off on a standard-density screen, the globe also loads its online map tiles up to one zoom level coarser — as few as a quarter of the tiles, which is all the half-resolution picture can show. On high-density screens (phones, tablets, HiDPI laptops) the tiles stay as they are, because half the density still shows them fully. Sharpest on high-DPI phones and tablets; a laptop with a weak integrated GPU may prefer it off.</td>
+<td>Render the 3D globe at the display's native pixel density (on) or at half of it (off) to save GPU and battery. Switched off on a screen below double pixel density (a desktop monitor, also at 125 % or 150 % scaling), the globe also loads its online map tiles up to one zoom level coarser — as few as a quarter of the tiles, which is all the half-resolution picture can show. On high-density screens (phones, tablets, displays at 200 % scaling and above) the tiles stay as they are, because half the density still shows them fully. Sharpest on high-DPI phones and tablets; a laptop with a weak integrated GPU may prefer it off.</td>
 <td>On (desktop) · Off (phone / tablet)</td>
 </tr>
 </tbody>
@@ -2398,13 +2398,13 @@ App Store tell you about new versions themselves, and GitHub releases have no iO
 </thead>
 <tbody>
 <tr>
-<td><strong>Default waypoint altitude</strong></td>
+<td><strong>Default WP Altitude</strong></td>
 <td>The altitude new waypoints get when you place them.</td>
 <td>50 m</td>
 </tr>
 <tr>
-<td><strong>Default PosHold time</strong></td>
-<td>The default loiter time for a new hold waypoint.</td>
+<td><strong>Default PH Time</strong></td>
+<td>The default loiter time for a new position-hold (PosHold) waypoint.</td>
 <td>30 s</td>
 </tr>
 </tbody>
@@ -2437,7 +2437,7 @@ App Store tell you about new versions themselves, and GitHub releases have no iO
 </tr>
 <tr>
 <td><strong>Airspace Manager</strong></td>
-<td>Enable the aeronautical overlay, pick the <strong>provider</strong> (OpenAIP) and enter its <strong>API key</strong>. See <strong><a href="../../guides/airspace/">Airspace Manager</a></strong>.</td>
+<td>Enable the aeronautical overlay, pick the <strong>Data provider</strong> (OpenAIP) and enter its <strong>API key</strong>. See <strong><a href="../../guides/airspace/">Airspace Manager</a></strong>.</td>
 <td>On, no provider set</td>
 </tr>
 </tbody>
@@ -2454,7 +2454,7 @@ App Store tell you about new versions themselves, and GitHub releases have no iO
 <tbody>
 <tr>
 <td><strong>Tile Cache</strong></td>
-<td>On-disk cache size for the map imagery (off … 5 GB), with a usage bar and <strong>Clear</strong>. Used by <strong>both 2D and 3D</strong>, and what makes the map work <strong>offline</strong>. Custom online providers use it like the built-in maps; custom offline maps are read from disk and never go into this cache.</td>
+<td>On-disk cache size for the map imagery (<strong>No Cache</strong>, 100 MB … 5 GB), with a usage bar and <strong>Clear</strong>. Used by <strong>both 2D and 3D</strong>, and what makes the map work <strong>offline</strong>. Custom online providers use it like the built-in maps; custom offline maps are read from disk and never go into this cache.</td>
 <td>200 MB</td>
 </tr>
 <tr>
@@ -2466,7 +2466,7 @@ App Store tell you about new versions themselves, and GitHub releases have no iO
 </table>
 <h2 id="data-tab">Data tab<a class="headerlink" href="#data-tab" title="Permanent link">&para;</a></h2>
 <h3 id="telemetry">Telemetry<a class="headerlink" href="#telemetry" title="Permanent link">&para;</a></h3>
-<p>Kite polls the link at just <strong>two</strong> configurable rates — <strong>Attitude</strong> and <strong>GPS / Position</strong>. Everything
+<p>Kite polls the link at just <strong>two</strong> configurable rates — <strong>Attitude</strong> and <strong>GPS Position</strong>. Everything
 else is <em>derived</em> from those: a few fields ride along with (a fraction of) those polls, and the remaining
 data — status, battery, flight mode, RC link, … — refreshes at roughly <strong>1 Hz</strong>. So these two rates set
 how smooth the instruments feel; the rest is automatic.</p>
@@ -2485,7 +2485,7 @@ how smooth the instruments feel; the rest is automatic.</p>
 <td>5 Hz</td>
 </tr>
 <tr>
-<td><strong>GPS / Position</strong></td>
+<td><strong>GPS Position</strong></td>
 <td>Position / speed / altitude update rate — 1–5 Hz.</td>
 <td>2 Hz</td>
 </tr>
@@ -2495,7 +2495,7 @@ how smooth the instruments feel; the rest is automatic.</p>
 <td>On</td>
 </tr>
 <tr>
-<td><strong>Wind</strong></td>
+<td><strong>Wind estimate</strong></td>
 <td>Request wind-estimate telemetry (shown on the compass widget). Live wind needs <strong>ArduPilot</strong> or <strong>PX4</strong>, or <strong>INAV 10.0+</strong> — on older INAV the toggle stays without effect. Replay always shows the wind a log recorded.</td>
 <td>Off</td>
 </tr>
@@ -2515,7 +2515,7 @@ how smooth the instruments feel; the rest is automatic.</p>
 <td>Off</td>
 </tr>
 <tr>
-<td><strong>Radar tracking</strong></td>
+<td><strong>Radar Tracking</strong></td>
 <td>Master switch for foreign-vehicle radar, with per-system enables (<strong>ADS-B</strong>, <strong>FormationFlight</strong>). See <strong><a href="../../guides/radar-and-adsb/">Radar &amp; ADS-B</a></strong>.</td>
 <td>On (ADS-B on)</td>
 </tr>
@@ -2526,7 +2526,7 @@ how smooth the instruments feel; the rest is automatic.</p>
 </tr>
 </tbody>
 </table>
-<p><strong>Airspeed</strong> and <strong>Wind</strong> each request <strong>extra messages</strong> over the link, so they're separate toggles —
+<p><strong>Airspeed</strong> and <strong>Wind estimate</strong> each request <strong>extra messages</strong> over the link, so they're separate toggles —
 switch them off to save bandwidth on a slow over-the-air radio, and on when the link can spare it.</p>
 <h3 id="flight-logbook">Flight Logbook<a class="headerlink" href="#flight-logbook" title="Permanent link">&para;</a></h3>
 <table>
@@ -2539,33 +2539,33 @@ switch them off to save bandwidth on a slow over-the-air radio, and on when the 
 </thead>
 <tbody>
 <tr>
-<td><strong>Enable flight logging</strong></td>
+<td><strong>Enable Flight Logbook</strong></td>
 <td>Record a flight-summary entry per flight in the logbook.</td>
 <td>On</td>
 </tr>
 <tr>
-<td><strong>Enable flight recording</strong></td>
+<td><strong>Enable Flight Recording</strong></td>
 <td>Record the full telemetry track for replay.</td>
 <td>On</td>
 </tr>
 <tr>
-<td><strong>Raw flight logs</strong></td>
+<td><strong>Save Raw Data Logs</strong></td>
 <td>Also keep the raw MSP/MAVLink stream (<code>.rawmsp</code> / <code>.tlog</code>) for each recording.</td>
 <td>Off</td>
 </tr>
 <tr>
-<td><strong>Continuous raw logging</strong></td>
+<td><strong>Continuous Raw Logging</strong></td>
 <td>Record the raw stream the whole time connected, not just while armed.</td>
 <td>Off</td>
 </tr>
 <tr>
-<td><strong>Flight log database</strong></td>
-<td>Where the logbook database lives — <strong>Choose</strong> a path or <strong>Use default</strong>.</td>
+<td><strong>Database Folder</strong></td>
+<td>Where the logbook database lives — <strong>Choose</strong> a folder or <strong>Use Default</strong>.</td>
 <td>default path</td>
 </tr>
 <tr>
 <td><strong>Compact Database</strong> <em>(desktop only)</em></td>
-<td>Rebuild the database file to reclaim space (rarely needed — deleting flights already frees space in the background). Kite shows a blocking notice until it is done; on a hard disk or an SD card this can take several minutes. If a flight is being recorded or an import is running, Kite refuses with a message. While it runs it needs free space: up to the size of the database next to the database file, and about the same again in the system's temporary folder. On Android and iOS the button is not shown: the database holds no original log files there, and deleting flights already gives the space back.</td>
+<td><strong>Compact now</strong> rebuilds the database file to reclaim space (rarely needed — deleting flights already frees space in the background). Kite shows a blocking notice until it is done; on a hard disk or an SD card this can take several minutes. If a flight is being recorded or an import is running, Kite refuses with a message. While it runs it needs free space: up to the size of the database next to the database file, and about the same again in the system's temporary folder. On Android and iOS the button is not shown: the database holds no original log files there, and deleting flights already gives the space back.</td>
 <td>—</td>
 </tr>
 <tr>
@@ -2574,7 +2574,7 @@ switch them off to save bandwidth on a slow over-the-air radio, and on when the 
 <td>—</td>
 </tr>
 <tr>
-<td><strong>Raw log path</strong></td>
+<td><strong>Raw Log Folder</strong></td>
 <td>Where raw <code>.rawmsp</code> / <code>.tlog</code> files are written.</td>
 <td>default path</td>
 </tr>
@@ -2592,17 +2592,17 @@ switch them off to save bandwidth on a slow over-the-air radio, and on when the 
 </thead>
 <tbody>
 <tr>
-<td><strong>Log level</strong></td>
-<td>How much Kite writes to its diagnostic log file — Off / Error / Warning / Debug. Raise it when reporting a problem.</td>
-<td>Warning</td>
+<td><strong>Log Level</strong></td>
+<td>How much Kite writes to its diagnostic log file — Off / Errors / Warnings / Debug (verbose). Raise it when reporting a problem.</td>
+<td>Warnings</td>
 </tr>
 <tr>
-<td><strong>Open log folder</strong></td>
-<td>Open the folder containing the diagnostic log in your file manager. Kite writes one file per day and keeps the last 30 days.</td>
+<td><strong>Log File</strong></td>
+<td><strong>Open Folder</strong> opens the folder containing the diagnostic log in your file manager. Kite writes one file per day and keeps the last 30 days.</td>
 <td>—</td>
 </tr>
 <tr>
-<td><strong>Share log file</strong> (Android)</td>
+<td><strong>Log File</strong> → <strong>Share log file</strong> (Android)</td>
 <td>Replaces <strong>Open Folder</strong> there — the log folder is app-private, no file manager can reach it. Opens a list of the day files, newest first, each with its date and size and the one this session writes tagged <strong>current</strong>; tap one to hand it to the Android share sheet (mail, messenger, a text editor). <strong>Close</strong> dismisses the list.</td>
 <td>—</td>
 </tr>
