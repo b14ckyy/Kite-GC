@@ -274,6 +274,11 @@ inside the box of the feature release they belong to, so the notes for one relea
       [Map search](guides/telemetry-and-display.md#map-search). [#263]
     - **Bigger icons on the map buttons.** The 2D / 3D, follow, camera-mode and video buttons use
       one icon size that fills the button, instead of several small ones. [#263]
+    - **Tablet: the map buttons sit in the corner again.** On a tablet the 2D map's buttons were
+      lifted so far that the top one slid under the lowest widget of the right dock, with an empty
+      strip below them. [#264]
+    - **Android: the background notification shows the Kite icon** instead of a blank placeholder.
+      [#264]
     - **3D map: leaving FPV puts the camera back at a normal viewpoint.** Switching from the FPV
       view to the free camera left the camera in the cockpit — banked with the aircraft and
       looking at the horizon — and on a touch screen it could then hardly be tilted or turned.
@@ -631,6 +636,7 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#261]: https://github.com/b14ckyy/Kite-GC/pull/261
 [#262]: https://github.com/b14ckyy/Kite-GC/pull/262
 [#263]: https://github.com/b14ckyy/Kite-GC/pull/263
+[#264]: https://github.com/b14ckyy/Kite-GC/pull/264
 [#256]: https://github.com/b14ckyy/Kite-GC/pull/256
 [#259]: https://github.com/b14ckyy/Kite-GC/pull/259
 [#143]: https://github.com/b14ckyy/Kite-GC/pull/143
