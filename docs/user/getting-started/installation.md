@@ -173,10 +173,10 @@ program, which Kite offers to **download automatically the first time you use th
 | Helper | Used for | How it's provided |
 |---|---|---|
 | `ffmpeg` | **Video** (native capture + fallback decoding for some RTSP sources on the classic path) | auto-download on **Windows & Linux**; **bundled inside the app on macOS** |
-| `mediamtx` | **Video** (the classic RTSP → low-latency engine, used with the *Native RTSP client* toggle off) | auto-download on **Windows, Linux & macOS** |
+| `mediamtx` | **Video** (the classic RTSP → low-latency engine, used with the *Native RTSP client* switched off) | auto-download on **Windows, Linux & macOS** |
 
 RTSP through Kite's own **Native RTSP client** needs neither helper — Android and iPad always use it,
-the desktop when the toggle in the Video panel is on (see **[Video](../guides/video.md)**).
+the desktop by default unless it is switched off in the Video panel (see **[Video](../guides/video.md)**).
 
 - Downloaded helpers are stored in Kite's tools folder (`…\kite-gc\bin`, or `data\bin` in portable
   mode) — they don't touch your system.

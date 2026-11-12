@@ -270,6 +270,12 @@ inside the box of the feature release they belong to, so the notes for one relea
 
     **Improved**
 
+    - **The Native RTSP client is on by default and no longer experimental.** RTSP on Windows, macOS
+      and Linux runs through Kite's own client unless you switch it off in the Video panel. Existing
+      installations are switched over once at the first start of 2.0; if you switch it off after
+      that, it stays off. Switching it off still gives you the classic engine path (MediaMTX /
+      ffmpeg). **Disable hardware acceleration** now appears only where it does something: on Linux,
+      on the classic path, when Kite found hardware for the stream conversion. [#259]
     - **Location names for the logbook keep to the map service's limit.** Kite asks OpenStreetMap's
       Nominatim for the place name of a flight's take-off point. Requests are now at least a second
       apart, as the service demands, and flights from the same field reuse the name instead of
@@ -602,6 +608,7 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#255]: https://github.com/b14ckyy/Kite-GC/pull/255
 [#258]: https://github.com/b14ckyy/Kite-GC/pull/258
 [#256]: https://github.com/b14ckyy/Kite-GC/pull/256
+[#259]: https://github.com/b14ckyy/Kite-GC/pull/259
 [#143]: https://github.com/b14ckyy/Kite-GC/pull/143
 [#145]: https://github.com/b14ckyy/Kite-GC/pull/145
 [#151]: https://github.com/b14ckyy/Kite-GC/pull/151
