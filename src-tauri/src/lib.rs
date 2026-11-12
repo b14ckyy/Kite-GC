@@ -95,7 +95,7 @@ use commands::info::{get_app_version, is_debug_mode, is_fleet_mode, is_fleet_gro
 use commands::system::{system_active_net_is_wifi, system_on_battery};
 use commands::storage::{share_file, storage_pick_folder};
 use commands::video::{
-    video_ffmpeg_status, video_ffmpeg_download,
+    video_ffmpeg_status, video_hw_transcode_available, video_ffmpeg_download,
     video_engine_status, video_engine_download, video_webrtc_start, video_webrtc_offer,
     video_webrtc_stop,
     video_list_native_devices, video_probe_device,
@@ -833,6 +833,7 @@ pub fn run() {
             storage_pick_folder,
             share_file,
             video_ffmpeg_status,
+            video_hw_transcode_available,
             video_ffmpeg_download,
             video_engine_status,
             video_engine_download,

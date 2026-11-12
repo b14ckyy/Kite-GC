@@ -107,6 +107,22 @@
     engineChecked = true;
   }
 
+  // "Disable hardware acceleration" steers one thing only: the ffmpeg H.264 → MJPEG transcode of an
+  // RTSP source, which runs when the classic path has no WebRTC (WebKitGTK), and which has a hardware
+  // variant on Linux alone (V4L2 M2M / VAAPI). Everywhere else the switch does nothing — the native
+  // client and the WebRTC path decode through the OS / the WebView — so it is shown only where it
+  // has an effect and the machine has hardware to switch off. The backend probes on the first ask.
+  let hwTranscode = $state(false);
+  const hwSwitchApplies = $derived(
+    isLinux && $videoState.kind === 'rtsp' && !$videoState.rtspNativeClient && !isWebrtcAvailable() && !!ffmpegVer,
+  );
+  $effect(() => {
+    if (!hwSwitchApplies) return;
+    invoke<boolean>('video_hw_transcode_available')
+      .then((ok) => { hwTranscode = ok; })
+      .catch(() => { hwTranscode = false; });
+  });
+
   async function checkFfmpeg(): Promise<void> {
     try {
       ffmpegVer = await invoke<string | null>('video_ffmpeg_status');
@@ -174,7 +190,7 @@
   // MediaMTX is only needed for the WebRTC path. A WebView without it (WebKitGTK builds with WebRTC
   // compiled out — Raspberry Pi OS among them) runs RTSP entirely on ffmpeg now, so demanding the
   // engine there would block a machine that already has everything it needs.
-  // …and not at all when the experimental in-process native RTSP client is active.
+  // …and not at all when the in-process native RTSP client is active.
   const needsEngine = $derived(isWebrtcAvailable() && !$videoState.rtspNativeClient);
 
   // Mirror can't reach Android's hardware-decoded surface (see the toggle row's comment).
@@ -526,8 +542,8 @@
         </div>
       </div>
 
-      <!-- Experimental: Kite's own in-process RTSP client (MOBILE_RTSP.md) — no MediaMTX, no
-           ffmpeg. MJPEG on the multipart path; H.264/HEVC decode in hardware.
+      <!-- Kite's own in-process RTSP client (MOBILE_RTSP.md) — no MediaMTX, no ffmpeg. MJPEG on the
+           multipart path; H.264/HEVC decode in hardware. On by default.
            On Android and iOS it is the ONLY route (no sidecars on mobile) — forced on in the
            store, nothing to toggle. -->
       {#if !isMobile}
@@ -669,10 +685,9 @@
     {/if}
 
     <!-- Escape hatch: some driver/hardware combinations pass the backend probe but still misbehave on
-         a live feed. Hardware stays the default; this forces the software transcode. It only steers
-         the ffmpeg transcode path — the native RTSP client decodes through the OS (Media Foundation),
-         where this switch has no say, so it is hidden there. -->
-    {#if !($videoState.kind === 'rtsp' && $videoState.rtspNativeClient)}
+         a live feed. Hardware stays the default; this forces the software transcode. Shown only where
+         it has an effect — see `hwSwitchApplies`. -->
+    {#if hwSwitchApplies && hwTranscode}
       <div class="field-row">
         <Toggle
           checked={$videoState.disableHwAccel}
