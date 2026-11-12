@@ -295,8 +295,10 @@ inside the box of the feature release they belong to, so the notes for one relea
     - **ArduPilot: returning and landing in one place, always with a hold.** A QuadPlane has
       **RTL / QRTL** and **Loiter QLand / QLand** as two pairs of hold-to-confirm buttons instead
       of QRTL and QLand as single clicks among the mode buttons; a fixed-wing plane on ArduPilot
-      4.7 gets **AutoLand** next to RTL. Among the mode buttons, SmartRTL (Copter, Rover), Auto
-      RTL and Surface (Sub) need a hold too and are listed after the ordinary flight modes. [#242]
+      4.7 gets **AutoLand** next to RTL. A rover or boat shows only RTL, and a Sub shows
+      **Surface** in place of RTL and Land, which it does not have. Among the mode buttons,
+      SmartRTL (Copter, Rover) and Auto RTL need a hold too and are listed after the ordinary
+      flight modes. [#242] · [#258]
     - **Compact Database no longer freezes the app, and cannot be started twice.** It runs in the
       background behind a notice that stays until it is done — on a hard disk or an SD card a large
       database takes minutes. It is refused while a flight is being recorded or an import is
@@ -598,6 +600,7 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#253]: https://github.com/b14ckyy/Kite-GC/pull/253
 [#254]: https://github.com/b14ckyy/Kite-GC/pull/254
 [#255]: https://github.com/b14ckyy/Kite-GC/pull/255
+[#258]: https://github.com/b14ckyy/Kite-GC/pull/258
 [#256]: https://github.com/b14ckyy/Kite-GC/pull/256
 [#143]: https://github.com/b14ckyy/Kite-GC/pull/143
 [#145]: https://github.com/b14ckyy/Kite-GC/pull/145

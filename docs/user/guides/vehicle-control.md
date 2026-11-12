@@ -75,13 +75,12 @@ is not shown. Kite keeps its own mode names and the RC lock. A mode Kite does no
 Lua script, for example — appears under **RC modes** with the name the flight controller gives
 it, and needs an RC source. Older ArduPilot versions and PX4 get Kite's built-in list.
 
-Not every mode of the list becomes a mode button: Guided, Takeoff, RTL, Land and ArduPlane's QRTL,
-QLand, Loiter QLand and AutoLand have their own controls further up (see [Takeoff, return and
+Not every mode of the list becomes a mode button: Guided, Takeoff, RTL, Land, ArduPlane's QRTL,
+QLand, Loiter QLand and AutoLand and ArduSub's Surface have their own controls further up (see [Takeoff, return and
 landing](#takeoff-return-and-landing)), and modes that only the firmware itself enters (Avoid ADSB,
 Initialising) or that are for diagnostics (ArduSub's Motor Detection) are never offered. The mode
 buttons are ordered: ordinary flight modes first, then — as hold-to-confirm buttons — the remaining
-ones that bring the vehicle back or down: **SmartRTL** (Copter, Rover), **Auto RTL** (Copter) and
-**Surface** (Sub).
+ones that bring the vehicle back: **SmartRTL** (Copter, Rover) and **Auto RTL** (Copter).
 If the flight controller's list has no Guided mode, the **Guided** toggle is greyed out.
 
 ## Takeoff, return and landing
@@ -102,8 +101,9 @@ If the flight controller's list has no Guided mode, the **Guided** toggle is gre
     the plane sits disarmed in TAKEOFF mode, the panel shows a warning line under the arm slider.
     Hold the plane ready for launch before you arm.
 
-- **RTL** returns to the launch/home point.
-- **Land** lands in place (Copter, PX4).
+- **RTL** returns to the launch/home point. Not on ArduSub, which has no such mode.
+- **Land** lands in place (Copter, PX4). A rover or boat has no Land button.
+- **ArduSub** — instead of RTL and Land there is **Surface**: the vehicle rises to the surface.
 - **ArduPilot QuadPlane** — the return and landing modes sit here in two pairs:
     - **RTL** and **QRTL**: RTL is the fixed-wing return; QRTL returns to home (or a rally point)
       and lands vertically.
