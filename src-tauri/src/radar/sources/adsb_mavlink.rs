@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Radar — ADS-B receiver over serial MAVLink (Phase 2).
+// Radar — ADS-B receiver over MAVLink (Phase 2).
 //
-// A dedicated hardware ADS-B receiver (e.g. ADSBee, PicoADSB) connected over Serial USB streams
-// MAVLink `ADSB_VEHICLE` (#246) frames. This source opens the port, parses frames (reusing the
-// project's MavParser), maps #246 → TrackedVehicle, and pushes batches to the aggregator (merged
-// with the online ADS-B feeds by ICAO). Runs on a dedicated thread; reconnects on serial error.
-// TCP/WiFi transport (same MAVLink decode) comes later. See docs/active/RADAR_TRACKING_CORE.md §7.1.
+// A dedicated hardware ADS-B receiver (e.g. ADSBee, PicoADSB) streams MAVLink `ADSB_VEHICLE` (#246)
+// frames over serial USB, TCP or UDP (`radar::link`). This source opens the link, parses frames
+// (reusing the project's MavParser), maps #246 → TrackedVehicle, and pushes batches to the aggregator
+// (merged with the online ADS-B feeds by ICAO). Read-only: it never writes to the receiver, so a UDP
+// link is a pure listener. Runs on a dedicated thread; reconnects on a link error.
+// See docs/active/RADAR_TRACKING_CORE.md §7.1.
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -22,18 +23,18 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
 use crate::mavlink_proto::parser::MavParser;
+use crate::radar::link::{LinkSpec, OpenFailureLog};
 use crate::radar::now_ms;
 use crate::radar::source::{RadarSource, SourceHandle, SourceUpdate};
 use crate::radar::vehicle::{AltRef, TrackedVehicle, VehicleSource, VehicleSystem};
 use crate::radar::ADSB_STATUS_EVENT;
-use crate::transport::serial::SerialConnection;
-use crate::transport::{ByteTransport, TransportError};
+use crate::transport::TransportError;
 
 /// Push the accumulated set + a status tick at this cadence.
 const EMIT_INTERVAL: Duration = Duration::from_millis(1000);
 /// Drop a contact from this source's working set if it hasn't been heard for this long.
 const RECEIVER_TTL_MS: i64 = 60_000;
-/// Backoff before reopening the port after a serial error.
+/// Backoff before reopening the link after an error.
 const RECONNECT_DELAY: Duration = Duration::from_secs(2);
 
 /// Per-source status (shared `radar-adsb-status` event, keyed by name).
@@ -47,14 +48,13 @@ struct AdsbProviderStatus {
 
 pub struct AdsbMavlinkSource {
     name: String,
-    port: String,
-    baud: u32,
+    link: LinkSpec,
     app: AppHandle,
 }
 
 impl AdsbMavlinkSource {
-    pub fn new(name: String, port: String, baud: u32, app: AppHandle) -> Self {
-        Self { name, port, baud, app }
+    pub fn new(name: String, link: LinkSpec, app: AppHandle) -> Self {
+        Self { name, link, app }
     }
 
     fn emit_status(&self, count: usize, ok: bool) {
@@ -77,11 +77,13 @@ impl RadarSource for AdsbMavlinkSource {
         let stop_worker = stop.clone();
 
         thread::spawn(move || {
+            let mut open_log = OpenFailureLog::default();
             while !stop_worker.load(Ordering::Relaxed) {
-                let mut conn = match SerialConnection::open(&self.port, self.baud) {
+                // Raise DTR/RTS on serial — many USB-serial ADS-B receivers only stream once the host does.
+                let mut conn = match self.link.open(true) {
                     Ok(c) => c,
                     Err(e) => {
-                        eprintln!("[radar][adsb-mav] {} open {} failed: {}", self.name, self.port, e);
+                        open_log.failed(&self.name, &self.link, &e);
                         self.emit_status(0, false);
                         if wait_or_stop(&stop_worker, RECONNECT_DELAY) {
                             break;
@@ -89,15 +91,14 @@ impl RadarSource for AdsbMavlinkSource {
                         continue;
                     }
                 };
-                // Raise DTR/RTS — many USB-serial ADS-B receivers only stream once the host does.
-                if let Err(e) = conn.set_control_signals(true, true) {
-                    eprintln!("[radar][adsb-mav] {} DTR/RTS failed (continuing): {}", self.name, e);
-                }
-                eprintln!("[radar][adsb-mav] {} reading {} @ {}", self.name, self.port, self.baud);
+                open_log.opened();
+                eprintln!("[radar][adsb-mav] {} reading {}", self.name, self.link.describe());
 
                 let mut parser = MavParser::new();
                 let mut vehicles: HashMap<String, TrackedVehicle> = HashMap::new();
-                let mut buf = [0u8; 512];
+                // Room for a whole UDP datagram: a bridge may pack more than one serial chunk into it, and
+                // a datagram larger than the buffer is an error on Windows and silently cut elsewhere.
+                let mut buf = [0u8; 2048];
                 let mut last_emit = Instant::now();
                 // Diagnostics (kept on; ADS-B receivers vary wildly in framing/baud).
                 let mut dbg_bytes = 0usize;
@@ -126,7 +127,7 @@ impl RadarSource for AdsbMavlinkSource {
                         }
                         Err(TransportError::Timeout) => {}
                         Err(e) => {
-                            eprintln!("[radar][adsb-mav] {} serial error: {} — reconnecting", self.name, e);
+                            eprintln!("[radar][adsb-mav] {} link error: {} — reconnecting", self.name, e);
                             self.emit_status(0, false);
                             break; // reopen
                         }

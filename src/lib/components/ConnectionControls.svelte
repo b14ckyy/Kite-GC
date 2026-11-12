@@ -16,6 +16,7 @@
   import { hasSerialPorts } from '$lib/platform';
   import { settings } from '$lib/stores/settings';
   import { defaultNetPort } from '$lib/stores/connection';
+  import { serialPortClaims, claimOf, ownerLabel } from '$lib/helpers/radarPorts';
   import type { PortInfo, BleDeviceInfo, TransportType, ProtocolType } from '$lib/stores/connection';
   import type { TelemetryData } from '$lib/stores/telemetry';
 
@@ -74,6 +75,16 @@
   const selectedIsBtSpp = $derived(
     ports.some((p) => p.path === selectedPort && p.port_type === 'bluetooth-spp'),
   );
+
+  // ── Serial ports held by a running radar source ────────────────────
+  // Shown disabled with the source's name. The current selection is never changed behind the pilot's
+  // back: a claimed selected port stays selected and shows the note — connecting is their call (the OS
+  // refuses the second open anyway).
+  const radarClaims = $derived(serialPortClaims($settings.radar, { activeOnly: true }));
+  function radarClaimNote(path: string): string | null {
+    const owner = claimOf(radarClaims, path);
+    return owner ? $t('connection.portUsedByRadar', { values: { who: ownerLabel(owner, $t) } }) : null;
+  }
 
   let editingBt = $state(false);
   let btNameDraft = $state('');
@@ -156,7 +167,8 @@
         <option value="">{$t('connection.noPortsFound')}</option>
       {:else}
         {#each ports as port}
-          <option value={port.path}>{portLabel(port)}</option>
+          {@const radarNote = radarClaimNote(port.path)}
+          <option value={port.path} disabled={!!radarNote && port.path !== selectedPort}>{portLabel(port)}{radarNote ? ` (${radarNote})` : ''}</option>
         {/each}
       {/if}
     </select>

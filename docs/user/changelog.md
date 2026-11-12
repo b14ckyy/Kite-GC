@@ -267,6 +267,12 @@ inside the box of the feature release they belong to, so the notes for one relea
       The 3D **Altitude Curtain** is off by default for new installations, because it costs a lot of
       performance; an installation that already has the setting keeps it. See
       [Settings](reference/settings.md). [#250]
+    - **Local radar devices over the network.** An ADS-B receiver and the FormationFlight module can
+      be connected over **TCP** or **UDP** as well as over a serial port — on Android, where serial
+      ports are limited, and on iPhone and iPad, which have none and now offer the network links
+      only. A serial port that a radar source uses is greyed out for the flight connection and the
+      other way round, and two sources set to the same UDP port get a warning. See
+      [Radar & ADS-B](guides/radar-and-adsb.md#connecting-a-local-device). [#261]
     - **No RC control on a phone.** The RC tool and its switch in Settings are gone from the phone
       layout: on-screen touch sticks are too easy to hit by accident for something that steers an
       aircraft. Tablets and the desktop keep RC control. [#260]
@@ -611,6 +617,7 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#255]: https://github.com/b14ckyy/Kite-GC/pull/255
 [#258]: https://github.com/b14ckyy/Kite-GC/pull/258
 [#260]: https://github.com/b14ckyy/Kite-GC/pull/260
+[#261]: https://github.com/b14ckyy/Kite-GC/pull/261
 [#256]: https://github.com/b14ckyy/Kite-GC/pull/256
 [#259]: https://github.com/b14ckyy/Kite-GC/pull/259
 [#143]: https://github.com/b14ckyy/Kite-GC/pull/143
