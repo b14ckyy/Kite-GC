@@ -11,7 +11,9 @@
 //
 // Custom (local tile folder) maps take their own path (`_createCustomTile`): no IndexedDB cache, and
 // every tile is a <canvas> — either the tile itself, or composed from its nearest existing ancestor
-// (scaled up) or, one level below the lowest level of an area, from its children (scaled down).
+// (scaled up) or, one level below the lowest level of an area, from its children (scaled down). A
+// custom layer with 512 / 128 px tiles runs with a zoomOffset; `_createCustomTile` converts Leaflet's
+// coords to file levels once, everything after it works in file levels.
 
 import L from "leaflet";
 import { invoke } from "@tauri-apps/api/core";
@@ -26,7 +28,7 @@ import {
   MIN_DETECT_ZOOM,
 } from "$lib/cache/tileAvailability";
 import { isUserProviderId, type CustomMapSpec, type MapProvider } from "$lib/config/mapProviders";
-import { fillTileTemplate, userLayerZoom } from "$lib/helpers/tileTemplate";
+import { customLayerZoom, fillTileTemplate, userLayerZoom } from "$lib/helpers/tileTemplate";
 import { recordCustomTile } from "$lib/stores/customMaps";
 
 /** Backend answer for a custom-map tile that is not on disk (see `custom_maps::resolve_tile`). */
@@ -36,10 +38,13 @@ interface CustomTilePlan {
   children: [boolean, boolean, boolean, boolean];
 }
 
+/** A tile address: Leaflet's coords, or a custom map's file-level address. */
+type TileXYZ = { x: number; y: number; z: number };
+
 /** Where tile `coords` sits inside its ancestor at zoom `ancestorZ`: the ancestor's x/y, the scale
  *  (2^levels) and this tile's quadrant inside it. Shared by the ESRI placeholder fill and the
- *  custom-map fallback. */
-function ancestorQuadrant(coords: L.Coords, ancestorZ: number) {
+ *  custom-map fallback (there in file levels). */
+function ancestorQuadrant(coords: TileXYZ, ancestorZ: number) {
   const dz = Math.max(1, coords.z - ancestorZ);
   const scale = 1 << dz;
   return {
@@ -314,14 +319,20 @@ export const CachedTileLayer = L.TileLayer.extend({
 
   /**
    * Custom-map tile: a <canvas> (the element must exist before we know what to draw). The tile on
-   * disk is drawn at its own resolution and the canvas is scaled to the 256 px grid by Leaflet's
-   * inline tile size — so 100, 256 or 512 px tiles all fit the grid. A missing tile is composed from
-   * what the backend resolves: the nearest existing ancestor (scaled up, any number of levels), or,
-   * one level below the lowest level of an area, the up-to-four children (scaled down). Nothing is
-   * drawn further below. Never touches the IndexedDB tile cache.
+   * disk is drawn at its own resolution and the canvas is scaled to the layer's grid (`tileSize`: the
+   * map's detected 128 / 256 / 512) by Leaflet's inline tile size — so a 100 px tile fills a 128 px
+   * cell. A missing tile is composed from what the backend resolves: the nearest existing ancestor
+   * (scaled up, any number of levels), or, one level below the lowest level of an area, the
+   * up-to-four children (scaled down). Nothing is drawn further below. Never touches the IndexedDB
+   * tile cache.
    */
   _createCustomTile(coords: L.Coords, done: L.DoneCallback): HTMLElement {
     const spec: CustomMapSpec = this.options.customMap;
+    // The ONE place a map zoom becomes a file level. Leaflet hands over its tile zoom (the map zoom,
+    // clamped to min/maxNativeZoom) and would fill a URL with it + zoomOffset; at that offset the
+    // layer's grid of tileSize-px cells IS the file level's grid, so x/y carry over unchanged. From
+    // here on — early-out, URLs, backend lookup, composing, debug record — everything is file levels.
+    const tile: TileXYZ = { x: coords.x, y: coords.y, z: coords.z + (this.options.zoomOffset ?? 0) };
     const canvas = document.createElement("canvas");
     canvas.setAttribute("role", "presentation");
     canvas.width = 1;
@@ -338,8 +349,8 @@ export const CachedTileLayer = L.TileLayer.extend({
       (canvas as HTMLCanvasElement & { complete?: boolean }).complete = true;
       done(undefined, canvas);
     });
-    const { x, y, z } = coords;
-    if (z < spec.minZoom - 1) {
+    const { x, y, z } = tile;
+    if (z < Math.max(0, spec.minZoom - 1)) {
       // More than one level below the lowest level: nothing to show, no backend round-trip.
       recordCustomTile({ z, x, y, kind: "below", srcZ: null });
       finish();
@@ -352,13 +363,14 @@ export const CachedTileLayer = L.TileLayer.extend({
         recordCustomTile({ z, x, y, kind: "exact", srcZ: z });
         finish();
       })
-      .catch(() => this._composeCustomTile(canvas, coords, spec).then(() => finish(), () => finish()));
+      .catch(() => this._composeCustomTile(canvas, tile, spec).then(() => finish(), () => finish()));
     return canvas;
   },
 
-  /** Fill `canvas` for a custom-map tile that is not on disk at its own level (see _createCustomTile). */
-  async _composeCustomTile(canvas: HTMLCanvasElement, coords: L.Coords, spec: CustomMapSpec): Promise<void> {
-    const { x, y, z } = coords;
+  /** Fill `canvas` for a custom-map tile that is not on disk at its own level (see _createCustomTile).
+   *  `tile` is the FILE-level address. */
+  async _composeCustomTile(canvas: HTMLCanvasElement, tile: TileXYZ, spec: CustomMapSpec): Promise<void> {
+    const { x, y, z } = tile;
     if (!canvas.isConnected) return; // aborted meanwhile — skip the lookup
     const plan = await invoke<CustomTilePlan>("custom_map_resolve", { map: spec.name, z, x, y });
     recordCustomTile({
@@ -379,7 +391,8 @@ export const CachedTileLayer = L.TileLayer.extend({
     // Don't allocate a backing store for a canvas Leaflet has already dropped.
     if (!canvas.isConnected) return;
 
-    // Composite at the screen's pixel density so an up-scaled ancestor is not doubly blurred.
+    // Composite at the screen's pixel density so an up-scaled ancestor is not doubly blurred
+    // (`getTileSize()` = the layer's cell size, i.e. the map's 128 / 256 / 512).
     const ts = this.getTileSize();
     const dpr = Math.min(3, Math.max(1, window.devicePixelRatio || 1));
     const w = Math.round(ts.x * dpr);
@@ -392,7 +405,7 @@ export const CachedTileLayer = L.TileLayer.extend({
 
     if (plan.kind === "tile") {
       // Nearest existing ancestor, scaled up: crop this tile's quadrant out of it.
-      const q = ancestorQuadrant(coords, plan.z);
+      const q = ancestorQuadrant(tile, plan.z);
       const img = await load(q.px, q.py, q.z);
       const sw = img.naturalWidth / q.scale;
       const sh = img.naturalHeight / q.scale;
@@ -406,7 +419,7 @@ export const CachedTileLayer = L.TileLayer.extend({
       const dx = i & 1;
       const dy = i >> 1;
       try {
-        const img = await load(coords.x * 2 + dx, coords.y * 2 + dy, plan.z);
+        const img = await load(x * 2 + dx, y * 2 + dy, plan.z);
         ctx.drawImage(img, (dx * w) / 2, (dy * h) / 2, w / 2, h / 2);
       } catch { /* a child that vanished meanwhile just stays empty */ }
     }));
@@ -415,8 +428,9 @@ export const CachedTileLayer = L.TileLayer.extend({
   /** Build a tile URL at explicit x/y/z from the layer template (Leaflet's
    *  getTileUrl always uses the current map zoom, so we fill it manually). */
   _buildUrlAt(x: number, y: number, z: number): string {
-    // Treats z (Leaflet's coords.z, a MAP zoom) as the URL zoom: wrong for a layer with a zoomOffset
-    // (custom online providers with 512 / 128 px tiles) — never reach it from such a layer.
+    // Puts z into the URL as it is: callers pass the URL level. Leaflet's coords.z is a MAP zoom, which
+    // differs on a layer with a zoomOffset — the custom-map path converts first (_createCustomTile);
+    // the ESRI placeholder path (map zoom) never runs on such a layer.
     const subs: string | string[] = this.options.subdomains ?? "abc";
     return fillTileTemplate(this._url, z, x, y, subs);
   },
@@ -432,13 +446,14 @@ export function cachedTileLayer(
   return layer;
 }
 
-/** Extra layer options for a provider's base layer: a custom map gets its local-tile path and
- *  `maxNativeZoom` = its highest level (Leaflet scales the top level above it — over-zoom), no
- *  attribution. A user online map gets its tile pixel size with the matching level shift and
- *  over-zooms the same way above its highest level, so a source with a low max zoom does not cap the
- *  whole map (`userLayerZoom`). Built-in providers get nothing. Spread AFTER the caller's own options. */
+/** Extra layer options for a provider's base layer: a custom map gets its local-tile path, no
+ *  attribution, and — like a user online map — its tile pixel size with the matching level shift,
+ *  `maxNativeZoom` = the map zoom showing its highest level (Leaflet scales the top level above it —
+ *  over-zoom) and the seam-CSS class (`customLayerZoom`). A user online map over-zooms the same way
+ *  above its highest level, so a source with a low max zoom does not cap the whole map
+ *  (`userLayerZoom`). Built-in providers get nothing. Spread AFTER the caller's own options. */
 export function providerLayerOptions(p: MapProvider): Partial<L.TileLayerOptions> & { customMap?: CustomMapSpec } {
   if (isUserProviderId(p.id)) return userLayerZoom(p.maxZoom, p.tileSize ?? 256);
   if (!p.custom) return {};
-  return { customMap: p.custom, maxNativeZoom: p.custom.maxZoom, attribution: "" };
+  return { customMap: p.custom, ...customLayerZoom(p.custom.maxZoom, p.custom.tileSize), attribution: "" };
 }

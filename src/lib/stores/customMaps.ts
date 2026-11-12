@@ -19,6 +19,7 @@ import {
   getProviderById,
   isCustomProviderId,
   isUserProviderId,
+  normalizeTileSize,
   setCustomProviders,
   type MapProvider,
   type UserMapSpec,
@@ -36,6 +37,10 @@ export interface CustomMapInfo {
   maxZoom: number;
   /** Detected tile extension (Debug Monitor). */
   ext: string | null;
+  /** Tile pixel size of the whole map (128 / 256 / 512; 256 when no tile header was readable). */
+  tileSize: number;
+  /** Real pixel size `[w, h]` of the sample tile behind `tileSize` (Debug Monitor). */
+  tilePx: [number, number] | null;
 }
 
 export interface CustomMapsState {
@@ -84,7 +89,8 @@ export interface CustomMapCoverage {
   indexHit: boolean;
 }
 
-/** One resolved custom-map tile, for the Debug Monitor (dev builds only). */
+/** One resolved custom-map tile, for the Debug Monitor (dev builds only). z/x/y and `srcZ` are FILE
+ *  levels (the map zoom differs by the tile-size shift on a 512 / 128 px map). */
 export interface CustomTileDebugEntry {
   z: number;
   x: number;
@@ -144,7 +150,9 @@ async function doRefresh(): Promise<void> {
   const path = get(settings).customMapsPath ?? '';
   try {
     const res = await invoke<Listing>('custom_maps_list', { root: path });
-    const providers = res.maps.map((m) => customProvider({ name: m.name, minZoom: m.minZoom, maxZoom: m.maxZoom }));
+    const providers = res.maps.map((m) =>
+      customProvider({ name: m.name, minZoom: m.minZoom, maxZoom: m.maxZoom, tileSize: normalizeTileSize(m.tileSize) }),
+    );
     setCustomProviders(providers);
     resetCoverage();
     customMaps.update((s) => ({
@@ -196,7 +204,7 @@ export function ensureCustomMapsLoaded(): Promise<void> {
  *  tiles may have changed on disk), a user online map whenever it is edited (same id, new template),
  *  a built-in one only when it changes. */
 function providerKey(p: MapProvider, revision: number): string {
-  if (p.custom) return `${p.id}|${p.custom.minZoom}-${p.custom.maxZoom}|${revision}`;
+  if (p.custom) return `${p.id}|${p.custom.minZoom}-${p.custom.maxZoom}|${p.custom.tileSize}|${revision}`;
   return isUserProviderId(p.id) ? `${p.id}|${p.maxZoom}|${p.tileSize}|${p.attribution}|${p.url}` : p.id;
 }
 

@@ -5,6 +5,8 @@
 // All providers listed here are free and require no API key; the user's own (keyed) sources are the
 // user online maps further down.
 
+import { customLayerZoom } from "$lib/helpers/tileTemplate";
+
 export interface MapProvider {
   id: string;
   label: string;
@@ -30,12 +32,16 @@ export interface MapProvider {
   tileSize?: UserTileSize;
 }
 
-/** A custom map: one folder under the custom-map root, holding XYZ tiles from `minZoom` to `maxZoom`. */
+/** A custom map: one folder under the custom-map root, holding XYZ tiles from `minZoom` to `maxZoom`
+ *  (FILE levels — the folder names; the 2D map shows them shifted by the tile size, see
+ *  `customLayerZoom`). */
 export interface CustomMapSpec {
   /** Folder name (= label and the part after `custom:` in the provider id). */
   name: string;
   minZoom: number;
   maxZoom: number;
+  /** Tile pixel size detected by the backend from one tile's header — one size for the whole map. */
+  tileSize: UserTileSize;
 }
 
 export const MAP_PROVIDERS: MapProvider[] = [
@@ -178,16 +184,17 @@ export function parseCustomTileUrl(url: string): { map: string; z: number; x: nu
 }
 
 /** Build the provider entry of a custom map. No attribution (the user's own tiles). The 2D zoom range
- *  reaches the higher of 20 (like the built-in providers) and two levels above the map's highest level;
- *  above that level Leaflet scales the top level up (`maxNativeZoom`). The 3D view stops at the highest
- *  level that exists. */
+ *  reaches the higher of 20 (like the built-in providers) and two map zooms above the one that shows
+ *  the map's highest level natively; above that Leaflet scales the top level up (`maxNativeZoom`, see
+ *  `customLayerZoom`). The 3D view stops at the highest level that exists (Cesium levels are file
+ *  levels; the tile size goes to Cesium as `tileWidth`/`tileHeight`). */
 export function customProvider(spec: CustomMapSpec): MapProvider {
   return {
     id: `${CUSTOM_PROVIDER_PREFIX}${spec.name}`,
     label: spec.name,
     url: customTileTemplate(spec.name),
     attribution: "",
-    maxZoom: Math.max(20, spec.maxZoom + 2),
+    maxZoom: customLayerZoom(spec.maxZoom, spec.tileSize).maxZoom,
     cesiumMaxZoom: spec.maxZoom,
     custom: spec,
   };

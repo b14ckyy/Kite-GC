@@ -6,13 +6,17 @@
 //! Layout: `<root>/<map>/<z>/<x>/<y>.<ext>` — strict XYZ (OSM order, y counted from the top, no TMS
 //! flip). Each direct subfolder of the root is one map, its folder name is the label. Tiles may be
 //! png / jpg / jpeg / webp (case-insensitive); the extension is detected once per map from the first
-//! tile found, the others stay as a fallback.
+//! tile found, the others stay as a fallback. The tile pixel size is detected once per map too (from
+//! one tile's header, normalised to 128 / 256 / 512) and applies to the whole map — mixed tile sizes
+//! inside one map are not supported. Everything here works in FILE levels; the 2D map converts its
+//! own zoom to them (a 512 px map's file level Z is drawn at map zoom Z+1, a 128 px one's at Z−1).
 //!
 //! Tiles are read through the [`TileSource`] trait, so a different source (e.g. a single-file archive)
 //! can later sit behind the same commands without touching the frontend. The coverage index (the
 //! covered areas behind the frames and "Show map area") lives in [`coverage`].
 
 pub mod coverage;
+pub mod image_size;
 
 use serde::Serialize;
 use std::collections::HashMap;
@@ -218,6 +222,10 @@ pub struct MapInfo {
     pub max_zoom: u8,
     /// Detected tile extension (lower-case), `None` if no tile was found while probing.
     pub ext: Option<String>,
+    /// Tile pixel size of the whole map: 128, 256 or 512 (256 when no tile header could be read).
+    pub tile_size: u16,
+    /// The sample tile's real pixel size `[width, height]` behind `tile_size` (Debug Monitor).
+    pub tile_px: Option<[u32; 2]>,
 }
 
 /// A registered map: its folder, its tile source and its level range.
@@ -250,8 +258,8 @@ pub fn lookup(name: &str) -> Result<Arc<MapEntry>, String> {
 }
 
 /// The first supported tile file among the first [`PROBE_X_DIRS`] X folders of a zoom-level folder —
-/// returns its extension as written. Directory listings only.
-fn probe_level(level_dir: &Path, z: u8) -> Option<String> {
+/// returns its extension as written and its path. Directory listings only.
+fn probe_level(level_dir: &Path, z: u8) -> Option<(String, PathBuf)> {
     let n = 1u64 << z;
     let rd = std::fs::read_dir(level_dir).ok()?;
     let mut probed = 0usize;
@@ -267,7 +275,7 @@ fn probe_level(level_dir: &Path, z: u8) -> Option<String> {
                 let fname = f.file_name();
                 if let Some((y, ext)) = fname.to_str().and_then(parse_tile_file_name) {
                     if (y as u64) < n {
-                        return Some(ext.to_string());
+                        return Some((ext.to_string(), f.path()));
                     }
                 }
             }
@@ -279,26 +287,65 @@ fn probe_level(level_dir: &Path, z: u8) -> Option<String> {
     None
 }
 
-/// Probe one map folder: the zoom levels that hold tiles and the tile extension.
-pub fn probe_map(dir: &Path) -> Option<(u8, u8, Option<String>)> {
+/// What [`probe_map`] found in one map folder.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MapProbe {
+    pub min_zoom: u8,
+    pub max_zoom: u8,
+    /// Tile extension as written in the folder.
+    pub ext: Option<String>,
+    /// Pixel size of the sample tile, `None` when no sampled tile header could be read.
+    pub tile_px: Option<(u32, u32)>,
+}
+
+impl MapProbe {
+    /// The map's tile size (128 / 256 / 512) from the sample's larger side; 256 when unknown.
+    pub fn tile_size(&self) -> u16 {
+        image_size::normalize_tile_size(self.tile_px.map_or(0, |(w, h)| w.max(h)))
+    }
+}
+
+/// Probe one map folder: the zoom levels that hold tiles, the tile extension and the tile pixel size.
+/// The size comes from the header of one tile of the HIGHEST level (the level a map is made for); when
+/// that one cannot be read, the sample tiles of the next lower levels are tried. One size applies to
+/// the whole map — a map that mixes tile sizes is drawn as if all its tiles had the detected one.
+pub fn probe_map(dir: &Path) -> Option<MapProbe> {
     let mut min: Option<u8> = None;
     let mut max: Option<u8> = None;
     let mut ext: Option<String> = None;
+    let mut samples: Vec<(u8, PathBuf)> = Vec::new();
     for entry in std::fs::read_dir(dir).ok()?.flatten() {
         let name = entry.file_name();
         let Some(z) = name.to_str().and_then(parse_level) else { continue };
         if !entry.path().is_dir() {
             continue;
         }
-        let Some(found) = probe_level(&entry.path(), z) else { continue };
+        let Some((found, sample)) = probe_level(&entry.path(), z) else { continue };
         // The extension of the lowest level wins (deterministic regardless of listing order).
         if min.is_none_or(|m| z < m) {
             ext = Some(found);
         }
         min = Some(min.map_or(z, |m| m.min(z)));
         max = Some(max.map_or(z, |m| m.max(z)));
+        samples.push((z, sample));
     }
-    Some((min?, max?, ext))
+    samples.sort_by(|a, b| b.0.cmp(&a.0));
+    let tile_px = samples.iter().find_map(|(z, path)| {
+        let size = image_size::read_image_size(path);
+        if size.is_none() {
+            log::debug!("custom maps: no image size in {} (level {z})", path.display());
+        }
+        size
+    });
+    if tile_px.is_none() {
+        if let Some((_, path)) = samples.first() {
+            log::warn!(
+                "custom maps: no readable tile size near {} — the map is drawn as 256 px tiles",
+                path.display()
+            );
+        }
+    }
+    Some(MapProbe { min_zoom: min?, max_zoom: max?, ext, tile_px })
 }
 
 /// Resolve the configured root (`""` = default, created if missing).
@@ -333,7 +380,9 @@ pub fn list_maps(root: &Path) -> Result<Vec<MapInfo>, String> {
         if !dir.is_dir() {
             continue;
         }
-        let Some((min_zoom, max_zoom, ext)) = probe_map(&dir) else { continue };
+        let Some(probe) = probe_map(&dir) else { continue };
+        let tile_size = probe.tile_size();
+        let MapProbe { min_zoom, max_zoom, ext, tile_px } = probe;
         let source: Arc<dyn TileSource> = Arc::new(FolderSource::new(dir.clone(), ext.as_deref()));
         maps.insert(
             name.to_string(),
@@ -344,14 +393,16 @@ pub fn list_maps(root: &Path) -> Result<Vec<MapInfo>, String> {
             min_zoom,
             max_zoom,
             ext: ext.map(|e| e.to_ascii_lowercase()),
+            tile_size,
+            tile_px: tile_px.map(|(w, h)| [w, h]),
         });
     }
     infos.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()).then(a.name.cmp(&b.name)));
     log::info!("custom maps: {} map(s) under {}", infos.len(), root.display());
     for m in &infos {
         log::debug!(
-            "custom maps: '{}' z{}-{} ext {:?}",
-            m.name, m.min_zoom, m.max_zoom, m.ext
+            "custom maps: '{}' z{}-{} ext {:?} tile {} px (sample {:?})",
+            m.name, m.min_zoom, m.max_zoom, m.ext, m.tile_size, m.tile_px
         );
     }
     registry().write().unwrap_or_else(|e| e.into_inner()).maps = maps;
@@ -375,7 +426,7 @@ pub(crate) mod test_util {
         dir
     }
 
-    /// Write a tiny placeholder tile file (the scan never opens tiles, so no real image is needed).
+    /// Write a tiny placeholder tile file (no real image is needed: the coverage scan never opens tiles, and the listing falls back to 256 px when a sample has no readable header).
     pub fn touch_tile(map_dir: &Path, z: u8, x: u32, y: u32, ext: &str) {
         let d = map_dir.join(z.to_string()).join(x.to_string());
         std::fs::create_dir_all(&d).unwrap();
@@ -448,8 +499,9 @@ mod tests {
         touch_tile(&a, 6, 6, 8, "jpg");
         // A stray png in the same map must still be found through the fallback list.
         touch_tile(&a, 6, 7, 8, "png");
-        let (min, max, ext) = probe_map(&a).unwrap();
-        assert_eq!((min, max, ext.as_deref()), (5, 6, Some("jpg")));
+        let probe = probe_map(&a).unwrap();
+        assert_eq!((probe.min_zoom, probe.max_zoom, probe.ext.as_deref()), (5, 6, Some("jpg")));
+        let ext = probe.ext;
         let src = FolderSource::new(a.clone(), ext.as_deref());
         assert!(src.read(5, 3, 4).unwrap().is_some());
         assert!(src.read(6, 7, 8).unwrap().is_some());
@@ -463,6 +515,7 @@ mod tests {
     fn listing_registers_maps_and_skips_junk() {
         let root = temp_root("list");
         touch_tile(&root.join("Beta"), 10, 1, 1, "png");
+        png_tile(&root.join("Beta"), 11, 2, 2, 512);
         touch_tile(&root.join("alpha"), 2, 1, 1, "webp");
         std::fs::create_dir_all(root.join("empty/5/3")).unwrap(); // levels but no tiles
         std::fs::create_dir_all(root.join(".hidden/1/1")).unwrap();
@@ -471,10 +524,72 @@ mod tests {
         let names: Vec<&str> = maps.iter().map(|m| m.name.as_str()).collect();
         assert_eq!(names, ["alpha", "Beta"]);
         assert_eq!(maps[0].ext.as_deref(), Some("webp"));
+        // Placeholder tiles have no readable header → 256; Beta's top level has a 512 px header.
+        assert_eq!((maps[0].tile_size, maps[0].tile_px), (256, None));
+        assert_eq!((maps[1].tile_size, maps[1].tile_px), (512, Some([512, 512])));
         assert!(lookup("alpha").is_ok());
         assert!(lookup("empty").is_err());
         assert!(lookup("../alpha").is_err());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A tile file holding just a PNG header of the given pixel size.
+    fn png_tile(map_dir: &Path, z: u8, x: u32, y: u32, px: u32) {
+        let d = map_dir.join(z.to_string()).join(x.to_string());
+        std::fs::create_dir_all(&d).unwrap();
+        let mut v = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR".to_vec();
+        v.extend_from_slice(&px.to_be_bytes());
+        v.extend_from_slice(&px.to_be_bytes());
+        v.extend_from_slice(&[8, 2, 0, 0, 0, 0, 0, 0, 0]);
+        std::fs::write(d.join(format!("{y}.png")), v).unwrap();
+    }
+
+    #[test]
+    fn tile_size_comes_from_the_highest_level_with_fallback() {
+        let root = temp_root("tilesize");
+        // Highest level 9 has 100 px tiles, level 8 (an overview made elsewhere) 512 px: the top wins.
+        let a = root.join("small");
+        png_tile(&a, 8, 1, 1, 512);
+        png_tile(&a, 9, 2, 2, 100);
+        let p = probe_map(&a).unwrap();
+        assert_eq!((p.tile_px, p.tile_size()), (Some((100, 100)), 128));
+        // Unreadable top-level tile → the next lower level's sample decides.
+        let b = root.join("fallback");
+        png_tile(&b, 10, 3, 3, 512);
+        touch_tile(&b, 12, 9, 9, "png");
+        let p = probe_map(&b).unwrap();
+        assert_eq!((p.max_zoom, p.tile_px, p.tile_size()), (12, Some((512, 512)), 512));
+        // No readable tile at all → 256.
+        let c = root.join("junk");
+        touch_tile(&c, 4, 1, 1, "jpg");
+        let p = probe_map(&c).unwrap();
+        assert_eq!((p.tile_px, p.tile_size()), (None, 256));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Opt-in: print what the probe detects for every map under `KITE_CUSTOM_MAPS_TEST_DIR` (e.g. a
+    /// synthetic set with 100 / 256 / 512 px maps) and check each size is a supported one.
+    #[test]
+    #[ignore]
+    fn probe_a_real_map_folder() {
+        let Ok(dir) = std::env::var("KITE_CUSTOM_MAPS_TEST_DIR") else {
+            eprintln!("KITE_CUSTOM_MAPS_TEST_DIR not set — skipped");
+            return;
+        };
+        for entry in std::fs::read_dir(dir).unwrap().flatten() {
+            let Some(p) = probe_map(&entry.path()) else { continue };
+            eprintln!(
+                "{}: z{}-{} ext {:?} sample {:?} → {} px",
+                entry.file_name().to_string_lossy(),
+                p.min_zoom,
+                p.max_zoom,
+                p.ext,
+                p.tile_px,
+                p.tile_size()
+            );
+            assert!(p.tile_px.is_some(), "no readable tile header");
+            assert!([128, 256, 512].contains(&p.tile_size()));
+        }
     }
 
     #[test]
