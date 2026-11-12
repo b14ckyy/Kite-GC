@@ -5060,9 +5060,23 @@
     viewer.scene.requestRender();
   }
 
+  /** Where the free camera lands after FPV: behind and above the aircraft, looking down at it. */
+  const FPV_EXIT_RANGE_M = 200;
+  const FPV_EXIT_PITCH = -30 * (Math.PI / 180);
+
   function exitFpv() {
     restoreFromFpv();
     cameraMode = 'free';
+    // FPV leaves the camera in the cockpit: at the aircraft, banked with it and looking at the horizon.
+    // Cesium's free controls cannot work from there — tilt and rotate pivot on the ground point under
+    // the gesture, and a level view has none, so on a touch screen the camera was stuck. Step back to
+    // an ordinary viewpoint instead: same compass direction, level horizon, the aircraft in view.
+    if (viewer && (lastFollowLat !== 0 || lastFollowLon !== 0)) {
+      const target = Cesium.Cartesian3.fromDegrees(lastFollowLon, lastFollowLat, Math.max(lastFollowAlt, 1));
+      viewer.camera.lookAt(target, new Cesium.HeadingPitchRange(viewer.camera.heading, FPV_EXIT_PITCH, FPV_EXIT_RANGE_M));
+      viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY); // release the frame so manual controls work
+      viewer.scene.requestRender();
+    }
   }
 
   // ── Fleet camera: frame every connected vehicle (or the 2+ selected ones) ──────────────────────
