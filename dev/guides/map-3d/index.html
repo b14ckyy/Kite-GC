@@ -1975,12 +1975,12 @@ mission overlay.</p>
 </figure>
 <h2 id="real-world-terrain-imagery">Real-world terrain &amp; imagery<a class="headerlink" href="#real-world-terrain-imagery" title="Permanent link">&para;</a></h2>
 <p>3D terrain comes from <strong>Cesium World Terrain</strong>, which needs a <strong>free Cesium Ion token</strong>. Kite prompts you
-for one the first time you open 3D; paste it once (or add it later in <strong>Settings → Data</strong>) and the globe
+for one the first time you open 3D; paste it once (or add it later in <strong>Settings → Map → Providers</strong>) and the globe
 shows true elevation. Without a token the 3D view still works — you just don't get real-world terrain
 relief. The surface <strong>imagery</strong> is whatever map/tile provider you've chosen for the 2D map, draped over
 the terrain — that can also be one of your <strong><a href="../custom-maps/#custom-online-providers">custom online providers</a></strong> or, on
 the desktop, a <strong><a href="../custom-maps/#custom-maps-from-a-folder">custom map</a></strong> read from disk.</p>
-<p>With a token you can also switch on <strong>3D Buildings (OSM)</strong> in <strong>Settings → Interface → Map</strong>: the
+<p>With a token you can also switch on <strong>3D Buildings (OSM)</strong> in <strong>Settings → Map → 3D View</strong>: the
 OpenStreetMap buildings, streamed from Cesium Ion, stand on the globe as extruded blocks. The option
 is off by default and stays greyed out without a token.</p>
 <div class="admonition warning">
@@ -2002,11 +2002,11 @@ depends on whether you're flying or reviewing:</p>
 </ul>
 <p>To make height legible the track gets:</p>
 <ul>
-<li>a clean line with a dark <strong>outline</strong>,</li>
-<li>a translucent <strong>ground shadow</strong> draped on the terrain directly below it, and</li>
-<li>an <strong>altitude curtain</strong> — a vertical wall from the track down to the ground (toggle it in <strong>Settings →
-  Interface → Map → Altitude Curtain (3D)</strong>).</li>
+<li>a clean line with a dark <strong>outline</strong>, and</li>
+<li>a translucent <strong>ground shadow</strong> draped on the terrain directly below it.</li>
 </ul>
+<p>On top of that you can switch on an <strong>altitude curtain</strong> — a vertical wall from the track down to the
+ground — in <strong>Settings → Map → 3D View → Altitude Curtain (3D)</strong>. It is off by default.</p>
 <p>The track uses the aircraft's smooth fused-altitude source, so it doesn't stair-step. The live trail
 grows behind the aircraft (with a thin ground-clamped trail shown before arming).</p>
 <h2 id="the-mission-in-3d">The mission in 3D<a class="headerlink" href="#the-mission-in-3d" title="Permanent link">&para;</a></h2>
@@ -2057,14 +2057,21 @@ left side, green the right, the yellow spike the nose; the same model draws the 
 <li><strong>Airspace &amp; obstacles</strong> — airspaces and obstacles from the Airspace Manager as 3D volumes/markers.</li>
 </ul>
 <h2 id="settings-worth-knowing">Settings worth knowing<a class="headerlink" href="#settings-worth-knowing" title="Permanent link">&para;</a></h2>
-<p>In <strong>Settings → Interface → Map</strong>:</p>
+<p>In <strong>Settings → Map → 3D View</strong>:</p>
 <ul>
-<li><strong>Altitude Curtain (3D)</strong> — the vertical wall under the track (above).</li>
+<li><strong>Altitude Curtain (3D)</strong> — the vertical wall under the track (above); off by default.</li>
 <li><strong>3D Buildings (OSM)</strong> — OpenStreetMap building extrusions on the globe; needs the Cesium Ion token
   (above).</li>
 <li><strong>Real Daytime and Lighting (3D)</strong> — light the globe with the real sun position (day/night, shadows).</li>
 <li><strong>Log Replay Time (3D)</strong> — during replay, drive that lighting from the log's actual time of day, so a
   dusk flight looks like dusk.</li>
+<li><strong>High-Resolution 3D</strong> — render the globe at the display's native pixel density (on) or at half
+  of it (off). On by default on the desktop, off on phones and tablets; switch it on for a sharp
+  globe on a high-DPI screen, off to give a weak integrated GPU room (one laptop went from 30 to
+  55 fps with video running).</li>
+</ul>
+<p>In <strong>Settings → Interface → Display</strong>:</p>
+<ul>
 <li><strong>Power Saving</strong> — cap the 3D frame rate to save battery: <strong>Off (60 fps)</strong>, <strong>On (20 fps)</strong> or
   <strong>Auto</strong> (20 fps on battery). Helpful on laptops and tablets. While active it also drops the smooth
   bar animations in the speed and battery widgets (they jump straight to the current value) and the
@@ -2072,10 +2079,6 @@ left side, green the right, the yellow spike the nose; the same model draws the 
   while the map moves, so this saves noticeable CPU and GPU during a flight; the readings are unchanged.
   On phones and tablets the glass blur of the widgets, buttons and chips over the map is always off
   (only the panels keep it), because it was the single biggest rendering cost there.</li>
-<li><strong>High-Resolution 3D</strong> — render the globe at the display's native pixel density (on) or at half
-  of it (off). On by default on the desktop, off on phones and tablets; switch it on for a sharp
-  globe on a high-DPI screen, off to give a weak integrated GPU room (one laptop went from 30 to
-  55 fps with video running).</li>
 </ul>
 <h2 id="where-to-go-next">Where to go next<a class="headerlink" href="#where-to-go-next" title="Permanent link">&para;</a></h2>
 <ul>

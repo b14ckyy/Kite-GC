@@ -2387,17 +2387,17 @@
 </tr>
 <tr>
 <td><strong>Set up in</strong></td>
-<td>Settings → Interface → Map → <strong>Custom Online Provider</strong></td>
-<td>Settings → Interface → Map → <strong>Custom map location</strong></td>
+<td>Settings → Map → Providers → <strong>Custom Online Provider</strong></td>
+<td>Settings → Map → Providers → <strong>Custom Offline Map Location</strong></td>
 </tr>
 <tr>
 <td><strong>In the map selector</strong></td>
 <td>Group <strong>Custom online maps</strong>, after the built-in maps</td>
-<td>Group <strong>Custom maps</strong>, at the end, marked <strong>▦</strong></td>
+<td>Group <strong>Custom offline maps</strong>, at the end, marked <strong>▦</strong></td>
 </tr>
 </tbody>
 </table>
-<p>Either kind replaces the imagery on the 2D map and the 3D globe, and you pick it in <strong>Tile Provider</strong>
+<p>Either kind replaces the imagery on the 2D map and the 3D globe, and you pick it in <strong>Map Provider</strong>
 like any built-in map.</p>
 <h2 id="custom-online-providers">Custom online providers<a class="headerlink" href="#custom-online-providers" title="Permanent link">&para;</a></h2>
 <p>Many map services deliver their tiles under a URL pattern such as
@@ -2413,14 +2413,14 @@ quota.</p>
 </div>
 <h3 id="adding-a-provider">Adding a provider<a class="headerlink" href="#adding-a-provider" title="Permanent link">&para;</a></h3>
 <ol>
-<li>Open <strong><a href="../../reference/settings/#map">Settings → Interface → Map</a></strong>. The row <strong>Custom Online
+<li>Open <strong><a href="../../reference/settings/#providers">Settings → Map → Providers</a></strong>. The row <strong>Custom Online
    Provider</strong> shows how many you have added (<strong>None</strong>, <strong>1 provider</strong>, <strong>2 providers</strong>, …).</li>
 <li>Press <strong>Manage</strong>. The <strong>Custom Online Providers</strong> dialog lists your providers, each with its name
    and the service's host name.</li>
 <li>Press <strong>Add provider</strong> and fill in the form (<strong>New online provider</strong>) — see the fields below.</li>
 <li>Press <strong>Test</strong> to check the provider with one tile, then <strong>Save</strong>. <strong>Cancel</strong> leaves the form
    without saving.</li>
-<li><strong>Close</strong> the dialog and pick the map in <strong>Tile Provider</strong>, under <strong>Custom online maps</strong>.</li>
+<li><strong>Close</strong> the dialog and pick the map in <strong>Map Provider</strong>, under <strong>Custom online maps</strong>.</li>
 </ol>
 <p>The form has these fields:</p>
 <table>
@@ -2584,7 +2584,7 @@ globe keeps the last level that loaded.</p>
   selected, also after a rename.</li>
 <li><strong>Delete</strong> turns into <strong>Really delete?</strong> — press it again to delete the provider.</li>
 </ul>
-<p>When you delete the provider that is selected, the map shows <strong>OpenStreetMap</strong>, and so does <strong>Tile
+<p>When you delete the provider that is selected, the map shows <strong>OpenStreetMap</strong>, and so does <strong>Map
 Provider</strong>. Pick another map there. Adding the same provider again creates a new entry, which you
 select again.</p>
 <p><strong>Escape</strong> takes you from the form back to the list, and closes the dialog from the list. While the
@@ -2593,7 +2593,7 @@ outside the dialog closes the list, but not a form you are filling in.</p>
 <h3 id="cache-keys-and-privacy">Cache, keys and privacy<a class="headerlink" href="#cache-keys-and-privacy" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>The tile cache.</strong> Tiles of your providers go into Kite's
-  <strong><a href="../../reference/settings/#map-caches-3d">Tile Cache</a></strong> like those of the built-in maps (unless
+  <strong><a href="../../reference/settings/#cache">Tile Cache</a></strong> like those of the built-in maps (unless
   the cache is set to off), so an area you have viewed also works offline. The cache stores each tile
   under its full URL — key included. Tiles stay in the cache after you delete a provider or change
   its key or URL, until the cache drops the least recently used tiles to stay within its size or you
@@ -2686,14 +2686,15 @@ level, in it one folder per tile column (X), in that one image file per tile, na
 </ul>
 <p>Files lying directly in the location are ignored.</p>
 <h3 id="choosing-a-custom-map">Choosing a custom map<a class="headerlink" href="#choosing-a-custom-map" title="Permanent link">&para;</a></h3>
-<p>Open <strong><a href="../../reference/settings/#map">Settings → Interface → Map</a></strong>:</p>
+<p>Two settings are involved:</p>
 <ul>
-<li><strong>Tile Provider</strong> — the maps Kite found are at the <strong>end of the list</strong>, under <strong>Custom maps</strong>, each
-  marked with <strong>▦</strong> and sorted by name. Pick one and it replaces the imagery on the 2D map and the 3D
-  globe.</li>
-<li><strong>Custom map location</strong> — the folder in use. <strong>Choose</strong> opens a folder picker; Kite reads the new
-  folder at once and the selector lists its maps. <strong>Use Default</strong> goes back to the default folder (it
-  is greyed out while the default is in use). Hover over the label for a short reminder of the layout.</li>
+<li><strong>Map Provider</strong> (<strong><a href="../../reference/settings/#display">Settings → Interface → Display</a></strong>) — the maps
+  Kite found are at the <strong>end of the list</strong>, under <strong>Custom offline maps</strong>, each marked with <strong>▦</strong>
+  and sorted by name. Pick one and it replaces the imagery on the 2D map and the 3D globe.</li>
+<li><strong>Custom Offline Map Location</strong> (<strong><a href="../../reference/settings/#providers">Settings → Map → Providers</a></strong>)
+  — the folder in use. <strong>Choose</strong> opens a folder picker; Kite reads the new folder at once and the
+  selector lists its maps. <strong>Use Default</strong> goes back to the default folder (it is greyed out while the
+  default is in use). Hover over the label for a short reminder of the layout.</li>
 </ul>
 <p>Below the location Kite shows how many maps it found (<strong>Scanning…</strong> while it reads), plus two buttons:</p>
 <ul>
@@ -2790,11 +2791,12 @@ map fills in more slowly than from a local disk. Some network shares do not repo
 folders; there the frames can stay out of date after you add tiles — press <strong>Rescan</strong>.</p>
 <h4 id="not-part-of-the-tile-cache">Not part of the tile cache<a class="headerlink" href="#not-part-of-the-tile-cache" title="Permanent link">&para;</a></h4>
 <p>Custom-map tiles are read from disk every time and never copied into Kite's <strong>Tile Cache</strong>. The cache
-size and <strong>Clear</strong> in <strong>Settings → Data</strong> do not affect them, and a custom map does not use up cache
-space.</p>
+size and <strong>Clear</strong> in <strong>Settings → Map → Cache</strong> do not affect them, and a custom map does not use up
+cache space.</p>
 <h2 id="where-to-go-next">Where to go next<a class="headerlink" href="#where-to-go-next" title="Permanent link">&para;</a></h2>
 <ul>
-<li>Every map setting: <strong><a href="../../reference/settings/#map">Settings</a></strong>.</li>
+<li>Every map setting: <strong><a href="../../reference/settings/#map">Settings → Map</a></strong>, and the <strong>Map Provider</strong> under
+  <strong><a href="../../reference/settings/#display">Interface → Display</a></strong>.</li>
 <li>The 3D globe and its terrain: <strong><a href="../map-3d/">3D map</a></strong>.</li>
 <li>Offline use of the online maps: <strong><a href="../../faq/#can-i-use-the-maps-offline">FAQ</a></strong>.</li>
 </ul>
