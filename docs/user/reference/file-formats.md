@@ -64,4 +64,4 @@ See **[Flight logbook](../guides/logbook.md)**.
   files that make the 2D map usable offline.
 - **Custom maps** (desktop) — your own map tiles in the custom map location, one `Z/X/Y` folder per
   map, plus a small `.kite-coverage.json` index Kite writes into each map folder. See
-  **[Custom maps](../guides/custom-maps.md)**.
+  **[Custom maps from a folder](../guides/custom-maps.md#custom-maps-from-a-folder)**.
