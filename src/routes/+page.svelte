@@ -729,7 +729,7 @@
   let mapProvider = $state("osm");
   let mapCacheMaxMB = $state(200);
   let cesiumIonToken = $state("");
-  let altitudeCurtain3D = $state(true);
+  let altitudeCurtain3D = $state(false);
   let realLighting3D = $state(false);
   let buildings3D = $state(false);
   let logReplayTime = $state(false);
@@ -1031,7 +1031,7 @@
   // One geolocation check at app start (refreshes the persisted user location for Night-Mode auto).
   ensureUserLocation();
 
-  /** Protocol the connection bar starts on. Settings → Connection owns the choice: "Last used"
+  /** Protocol the connection bar starts on. Settings → Interface → UI owns the choice: "Last used"
    *  (the default, and the behaviour Kite has always had) restores the stored protocol, while a
    *  fixed value wins over that store on every launch. Only a protocol we actually support is
    *  honoured, with MSP as the fallback: the old form mapped everything that was not MAVLink onto
@@ -1088,7 +1088,7 @@
   mapProvider = saved.mapProvider;
   mapCacheMaxMB = saved.mapCacheMaxMB;
   cesiumIonToken = saved.cesiumIonToken ?? '';
-  altitudeCurtain3D = saved.altitudeCurtain3D ?? true;
+  altitudeCurtain3D = saved.altitudeCurtain3D ?? false;
   realLighting3D = saved.realLighting3D ?? false;
   buildings3D = saved.buildings3D ?? false;
   logReplayTime = saved.logReplayTime ?? false;
