@@ -2393,6 +2393,8 @@
   async function selectFlight(flightId: number) {
     selectedFlightId = flightId;
     const data = await logbookCtrl.selectFlightData(flightId, activeDbPath, $locale ?? 'en');
+    // The location / weather lookup inside can take a moment — another flight may be selected by now.
+    if (selectedFlightId !== flightId) return;
     selectedFlight = data.flight;
     selectedFlightTrack = data.track;
     selectedFlightTrackCount = data.trackCount;
