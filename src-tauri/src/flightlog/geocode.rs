@@ -20,6 +20,8 @@ const NOMINATIM_URL: &str = "https://nominatim.openstreetmap.org/reverse";
 const MIN_INTERVAL: Duration = Duration::from_millis(1100);
 /// A request that takes longer is abandoned — callers await the name inline (imports).
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+/// A refused request is reported at most this often.
+const WARN_INTERVAL: Duration = Duration::from_secs(600);
 /// Upper bound of remembered names (cleared when reached; one entry is a short string).
 const CACHE_MAX: usize = 512;
 
@@ -93,6 +95,20 @@ pub async fn reverse_geocode(lat: f64, lon: f64, lang: &str) -> Option<String> {
     Some(name)
 }
 
+/// Report a refused request at the default log level — at most once per `WARN_INTERVAL`, so a block
+/// that hits every flight of an import does not fill the log.
+fn warn_refused(status: u16) {
+    static LAST: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
+    let mut last = LAST.get_or_init(|| Mutex::new(None)).lock().unwrap_or_else(|e| e.into_inner());
+    let now = Instant::now();
+    if last.is_none_or(|t| now.duration_since(t) >= WARN_INTERVAL) {
+        *last = Some(now);
+        log::warn!(
+            "[geocode] Nominatim refused the location-name request (HTTP {status}); flights keep an empty location until it answers again"
+        );
+    }
+}
+
 /// One Nominatim request (no spacing, no cache — `reverse_geocode` adds both).
 async fn request_name(lat: f64, lon: f64, lang: &str) -> Option<String> {
     // One client for the app's lifetime: its kept-alive connection makes the time from `send()` to the
@@ -120,7 +136,16 @@ async fn request_name(lat: f64, lon: f64, lang: &str) -> Option<String> {
         ])
         .send()
         .await
-        .ok()?;
+        .ok()?; // no network / timeout: the normal offline case, nothing to report
+
+    // The service answered but refused (403 / 429 = blocked or rate-limited, 5xx = its own trouble).
+    // Without this line a block of Kite's User-Agent is indistinguishable from "offline" in a tester's
+    // log. Never logs the position.
+    let status = resp.status();
+    if !status.is_success() {
+        warn_refused(status.as_u16());
+        return None;
+    }
 
     let data: NominatimResponse = resp.json().await.ok()?;
 
