@@ -11,7 +11,7 @@
   import { connection, availablePorts, bleDevices, defaultNetPort, netHostOrLocal, hasMsp, isArduPilotLink } from "$lib/stores/connection";
   import type { FcInfo, PortInfo, BleDeviceInfo, TransportType, ProtocolType } from "$lib/stores/connection";
   import { settings } from "$lib/stores/settings";
-  import { isAndroid, isMobile, isTablet, isPhone as isPhoneDevice, hasSerialPorts, hasVideo, logPlayerWidth } from "$lib/platform";
+  import { isAndroid, isMobile, isTablet, isPhone as isPhoneDevice, hasSerialPorts, hasVideo, hasRcControl, logPlayerWidth } from "$lib/platform";
   import { isDebugMode } from "$lib/stores/debug";
   import { telemetry } from "$lib/stores/telemetry";
   import { startRadarListeners, configureRadar, setRadarCenter, setRadarNode } from "$lib/stores/radarTracking";
@@ -936,8 +936,9 @@
   // Also hidden on an MSP-over-MAVLink link (INAV 10.0+): the MSP RC stream doesn't run through the tunnel
   // and the ArduPilot override adapter must not drive INAV (rcPlatform is null there). Hidden until
   // Stage 3 — MAVLink-RX mode, see Dev-Docs active/MSP_OVER_MAVLINK.md.
+  // Never on a phone, whatever the stored switch says — see `hasRcControl`.
   const rcTabAvailable = $derived(
-    $settings.rcControl.enabled && !isTelemetryConnected && !($connection.status === 'connected' && $connection.mspTunnel)
+    hasRcControl && $settings.rcControl.enabled && !isTelemetryConnected && !($connection.status === 'connected' && $connection.mspTunnel)
   );
   // On mobile there is no joystick, but the on-screen touch sticks (VirtualSticks) can drive RC over
   // Wi-Fi. RC is safety-relevant and barely field-tested, so touch control is opt-in behind the SAME
