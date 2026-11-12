@@ -699,11 +699,17 @@
     const hasSubdomains = cesiumUrl.includes('{s}');
     const subdomains = hasSubdomains ? ['a', 'b', 'c'] : [];
 
-    // With High-Resolution 3D off the globe renders at half the pixel density, but Cesium picks tile
-    // levels in CSS pixels (QuadtreePrimitive divides the screen-space error by pixelRatio), so it
-    // would still load tiles twice as fine as the picture can show. Telling it the tiles are twice as
-    // wide makes it take the imagery one level lower: a quarter of the tiles, matching the picture.
-    const texelPx = (provider.custom?.tileSize ?? provider.tileSize ?? 256) * (highRes3DSetting ? 1 : 2);
+    // With High-Resolution 3D off the globe renders at half the display's pixel density, but Cesium
+    // picks tile levels in CSS pixels (QuadtreePrimitive divides the screen-space error by pixelRatio).
+    // Where that leaves fewer than one rendered pixel per CSS pixel — a DPR-1 screen at half density —
+    // the tiles would be finer than the picture can show; telling Cesium the tiles are wider makes it
+    // take the imagery from a lower level (factor 2 = one level, a quarter of the tiles). On a DPR ≥ 2
+    // screen half density is still ≥ 1 rendered pixel per CSS pixel, so nothing is coarsened there.
+    // A custom (local folder) map is left alone: its tiles cost no requests, and a lower level would
+    // fall below its lowest folder level sooner (rejected below → blank globe).
+    const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+    const coarser = highRes3DSetting || provider.custom ? 1 : Math.max(1, 2 / dpr);
+    const texelPx = Math.round((provider.custom?.tileSize ?? provider.tileSize ?? 256) * coarser);
 
     const imgProvider = new Cesium.UrlTemplateImageryProvider({
       url: cesiumUrl,
