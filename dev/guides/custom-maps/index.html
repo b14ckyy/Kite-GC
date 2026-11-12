@@ -1233,6 +1233,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#the-maps-tile-size" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The map's tile size
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#missing-tiles-and-zoom-levels" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2209,6 +2220,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#the-maps-tile-size" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The map's tile size
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#missing-tiles-and-zoom-levels" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2674,8 +2696,8 @@ level, in it one folder per tile column (X), in that one image file per tile, na
 <li>Folder and file names are <strong>plain numbers</strong>: <code>12</code>, not <code>012</code>.</li>
 <li>Tile files are <strong><code>.png</code>, <code>.jpg</code>, <code>.jpeg</code> or <code>.webp</code></strong>, in upper or lower case; one map may mix them.
   Other files are ignored.</li>
-<li><strong>Any tile size</strong> works — 256 × 256, 512 × 512 or another pixel size; Kite scales every tile to its
-  place on the map.</li>
+<li><strong>One tile size per map</strong>: 256 × 256 pixels, the usual size, or 512 × 512 or 128 × 128. Kite detects
+  the size by itself — see <a href="#the-maps-tile-size">The map's tile size</a>.</li>
 <li>A map does not need every zoom level. It can start and end at any level and leave levels out.</li>
 </ul>
 <p>Folders that Kite does <strong>not</strong> list as a map:</p>
@@ -2709,7 +2731,32 @@ level, in it one folder per tile column (X), in that one image file per tile, na
 has a map of the same name, Kite shows that one; otherwise the map shows <strong>OpenStreetMap</strong> until the
 map is back or you pick another one.</p>
 <h3 id="how-a-custom-map-is-drawn">How a custom map is drawn<a class="headerlink" href="#how-a-custom-map-is-drawn" title="Permanent link">&para;</a></h3>
+<h4 id="the-maps-tile-size">The map's tile size<a class="headerlink" href="#the-maps-tile-size" title="Permanent link">&para;</a></h4>
+<p>A custom map has no tile-size setting. When Kite reads the location, it reads the pixel size of one
+tile per map: the first tile it finds in the map's <strong>highest zoom level</strong>. If that tile's size cannot be
+read, Kite tries the first tile of the next lower level, and so on. The size counts as the nearest of
+<strong>128, 256 and 512 px</strong> — 100 px tiles count as 128 px, 300 px tiles as 256 px, 1024 px tiles as 512 px;
+for a tile that is not square, the longer side decides. If no tile's size can be read, the map counts as
+256 px.</p>
+<p>The whole map is then drawn with that size, the same way as a
+<a href="#tile-size">custom online provider</a>:</p>
+<ul>
+<li><strong>256 px</strong> — the folder's level 15 is shown at map zoom 15.</li>
+<li><strong>512 px</strong> — each tile is shown at 512 pixels, the folder's level 14 at map zoom 15. The same view
+  needs a quarter as many tiles, and labels appear at the size they were drawn at.</li>
+<li><strong>128 px</strong> — the opposite: each tile is shown at 128 pixels, the folder's level 16 at map zoom 15,
+  and the same view needs four times as many tiles.</li>
+</ul>
+<p>Tiles between the three sizes are stretched or shrunk a little to fit: 100 px tiles fill 128 pixels.</p>
+<p><strong>One size per map.</strong> The size Kite detects applies to every tile of the map; a folder that mixes tile
+sizes is not supported. Tiles of another size still land in the right place, but squeezed or stretched
+to the detected size, so their labels and details appear too small or too large. The size is detected
+again whenever Kite reads the location — press <a href="#after-adding-tiles-rescan">Rescan</a> after replacing a
+map's tiles with ones of another size.</p>
+<p>The 3D globe uses the tile size as well: it draws a 512 px map from one level lower.</p>
 <h4 id="missing-tiles-and-zoom-levels">Missing tiles and zoom levels<a class="headerlink" href="#missing-tiles-and-zoom-levels" title="Permanent link">&para;</a></h4>
+<p>Below, a <strong>level</strong> is one of the map's zoom-level folders. With 256 px tiles it is shown at the map zoom
+of the same number; with 512 px tiles one map zoom higher, with 128 px tiles one lower.</p>
 <ul>
 <li><strong>Gaps are filled from lower levels.</strong> Where a tile is missing, the 2D map enlarges the nearest
   lower-level tile that exists — however many levels down that is. A map with a coarse overview and a
@@ -2717,12 +2764,48 @@ map is back or you pick another one.</p>
 <li><strong>One level below the lowest level</strong> the 2D map still shows the map: Kite builds each tile from the
   (up to four) tiles of the lowest level, scaled down. Zoomed out further, the map is empty.</li>
 <li><strong>Outside the tiles the map is empty.</strong> No online map fills in around a custom map.</li>
-<li><strong>Above the highest level</strong> the 2D map keeps zooming — up to level 20, or two levels past the map's
-  highest level if that is higher — and enlarges the highest-level tiles.</li>
+<li><strong>Above the highest level</strong> the 2D map enlarges the highest-level tiles and keeps zooming — up to map
+  zoom 20, or two map zooms past the one that shows the highest level, if that is higher.</li>
 <li><strong>In 3D</strong> the globe uses the same tiles up to the map's highest level. Where a tile is missing, the
   lower level stays visible. Below the map's lowest level the globe shows none of it — the "one level
   below" step is 2D only.</li>
 </ul>
+<p>For example, a map with the levels 8 to 13 on the 2D map:</p>
+<table>
+<thead>
+<tr>
+<th>Tile size</th>
+<th>Levels 8–13 at full resolution</th>
+<th>One level below (built from level 8)</th>
+<th>Empty at map zoom</th>
+<th>Highest level enlarged from map zoom</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>256 px</td>
+<td>map zoom 8–13</td>
+<td>map zoom 7</td>
+<td>6 and lower</td>
+<td>14</td>
+</tr>
+<tr>
+<td>512 px</td>
+<td>map zoom 9–14</td>
+<td>map zoom 8</td>
+<td>7 and lower</td>
+<td>15</td>
+</tr>
+<tr>
+<td>128 px</td>
+<td>map zoom 7–12</td>
+<td>map zoom 6</td>
+<td>5 and lower</td>
+<td>13</td>
+</tr>
+</tbody>
+</table>
+<p>In all three cases the 2D map zooms in to map zoom 20.</p>
 <h4 id="frames-on-the-2d-map">Frames on the 2D map<a class="headerlink" href="#frames-on-the-2d-map" title="Permanent link">&para;</a></h4>
 <p>A detailed patch of a few hundred metres is easy to lose on a large map. So while a custom map is
 selected, the 2D map frames every <strong>area</strong> it covers (see the next section) with a thin blue line. The
@@ -2765,10 +2848,10 @@ goes into a <code>custom_maps_index</code> folder in Kite's app data folder inst
 <code>%APPDATA%\kite-gc\custom_maps_index\</code> on Windows, or <code>&lt;app&gt;/data/custom_maps_index/</code> in portable mode.
 You can delete the index file at any time; Kite builds it again.</p>
 <h4 id="after-adding-tiles-rescan">After adding tiles: Rescan<a class="headerlink" href="#after-adding-tiles-rescan" title="Permanent link">&para;</a></h4>
-<p>Kite reads the list of maps and their zoom levels when it needs them, not continuously. Press
-<strong>Rescan</strong> after you:</p>
+<p>Kite reads the list of maps, their zoom levels and their tile sizes when it needs them, not
+continuously. Press <strong>Rescan</strong> after you:</p>
 <ul>
-<li>add a new map folder or new zoom levels,</li>
+<li>add a new map folder or new zoom levels, or replace a map's tiles with ones of another size,</li>
 <li>connect the drive that holds the maps — a <strong>USB stick</strong> or <strong>SD card</strong> plugged in after Kite started,</li>
 <li>notice that new or changed tiles do not show up.</li>
 </ul>

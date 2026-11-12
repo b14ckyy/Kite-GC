@@ -1870,9 +1870,10 @@ labels as the service intended; <strong>Test</strong> detects the tile size for 
 tile cache like those of the built-in maps, and past the service's highest level the 2D map
 enlarges them instead of stopping. <a href="https://github.com/b14ckyy/Kite-GC/pull/249">#249</a></p>
 <p><strong>Custom maps: offline tiles from a folder (desktop).</strong> Put tiles in the usual <code>Z/X/Y</code> layout
-(<code>.png</code>, <code>.jpg</code>, <code>.webp</code>, any tile size) into a subfolder of the custom map location and the
-folder shows up at the end of the map selector — on the 2D map and the 3D globe, without
-internet. Gaps are filled from lower zoom levels, and a frame on the 2D map shows where the
+(<code>.png</code>, <code>.jpg</code>, <code>.webp</code>) into a subfolder of the custom map location and the folder shows up
+at the end of the map selector — on the 2D map and the 3D globe, without internet. Kite
+detects the tile size by itself, so 128 px and 512 px tile sets are drawn at their real size.
+<a href="https://github.com/b14ckyy/Kite-GC/pull/253">#253</a> Gaps are filled from lower zoom levels, and a frame on the 2D map shows where the
 detailed tiles are: a dashed rectangle from far out, the exact outline once you are close.
 The location can be moved in Settings. Not on Android and iOS; the 3D terrain still needs the
 internet. <a href="https://github.com/b14ckyy/Kite-GC/pull/246">#246</a></p>
