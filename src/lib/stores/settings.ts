@@ -5,6 +5,7 @@
 // Stores user preferences in localStorage, survives between sessions
 
 import { writable } from 'svelte/store';
+import { currentProviderId } from '$lib/config/mapProviders';
 import type { RelayConfig } from '$lib/stores/relay';
 import { isMobile } from '$lib/platform';
 import type { WidgetSize } from '$lib/config/widgetRegistry';
@@ -528,6 +529,8 @@ function load(): AppSettings {
       return {
         ...defaults,
         ...parsed,
+        // A map provider that no longer exists is replaced by its successor.
+        mapProvider: currentProviderId(parsed.mapProvider ?? defaults.mapProvider),
         interface: {
           ...defaults.interface,
           ...(parsed.interface ?? {}),

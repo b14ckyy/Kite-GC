@@ -472,6 +472,10 @@ inside the box of the feature release they belong to, so the notes for one relea
       could no longer reach it — only quitting Kite helped. The reload keys no longer do anything,
       and should the interface ever restart on its own while connected, Connect now offers to
       close the leftover connection and connect again.
+    - **The dark map showed "API KEY REQUIRED" instead of the map.** The provider of *CartoDB Dark
+      Matter* now demands an API key for every tile. The dark map is **ESRI Dark Gray** instead;
+      if you had the CartoDB map selected, Kite switches to it by itself. Its tiles end at zoom
+      level 16 — zoomed in further, Kite enlarges them.
     - **QuadPlane: QHover was offered without an RC source.** QHover only holds the altitude; the
       pilot holds the position. It is now behind *Show all modes* and locked without an RC source,
       like the other stick-flown modes.
