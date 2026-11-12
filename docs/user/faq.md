@@ -15,8 +15,14 @@ the 2D map and the 3D globe**:
 - **OpenTopoMap** — topographic map with contour lines.
 - **ESRI Dark Gray** — a dark, low-contrast basemap.
 
-All of them work **offline** once the tiles have been cached — see below. On Windows, Linux and macOS
-the list also offers your own map tiles from a folder on disk — see **[Custom maps](guides/custom-maps.md)**.
+All of them work **offline** once the tiles have been cached — see below.
+
+You can also bring your own maps (see **[Your own maps](guides/custom-maps.md)**):
+
+- **Custom online providers** — any online tile service you add by its URL template, with your own API key in
+  the URL if the service needs one. On every platform; the tiles are cached like those of the
+  built-in maps.
+- **Custom maps** — map tiles from a folder on disk, on Windows, Linux and macOS.
 
 ### Can I use the maps offline?
 
@@ -24,11 +30,12 @@ Yes, within limits. Kite caches every map tile it downloads (**[Settings → Dat
 Tile Cache](reference/settings.md)**). Pan and zoom over your flying area **while you still have an
 internet connection**, and those tiles stay available offline afterwards. There is **no bulk
 "pre-download this whole region" button** — the cache fills from what you actually view. The default
-cache is 200 MB and can be raised up to 5 GB.
+cache is 200 MB and can be raised up to 5 GB. The same holds for your
+**[custom online providers](guides/custom-maps.md#custom-online-providers)**.
 
 On the desktop there is a second way: map tiles you already have can be put into a folder and shown as
-a **[custom map](guides/custom-maps.md)**, straight from disk and without any connection. Kite does not
-download those tiles for you.
+a **[custom map](guides/custom-maps.md#custom-maps-from-a-folder)**, straight from disk and without any
+connection. Kite does not download those tiles for you.
 
 ### Why isn't Google Maps or HERE Maps available?
 
@@ -52,9 +59,10 @@ mid-zoom imagery as ESRI, it lacks the highest zoom levels ESRI provides, and it
 the older Bing basemap that ESRI already serves in better quality.
 
 In both cases the extra setup (account, API key, billing) and the licensing constraints simply aren't
-worth it for a map style you can already get, key-free, from the built-in providers. If a specific,
-properly licensed provider ever adds real value, we would add it as an optional *bring-your-own-key*
-source rather than route around anyone's terms of service.
+worth it for a map style you can already get, key-free, from the built-in providers. A service you
+have a key for can be added yourself as a **[custom online provider](guides/custom-maps.md#custom-online-providers)**,
+by its tile URL template — whether its terms allow that use, including Kite's tile cache, is yours to
+check.
 
 ## Connections
 

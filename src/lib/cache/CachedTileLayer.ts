@@ -25,7 +25,8 @@ import {
   setRegionVerified,
   MIN_DETECT_ZOOM,
 } from "$lib/cache/tileAvailability";
-import type { CustomMapSpec, MapProvider } from "$lib/config/mapProviders";
+import { isUserProviderId, type CustomMapSpec, type MapProvider } from "$lib/config/mapProviders";
+import { fillTileTemplate, userLayerZoom } from "$lib/helpers/tileTemplate";
 import { recordCustomTile } from "$lib/stores/customMaps";
 
 /** Backend answer for a custom-map tile that is not on disk (see `custom_maps::resolve_tile`). */
@@ -414,14 +415,10 @@ export const CachedTileLayer = L.TileLayer.extend({
   /** Build a tile URL at explicit x/y/z from the layer template (Leaflet's
    *  getTileUrl always uses the current map zoom, so we fill it manually). */
   _buildUrlAt(x: number, y: number, z: number): string {
+    // Treats z (Leaflet's coords.z, a MAP zoom) as the URL zoom: wrong for a layer with a zoomOffset
+    // (custom online providers with 512 / 128 px tiles) — never reach it from such a layer.
     const subs: string | string[] = this.options.subdomains ?? "abc";
-    const sub = subs[(x + y + z) % subs.length];
-    return this._url
-      .replace("{s}", sub)
-      .replace("{z}", String(z))
-      .replace("{x}", String(x))
-      .replace("{y}", String(y))
-      .replace("{r}", "");
+    return fillTileTemplate(this._url, z, x, y, subs);
   },
 });
 
@@ -437,8 +434,11 @@ export function cachedTileLayer(
 
 /** Extra layer options for a provider's base layer: a custom map gets its local-tile path and
  *  `maxNativeZoom` = its highest level (Leaflet scales the top level above it — over-zoom), no
- *  attribution. Built-in providers get nothing. Spread AFTER the caller's own options. */
+ *  attribution. A user online map gets its tile pixel size with the matching level shift and
+ *  over-zooms the same way above its highest level, so a source with a low max zoom does not cap the
+ *  whole map (`userLayerZoom`). Built-in providers get nothing. Spread AFTER the caller's own options. */
 export function providerLayerOptions(p: MapProvider): Partial<L.TileLayerOptions> & { customMap?: CustomMapSpec } {
+  if (isUserProviderId(p.id)) return userLayerZoom(p.maxZoom, p.tileSize ?? 256);
   if (!p.custom) return {};
   return { customMap: p.custom, maxNativeZoom: p.custom.maxZoom, attribution: "" };
 }

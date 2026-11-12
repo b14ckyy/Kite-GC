@@ -65,13 +65,55 @@ pub async fn fetch_tile(url: String, layer: String) -> Result<tauri::ipc::Respon
         .get(&url)
         .send()
         .await
-        .map_err(|e| format!("tile request failed: {e}"))?;
+        .map_err(|e| format!("tile request failed: {}", describe_error(e)))?;
     if !resp.status().is_success() {
         return Err(format!("tile HTTP {}", resp.status()));
     }
     let bytes = resp
         .bytes()
         .await
-        .map_err(|e| format!("tile body read failed: {e}"))?;
+        .map_err(|e| format!("tile body read failed: {}", describe_error(e)))?;
     Ok(tauri::ipc::Response::new(bytes.to_vec()))
+}
+
+/// Error text for the frontend: the error and its causes (DNS, connect, TLS …), WITHOUT the URL. A
+/// user map's URL may carry an API key, and this text reaches the UI (Settings → Test); reqwest's own
+/// message would quote the full URL.
+fn describe_error(e: reqwest::Error) -> String {
+    let e = e.without_url();
+    let mut text = e.to_string();
+    let mut source = std::error::Error::source(&e);
+    while let Some(cause) = source {
+        text.push_str(": ");
+        text.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    text
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // A refused connection on the loopback (port 1 is practically never listened on) yields a real
+    // reqwest error that carries the request URL; the described text must not. No proxy (an
+    // environment proxy would answer instead) and a short timeout (a dropping firewall must not hang).
+    #[tokio::test]
+    async fn describe_error_drops_the_url() {
+        let url = "http://127.0.0.1:1/tiles/1/0/0.png?key=SECRET123";
+        let err = reqwest::Client::builder()
+            .no_proxy()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .expect("client")
+            .get(url)
+            .send()
+            .await
+            .expect_err("nothing listens on port 1");
+        assert!(err.to_string().contains("SECRET123"), "precondition: reqwest quotes the URL");
+        let text = describe_error(err);
+        assert!(!text.contains("SECRET123"), "key leaked: {text}");
+        assert!(!text.contains("127.0.0.1:1/tiles"), "URL leaked: {text}");
+        assert!(!text.is_empty());
+    }
 }
