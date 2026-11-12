@@ -72,7 +72,7 @@ how smooth the instruments feel; the rest is automatic.
 |---|---|---|
 | **Attitude** | Attitude (AHI / compass) update rate — 1–5 Hz. Higher is smoother but uses more link bandwidth. | 5 Hz |
 | **GPS / Position** | Position / speed / altitude update rate — 1–5 Hz. | 2 Hz |
-| **Airspeed** | Request airspeed telemetry (when the aircraft has an airspeed sensor). | Off |
+| **Airspeed** | Request airspeed telemetry (when the aircraft has an airspeed sensor). | On |
 | **Wind** | Request wind-estimate telemetry (shown on the compass widget). Live wind needs **ArduPilot** or **PX4**, or **INAV 10.0+** — on older INAV the toggle stays without effect. Replay always shows the wind a log recorded. | Off |
 | **Direction indicators** | Draw the heading / course / predicted-turn lines at the aircraft on the map. | On |
 | **Full MAVLink Telemetry** | MAVLink only — hand rate control to the flight controller (streams everything at its own rates, ignoring the two rates above). For fast links / full `.tlog` capture. See **[Telemetry & display](../guides/telemetry-and-display.md)**. | Off |
@@ -80,7 +80,7 @@ how smooth the instruments feel; the rest is automatic.
 | **RC Control** | Enable GCS RC control (reveals the RC tool). See **[RC control](../guides/rc-control.md)**. | Off |
 
 **Airspeed** and **Wind** each request **extra messages** over the link, so they're separate toggles —
-leave them off to save bandwidth on a slow over-the-air radio, turn them on when the link can spare it.
+switch them off to save bandwidth on a slow over-the-air radio, and on when the link can spare it.
 
 ### Flight Logbook
 
