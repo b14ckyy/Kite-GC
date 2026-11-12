@@ -1034,7 +1034,7 @@
     "lowPower3DOn": "Zap. (20 fps)",
     "lowPower3DAuto": "Auto (20 fps na batérii)",
     "highRes3D": "3D vo vysokom rozlíšení",
-    "highRes3DHint": "Vykresľuje 3D glóbus v natívnej hustote pixelov displeja. Vypnuté vykresľuje v polovičnej, čím šetrí GPU a batériu. Predvolené: zapnuté na počítači, vypnuté na telefónoch a tabletoch.",
+    "highRes3DHint": "Vykresľuje 3D glóbus v natívnej hustote pixelov displeja. Vypnuté vykresľuje v polovičnej, čím šetrí GPU a batériu, a okrem displejov s vysokou hustotou navyše načítava hrubšie online mapové dlaždice. Predvolené: zapnuté na počítači, vypnuté na telefónoch a tabletoch.",
     "userLocation": "Vaša poloha",
     "locationNone": "nenastavená",
     "detectLocation": "Zistiť",

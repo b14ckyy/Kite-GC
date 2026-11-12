@@ -1034,7 +1034,7 @@
     "lowPower3DOn": "Activé (20 fps)",
     "lowPower3DAuto": "Auto (20 fps sur batterie)",
     "highRes3D": "3D haute résolution",
-    "highRes3DHint": "Affiche le globe 3D à la densité de pixels native de l'écran ; désactivé, il est rendu à la moitié pour économiser GPU et batterie. Par défaut : activé sur ordinateur, désactivé sur téléphone et tablette.",
+    "highRes3DHint": "Affiche le globe 3D à la densité de pixels native de l'écran ; désactivé, il est rendu à la moitié pour économiser GPU et batterie et, sauf sur les écrans à haute densité, charge aussi des tuiles de carte en ligne plus grossières. Par défaut : activé sur ordinateur, désactivé sur téléphone et tablette.",
     "userLocation": "Votre position",
     "locationNone": "non définie",
     "detectLocation": "Détecter",
