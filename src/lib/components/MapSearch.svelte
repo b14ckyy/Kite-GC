@@ -55,6 +55,9 @@
     fitBesidePanel();
     open = true;
     status = 'idle';
+    // With a touch screen the focus waits for a tap into the line: focusing it here would raise the soft
+    // keyboard every time, also for someone who only wants the location button.
+    if (isMobile) return;
     await tick();
     inputEl?.focus();
     inputEl?.select();
