@@ -1004,7 +1004,7 @@
   <span class="md-ellipsis">
     
   
-    Custom maps
+    Your own maps
   
 
     
@@ -2161,12 +2161,17 @@ clicked into ignores the wheel, so scrolling the panel never changes a value by 
 <tbody>
 <tr>
 <td><strong>Tile Provider</strong></td>
-<td>The map imagery source — used by <strong>both the 2D map and the 3D globe</strong>. On the desktop the list ends with your own offline maps under <strong>Custom maps</strong>, each marked <strong>▦</strong>. See <strong><a href="../../guides/custom-maps/">Custom maps</a></strong>.</td>
+<td>The map imagery source — used by <strong>both the 2D map and the 3D globe</strong>. After the built-in maps the list shows your custom online providers under <strong>Custom online maps</strong>; on the desktop it ends with your offline maps under <strong>Custom maps</strong>, each marked <strong>▦</strong>. See <strong><a href="../../guides/custom-maps/">Your own maps</a></strong>.</td>
 <td>ESRI Hybrid</td>
 </tr>
 <tr>
+<td><strong>Custom Online Provider</strong></td>
+<td>How many online tile services you added (<strong>None</strong>, <strong>1 provider</strong>, …). <strong>Manage</strong> opens the list: <strong>Add provider</strong>, <strong>Edit</strong>, <strong>Delete</strong>, and in the form a <strong>Test</strong> that loads one tile. Each provider is given by its URL template (an API key is simply part of the URL), with a max zoom, a tile size (256 / 512 / 128 px) and an optional attribution. See <strong><a href="../../guides/custom-maps/#custom-online-providers">Custom online providers</a></strong>.</td>
+<td>None</td>
+</tr>
+<tr>
 <td><strong>Custom map location</strong> <em>(desktop only)</em></td>
-<td>The folder Kite reads custom maps from, one subfolder per map — <strong>Choose</strong> another folder or <strong>Use Default</strong>. Below it: how many maps were found, <strong>Show map area</strong> (moves the map to the area the selected custom map covers; shown only while one is selected) and <strong>Rescan</strong> (read the folder again, e.g. after adding tiles or plugging in the drive). See <strong><a href="../../guides/custom-maps/">Custom maps</a></strong>.</td>
+<td>The folder Kite reads custom maps from, one subfolder per map — <strong>Choose</strong> another folder or <strong>Use Default</strong>. Below it: how many maps were found, <strong>Show map area</strong> (moves the map to the area the selected custom map covers; shown only while one is selected) and <strong>Rescan</strong> (read the folder again, e.g. after adding tiles or plugging in the drive). See <strong><a href="../../guides/custom-maps/#custom-maps-from-a-folder">Custom maps from a folder</a></strong>.</td>
 <td><code>custom_maps</code> in Kite's app data folder</td>
 </tr>
 <tr>
@@ -2272,7 +2277,7 @@ Altitude and Compass sit in the bottom dock and Home, RC Link and GPS in the rig
 <tbody>
 <tr>
 <td><strong>Tile Cache</strong></td>
-<td>On-disk cache size for the map imagery (off … 5 GB), with a usage bar and <strong>Clear</strong>. Used by <strong>both 2D and 3D</strong>, and what makes the map work <strong>offline</strong>. Custom maps are read from disk and never go into this cache.</td>
+<td>On-disk cache size for the map imagery (off … 5 GB), with a usage bar and <strong>Clear</strong>. Used by <strong>both 2D and 3D</strong>, and what makes the map work <strong>offline</strong>. Custom online providers use it like the built-in maps; custom maps are read from disk and never go into this cache.</td>
 <td>200 MB</td>
 </tr>
 <tr>

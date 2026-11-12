@@ -1004,7 +1004,7 @@
   <span class="md-ellipsis">
     
   
-    Custom maps
+    Your own maps
   
 
     
@@ -1857,6 +1857,27 @@ stay, without HI-RES replay). If an import goes wrong, starting Kite with the en
 variable <code>KITE_BLACKBOX_LEGACY=1</code> brings back the old decoder for now — please report the
 log that failed. <a href="https://github.com/b14ckyy/Kite-GC/pull/234">#234</a></p>
 </details>
+<details class="info">
+<summary>Your own maps — online with your own key, offline from a folder</summary>
+<p><strong>Custom online providers.</strong> Add any online tile service by its URL template — <code>{z}</code>, <code>{x}</code> and
+<code>{y}</code> (or <code>{-y}</code> for a TMS service), optionally <code>{s}</code> and <code>{r}</code> — under Settings → Interface →
+Map → <em>Custom Online Provider</em>. An API key simply goes into the URL. Give the provider a name,
+the highest zoom level the service delivers and an optional attribution, check it with
+<strong>Test</strong>, and it shows up in the map selector under <em>Custom online maps</em>, after the built-in
+maps — on the 2D map and the 3D globe, on every platform including Android, iPhone and iPad.
+Services with 512 px tiles are drawn at their real size, with a quarter of the requests and
+labels as the service intended; <strong>Test</strong> detects the tile size for you. Its tiles go into the
+tile cache like those of the built-in maps, and past the service's highest level the 2D map
+enlarges them instead of stopping. <a href="https://github.com/b14ckyy/Kite-GC/pull/249">#249</a></p>
+<p><strong>Custom maps: offline tiles from a folder (desktop).</strong> Put tiles in the usual <code>Z/X/Y</code> layout
+(<code>.png</code>, <code>.jpg</code>, <code>.webp</code>, any tile size) into a subfolder of the custom map location and the
+folder shows up at the end of the map selector — on the 2D map and the 3D globe, without
+internet. Gaps are filled from lower zoom levels, and a frame on the 2D map shows where the
+detailed tiles are: a dashed rectangle from far out, the exact outline once you are close.
+The location can be moved in Settings. Not on Android and iOS; the 3D terrain still needs the
+internet. <a href="https://github.com/b14ckyy/Kite-GC/pull/246">#246</a></p>
+<p>Both are described in <a href="../guides/custom-maps/">Your own maps</a>.</p>
+</details>
 <p><strong>Added</strong></p>
 <ul>
 <li><strong>Android support</strong> — native app with USB serial, Bluetooth LE and Wi-Fi links, touch layout
@@ -1953,13 +1974,6 @@ log that failed. <a href="https://github.com/b14ckyy/Kite-GC/pull/234">#234</a><
   placeholder ID (INAV SITL, PX4 SITL as system ID 1) report no FC ID. <a href="https://github.com/b14ckyy/Kite-GC/pull/228">#228</a></li>
 <li><strong><code>.kflight</code> files of INAV Blackbox flights are smaller</strong> — and a file written by 2.0 still
   imports into Kite 1.0, linked pairs (live recording + onboard log) included. <a href="https://github.com/b14ckyy/Kite-GC/pull/232">#232</a></li>
-<li><strong>Custom maps: offline map tiles from a folder (desktop).</strong> Put tiles in the usual <code>Z/X/Y</code>
-  layout (<code>.png</code>, <code>.jpg</code>, <code>.webp</code>, any tile size) into a subfolder of the custom map location
-  and the folder shows up at the end of the map selector — on the 2D map and the 3D globe,
-  without internet. Gaps are filled from lower zoom levels, and a frame on the 2D map shows
-  where the detailed tiles are: a dashed rectangle from far out, the exact outline once you
-  are close. The location can be moved in Settings. Not on Android and iOS; the 3D terrain
-  still needs the internet. See <a href="../guides/custom-maps/">Custom maps</a>. <a href="https://github.com/b14ckyy/Kite-GC/pull/246">#246</a></li>
 </ul>
 <p><strong>Improved</strong></p>
 <ul>

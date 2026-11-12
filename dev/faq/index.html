@@ -1004,7 +1004,7 @@
   <span class="md-ellipsis">
     
   
-    Custom maps
+    Your own maps
   
 
     
@@ -1983,17 +1983,24 @@ the 2D map and the 3D globe</strong>:</p>
 <li><strong>OpenTopoMap</strong> — topographic map with contour lines.</li>
 <li><strong>ESRI Dark Gray</strong> — a dark, low-contrast basemap.</li>
 </ul>
-<p>All of them work <strong>offline</strong> once the tiles have been cached — see below. On Windows, Linux and macOS
-the list also offers your own map tiles from a folder on disk — see <strong><a href="../guides/custom-maps/">Custom maps</a></strong>.</p>
+<p>All of them work <strong>offline</strong> once the tiles have been cached — see below.</p>
+<p>You can also bring your own maps (see <strong><a href="../guides/custom-maps/">Your own maps</a></strong>):</p>
+<ul>
+<li><strong>Custom online providers</strong> — any online tile service you add by its URL template, with your own API key in
+  the URL if the service needs one. On every platform; the tiles are cached like those of the
+  built-in maps.</li>
+<li><strong>Custom maps</strong> — map tiles from a folder on disk, on Windows, Linux and macOS.</li>
+</ul>
 <h3 id="can-i-use-the-maps-offline">Can I use the maps offline?<a class="headerlink" href="#can-i-use-the-maps-offline" title="Permanent link">&para;</a></h3>
 <p>Yes, within limits. Kite caches every map tile it downloads (<strong><a href="../reference/settings/">Settings → Data → Map →
 Tile Cache</a></strong>). Pan and zoom over your flying area <strong>while you still have an
 internet connection</strong>, and those tiles stay available offline afterwards. There is <strong>no bulk
 "pre-download this whole region" button</strong> — the cache fills from what you actually view. The default
-cache is 200 MB and can be raised up to 5 GB.</p>
+cache is 200 MB and can be raised up to 5 GB. The same holds for your
+<strong><a href="../guides/custom-maps/#custom-online-providers">custom online providers</a></strong>.</p>
 <p>On the desktop there is a second way: map tiles you already have can be put into a folder and shown as
-a <strong><a href="../guides/custom-maps/">custom map</a></strong>, straight from disk and without any connection. Kite does not
-download those tiles for you.</p>
+a <strong><a href="../guides/custom-maps/#custom-maps-from-a-folder">custom map</a></strong>, straight from disk and without any
+connection. Kite does not download those tiles for you.</p>
 <h3 id="why-isnt-google-maps-or-here-maps-available">Why isn't Google Maps or HERE Maps available?<a class="headerlink" href="#why-isnt-google-maps-or-here-maps-available" title="Permanent link">&para;</a></h3>
 <p>This comes up because other ground stations (Mission Planner, QGroundControl) show Google satellite
 imagery. We looked at both Google and HERE carefully and deliberately chose <strong>not</strong> to integrate them.
@@ -2012,9 +2019,10 @@ On top of that, a direct comparison showed <strong>no quality benefit</strong>: 
 mid-zoom imagery as ESRI, it lacks the highest zoom levels ESRI provides, and its low-zoom imagery is
 the older Bing basemap that ESRI already serves in better quality.</p>
 <p>In both cases the extra setup (account, API key, billing) and the licensing constraints simply aren't
-worth it for a map style you can already get, key-free, from the built-in providers. If a specific,
-properly licensed provider ever adds real value, we would add it as an optional <em>bring-your-own-key</em>
-source rather than route around anyone's terms of service.</p>
+worth it for a map style you can already get, key-free, from the built-in providers. A service you
+have a key for can be added yourself as a <strong><a href="../guides/custom-maps/#custom-online-providers">custom online provider</a></strong>,
+by its tile URL template — whether its terms allow that use, including Kite's tile cache, is yours to
+check.</p>
 <h2 id="connections">Connections<a class="headerlink" href="#connections" title="Permanent link">&para;</a></h2>
 <h3 id="why-does-kite-keep-showing-a-firmware-message-that-mission-planner-doesnt">Why does Kite keep showing a firmware message that Mission Planner doesn't?<a class="headerlink" href="#why-does-kite-keep-showing-a-firmware-message-that-mission-planner-doesnt" title="Permanent link">&para;</a></h3>
 <p>When Kite is connected through <strong>another ground station's MAVLink forward</strong> (Mission Planner's
