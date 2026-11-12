@@ -673,6 +673,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#map-search" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Map search
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1901,6 +1912,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#map-search" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Map search
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2060,6 +2082,25 @@ the <strong>course over ground</strong> (where it's actually travelling — the 
 <p>The map controls — the 2D/3D, follow-mode and zoom buttons (shown here in several states).</p>
 </figcaption>
 </figure>
+<h3 id="map-search">Map search<a class="headerlink" href="#map-search" title="Permanent link">&para;</a></h3>
+<p>The <strong>magnifier</strong> button takes the map to a place or to coordinates. On the desktop and on a tablet
+it sits in the top bar, left of the connection controls; on a phone it is the top button of the map
+control cluster. It opens one text line:</p>
+<ul>
+<li>Type a <strong>place</strong> — a town, a region, an airfield — and press <strong>Enter</strong>. Kite asks OpenStreetMap's
+  search service once per Enter (it does not search while you type) and lists up to five matches;
+  pick one and the map jumps there, zoomed to the size of the place. A single match jumps at once.
+  This needs internet.</li>
+<li>Type <strong>coordinates</strong> and the map jumps without asking any service, so this works offline. Kite
+  understands decimal degrees (<code>51.4886, 11.97</code>), degrees with decimal minutes
+  (<code>51 29.316 N 11 58.2 E</code>) and degrees, minutes and seconds (<code>51°29'19"N 11°58'12"E</code>), with or
+  without the letters N S E W, latitude first.</li>
+<li>The <strong>location</strong> button left of the line jumps to your own position: the ground-station position
+  Kite already knows, otherwise it asks the operating system once.</li>
+</ul>
+<p>A small pin marks the target for a few seconds. The search works on the 2D and the 3D map; in 3D a
+follow, orbit or FPV camera is released to the free camera for the jump. It is a way to move the
+map, not an address finder: Kite stores no search history and offers no routing.</p>
 <h2 id="aircraft-status-top-bar">Aircraft status (top bar)<a class="headerlink" href="#aircraft-status-top-bar" title="Permanent link">&para;</a></h2>
 <p>The centre of the top bar is a live health summary of the connected craft:</p>
 <ul>
