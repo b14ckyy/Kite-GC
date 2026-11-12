@@ -270,6 +270,10 @@ inside the box of the feature release they belong to, so the notes for one relea
 
     **Improved**
 
+    - **3D map: fewer tiles with High-Resolution 3D switched off.** At half the render resolution
+      the globe kept loading map tiles as fine as for the full resolution. It now takes them one
+      zoom level coarser — a quarter of the tiles and requests for the same picture, which matters
+      on a phone, a slow link or a tile service with a quota. [#254]
     - **ArduPilot: the control panel offers the modes your flight controller really has.** From
       ArduPilot 4.7 on, Kite reads the mode list from the flight controller: modes missing from your
       firmware or switched off there are no longer offered, and modes the panel did not have before
@@ -587,6 +591,7 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#249]: https://github.com/b14ckyy/Kite-GC/pull/249
 [#250]: https://github.com/b14ckyy/Kite-GC/pull/250
 [#253]: https://github.com/b14ckyy/Kite-GC/pull/253
+[#254]: https://github.com/b14ckyy/Kite-GC/pull/254
 [#143]: https://github.com/b14ckyy/Kite-GC/pull/143
 [#145]: https://github.com/b14ckyy/Kite-GC/pull/145
 [#151]: https://github.com/b14ckyy/Kite-GC/pull/151

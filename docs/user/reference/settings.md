@@ -92,7 +92,7 @@ App Store tell you about new versions themselves, and GitHub releases have no iO
 | **3D Buildings (OSM)** | Show OpenStreetMap building extrusions on the 3D globe. The buildings come from Cesium Ion, so the switch stays greyed out until a **Cesium Ion Token** is entered (**[Providers](#providers)**, below). | Off |
 | **Real Daytime and Lighting (3D)** | Light the 3D globe with the real sun position (day / night, shadows). | On |
 | **Log Replay Time (3D)** | During replay, drive that lighting from the log's actual time of day (needs the option above). | On |
-| **High-Resolution 3D** | Render the 3D globe at the display's native pixel density (on) or at half of it (off) to save GPU and battery. Sharpest on high-DPI phones and tablets; a laptop with a weak integrated GPU may prefer it off. | On (desktop) · Off (phone / tablet) |
+| **High-Resolution 3D** | Render the 3D globe at the display's native pixel density (on) or at half of it (off) to save GPU and battery. Switched off, the globe also loads its map tiles one zoom level coarser — a quarter of the tiles, which is all the half-resolution picture can show. Sharpest on high-DPI phones and tablets; a laptop with a weak integrated GPU may prefer it off. | On (desktop) · Off (phone / tablet) |
 
 ### Mission Control
 
