@@ -15,6 +15,7 @@
   import { isDebugMode } from "$lib/stores/debug";
   import { telemetry } from "$lib/stores/telemetry";
   import { startRadarListeners, configureRadar, setRadarCenter, setRadarNode } from "$lib/stores/radarTracking";
+  import { effectiveLink } from "$lib/helpers/radarPorts";
   import { startRadarAlerts } from "$lib/controllers/radarAlerts";
   import { startBreachMonitor } from "$lib/controllers/breachMonitor";
   import { startAlertAudio } from "$lib/controllers/alertAudio";
@@ -1260,19 +1261,15 @@
           ...BUILTIN_ADSB_PROVIDERS.map((b) => ({ name: b.name, url: b.url, enabled: radarSettings.adsb.builtins[b.name] ?? true })),
           ...radarSettings.adsb.online,
         ],
-        local: radarSettings.adsb.local,
+        // The links as the Radar panel shows them (iOS: a stored serial source as TCP), so what is shown runs.
+        local: radarSettings.adsb.local.map((l) => effectiveLink(l, 'adsb', hasSerialPorts)),
         // Only request the FC's ADS-B list when the connected INAV (8.0+) actually supports it.
         mspFromFc: radarSettings.adsb.mspFromFc && mspAdsbSupported,
         radiusKm: radarSettings.adsb.radiusKm,
         pollSec: radarSettings.adsb.pollSec,
         center: [lat, lon],
       },
-      formationFlight: {
-        enabled: radarSettings.formationFlight.enabled,
-        port: radarSettings.formationFlight.port,
-        baud: radarSettings.formationFlight.baud,
-        nodeName: radarSettings.formationFlight.nodeName,
-      },
+      formationFlight: effectiveLink(radarSettings.formationFlight, 'formationFlight', hasSerialPorts),
     });
   }
   if (typeof window !== 'undefined') {
@@ -4367,7 +4364,7 @@
             <RcControlPanel />
           {/if}
         {:else if activeTab === 'radar'}
-          <RadarPanel radar={radarSettings} {interfaceSettings} referencePoint={radarReference} mspSupported={mspAdsbSupported} onPatch={applySettingsPatch} />
+          <RadarPanel radar={radarSettings} {interfaceSettings} referencePoint={radarReference} mspSupported={mspAdsbSupported} mainSerialPort={$connection.status === 'connected' && $connection.transportType === 'serial' ? selectedPort || null : null} mainUdpPort={selectedTransport === 'udp' ? tcpPort : null} onPatch={applySettingsPatch} />
         {:else if activeTab === 'airspace'}
           <!-- Re-init the panel on connect/disconnect + when the FC's geozone/fence capability resolves
                (loaded async after connect) so an already-open panel reflects the new FC without a tab switch. -->

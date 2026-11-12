@@ -16,6 +16,7 @@
   import Toggle from '$lib/components/panel/Toggle.svelte';
   import SegmentedToggle, { type SegOption } from '$lib/components/panel/SegmentedToggle.svelte';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
+  import RadarLinkRow from '$lib/components/RadarLinkRow.svelte';
   import { radarVehicles, radarAdsbStatus, radarSelection, enrichList, type EnrichedVehicle } from '$lib/stores/radarTracking';
   import { BUILTIN_ADSB_PROVIDERS } from '$lib/stores/settings';
   import { panelState } from '$lib/stores/panelState';
@@ -23,14 +24,21 @@
   import type { PortInfo } from '$lib/stores/connection';
   import { convertSpeed, convertAltitude, convertDistance, formatConverted, speedDigits } from '$lib/utils/units';
   import { RELATIVE_LEGEND_STOPS, LEGEND_LEVEL_PCT } from '$lib/helpers/radarMap';
+  import { effectiveLink, withTransport, linkSummary, serialPortClaims, claimOf, ownerLabel, udpPortOwner, type PortOwner } from '$lib/helpers/radarPorts';
+  import { hasSerialPorts } from '$lib/platform';
+  import type { RadarLinkTransport } from '$lib/stores/settings';
 
-  let { radar, interfaceSettings, referencePoint = null, mspSupported = false, onPatch = (_p: Partial<AppSettings>) => {} }: {
+  let { radar, interfaceSettings, referencePoint = null, mspSupported = false, mainSerialPort = null, mainUdpPort = null, onPatch = (_p: Partial<AppSettings>) => {} }: {
     radar: RadarSettings;
     interfaceSettings: InterfaceSettings;
     /** Distance/bearing reference: connected UAV (valid fix) else the GCS location. */
     referencePoint?: { lat: number; lon: number } | null;
     /** ADS-B-via-MSP available (INAV 8.0+ on an active MSP link) — gates the "UAV Source" toggle. */
     mspSupported?: boolean;
+    /** Serial port the main connection holds (null = none) — offered as "in use" to the radar sources. */
+    mainSerialPort?: string | null;
+    /** UDP port set for the main connection while UDP is selected there (connected or not), else null. */
+    mainUdpPort?: number | null;
     onPatch?: (patch: Partial<AppSettings>) => void;
   } = $props();
 
@@ -57,7 +65,9 @@
       cpaRadiusM: a.cpaRadiusM, cpaHeightM: a.cpaHeightM, cpaLookAheadS: a.cpaLookAheadS,
     };
   });
-  const patchFf = (partial: Partial<RadarSettings['formationFlight']>) => patchRadar({ formationFlight: { ...radar.formationFlight, ...partial } });
+  // FormationFlight link as shown (iOS: serial shown as TCP); edits apply on top of what is shown.
+  const ffLink = $derived(effectiveLink(radar.formationFlight, 'formationFlight', hasSerialPorts));
+  const patchFf = (partial: Partial<RadarSettings['formationFlight']>) => patchRadar({ formationFlight: { ...ffLink, ...partial } });
   const setMapVisible = (key: 'adsb' | 'formationFlight' | 'radio', on: boolean) =>
     patchMap({ visible: { ...radar.map.visible, [key]: on } });
   const setBuiltinEnabled = (name: string, on: boolean) =>
@@ -70,24 +80,39 @@
     patchAdsb({ online: [...radar.adsb.online, { name: '', url: 'https://api.adsb.lol/v2/point/{lat}/{lon}/{dist}', enabled: false }] });
   const inputVal = (e: Event) => (e.target as HTMLInputElement).value;
 
-  // Local hardware receivers (Phase 2: serial MAVLink).
-  const BAUD_STEPS = [57600, 115200, 9600, 38400, 230400, 921600];
+  // Local hardware receivers (MAVLink over serial / TCP / UDP). Rows show — and edits apply on top of —
+  // the effective link (iOS: a stored serial receiver is shown as TCP).
+  const localLinks = $derived(radar.adsb.local.map((l) => effectiveLink(l, 'adsb', hasSerialPorts)));
   const updateLocal = (i: number, patch: Partial<RadarSettings['adsb']['local'][number]>) =>
-    patchAdsb({ local: radar.adsb.local.map((l, j) => (j === i ? { ...l, ...patch } : l)) });
+    patchAdsb({ local: radar.adsb.local.map((l, j) => (j === i ? { ...localLinks[j], ...patch } : l)) });
   const removeLocal = (i: number) =>
     patchAdsb({ local: radar.adsb.local.filter((_, j) => j !== i) });
   const addLocal = () => {
-    void refreshPorts();
-    patchAdsb({ local: [...radar.adsb.local, { name: 'Receiver', transport: 'serial', port: '', baud: 57600, enabled: false }] });
+    // New receivers start on serial; without serial ports (iOS) on TCP.
+    const fresh = { name: 'Receiver', transport: 'serial' as const, port: '', baud: 57600, host: '', netPort: 0, enabled: false };
+    if (hasSerialPorts) void refreshPorts();
+    patchAdsb({ local: [...radar.adsb.local, hasSerialPorts ? fresh : withTransport(fresh, 'adsb', 'tcp')] });
   };
-  /** If another local source already uses `path`, return its name (for a disabled "(in use)" option). */
-  const portConflict = (i: number, path: string): string | null => {
-    if (!path) return null;
-    const other = radar.adsb.local.find((l, j) => j !== i && l.port === path);
-    return other ? (other.name || '—') : null;
+  const setLocalTransport = (i: number, next: RadarLinkTransport) =>
+    patchAdsb({ local: radar.adsb.local.map((l, j) => (j === i ? withTransport(localLinks[j], 'adsb', next) : l)) });
+  const setFfTransport = (next: RadarLinkTransport) => patchRadar({ formationFlight: withTransport(ffLink, 'formationFlight', next) });
+
+  // Serial ports already held by another radar source or the main connection: offered disabled with
+  // "(in use: <who>)" — except the row's own current port, which stays shown as it is.
+  const portClaims = $derived(serialPortClaims(radar, { activeOnly: false, mainPort: mainSerialPort }));
+  const portInUse = (self: PortOwner, path: string): string | null => {
+    const owner = claimOf(portClaims, path, self);
+    return owner ? ownerLabel(owner, $t) : null;
   };
 
-  // Available serial ports for the local-source picker (refreshed on mount + on demand).
+  // Same idea for UDP: two listeners on one port number cannot both receive — warn in the row.
+  const udpInUse = (self: PortOwner, port: number): string | null => {
+    const owner = udpPortOwner(radar, self, port, { mainUdpPort, serialAvailable: hasSerialPorts });
+    return owner ? ownerLabel(owner, $t) : null;
+  };
+
+  // Available serial ports for the local-source picker (refreshed on mount + on demand). Never asked for
+  // where the platform has no serial ports (iOS).
   let serialPorts = $state<PortInfo[]>([]);
   async function refreshPorts() {
     try {
@@ -96,7 +121,9 @@
       console.warn('list_serial_ports failed:', e);
     }
   }
-  onMount(refreshPorts);
+  onMount(() => {
+    if (hasSerialPorts) void refreshPorts();
+  });
 
   // Compact/advanced view persists across panel switches + restart (panelState store).
   const compact = $derived($panelState.radarCompact);
@@ -341,9 +368,9 @@
       {/each}
       <Button variant="standard" size="sm" full icon="add" onclick={addProvider}>{$t('radar.addSource')}</Button>
 
-      <!-- Local hardware receivers (serial MAVLink; TCP later). -->
+      <!-- Local hardware receivers (MAVLink over serial / TCP / UDP). -->
       <p class="src-head">{$t('radar.localSources')}</p>
-      {#each radar.adsb.local as l, i (i)}
+      {#each localLinks as l, i (i)}
         {@const st = $radarAdsbStatus[l.name]}
         <div class="src-card">
           <div class="src-card-head">
@@ -356,7 +383,8 @@
                 onchange={(e) => updateLocal(i, { name: inputVal(e) })}
               />
             {:else}
-              <span class="src-name">{l.name || '—'}{#if l.port}<span class="src-sub"> · {l.port}</span>{/if}</span>
+              {@const where = linkSummary(l)}
+              <span class="src-name">{l.name || '—'}{#if where}<span class="src-sub"> · {where}</span>{/if}</span>
               {#if st}
                 {#if st.ok}<span class="src-stat ok" title={$t('radar.contacts')}>{st.count}</span>
                 {:else}<span class="src-stat err" title={$t('radar.sourceError')}>✕</span>{/if}
@@ -365,20 +393,15 @@
             <Toggle checked={l.enabled} onchange={(c) => updateLocal(i, { enabled: c })} />
           </div>
           {#if !l.enabled}
-            <div class="src-row2">
-              <select class="src-select src-input-port" value={l.port} onchange={(e) => updateLocal(i, { port: (e.target as HTMLSelectElement).value })}>
-                <option value="">{$t('radar.selectPort')}</option>
-                {#each serialPorts as sp}
-                  {@const conflict = portConflict(i, sp.path)}
-                  <option value={sp.path} disabled={!!conflict}>{sp.label || sp.path}{conflict ? ` (${$t('radar.inUse')}: ${conflict})` : ''}</option>
-                {/each}
-                {#if l.port && !serialPorts.some((sp) => sp.path === l.port)}<option value={l.port}>{l.port} ({$t('radar.portMissing')})</option>{/if}
-              </select>
-              <button class="src-refresh" title={$t('radar.refreshPorts')} onclick={refreshPorts} aria-label={$t('radar.refreshPorts')}>⟳</button>
-              <select class="src-select" value={l.baud} onchange={(e) => updateLocal(i, { baud: Number((e.target as HTMLSelectElement).value) })}>
-                {#each BAUD_STEPS as b}<option value={b}>{b}</option>{/each}
-              </select>
-            </div>
+            <RadarLinkRow
+              link={l}
+              {serialPorts}
+              portInUse={(path) => portInUse({ kind: 'adsb', index: i, name: l.name }, path)}
+              udpPortInUse={udpInUse({ kind: 'adsb', index: i, name: l.name }, l.netPort)}
+              onTransport={(next) => setLocalTransport(i, next)}
+              onPatch={(p) => updateLocal(i, p)}
+              onRefreshPorts={refreshPorts}
+            />
           {/if}
         </div>
       {/each}
@@ -428,24 +451,18 @@
       </div>
     </div>
   {:else if activeSys === 'formationFlight'}
-    <!-- FormationFlight (INAV-Radar / ESP32): the serial module Kite talks MSP to as an emulated FC. -->
+    <!-- FormationFlight (INAV-Radar / ESP32): the module Kite talks MSP to as an emulated FC (serial, TCP or UDP). -->
     <div class="src-block">
       <p class="src-head">{$t('radar.ffModule')}</p>
-      <div class="src-row2">
-        <select class="src-select src-input-port" value={radar.formationFlight.port} onchange={(e) => patchFf({ port: (e.target as HTMLSelectElement).value })}>
-          <option value="">{$t('radar.selectPort')}</option>
-          {#each serialPorts as sp}
-            <option value={sp.path}>{sp.label || sp.path}</option>
-          {/each}
-          {#if radar.formationFlight.port && !serialPorts.some((sp) => sp.path === radar.formationFlight.port)}
-            <option value={radar.formationFlight.port}>{radar.formationFlight.port} ({$t('radar.portMissing')})</option>
-          {/if}
-        </select>
-        <button class="src-refresh" title={$t('radar.refreshPorts')} onclick={refreshPorts} aria-label={$t('radar.refreshPorts')}>⟳</button>
-        <select class="src-select" value={radar.formationFlight.baud} onchange={(e) => patchFf({ baud: Number((e.target as HTMLSelectElement).value) })}>
-          {#each BAUD_STEPS as b}<option value={b}>{b}</option>{/each}
-        </select>
-      </div>
+      <RadarLinkRow
+        link={ffLink}
+        {serialPorts}
+        portInUse={(path) => portInUse({ kind: 'formationFlight' }, path)}
+        udpPortInUse={udpInUse({ kind: 'formationFlight' }, ffLink.netPort)}
+        onTransport={setFfTransport}
+        onPatch={patchFf}
+        onRefreshPorts={refreshPorts}
+      />
       <p class="src-head">{$t('radar.ffNodeName')}</p>
       <input
         class="src-input"
@@ -574,21 +591,6 @@
   }
   .src-input-name { flex: 1; font-weight: 600; }
   .src-sub { color: #949494; font-weight: 400; }
-  .src-row2 { display: flex; gap: 6px; align-items: center; }
-  .src-input-port { flex: 1; min-width: 0; }
-  .src-refresh {
-    flex-shrink: 0;
-    width: 26px;
-    height: 26px;
-    border: 1px solid #555;
-    border-radius: 4px;
-    background: #434343;
-    color: #cdd6da;
-    cursor: pointer;
-    font-size: 14px;
-    line-height: 1;
-  }
-  .src-refresh:hover { background: #4d4d4d; color: #fff; }
   .src-del {
     flex-shrink: 0;
     width: 24px;

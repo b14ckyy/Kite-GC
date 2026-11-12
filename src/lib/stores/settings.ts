@@ -57,17 +57,38 @@ export interface AdsbOnlineProvider {
   enabled: boolean;
 }
 
-/** A local hardware ADS-B receiver (MAVLink ADSB_VEHICLE). Phase 2: serial; TCP later. */
-export interface AdsbLocalSource {
-  name: string;
-  transport: 'serial' | 'tcp';
+/** How a local radar source is reached: a serial port, a TCP connection Kite opens, or a UDP port Kite
+ *  listens on. */
+export type RadarLinkTransport = 'serial' | 'tcp' | 'udp';
+
+/** The link fields shared by every local radar source (ADS-B receivers, the FormationFlight module).
+ *  Only the fields of the selected transport are used; the others are kept for switching back. */
+export interface RadarLinkFields {
+  transport: RadarLinkTransport;
   /** serial */
   port: string;
   baud: number;
-  /** tcp (later) */
-  host?: string;
-  tcpPort?: number;
+  /** tcp / udp — an empty host or port 0 leaves the source stopped. */
+  host: string;
+  netPort: number;
+}
+
+/** A local hardware ADS-B receiver (MAVLink ADSB_VEHICLE over serial, TCP or UDP). */
+export interface AdsbLocalSource extends RadarLinkFields {
+  name: string;
   enabled: boolean;
+}
+
+/** Fill the link fields a stored source may lack (saved before TCP / UDP existed): no or an unknown
+ *  transport is serial, no host is empty, no port is 0. */
+function normalizeRadarLink<T extends Partial<RadarLinkFields>>(src: T): T & Pick<RadarLinkFields, 'transport' | 'host' | 'netPort'> {
+  const transport: RadarLinkTransport = src.transport === 'tcp' || src.transport === 'udp' ? src.transport : 'serial';
+  return {
+    ...src,
+    transport,
+    host: typeof src.host === 'string' ? src.host : '',
+    netPort: typeof src.netPort === 'number' && Number.isFinite(src.netPort) ? src.netPort : 0,
+  };
 }
 
 /** Fixed, always-present ADS-B providers (URL defined in code, not editable/deletable). Only their
@@ -88,7 +109,7 @@ export interface RadarSettings {
     builtins: Record<string, boolean>;
     /** User-editable custom providers (e.g. adsb.fi example). Merged with the built-ins by ICAO. */
     online: AdsbOnlineProvider[];
-    /** Local hardware receivers (serial MAVLink; TCP later). */
+    /** Local hardware receivers (MAVLink over serial / TCP / UDP). */
     local: AdsbLocalSource[];
     /** Pull the ADS-B list from the connected UAV via MSP (INAV 8.0+). Bandwidth-heavy → opt-in. */
     mspFromFc: boolean;
@@ -107,14 +128,11 @@ export interface RadarSettings {
   sim: boolean;
 }
 
-/** FormationFlight (INAV-Radar / ESP32): one serial module Kite speaks MSP to as an emulated FC.
+/** FormationFlight (INAV-Radar / ESP32): one module Kite speaks MSP to as an emulated FC, over serial
+ *  (`port`, `baud` — default 115200) or TCP / UDP (`host`, `netPort`).
  *  See docs/active/RADAR_FORMATION_FLIGHT.md. */
-export interface RadarFormationFlightSettings {
+export interface RadarFormationFlightSettings extends RadarLinkFields {
   enabled: boolean;
-  /** Serial port the ESP32 module is on. */
-  port: string;
-  /** Baud (default 115200). */
-  baud: number;
   /** Name we advertise via MSP_NAME (our node's broadcast name). Empty ⇒ a default is used. */
   nodeName: string;
 }
@@ -171,7 +189,7 @@ export const DEFAULT_RADAR: RadarSettings = {
     radiusKm: 25,
     pollSec: 5,
   },
-  formationFlight: { enabled: false, port: '', baud: 115200, nodeName: '' },
+  formationFlight: { enabled: false, transport: 'serial', port: '', baud: 115200, host: '', netPort: 0, nodeName: '' },
   radio: { enabled: false },
   map: {
     radiusKm: 50,
@@ -572,9 +590,9 @@ function load(): AppSettings {
               // Strip any built-in-named entries from the custom list (migration from the old flat
               // `online` array, where adsb.lol/.one lived as custom rows).
               online: (pa.online ?? dr.adsb.online).filter((p) => !builtinNames.has(p.name)),
-              local: pa.local ?? dr.adsb.local,
+              local: (pa.local ?? dr.adsb.local).map(normalizeRadarLink),
             },
-            formationFlight: { ...dr.formationFlight, ...(pr.formationFlight ?? {}) },
+            formationFlight: normalizeRadarLink({ ...dr.formationFlight, ...(pr.formationFlight ?? {}) }),
             radio: { ...dr.radio, ...(pr.radio ?? {}) },
             map: {
               ...dr.map,

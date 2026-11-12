@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Radar — FormationFlight (INAV-Radar / ESP32) over serial MSP (Phase F1).
+// Radar — FormationFlight (INAV-Radar / ESP32) over MSP (Phase F1).
 //
 // An ESP32 INAV-Radar module (LoRa / ESP-NOW) talks MSP to a flight controller: it polls the FC for its
 // own telemetry, broadcasts it to the formation, and relays received peers back into the FC via
-// MSP2_COMMON_SET_RADAR_POS. Kite joins as a GROUND NODE by emulating an INAV FC over this serial link:
+// MSP2_COMMON_SET_RADAR_POS. Kite joins as a GROUND NODE by emulating an INAV FC over this link (serial,
+// or TCP / UDP to a network bridge in front of the module — see `radar::link`):
 //   - We answer the module's MSP requests as an armed "INAV" FC at the GCS location (so the module runs
 //     as a full TX node — sidestepping the historical "GCS" listen-only bug, which gated on the host type).
 //   - We parse the peers it pushes (MSP2_COMMON_SET_RADAR_POS) into TrackedVehicles (system=FormationFlight).
@@ -26,11 +27,11 @@ use crate::msp::types::{
     MspDirection, MspMessage, MspVersion, MSP_ANALOG, MSP_API_VERSION, MSP_ATTITUDE, MSP_FC_VARIANT,
     MSP_FC_VERSION, MSP_NAME, MSP_RAW_GPS,
 };
+use crate::radar::link::{LinkSpec, OpenFailureLog};
 use crate::radar::now_ms;
 use crate::radar::source::{NodePos, RadarSource, SourceHandle, SourceUpdate};
 use crate::radar::vehicle::{AltRef, TrackedVehicle, VehicleSource, VehicleSystem};
-use crate::transport::serial::SerialConnection;
-use crate::transport::{ByteTransport, TransportError};
+use crate::transport::TransportError;
 
 /// INAV MSP2 radar message: the module pushes each peer's position with this command.
 const MSP2_COMMON_SET_RADAR_POS: u16 = 0x100B;
@@ -46,7 +47,7 @@ const EMIT_INTERVAL: Duration = Duration::from_millis(1000);
 const LOST_AFTER_MS: i64 = 12_000;
 /// Keep a lost peer this long (at its last position, red) so the pilot still sees where it dropped.
 const LOST_RETAIN_MS: i64 = 300_000; // 5 min
-/// Backoff before reopening the port after a serial error.
+/// Backoff before reopening the link after an error.
 const RECONNECT_DELAY: Duration = Duration::from_secs(2);
 /// Resync guard: if the accumulator grows past this without yielding a frame, drop the leading byte.
 const MAX_ACC: usize = 1024;
@@ -69,8 +70,8 @@ struct ParsedPeer {
 
 pub struct FormationFlightSource {
     name: String,
-    port: String,
-    baud: u32,
+    /// The link to the module; a serial link carries the effective baud (the manager applies 115200 for 0).
+    link: LinkSpec,
     node_name: NodeName,
     node_pos: NodePos,
     #[allow(dead_code)]
@@ -80,13 +81,12 @@ pub struct FormationFlightSource {
 impl FormationFlightSource {
     pub fn new(
         name: String,
-        port: String,
-        baud: u32,
+        link: LinkSpec,
         node_name: NodeName,
         node_pos: NodePos,
         app: AppHandle,
     ) -> Self {
-        Self { name, port, baud, node_name, node_pos, app }
+        Self { name, link, node_name, node_pos, app }
     }
 }
 
@@ -102,25 +102,28 @@ impl RadarSource for FormationFlightSource {
         let stop_worker = stop.clone();
 
         thread::spawn(move || {
+            let mut open_log = OpenFailureLog::default();
             while !stop_worker.load(Ordering::Relaxed) {
-                let baud = if self.baud > 0 { self.baud } else { 115200 };
-                let mut conn = match SerialConnection::open(&self.port, baud) {
+                // Do NOT touch DTR/RTS here: toggling them resets the ESP32 (the USB auto-reset line). We
+                // also keep this link open across radar reconfigures (the manager only restarts the FF
+                // source when the link itself changes) so we don't reset the module mid-session.
+                let mut conn = match self.link.open(false) {
                     Ok(c) => c,
                     Err(e) => {
-                        eprintln!("[radar][ff] {} open {} failed: {}", self.name, self.port, e);
+                        open_log.failed(&self.name, &self.link, &e);
                         if wait_or_stop(&stop_worker, RECONNECT_DELAY) {
                             break;
                         }
                         continue;
                     }
                 };
-                // Do NOT touch DTR/RTS here: toggling them resets the ESP32 (the USB auto-reset line). We
-                // also keep this port open across radar reconfigures (the manager only restarts the FF
-                // source when the port/baud actually change) so we don't reset the module mid-session.
-                eprintln!("[radar][ff] {} MSP slave on {} @ {}", self.name, self.port, baud);
+                open_log.opened();
+                eprintln!("[radar][ff] {} MSP slave on {}", self.name, self.link.describe());
 
                 let mut acc: Vec<u8> = Vec::with_capacity(512);
-                let mut buf = [0u8; 512];
+                // Room for a whole UDP datagram: a bridge may pack more than one serial chunk into it, and
+                // a datagram larger than the buffer is an error on Windows and silently cut elsewhere.
+                let mut buf = [0u8; 2048];
                 let mut peers: HashMap<u8, PeerEntry> = HashMap::new();
                 let mut last_emit = Instant::now();
                 let mut dbg_req: HashMap<u16, u32> = HashMap::new();
@@ -163,7 +166,7 @@ impl RadarSource for FormationFlightSource {
                         }
                         Err(TransportError::Timeout) => {}
                         Err(e) => {
-                            eprintln!("[radar][ff] {} serial error: {} — reconnecting", self.name, e);
+                            eprintln!("[radar][ff] {} link error: {} — reconnecting", self.name, e);
                             break; // reopen
                         }
                     }
