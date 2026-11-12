@@ -1034,7 +1034,7 @@
     "lowPower3DOn": "Activado (20 fps)",
     "lowPower3DAuto": "Auto (20 fps con batería)",
     "highRes3D": "3D de alta resolución",
-    "highRes3DHint": "Renderiza el globo 3D a la densidad de píxeles nativa de la pantalla; desactivado, lo renderiza a la mitad para ahorrar GPU y batería. Predeterminado: activado en escritorio, desactivado en teléfonos y tabletas.",
+    "highRes3DHint": "Renderiza el globo 3D a la densidad de píxeles nativa de la pantalla; desactivado, lo renderiza a la mitad para ahorrar GPU y batería y, salvo en pantallas de alta densidad, carga además teselas de mapa en línea más gruesas. Predeterminado: activado en escritorio, desactivado en teléfonos y tabletas.",
     "userLocation": "Tu ubicación",
     "locationNone": "sin definir",
     "detectLocation": "Detectar",

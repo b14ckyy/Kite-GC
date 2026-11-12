@@ -39,11 +39,11 @@ These are **global** — every widget, map read-out and panel follows them. See
 
 | Setting | Options | Default |
 |---|---|---|
-| **Speed** | km/h · mi/h · m/s · ft/s · kt | km/h |
-| **Altitude** | m · ft | m |
-| **Distance** | m / km · ft / mi | m / km |
-| **Vertical speed** | m/s · ft/s | m/s |
-| **Temperature** | °C · °F | °C |
+| **Speed Unit** | km/h · mi/h · m/s · ft/s · kt | km/h |
+| **Altitude Unit** | m · ft | m |
+| **Distance Unit** | m / km · ft / mi | m / km |
+| **Vertical Speed Unit** | m/s · ft/s | m/s |
+| **Temperature Unit** | °C · °F | °C |
 
 ### Alerts
 
@@ -51,7 +51,7 @@ These are **global** — every widget, map read-out and panel follows them. See
 |---|---|---|
 | **Altitude** | The altitude above which the aircraft is flagged (also the reference for altitude track-colouring). | 120 m |
 | **Battery alert** | The charge % at which the battery widget enters its alert state (and multi-battery AUTO drops to the lowest pack). See **[Batteries](../guides/batteries.md)**. | 30 % |
-| **System messages** | How many in-app notifications to show — Off / Error / Warning / All / Debug. *All* shows everything up to the firmware's info level; *Debug* adds its developer-level texts (MAVLink severity *debug* — ArduPilot's "Sending unknown message …", for example), without a sound. **Currently MAVLink (ArduPilot / PX4) only** — INAV has no equivalent message source. | Warning |
+| **System Messages** | How many in-app notifications to show — Off / Errors / Warnings / All / Debug (verbose). *All* shows everything up to the firmware's info level; *Debug (verbose)* adds its developer-level texts (MAVLink severity *debug* — ArduPilot's "Sending unknown message …", for example), without a sound. **Currently MAVLink (ArduPilot / PX4) only** — INAV has no equivalent message source. | Warnings |
 
 ### UI
 
@@ -92,14 +92,14 @@ App Store tell you about new versions themselves, and GitHub releases have no iO
 | **3D Buildings (OSM)** | Show OpenStreetMap building extrusions on the 3D globe. The buildings come from Cesium Ion, so the switch stays greyed out until a **Cesium Ion Token** is entered (**[Providers](#providers)**, below). | Off |
 | **Real Daytime and Lighting (3D)** | Light the 3D globe with the real sun position (day / night, shadows). | On |
 | **Log Replay Time (3D)** | During replay, drive that lighting from the log's actual time of day (needs the option above). | On |
-| **High-Resolution 3D** | Render the 3D globe at the display's native pixel density (on) or at half of it (off) to save GPU and battery. Switched off on a standard-density screen, the globe also loads its online map tiles up to one zoom level coarser — as few as a quarter of the tiles, which is all the half-resolution picture can show. On high-density screens (phones, tablets, HiDPI laptops) the tiles stay as they are, because half the density still shows them fully. Sharpest on high-DPI phones and tablets; a laptop with a weak integrated GPU may prefer it off. | On (desktop) · Off (phone / tablet) |
+| **High-Resolution 3D** | Render the 3D globe at the display's native pixel density (on) or at half of it (off) to save GPU and battery. Switched off on a screen below double pixel density (a desktop monitor, also at 125 % or 150 % scaling), the globe also loads its online map tiles up to one zoom level coarser — as few as a quarter of the tiles, which is all the half-resolution picture can show. On high-density screens (phones, tablets, displays at 200 % scaling and above) the tiles stay as they are, because half the density still shows them fully. Sharpest on high-DPI phones and tablets; a laptop with a weak integrated GPU may prefer it off. | On (desktop) · Off (phone / tablet) |
 
 ### Mission Control
 
 | Setting | What it does | Default |
 |---|---|---|
-| **Default waypoint altitude** | The altitude new waypoints get when you place them. | 50 m |
-| **Default PosHold time** | The default loiter time for a new hold waypoint. | 30 s |
+| **Default WP Altitude** | The altitude new waypoints get when you place them. | 50 m |
+| **Default PH Time** | The default loiter time for a new position-hold (PosHold) waypoint. | 30 s |
 
 See **[Missions](../guides/missions.md)**.
 
@@ -110,20 +110,20 @@ See **[Missions](../guides/missions.md)**.
 | **Custom Offline Map Location** *(desktop only)* | The folder Kite reads custom maps from, one subfolder per map — **Choose** another folder or **Use Default**. Below it: how many maps were found, **Show map area** (moves the map to the area the selected custom map covers; shown only while one is selected) and **Rescan** (read the folder again, e.g. after adding tiles or plugging in the drive). You pick the map itself under **Map Provider** (**[Display](#display)**, Interface tab). See **[Custom maps from a folder](../guides/custom-maps.md#custom-maps-from-a-folder)**. | `custom_maps` in Kite's app data folder |
 | **Custom Online Provider** | How many online tile services you added (**None**, **1 provider**, …). **Manage** opens the list: **Add provider**, **Edit**, **Delete**, and in the form a **Test** that loads one tile. Each provider is given by its URL template (an API key is simply part of the URL), with a max zoom, a tile size (256 / 512 / 128 px) and an optional attribution. See **[Custom online providers](../guides/custom-maps.md#custom-online-providers)**. | None |
 | **Cesium Ion Token** | Your free Cesium Ion token, which enables real-world 3D terrain. See **[3D map](../guides/map-3d.md)**. | (none) |
-| **Airspace Manager** | Enable the aeronautical overlay, pick the **provider** (OpenAIP) and enter its **API key**. See **[Airspace Manager](../guides/airspace.md)**. | On, no provider set |
+| **Airspace Manager** | Enable the aeronautical overlay, pick the **Data provider** (OpenAIP) and enter its **API key**. See **[Airspace Manager](../guides/airspace.md)**. | On, no provider set |
 
 ### Cache
 
 | Setting | What it does | Default |
 |---|---|---|
-| **Tile Cache** | On-disk cache size for the map imagery (off … 5 GB), with a usage bar and **Clear**. Used by **both 2D and 3D**, and what makes the map work **offline**. Custom online providers use it like the built-in maps; custom offline maps are read from disk and never go into this cache. | 200 MB |
+| **Tile Cache** | On-disk cache size for the map imagery (**No Cache**, 100 MB … 5 GB), with a usage bar and **Clear**. Used by **both 2D and 3D**, and what makes the map work **offline**. Custom online providers use it like the built-in maps; custom offline maps are read from disk and never go into this cache. | 200 MB |
 | **Terrain Cache** | Disk cache for the Copernicus terrain used by terrain analysis (size read-out + **Clear**). | — |
 
 ## Data tab
 
 ### Telemetry
 
-Kite polls the link at just **two** configurable rates — **Attitude** and **GPS / Position**. Everything
+Kite polls the link at just **two** configurable rates — **Attitude** and **GPS Position**. Everything
 else is *derived* from those: a few fields ride along with (a fraction of) those polls, and the remaining
 data — status, battery, flight mode, RC link, … — refreshes at roughly **1 Hz**. So these two rates set
 how smooth the instruments feel; the rest is automatic.
@@ -131,30 +131,30 @@ how smooth the instruments feel; the rest is automatic.
 | Setting | What it does | Default |
 |---|---|---|
 | **Attitude** | Attitude (AHI / compass) update rate — 1–5 Hz. Higher is smoother but uses more link bandwidth. | 5 Hz |
-| **GPS / Position** | Position / speed / altitude update rate — 1–5 Hz. | 2 Hz |
+| **GPS Position** | Position / speed / altitude update rate — 1–5 Hz. | 2 Hz |
 | **Airspeed** | Request airspeed telemetry (when the aircraft has an airspeed sensor). | On |
-| **Wind** | Request wind-estimate telemetry (shown on the compass widget). Live wind needs **ArduPilot** or **PX4**, or **INAV 10.0+** — on older INAV the toggle stays without effect. Replay always shows the wind a log recorded. | Off |
+| **Wind estimate** | Request wind-estimate telemetry (shown on the compass widget). Live wind needs **ArduPilot** or **PX4**, or **INAV 10.0+** — on older INAV the toggle stays without effect. Replay always shows the wind a log recorded. | Off |
 | **Direction indicators** | Draw the heading / course / predicted-turn lines at the aircraft on the map. | On |
 | **Full MAVLink Telemetry** | MAVLink only — hand rate control to the flight controller (streams everything at its own rates, ignoring the two rates above). For fast links / full `.tlog` capture. See **[Telemetry & display](../guides/telemetry-and-display.md)**. | Off |
 | **Telemetry API** | Serve the live telemetry to other programs as JSON, read-only: a **TCP stream** (port 27300), an **HTTP snapshot** (port 27301) and/or **UDP subscribers** (port 27300, a client subscribes by sending the word `subscribe`); **Reachable on the network** switches the listeners from loopback to all interfaces; **Update rate** 1–10 Hz. The status line shows the endpoints and connected clients. Full contract: **[Telemetry API](telemetry-api.md)**. | Off |
-| **Radar tracking** | Master switch for foreign-vehicle radar, with per-system enables (**ADS-B**, **FormationFlight**). See **[Radar & ADS-B](../guides/radar-and-adsb.md)**. | On (ADS-B on) |
+| **Radar Tracking** | Master switch for foreign-vehicle radar, with per-system enables (**ADS-B**, **FormationFlight**). See **[Radar & ADS-B](../guides/radar-and-adsb.md)**. | On (ADS-B on) |
 | **RC Control** | Enable GCS RC control (reveals the RC tool). See **[RC control](../guides/rc-control.md)**. | Off |
 
-**Airspeed** and **Wind** each request **extra messages** over the link, so they're separate toggles —
+**Airspeed** and **Wind estimate** each request **extra messages** over the link, so they're separate toggles —
 switch them off to save bandwidth on a slow over-the-air radio, and on when the link can spare it.
 
 ### Flight Logbook
 
 | Setting | What it does | Default |
 |---|---|---|
-| **Enable flight logging** | Record a flight-summary entry per flight in the logbook. | On |
-| **Enable flight recording** | Record the full telemetry track for replay. | On |
-| **Raw flight logs** | Also keep the raw MSP/MAVLink stream (`.rawmsp` / `.tlog`) for each recording. | Off |
-| **Continuous raw logging** | Record the raw stream the whole time connected, not just while armed. | Off |
-| **Flight log database** | Where the logbook database lives — **Choose** a path or **Use default**. | default path |
-| **Compact Database** *(desktop only)* | Rebuild the database file to reclaim space (rarely needed — deleting flights already frees space in the background). Kite shows a blocking notice until it is done; on a hard disk or an SD card this can take several minutes. If a flight is being recorded or an import is running, Kite refuses with a message. While it runs it needs free space: up to the size of the database next to the database file, and about the same again in the system's temporary folder. On Android and iOS the button is not shown: the database holds no original log files there, and deleting flights already gives the space back. | — |
+| **Enable Flight Logbook** | Record a flight-summary entry per flight in the logbook. | On |
+| **Enable Flight Recording** | Record the full telemetry track for replay. | On |
+| **Save Raw Data Logs** | Also keep the raw MSP/MAVLink stream (`.rawmsp` / `.tlog`) for each recording. | Off |
+| **Continuous Raw Logging** | Record the raw stream the whole time connected, not just while armed. | Off |
+| **Database Folder** | Where the logbook database lives — **Choose** a folder or **Use Default**. | default path |
+| **Compact Database** *(desktop only)* | **Compact now** rebuilds the database file to reclaim space (rarely needed — deleting flights already frees space in the background). Kite shows a blocking notice until it is done; on a hard disk or an SD card this can take several minutes. If a flight is being recorded or an import is running, Kite refuses with a message. While it runs it needs free space: up to the size of the database next to the database file, and about the same again in the system's temporary folder. On Android and iOS the button is not shown: the database holds no original log files there, and deleting flights already gives the space back. | — |
 | **Database backup (pre-update)** | Shown only once a backup exists: the backup Kite wrote before it last upgraded the database format, with its size and a **Delete** button. See **[Flight logbook](../guides/logbook.md#the-database-updates-and-the-automatic-backup)**. | — |
-| **Raw log path** | Where raw `.rawmsp` / `.tlog` files are written. | default path |
+| **Raw Log Folder** | Where raw `.rawmsp` / `.tlog` files are written. | default path |
 
 See **[Flight logbook](../guides/logbook.md)** for how these are used.
 
@@ -162,9 +162,9 @@ See **[Flight logbook](../guides/logbook.md)** for how these are used.
 
 | Setting | What it does | Default |
 |---|---|---|
-| **Log level** | How much Kite writes to its diagnostic log file — Off / Error / Warning / Debug. Raise it when reporting a problem. | Warning |
-| **Open log folder** | Open the folder containing the diagnostic log in your file manager. Kite writes one file per day and keeps the last 30 days. | — |
-| **Share log file** (Android) | Replaces **Open Folder** there — the log folder is app-private, no file manager can reach it. Opens a list of the day files, newest first, each with its date and size and the one this session writes tagged **current**; tap one to hand it to the Android share sheet (mail, messenger, a text editor). **Close** dismisses the list. | — |
+| **Log Level** | How much Kite writes to its diagnostic log file — Off / Errors / Warnings / Debug (verbose). Raise it when reporting a problem. | Warnings |
+| **Log File** | **Open Folder** opens the folder containing the diagnostic log in your file manager. Kite writes one file per day and keeps the last 30 days. | — |
+| **Log File** → **Share log file** (Android) | Replaces **Open Folder** there — the log folder is app-private, no file manager can reach it. Opens a list of the day files, newest first, each with its date and size and the one this session writes tagged **current**; tap one to hand it to the Android share sheet (mail, messenger, a text editor). **Close** dismisses the list. | — |
 
 ## See also
 
