@@ -22,7 +22,8 @@ the full guide.
   without window controls.
 - On both, the frosted-glass blur of the widgets, buttons and chips over the map is always off (only
   the panels keep it), and **High-Resolution 3D** starts switched off. See
-  **[Settings](../reference/settings.md#map)**.
+  **[Power Saving](../reference/settings.md#display)** and
+  **[High-Resolution 3D](../reference/settings.md#3d-view)** in the Settings reference.
 
 ## Connecting
 

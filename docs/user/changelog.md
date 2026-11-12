@@ -145,8 +145,8 @@ inside the box of the feature release they belong to, so the notes for one relea
 
     ??? info "Your own maps — online with your own key, offline from a folder"
         **Custom online providers.** Add any online tile service by its URL template — `{z}`, `{x}` and
-        `{y}` (or `{-y}` for a TMS service), optionally `{s}` and `{r}` — under Settings → Interface →
-        Map → *Custom Online Provider*. An API key simply goes into the URL. Give the provider a name,
+        `{y}` (or `{-y}` for a TMS service), optionally `{s}` and `{r}` — under Settings → Map →
+        Providers → *Custom Online Provider*. An API key simply goes into the URL. Give the provider a name,
         the highest zoom level the service delivers and an optional attribution, check it with
         **Test**, and it shows up in the map selector under *Custom online maps*, after the built-in
         maps — on the 2D map and the 3D globe, on every platform including Android, iPhone and iPad.
@@ -198,7 +198,7 @@ inside the box of the feature release they belong to, so the notes for one relea
     - **Background telemetry on Android** — a foreground service with a live notification keeps
       the link, the recording and the track running while Kite is minimised. [#111]
     - **High-Resolution 3D** — the globe at native pixel density (sharp on phones, tablets and
-      high-DPI screens) or at half resolution for weak GPUs; Settings → Interface → Map. [#111]
+      high-DPI screens) or at half resolution for weak GPUs; Settings → Map → 3D View. [#111]
     - **Detached video window** — the floating video frame moves out of the app into its own
       always-on-top window: put it beside Kite or on a second monitor, which then becomes your video
       screen and is filled automatically at start. An **unplug button** appears on the floating
@@ -214,7 +214,7 @@ inside the box of the feature release they belong to, so the notes for one relea
       Video panel replaces its preview with a status block (state, resolution, fps, codec, bitrate). [#127]
     - **Long-press widget editing on the desktop** — hold a widget (mouse or touch) to enter edit
       mode and drag it right away; the ✎ button is gone. Click outside the docks or Escape to leave. [#127]
-    - **Default protocol** in Settings → Connection. It stays on **Last used**, which is what Kite
+    - **Default protocol** in Settings → Interface → UI. It stays on **Last used**, which is what Kite
       has always done, and can be pinned to MSP, MAVLink or Telemetry instead, so the app opens on
       the link you actually fly no matter what the last session happened to use. [#151]
     - **Mini-map gestures** — the small map in the video frame or widget tile stays follow-locked, but
@@ -258,6 +258,14 @@ inside the box of the feature release they belong to, so the notes for one relea
       placeholder ID (INAV SITL, PX4 SITL as system ID 1) report no FC ID. [#228]
     - **`.kflight` files of INAV Blackbox flights are smaller** — and a file written by 2.0 still
       imports into Kite 1.0, linked pairs (live recording + onboard log) included. [#232]
+    - **Settings has three tabs: Interface, Map and Data.** Interface holds the display options, HUD
+      widgets, units, alerts, language, UI scale, the default protocol and updates; the new Map tab
+      gathers the 3D view, the mission defaults, the providers (custom offline maps, custom online
+      providers, Cesium Ion token, Airspace Manager) and the tile and terrain caches; Data keeps
+      telemetry, the flight logbook and diagnostics. *Tile Provider* is now called **Map Provider**.
+      The 3D **Altitude Curtain** is off by default for new installations, because it costs a lot of
+      performance; an installation that already has the setting keeps it. See
+      [Settings](reference/settings.md). [#250]
 
     **Improved**
 
@@ -576,6 +584,7 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#243]: https://github.com/b14ckyy/Kite-GC/pull/243
 [#246]: https://github.com/b14ckyy/Kite-GC/pull/246
 [#249]: https://github.com/b14ckyy/Kite-GC/pull/249
+[#250]: https://github.com/b14ckyy/Kite-GC/pull/250
 [#143]: https://github.com/b14ckyy/Kite-GC/pull/143
 [#145]: https://github.com/b14ckyy/Kite-GC/pull/145
 [#151]: https://github.com/b14ckyy/Kite-GC/pull/151

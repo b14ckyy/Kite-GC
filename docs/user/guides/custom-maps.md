@@ -7,10 +7,10 @@ Besides the built-in maps, Kite can show map imagery you bring yourself — in t
 | **Source** | An online tile service, added by its URL template | Tile files in a folder on your computer |
 | **Platforms** | Windows, Linux, macOS, Android, iPhone and iPad | Windows, Linux and macOS |
 | **Internet** | Needed; viewed tiles are cached like those of the built-in maps | Not needed |
-| **Set up in** | Settings → Interface → Map → **Custom Online Provider** | Settings → Interface → Map → **Custom map location** |
-| **In the map selector** | Group **Custom online maps**, after the built-in maps | Group **Custom maps**, at the end, marked **▦** |
+| **Set up in** | Settings → Map → Providers → **Custom Online Provider** | Settings → Map → Providers → **Custom Offline Map Location** |
+| **In the map selector** | Group **Custom online maps**, after the built-in maps | Group **Custom offline maps**, at the end, marked **▦** |
 
-Either kind replaces the imagery on the 2D map and the 3D globe, and you pick it in **Tile Provider**
+Either kind replaces the imagery on the 2D map and the 3D globe, and you pick it in **Map Provider**
 like any built-in map.
 
 ## Custom online providers
@@ -28,14 +28,14 @@ simply part of the URL.
 
 ### Adding a provider
 
-1. Open **[Settings → Interface → Map](../reference/settings.md#map)**. The row **Custom Online
+1. Open **[Settings → Map → Providers](../reference/settings.md#providers)**. The row **Custom Online
    Provider** shows how many you have added (**None**, **1 provider**, **2 providers**, …).
 2. Press **Manage**. The **Custom Online Providers** dialog lists your providers, each with its name
    and the service's host name.
 3. Press **Add provider** and fill in the form (**New online provider**) — see the fields below.
 4. Press **Test** to check the provider with one tile, then **Save**. **Cancel** leaves the form
    without saving.
-5. **Close** the dialog and pick the map in **Tile Provider**, under **Custom online maps**.
+5. **Close** the dialog and pick the map in **Map Provider**, under **Custom online maps**.
 
 The form has these fields:
 
@@ -151,7 +151,7 @@ In the **Custom Online Providers** dialog:
   selected, also after a rename.
 - **Delete** turns into **Really delete?** — press it again to delete the provider.
 
-When you delete the provider that is selected, the map shows **OpenStreetMap**, and so does **Tile
+When you delete the provider that is selected, the map shows **OpenStreetMap**, and so does **Map
 Provider**. Pick another map there. Adding the same provider again creates a new entry, which you
 select again.
 
@@ -162,7 +162,7 @@ outside the dialog closes the list, but not a form you are filling in.
 ### Cache, keys and privacy
 
 - **The tile cache.** Tiles of your providers go into Kite's
-  **[Tile Cache](../reference/settings.md#map-caches-3d)** like those of the built-in maps (unless
+  **[Tile Cache](../reference/settings.md#cache)** like those of the built-in maps (unless
   the cache is set to off), so an area you have viewed also works offline. The cache stores each tile
   under its full URL — key included. Tiles stay in the cache after you delete a provider or change
   its key or URL, until the cache drops the least recently used tiles to stay within its size or you
@@ -251,14 +251,15 @@ Files lying directly in the location are ignored.
 
 ### Choosing a custom map
 
-Open **[Settings → Interface → Map](../reference/settings.md#map)**:
+Two settings are involved:
 
-- **Tile Provider** — the maps Kite found are at the **end of the list**, under **Custom maps**, each
-  marked with **▦** and sorted by name. Pick one and it replaces the imagery on the 2D map and the 3D
-  globe.
-- **Custom map location** — the folder in use. **Choose** opens a folder picker; Kite reads the new
-  folder at once and the selector lists its maps. **Use Default** goes back to the default folder (it
-  is greyed out while the default is in use). Hover over the label for a short reminder of the layout.
+- **Map Provider** (**[Settings → Interface → Display](../reference/settings.md#display)**) — the maps
+  Kite found are at the **end of the list**, under **Custom offline maps**, each marked with **▦**
+  and sorted by name. Pick one and it replaces the imagery on the 2D map and the 3D globe.
+- **Custom Offline Map Location** (**[Settings → Map → Providers](../reference/settings.md#providers)**)
+  — the folder in use. **Choose** opens a folder picker; Kite reads the new folder at once and the
+  selector lists its maps. **Use Default** goes back to the default folder (it is greyed out while the
+  default is in use). Hover over the label for a short reminder of the layout.
 
 Below the location Kite shows how many maps it found (**Scanning…** while it reads), plus two buttons:
 
@@ -369,11 +370,12 @@ folders; there the frames can stay out of date after you add tiles — press **R
 #### Not part of the tile cache
 
 Custom-map tiles are read from disk every time and never copied into Kite's **Tile Cache**. The cache
-size and **Clear** in **Settings → Data** do not affect them, and a custom map does not use up cache
-space.
+size and **Clear** in **Settings → Map → Cache** do not affect them, and a custom map does not use up
+cache space.
 
 ## Where to go next
 
-- Every map setting: **[Settings](../reference/settings.md#map)**.
+- Every map setting: **[Settings → Map](../reference/settings.md#map)**, and the **Map Provider** under
+  **[Interface → Display](../reference/settings.md#display)**.
 - The 3D globe and its terrain: **[3D map](map-3d.md)**.
 - Offline use of the online maps: **[FAQ](../faq.md#can-i-use-the-maps-offline)**.
