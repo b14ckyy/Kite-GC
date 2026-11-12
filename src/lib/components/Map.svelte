@@ -3289,11 +3289,12 @@
     gap: 8px;
   }
 
-  /* On mobile the zoom/compass buttons sit on top of the Leaflet attribution label at the very bottom.
-     Lift the button cluster above the label (and clear of the iPad home indicator), and push the
-     attribution to the bottom-left so the two no longer collide. */
+  /* On mobile the provider credit moves to the bottom-left (below), so the button cluster can sit in
+     the corner like on the desktop and like the 3D map's cluster — clear of the iPad home indicator.
+     It used to be lifted 34 px above the credit as well; on a tablet that pushed the top button under
+     the right dock's lowest widget and left a gap below. */
   :global(html.is-mobile) .map-controls-corner {
-    bottom: calc(34px + var(--safe-bottom, 0px));
+    bottom: calc(8px + var(--safe-bottom, 0px));
   }
   :global(html.is-mobile) :global(.leaflet-control-attribution) {
     margin-bottom: var(--safe-bottom, 0px);
