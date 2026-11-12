@@ -2063,12 +2063,12 @@ place, see the <strong><a href="../../guides/video/">Video guide</a></strong>.</
 <h2 id="an-rtsp-stream-wont-start">An RTSP stream won't start<a class="headerlink" href="#an-rtsp-stream-wont-start" title="Permanent link">&para;</a></h2>
 <p>RTSP is played in one of three ways, and which one your machine uses decides what has to be installed:</p>
 <ul>
-<li><strong>The Native RTSP client</strong> — Kite's own built-in client, switched on with the <em>Native RTSP client</em>
-  toggle in the Video panel (Android and iPad always use it). It needs <strong>no helper at all</strong>: no
-  MediaMTX, no ffmpeg. If a stream won't start with it, the toggle is also the quickest test — switch
-  it off to try the classic path below (desktop only).</li>
+<li><strong>The Native RTSP client</strong> — Kite's own built-in client, on by default (the <em>Native RTSP client</em>
+  toggle in the Video panel; Android and iPad always use it and have no toggle). It needs <strong>no
+  helper at all</strong>: no MediaMTX, no ffmpeg. If a stream won't start with it, the toggle is also the
+  quickest test — switch it off to try the classic path below (desktop only).</li>
 </ul>
-<p>The classic path (toggle off) comes in two variants:</p>
+<p>The classic path (Native RTSP client switched off) comes in two variants:</p>
 <ul>
 <li><strong>The direct path</strong> uses a small bundled engine (<strong>MediaMTX</strong>), which Kite downloads automatically the
   first time you start an RTSP source. This is what Windows and macOS use.</li>
@@ -2094,7 +2094,7 @@ place, see the <strong><a href="../../guides/video/">Video guide</a></strong>.</
 <h2 id="the-stream-keeps-showing-reconnecting-check-the-codec-first">The stream keeps showing "Reconnecting…" — check the codec first<a class="headerlink" href="#the-stream-keeps-showing-reconnecting-check-the-codec-first" title="Permanent link">&para;</a></h2>
 <p>Before chasing the network: over RTSP Kite supports <strong>H.264 and MJPEG</strong> everywhere, and
 <strong>HEVC/H.265</strong> only where the <strong>Kite RTSP client</strong> decodes (Android and iPad always; Windows, Linux
-and macOS with the <em>Native RTSP client</em> toggle on — Windows additionally needs the "HEVC Video
+and macOS with the <em>Native RTSP client</em> on, the default — Windows additionally needs the "HEVC Video
 Extensions") — plus macOS on the classic path, whose browser engine plays HEVC itself. A
 stream in an unsupported codec — HEVC elsewhere, VP8, VP9 or AV1 — typically fails in exactly this
 way: it retries forever instead of reporting a codec problem, because from Kite's side an unplayable
@@ -2169,10 +2169,11 @@ or a non-low-latency tuning. Tune the encoder/camera for low-latency streaming. 
 <strong>Smoothing buffer</strong> in the Video panel's RTSP section: every step above 0 deliberately adds latency —
 set it back to 0 for the minimum.</p>
 <h2 id="linux-high-cpu-load-or-a-stuttering-picture">Linux: high CPU load or a stuttering picture<a class="headerlink" href="#linux-high-cpu-load-or-a-stuttering-picture" title="Permanent link">&para;</a></h2>
-<p>First: if the stream is H.264 or HEVC, switch on the <strong>Native RTSP client</strong> (Video panel → RTSP
-section). It takes the browser engine out of the picture entirely and decodes in hardware where the
-machine can — on the reference laptop that cut the total video load to roughly a third of one core at
-a stable 60 fps. Everything below applies to the <strong>classic path</strong>, with that toggle off.</p>
+<p>First: if the stream is H.264 or HEVC, make sure the <strong>Native RTSP client</strong> is on (the default;
+Video panel → RTSP section). It takes the browser engine out of the picture entirely and decodes in
+hardware where the machine can — on the reference laptop that cut the total video load to roughly a
+third of one core at a stable 60 fps. Everything below applies to the <strong>classic path</strong>, with the
+Native RTSP client switched off.</p>
 <p>On Linux, Kite depends on your distribution's browser-engine build for video — see the
 <strong><a href="../../guides/video/#platform-notes-what-to-expect-per-operating-system">platform notes</a></strong> in the
 guide. The log tells you what your system offers. Restart Kite, start your stream, then open the log
@@ -2207,8 +2208,7 @@ automatically on install).</p>
 its own browser engine and does not use the system's media packages at all. If video matters to you
 on Linux, prefer the <strong>.deb / system installation</strong> — it uses your distribution's engine and plugins,
 which you can at least influence.
-- <strong>Hardware conversion is used automatically where it exists.</strong> Kite tests the machine once at
-  start-up and writes the verdict to the log:
+- <strong>Hardware conversion is used automatically where it exists.</strong> Kite tests the machine once, the first time it is needed, and writes the verdict to the log:
 - Desktop graphics (Intel and AMD, via VAAPI) can do <strong>both halves</strong> — decoding and re-encoding —
   with the frames never leaving the GPU. Look for <code>[ffmpeg] VAAPI hardware H.264-decode +
   MJPEG-encode: …</code>. On an Intel laptop this cut ffmpeg's CPU use to roughly a seventh.
@@ -2220,8 +2220,10 @@ which you can at least influence.
   just one half there means copying every frame back out of graphics memory, which is slower than
   staying on the CPU altogether.
 - <strong>You can force the CPU path.</strong> If the picture is broken or unstable with hardware conversion, switch
-  on <strong>Disable hardware acceleration</strong> in the Video panel. The Video panel also states which path is
-  live — <code>Transcode: Hardware</code>, <code>Software</code>, or <code>Copy</code> when nothing needs converting at all.
+  on <strong>Disable hardware acceleration</strong> in the Video panel — it only appears when the test above found
+  working hardware, since otherwise the conversion already runs on the CPU. The Video panel also
+  states which path is live — <code>Transcode: Hardware</code>, <code>Software</code>, or <code>Copy</code> when nothing needs
+  converting at all.
 - <strong>Send a smaller or slower stream from the source.</strong> This is the one lever that really works, because
   it removes the work at <em>every</em> stage — network, decoding, conversion and display. On a single-board
   computer, 480p at 30 fps is comfortable where 720p60 is not. Set it where the stream is produced (your
