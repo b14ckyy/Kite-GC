@@ -2299,6 +2299,7 @@
       attribution: provider.attribution,
       maxZoom: provider.maxZoom,
       updateWhenIdle: false,
+      maxNativeZoom: provider.maxNativeZoom,
       // Enable over-zoom placeholder detection on flagged base layers (ESRI sat).
       providerId: provider.detectPlaceholders ? provider.id : undefined,
       // Custom (local tile folder) map: local tile path + over-zoom above its highest level.
@@ -2312,6 +2313,7 @@
           attribution: ol.attribution,
           maxZoom: ol.maxZoom,
           updateWhenIdle: false,
+          maxNativeZoom: ol.maxNativeZoom,
           pane: "overlayPane",
         }).addTo(map);
         currentOverlays.push(layer);

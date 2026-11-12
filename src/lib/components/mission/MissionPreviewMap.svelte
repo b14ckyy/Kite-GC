@@ -98,7 +98,7 @@
       // preview to the ~10px border instead of being capped tiny at the provider's native zoom.
       cachedTileLayer(provider.url, {
         attribution: '',
-        maxNativeZoom: provider.maxZoom,
+        maxNativeZoom: provider.maxNativeZoom ?? provider.maxZoom,
         providerId: provider.detectPlaceholders ? provider.id : undefined,
         ...providerLayerOptions(provider),
         // After the spread: a user online map's over-zoom limit (20) must not lower the preview's 21.
