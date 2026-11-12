@@ -18,9 +18,14 @@ import {
   customProvider,
   getProviderById,
   isCustomProviderId,
+  isUserProviderId,
   setCustomProviders,
   type MapProvider,
+  type UserMapSpec,
 } from '$lib/config/mapProviders';
+// Imported for its side effect too: it mirrors the persisted user online maps into the provider
+// registry at load, before any map view (all of which import this module) resolves an id.
+import { syncUserMapRegistry } from '$lib/stores/userMaps';
 
 /** `[west, south, east, north]` in degrees. */
 export type GeoBounds = [number, number, number, number];
@@ -188,19 +193,22 @@ export function ensureCustomMapsLoaded(): Promise<void> {
 }
 
 /** Change detection key of a resolved provider: a custom map is re-applied after every listing (its
- *  tiles may have changed on disk), a built-in one only when it changes. */
+ *  tiles may have changed on disk), a user online map whenever it is edited (same id, new template),
+ *  a built-in one only when it changes. */
 function providerKey(p: MapProvider, revision: number): string {
-  return p.custom ? `${p.id}|${p.custom.minZoom}-${p.custom.maxZoom}|${revision}` : p.id;
+  if (p.custom) return `${p.id}|${p.custom.minZoom}-${p.custom.maxZoom}|${revision}`;
+  return isUserProviderId(p.id) ? `${p.id}|${p.maxZoom}|${p.tileSize}|${p.attribution}|${p.url}` : p.id;
 }
 
 /**
  * Follow the provider the map views should show (`settings.mapProvider`, resolved against the
- * custom-map registry). Calls `apply` immediately for a built-in provider and whenever the resolved
- * provider changes — NOT on the many other settings writes. A persisted custom id waits for the first
- * listing; a custom map that no longer exists resolves to the built-in fallback.
+ * custom-map and user-map registry). Calls `apply` immediately for a built-in provider and whenever the
+ * resolved provider changes — NOT on the many other settings writes. A persisted custom id waits for
+ * the first listing; a custom or user map that no longer exists resolves to the built-in fallback.
  */
 export function watchMapProvider(apply: (p: MapProvider) => void): () => void {
   let id: string | null = null;
+  let userList: UserMapSpec[] | null = null;
   let state = get(customMaps);
   let lastKey = '';
   const check = () => {
@@ -217,8 +225,10 @@ export function watchMapProvider(apply: (p: MapProvider) => void): () => void {
   };
   const unsubMaps = customMaps.subscribe((s) => { state = s; check(); });
   const unsubSettings = settings.subscribe((s) => {
-    if (s.mapProvider === id) return;
+    if (s.mapProvider === id && s.userMapProviders === userList) return;
     id = s.mapProvider;
+    userList = s.userMapProviders;
+    syncUserMapRegistry(userList); // before resolving, whatever order the subscribers run in
     check();
   });
   return () => { unsubMaps(); unsubSettings(); };

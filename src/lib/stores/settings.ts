@@ -8,6 +8,8 @@ import { writable } from 'svelte/store';
 import type { RelayConfig } from '$lib/stores/relay';
 import { isMobile } from '$lib/platform';
 import type { WidgetSize } from '$lib/config/widgetRegistry';
+import { normalizeTileSize, type UserMapSpec } from '$lib/config/mapProviders';
+import { validateTileTemplate } from '$lib/helpers/tileTemplate';
 import { DEFAULT_PHONE_WIDGETS, type PhoneWidgetsConfig } from '$lib/controllers/phoneWidgetController';
 
 export interface MapState {
@@ -343,6 +345,9 @@ export interface AppSettings {
   /** Folder holding the custom (local tile) maps, one subfolder per map; '' = the default
    *  `<app data>/custom_maps`. Desktop only. */
   customMapsPath: string;
+  /** User online maps (tile URL templates, may hold an API key — never log them). Selected as
+   *  `user:<id>`; see `stores/userMaps.ts`. */
+  userMapProviders: UserMapSpec[];
   /** The swapped-in mini map (video frame / widget tile) follows the aircraft heading-up (true) or
    *  north-up (false); a tap on it toggles (Map.svelte). Remembered across swaps and restarts. */
   miniMapHeadingUp: boolean;
@@ -457,6 +462,7 @@ const defaults: AppSettings = {
   mapProvider: 'esri-hybrid',
   mapCacheMaxMB: 200,
   customMapsPath: '',
+  userMapProviders: [],
   miniMapHeadingUp: true,
   navPanelOpen: true,
   activeTab: 'uav-info',
@@ -528,6 +534,22 @@ function load(): AppSettings {
       return {
         ...defaults,
         ...parsed,
+        // Every map view resolves these on mount — drop anything a hand-edited profile broke: a wrong
+        // shape, a template the 2D map would throw on, a repeated id (the first one wins).
+        userMapProviders: (() => {
+          if (!Array.isArray(parsed.userMapProviders)) return [];
+          const seen = new Set<string>();
+          return parsed.userMapProviders
+            .filter((m) => {
+              const ok = m && typeof m.id === 'string' && typeof m.name === 'string' && typeof m.url === 'string'
+                && typeof m.maxZoom === 'number' && typeof m.attribution === 'string'
+                && !seen.has(m.id) && validateTileTemplate(m.url) === null;
+              if (ok) seen.add(m.id);
+              return ok;
+            })
+            // No tile size yet (stored before it existed) → 256; an odd value → the nearest supported.
+            .map((m) => ({ ...m, tileSize: normalizeTileSize(m.tileSize) }));
+        })(),
         interface: {
           ...defaults.interface,
           ...(parsed.interface ?? {}),

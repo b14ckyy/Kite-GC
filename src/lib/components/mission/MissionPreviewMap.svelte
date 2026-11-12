@@ -98,10 +98,11 @@
       // preview to the ~10px border instead of being capped tiny at the provider's native zoom.
       cachedTileLayer(provider.url, {
         attribution: '',
-        maxZoom: 21,
         maxNativeZoom: provider.maxZoom,
         providerId: provider.detectPlaceholders ? provider.id : undefined,
         ...providerLayerOptions(provider),
+        // After the spread: a user online map's over-zoom limit (20) must not lower the preview's 21.
+        maxZoom: 21,
       }).addTo(map);
     };
     // A custom map resolves only once the custom-map folder is listed.

@@ -57,6 +57,7 @@
   import { settings } from "$lib/stores/settings";
   import { gcsLocation } from "$lib/stores/gcsLocation";
   import { getProviderById, isCustomProviderId, isCustomTileUrl } from "$lib/config/mapProviders";
+  import { fillTileTemplate } from "$lib/helpers/tileTemplate";
   import type { MapProvider } from "$lib/config/mapProviders";
   import { ensureCustomMapsLoaded, watchMapProvider, onCustomMapFocus } from "$lib/stores/customMaps";
   import { getCachedTile, putCachedTile, initTileCache } from "$lib/cache/tileCache";
@@ -615,18 +616,11 @@
   }
 
   /**
-   * Build the actual tile URL from a template + tile coordinates.
+   * Build the actual tile URL from a template + tile coordinates (incl. a user map's `{-y}` TMS row).
    * Used as the IndexedDB cache key.
    */
   function buildTileUrl(template: string, x: number, y: number, z: number, subdomains: string[]): string {
-    let url = template
-      .replace('{x}', String(x))
-      .replace('{y}', String(y))
-      .replace('{z}', String(z));
-    if (subdomains.length > 0) {
-      url = url.replace('{s}', subdomains[(x + y + z) % subdomains.length]);
-    }
-    return url;
+    return fillTileTemplate(template, z, x, y, subdomains);
   }
 
   /** Tile coordinates + provider for over-zoom placeholder detection. */
@@ -709,6 +703,11 @@
       url: cesiumUrl,
       subdomains: hasSubdomains ? subdomains : undefined,
       maximumLevel: provider.cesiumMaxZoom ?? provider.maxZoom,
+      // A user online map's real tile pixel size (Cesium default 256): Cesium picks the imagery level
+      // from texel spacing (ImageryLayer getLevelWithMaximumTexelSpacing divides by tileWidth), so a
+      // 512 px source is drawn from one level lower — its own native density.
+      tileWidth: provider.tileSize,
+      tileHeight: provider.tileSize,
       credit: new Cesium.Credit(provider.attribution, false),
     });
 
