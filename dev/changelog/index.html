@@ -1983,6 +1983,12 @@ internet. <a href="https://github.com/b14ckyy/Kite-GC/pull/246">#246</a></p>
   The 3D <strong>Altitude Curtain</strong> is off by default for new installations, because it costs a lot of
   performance; an installation that already has the setting keeps it. See
   <a href="../reference/settings/">Settings</a>. <a href="https://github.com/b14ckyy/Kite-GC/pull/250">#250</a></li>
+<li><strong>Local radar devices over the network.</strong> An ADS-B receiver and the FormationFlight module can
+  be connected over <strong>TCP</strong> or <strong>UDP</strong> as well as over a serial port — on Android, where serial
+  ports are limited, and on iPhone and iPad, which have none and now offer the network links
+  only. A serial port that a radar source uses is greyed out for the flight connection and the
+  other way round, and two sources set to the same UDP port get a warning. See
+  <a href="../guides/radar-and-adsb/#connecting-a-local-device">Radar &amp; ADS-B</a>. <a href="https://github.com/b14ckyy/Kite-GC/pull/261">#261</a></li>
 <li><strong>No RC control on a phone.</strong> The RC tool and its switch in Settings are gone from the phone
   layout: on-screen touch sticks are too easy to hit by accident for something that steers an
   aircraft. Tablets and the desktop keep RC control. <a href="https://github.com/b14ckyy/Kite-GC/pull/260">#260</a></li>
