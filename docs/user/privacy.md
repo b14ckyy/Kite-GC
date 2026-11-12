@@ -75,15 +75,20 @@ These transfers happen only because you trigger them, and you choose the recipie
   network* on.
 - **Helper programs** — when you press *Download* for a helper on the desktop, Kite fetches it from its
   publisher's GitHub releases: MediaMTX for RTSP video from bluenviron/mediamtx, and ffmpeg from
-  BtbN/FFmpeg-Builds. The request carries only what any download does (your IP address and a
+  BtbN/FFmpeg-Builds; Kite 1.x also the Blackbox decoder from iNavFlight/blackbox-tools (later versions
+  decode INAV Blackbox logs themselves and fetch it only when started with the fallback switch
+  `KITE_BLACKBOX_LEGACY=1`). The request carries only what any download does (your IP address and a
   user-agent string naming Kite); it is governed by [GitHub's privacy statement](https://docs.github.com/site-policy/privacy-policies).
 
 ## Third-party services the app contacts
 
 Kite is a client: for some features it downloads data from public services straight from your device.
 The app sends only what the request needs — usually a map position and a radius — plus what every
-internet request carries (your IP address, a user-agent string naming Kite and its version). None of
-these requests contain your name, your flight logs or any identifier for your device or your aircraft.
+internet request carries (your IP address and a user-agent string). Requests Kite makes itself name
+Kite and its version there. Some requests are made by the system's web view and carry its browser
+user agent instead: the 3D map's requests to Cesium ion, a map tile Kite's own download could not
+fetch, and on the 2D map the coarser stand-in tile where a satellite map has no detail. None of these
+requests contain your name, your flight logs or any identifier for your device or your aircraft.
 Each provider handles the request under its own privacy policy, which we link below.
 
 ### Automatic

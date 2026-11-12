@@ -41,9 +41,9 @@ The more of this you provide, the quicker it can be diagnosed:
 
 The log usually pinpoints the cause. To capture a good one:
 
-1. Open **Settings → Diagnostics** and set **Log Level** to **Debug**.
+1. Open **Settings → Diagnostics** and set **Log Level** to **Debug (verbose)**.
 2. **Reproduce** the problem.
-3. Click **Open Log Folder** and attach the log file to the issue (on Android **Share log file** → pick the
+3. Click **Open Folder** and attach the log file to the issue (on Android **Share log file** → pick the
    day → send it to mail or a messenger, then attach it).
 
 The log locations and what the file contains (port names and firmware strings, but no personal data) are

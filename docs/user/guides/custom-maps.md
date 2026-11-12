@@ -204,7 +204,7 @@ Kite reads all custom maps from one folder, the **custom map location**. By defa
 |---|---|---|---|
 | `%APPDATA%\kite-gc\custom_maps\` | `~/.local/share/kite-gc/custom_maps/` | `~/Library/Application Support/kite-gc/custom_maps/` | `<app>/data/custom_maps/` |
 
-Kite creates the default folder if it does not exist. Moving the **Flight log database** to another
+Kite creates the default folder if it does not exist. Moving the flight log database (**Database Folder**) to another
 folder in Settings does not move it. To use a different folder — another drive, a USB stick, a network
 share — pick it in Settings (see [below](#choosing-a-custom-map)).
 
