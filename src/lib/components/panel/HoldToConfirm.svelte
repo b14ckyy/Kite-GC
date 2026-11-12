@@ -6,7 +6,9 @@
 <script lang="ts">
   // Hold-to-confirm button (control library, see docs/active/VEHICLE_CONTROL.md): fills left→right
   // while pressed; firing `onconfirm` only once the fill completes. Releasing early cancels. Touch-
-  // and trackpad-friendly (no drag precision needed). Used for all vehicle-control actions except
+  // and trackpad-friendly (no drag precision needed). A vertical swipe that starts on the button
+  // scrolls the panel instead (`touch-action: pan-y`): the browser then takes the gesture and sends
+  // `pointercancel`, which drops the hold. Used for all vehicle-control actions except
   // arming (which uses the slide-to-confirm ArmSlider).
   import type { Snippet } from 'svelte';
 
@@ -97,7 +99,7 @@
     cursor: pointer;
     overflow: hidden;
     user-select: none;
-    touch-action: none;
+    touch-action: pan-y;
     transition: background-color 0.15s, border-color 0.15s, opacity 0.15s;
   }
   .htc.standard { --htc-border: #37a8db; --htc-bg: rgba(55, 168, 219, 0.12); --htc-fg: #cfe8f4; --htc-fill: rgba(55, 168, 219, 0.55); }

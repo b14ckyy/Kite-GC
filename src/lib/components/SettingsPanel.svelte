@@ -25,7 +25,7 @@
   import { resetGcsManual, gcsManuallySet } from '$lib/stores/gcsLocation';
   import type { AppSettings, InterfaceSettings, RadarSettings, GcsMode, AirspaceSettings, AirspaceProvider, SystemMessagesLevel, LogLevel, RcControlSettings, TelemetryApiSettings, UpdateCheckSettings, UpdateCheckMode, DefaultProtocol } from '$lib/stores/settings';
   import { revealItemInDir, openPath } from '@tauri-apps/plugin-opener';
-  import { isAndroid, isMobile, hasDbCompact, hasCustomMaps } from '$lib/platform';
+  import { isAndroid, isMobile, hasDbCompact, hasCustomMaps, hasRcControl } from '$lib/platform';
   import { updatesSupported } from '$lib/controllers/updateCheck';
   import { blackboxDecoderVersion, blackboxLegacyMode, downloadBlackboxDecode } from '$lib/stores/flightlog';
   import type { TileCacheStats } from '$lib/cache/tileCache';
@@ -914,11 +914,14 @@
         </div>
       {/if}
 
-      <!-- RC Control (INAV RC over MSP) — master switch for the RC nav-rail tab. -->
-      <div class="s-row">
-        <label class="s-label" for="rc-control-enabled">{$t('settings.rcControl')}</label>
-        <Toggle checked={rcControl.enabled} id="rc-control-enabled" onchange={(c) => patchRcControl({ enabled: c })} />
-      </div>
+      <!-- RC Control (INAV RC over MSP) — master switch for the RC nav-rail tab. Not on a phone
+           (`hasRcControl`). -->
+      {#if hasRcControl}
+        <div class="s-row">
+          <label class="s-label" for="rc-control-enabled">{$t('settings.rcControl')}</label>
+          <Toggle checked={rcControl.enabled} id="rc-control-enabled" onchange={(c) => patchRcControl({ enabled: c })} />
+        </div>
+      {/if}
     </div>
 
     <!-- ── Flight Logbook ────────────────────────────── -->

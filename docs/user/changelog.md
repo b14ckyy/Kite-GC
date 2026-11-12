@@ -267,6 +267,9 @@ inside the box of the feature release they belong to, so the notes for one relea
       The 3D **Altitude Curtain** is off by default for new installations, because it costs a lot of
       performance; an installation that already has the setting keeps it. See
       [Settings](reference/settings.md). [#250]
+    - **No RC control on a phone.** The RC tool and its switch in Settings are gone from the phone
+      layout: on-screen touch sticks are too easy to hit by accident for something that steers an
+      aircraft. Tablets and the desktop keep RC control. [#260]
 
     **Improved**
 
@@ -607,6 +610,7 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#254]: https://github.com/b14ckyy/Kite-GC/pull/254
 [#255]: https://github.com/b14ckyy/Kite-GC/pull/255
 [#258]: https://github.com/b14ckyy/Kite-GC/pull/258
+[#260]: https://github.com/b14ckyy/Kite-GC/pull/260
 [#256]: https://github.com/b14ckyy/Kite-GC/pull/256
 [#259]: https://github.com/b14ckyy/Kite-GC/pull/259
 [#143]: https://github.com/b14ckyy/Kite-GC/pull/143
