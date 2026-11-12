@@ -117,13 +117,13 @@
   >
     {#if mapHere}
       <!-- map -->
-      <svg viewBox="0 0 24 24" aria-hidden="true">
+      <svg viewBox="2 2 20 20" aria-hidden="true">
         <path d="M3 6.5 9 4l6 2.5 6-2.5v13.5L15 20l-6-2.5L3 20z" />
         <path d="M9 4v13.5M15 6.5V20" />
       </svg>
     {:else}
       <!-- camera -->
-      <svg viewBox="0 0 24 24" aria-hidden="true">
+      <svg viewBox="2 2 20 20" aria-hidden="true">
         <rect x="3" y="7" width="13" height="10" rx="2" />
         <path d="M16 10.5 21 8v8l-5-2.5" />
       </svg>
@@ -196,7 +196,10 @@
     box-sizing: border-box;
     width: 38px;
     height: 38px;
-    padding: 7px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
     background: rgba(46, 46, 46, 0.9);
     border: 2px solid rgba(55, 168, 219, 0.5);
     border-radius: 6px;
@@ -216,9 +219,12 @@
   .dock-btn.map-mode {
     bottom: calc(8px + var(--safe-bottom, 0px));
   }
+  /* The drawing fills 75 % of the button, as on the corner controls: the viewBoxes are cropped to it
+     (app.html, --map-btn-icon). */
   .dock-btn svg {
-    width: 100%;
-    height: 100%;
+    flex: none;
+    width: var(--map-btn-icon, 28.5px);
+    height: var(--map-btn-icon, 28.5px);
     fill: none;
     stroke: currentColor;
     stroke-width: 2;

@@ -42,14 +42,14 @@ export function setUserLocation(lat: number, lon: number, source: string, accura
  *  prompt is labelled with the app name + Info.plist usage string, not the WebView origin ("localhost"
  *  is all the Web geolocation prompt can show). Loaded lazily so the plugin JS never reaches the desktop
  *  bundle's startup path. */
-async function runGeoCheckNative(): Promise<void> {
+async function runGeoCheckNative(): Promise<boolean> {
   try {
     const geo = await import('@tauri-apps/plugin-geolocation');
     let perm = await geo.checkPermissions();
     if (perm.location !== 'granted') perm = await geo.requestPermissions(['location']);
     if (perm.location !== 'granted') {
       console.warn('[geo] native location permission not granted:', perm.location);
-      return;
+      return false;
     }
     // The plugin's PositionOptions has no optional fields, so pass an explicit literal (same values
     // as GEO_OPTS: coarse fix, 8 s timeout, up to a 1 h cached position).
@@ -58,15 +58,17 @@ async function runGeoCheckNative(): Promise<void> {
       pos.coords.latitude, pos.coords.longitude, 'os-geolocation-native',
       Number.isFinite(pos.coords.accuracy) ? pos.coords.accuracy : null,
     );
+    return true;
   } catch (err) {
     console.warn('[geo] native geolocation failed, keeping last known:', err);
+    return false;
   }
 }
 
 /** macOS: read the newest CoreLocation fix from the backend (location_macos.rs). WKWebView has no
  *  Geolocation API at all, so the Web path below can never resolve there. The native module is the
  *  only source, and it pushes an `os-location` event as well for the live updates. */
-async function runGeoCheckMacOs(): Promise<void> {
+async function runGeoCheckMacOs(): Promise<boolean> {
   try {
     // Start first, and on every manual check. The backend gives up when Location Services are off
     // system-wide, so without this a user who turns them on (or grants the permission) after launch
@@ -78,30 +80,47 @@ async function runGeoCheckMacOs(): Promise<void> {
     if (fix) setUserLocation(fix.lat, fix.lon, 'os-corelocation', fix.accuracy_m);
     // No fix yet is normal, not an error: CoreLocation is still resolving, or the permission prompt
     // is unanswered. The event listener below delivers it whenever it arrives.
+    return fix != null;
   } catch (err) {
     console.warn('[geo] CoreLocation read failed, keeping last known:', err);
+    return false;
   }
 }
 
-function runGeoCheck(): void {
+/** Windows (WebView2) / Linux (WebKitGTK): the Web Geolocation API. Resolves once it has answered. */
+function runGeoCheckWeb(): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      console.warn('[geo] navigator.geolocation unavailable');
+      resolve(false);
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setUserLocation(
+          pos.coords.latitude, pos.coords.longitude, 'os-geolocation',
+          Number.isFinite(pos.coords.accuracy) ? pos.coords.accuracy : null,
+        );
+        resolve(true);
+      },
+      (err) => {
+        console.warn('[geo] geolocation failed, keeping last known:', err.message);
+        resolve(false);
+      },
+      GEO_OPTS,
+    );
+  });
+}
+
+/** One OS check on the platform's path; true when it delivered a fix (stored via setUserLocation). */
+function runGeoCheck(): Promise<boolean> {
   // On mobile the vehicle's own GPS is the primary source (see the telemetry subscription below); the OS
   // check is a best-effort head start before a UAV connects. Route it through the native plugin so the
   // permission dialog carries the app's name.
-  if (isMobile) { void runGeoCheckNative(); return; }
+  if (isMobile) return runGeoCheckNative();
   // macOS desktop (isMacOS excludes iOS): native CoreLocation, see runGeoCheckMacOs.
-  if (isMacOS) { void runGeoCheckMacOs(); return; }
-  if (typeof navigator === 'undefined' || !navigator.geolocation) {
-    console.warn('[geo] navigator.geolocation unavailable');
-    return;
-  }
-  navigator.geolocation.getCurrentPosition(
-    (pos) => setUserLocation(
-      pos.coords.latitude, pos.coords.longitude, 'os-geolocation',
-      Number.isFinite(pos.coords.accuracy) ? pos.coords.accuracy : null,
-    ),
-    (err) => console.warn('[geo] geolocation failed, keeping last known:', err.message),
-    GEO_OPTS,
-  );
+  if (isMacOS) return runGeoCheckMacOs();
+  return runGeoCheckWeb();
 }
 
 let autoChecked = false;
@@ -109,12 +128,40 @@ let autoChecked = false;
 export function ensureUserLocation(): void {
   if (autoChecked) return;
   autoChecked = true;
-  runGeoCheck();
+  void runGeoCheck();
 }
 
 /** Manual trigger (settings button) — always runs a fresh OS geo check. */
 export function requestUserLocation(): void {
-  runGeoCheck();
+  void runGeoCheck();
+}
+
+/** How long "to my location" waits on macOS for CoreLocation to deliver a first fix by event. */
+const MACOS_FIRST_FIX_WAIT_MS = 10_000;
+
+/** A fresh OS geo check that reports its outcome (the map search's "to my location"): the fix, or
+ *  null when the permission is denied or the platform has none to give. The fix is stored like any
+ *  other (`userGeoLocation`). On macOS a first fix may still arrive by event after the read came back
+ *  empty — waited for up to MACOS_FIRST_FIX_WAIT_MS. */
+export async function locateUserOnce(): Promise<LatLon | null> {
+  if (await runGeoCheck()) return get(userGeoLocation);
+  if (!isMacOS) return null;
+  return new Promise((resolve) => {
+    let settled = false;
+    let unsub: (() => void) | null = null;
+    const finish = (v: LatLon | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      unsub?.();
+      resolve(v);
+    };
+    const timer = setTimeout(() => finish(null), MACOS_FIRST_FIX_WAIT_MS);
+    const before = get(userGeoLocation);
+    unsub = userGeoLocation.subscribe((v) => {
+      if (v && v !== before) finish(v);
+    });
+  });
 }
 
 // ── macOS: live CoreLocation updates ──

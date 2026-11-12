@@ -1442,6 +1442,21 @@
     "headingUp": "Zu Kurs-oben-Ansicht wechseln",
     "northUp": "Zu Nord-oben-Ansicht wechseln"
   },
+  "mapSearch": {
+    "open": "Ort oder Koordinaten suchen",
+    "search": "Suchen",
+    "close": "Suche schließen",
+    "placeholder": "Ort oder Koordinaten",
+    "myLocation": "Zu meinem Standort",
+    "searching": "Suche läuft…",
+    "noHits": "Kein Ort gefunden.",
+    "offline": "Suchdienst nicht erreichbar. Koordinaten funktionieren auch offline.",
+    "refused": "Der Suchdienst hat die Anfrage abgelehnt. Koordinaten funktionieren weiterhin.",
+    "failed": "Die Suche ist fehlgeschlagen. Koordinaten funktionieren weiterhin.",
+    "locating": "Standort wird ermittelt…",
+    "locationFailed": "Dein Standort ist nicht verfügbar (keine Berechtigung oder kein Ortungsdienst).",
+    "attribution": "© OpenStreetMap-Mitwirkende"
+  },
   "mission": {
     "editing": "Bearbeiten",
     "edit": "Bearbeiten",

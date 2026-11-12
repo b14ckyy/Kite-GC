@@ -1442,6 +1442,21 @@
     "headingUp": "Cambiar a vista con rumbo arriba",
     "northUp": "Cambiar a vista con norte arriba"
   },
+  "mapSearch": {
+    "open": "Buscar un lugar o coordenadas",
+    "search": "Buscar",
+    "close": "Cerrar búsqueda",
+    "placeholder": "Lugar o coordenadas",
+    "myLocation": "Ir a mi ubicación",
+    "searching": "Buscando…",
+    "noHits": "No se encontró ningún lugar.",
+    "offline": "Servicio de búsqueda no disponible. Las coordenadas funcionan sin conexión.",
+    "refused": "El servicio de búsqueda rechazó la solicitud. Las coordenadas siguen funcionando.",
+    "failed": "La búsqueda falló. Las coordenadas siguen funcionando.",
+    "locating": "Obteniendo tu ubicación…",
+    "locationFailed": "Tu ubicación no está disponible (sin permiso o sin servicio de ubicación).",
+    "attribution": "© colaboradores de OpenStreetMap"
+  },
   "mission": {
     "editing": "Editando",
     "edit": "Editar",

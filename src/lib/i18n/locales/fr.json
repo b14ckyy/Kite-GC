@@ -1442,6 +1442,21 @@
     "headingUp": "Passer en vue cap en haut",
     "northUp": "Passer en vue nord en haut"
   },
+  "mapSearch": {
+    "open": "Rechercher un lieu ou des coordonnées",
+    "search": "Rechercher",
+    "close": "Fermer la recherche",
+    "placeholder": "Lieu ou coordonnées",
+    "myLocation": "Aller à ma position",
+    "searching": "Recherche…",
+    "noHits": "Aucun lieu trouvé.",
+    "offline": "Service de recherche injoignable. Les coordonnées fonctionnent hors ligne.",
+    "refused": "Le service de recherche a refusé la requête. Les coordonnées fonctionnent toujours.",
+    "failed": "La recherche a échoué. Les coordonnées fonctionnent toujours.",
+    "locating": "Localisation en cours…",
+    "locationFailed": "Votre position n'est pas disponible (pas d'autorisation ou pas de service de localisation).",
+    "attribution": "© les contributeurs d'OpenStreetMap"
+  },
   "mission": {
     "editing": "Édition",
     "edit": "Modifier",

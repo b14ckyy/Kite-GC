@@ -1442,6 +1442,21 @@
     "headingUp": "Switch to Heading-Up view",
     "northUp": "Switch to North-Up view"
   },
+  "mapSearch": {
+    "open": "Search a place or coordinates",
+    "search": "Search",
+    "close": "Close search",
+    "placeholder": "Place or coordinates",
+    "myLocation": "Go to my location",
+    "searching": "Searching…",
+    "noHits": "No place found.",
+    "offline": "Search service not reachable. Coordinates work offline.",
+    "refused": "The search service refused the request. Coordinates still work.",
+    "failed": "The search failed. Coordinates still work.",
+    "locating": "Finding your location…",
+    "locationFailed": "Your location is not available (no permission or no location service).",
+    "attribution": "© OpenStreetMap contributors"
+  },
   "mission": {
     "editing": "Editing",
     "edit": "Edit",

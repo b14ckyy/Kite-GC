@@ -1442,6 +1442,21 @@
     "headingUp": "切换到航向朝上视图",
     "northUp": "切换到北朝上视图"
   },
+  "mapSearch": {
+    "open": "搜索地点或坐标",
+    "search": "搜索",
+    "close": "关闭搜索",
+    "placeholder": "地点或坐标",
+    "myLocation": "转到我的位置",
+    "searching": "正在搜索…",
+    "noHits": "未找到地点。",
+    "offline": "无法连接搜索服务。坐标可离线使用。",
+    "refused": "搜索服务拒绝了请求。坐标仍可使用。",
+    "failed": "搜索失败。坐标仍可使用。",
+    "locating": "正在获取您的位置…",
+    "locationFailed": "无法获取您的位置（无权限或无定位服务）。",
+    "attribution": "© OpenStreetMap 贡献者"
+  },
   "mission": {
     "editing": "编辑中",
     "edit": "编辑",
