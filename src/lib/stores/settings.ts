@@ -326,7 +326,7 @@ export interface AppSettings {
   lastPort: string;
   lastBaud: number;
   lastProtocol: string;
-  /** Startup protocol preference (Settings → Connection). `last` = restore `lastProtocol`. */
+  /** Startup protocol preference (Settings → Interface → UI). `last` = restore `lastProtocol`. */
   defaultProtocol: DefaultProtocol;
   // Full last-used connection path (restored on startup so nothing has to be re-entered)
   lastTransport: string;
@@ -509,7 +509,7 @@ const defaults: AppSettings = {
   cesiumKeyPromptDismissed: false,
   lowPower3D: 'auto',
   highRes3D: !isMobile,
-  altitudeCurtain3D: true,
+  altitudeCurtain3D: false,
   realLighting3D: true,
   // Off by default: the tileset is a live download and real GPU work, and it is only useful close to
   // the ground over a built-up area. Needs an Ion token, like World Terrain.

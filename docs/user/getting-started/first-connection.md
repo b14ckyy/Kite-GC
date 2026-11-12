@@ -78,7 +78,7 @@ That's it — you're connected. 🎉
 
 Click **Disconnect** in the top bar. Kite remembers your **port, baud, protocol and transport**, so
 next time you can usually just press **Connect** straight away. (Always fly the same link? Pin it under
-**Settings → Connection → Default Protocol**, and Kite starts on that protocol whatever the last session
+**Settings → Interface → UI → Default Protocol**, and Kite starts on that protocol whatever the last session
 used.)
 
 ## It didn't connect?

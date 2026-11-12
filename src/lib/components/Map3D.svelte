@@ -237,7 +237,7 @@
   let decoTrailingTimer: ReturnType<typeof setTimeout> | null = null;
   let decoRebuildTimer: ReturnType<typeof setTimeout> | null = null; // reverse-scrub debounce
   let decoLoading = false;                           // suppress deco growth during an (async) track load
-  let curtainEnabled = true;                         // settings.altitudeCurtain3D
+  let curtainEnabled = false;                        // settings.altitudeCurtain3D
   const DECO_CHUNK_MAX = 150;                        // finalize a chunk at this many points
   const SHADOW_MERGE_POINTS = 1200;                  // consolidate pending shadow chunks at this size
   const TRACK_MIN_STEP_M = 2.5;                      // decimation: drop steps shorter than this (3D only)
@@ -1130,7 +1130,7 @@
       ionToken = s.cesiumIonToken || '';
       mapProviderId = s.mapProvider || 'osm';
       cacheMaxMB = s.mapCacheMaxMB || 0;
-      curtainEnabled = s.altitudeCurtain3D ?? true;
+      curtainEnabled = s.altitudeCurtain3D ?? false;
       lightingEnabled = s.realLighting3D ?? false;
       buildingsEnabled = s.buildings3D ?? false;
       replayTimeEnabled = s.logReplayTime ?? false;
@@ -1454,7 +1454,7 @@
 
     // Watch for live setting changes (altitude curtain toggle, lighting, …)
     unsubSettingsWatch = settings.subscribe((next) => {
-      const curtain = next.altitudeCurtain3D ?? true;
+      const curtain = next.altitudeCurtain3D ?? false;
       if (curtain !== curtainEnabled) {
         curtainEnabled = curtain;
         forceDecoRebuild(); // add/remove the curtain walls

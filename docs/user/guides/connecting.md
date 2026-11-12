@@ -144,7 +144,7 @@ selectors, and stays yours across restarts: Kite remembers that you typed it rat
 number. Type the standard port for the current selection and it goes back to following the
 selectors, so there is always a way back.
 
-If **Settings → Connection → Default Protocol** is pinned, the port follows it at startup, the same
+If **Settings → Interface → UI → Default Protocol** is pinned, the port follows it at startup, the same
 way it follows the selectors.
 
 On **UDP**, Kite listens on the port it targets, so a vehicle or bridge that pushes its telemetry to
@@ -263,7 +263,7 @@ ends the connection; if a flight was being recorded, Kite then asks what to do w
 connection lost**: **Discard**, **Save Incomplete** or **Continue on Reconnect**).
 
 If you always fly the same link and would rather not have a stray session decide, set
-**Settings → Connection → Default Protocol** to that protocol: it then wins on every launch. Leave it
+**Settings → Interface → UI → Default Protocol** to that protocol: it then wins on every launch. Leave it
 on **Last used** for the behaviour described above.
 
 ## Trouble connecting?
