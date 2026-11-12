@@ -350,6 +350,17 @@
       : ($videoState.floating && $videoState.floatSnapped ? floatW + FLOAT_BTN_GAP_PX : 0) +
         FLOAT_MARGIN_PX + FLOAT_BTN_PX + FLOAT_BTN_GAP_PX,
   );
+  // `videoReserve` is measured from the window's left edge, but the bottom dock zone starts right of
+  // the nav rail column in the wide layout (and at the edge in the narrow one). The dock only has to
+  // yield what reaches into its own zone — taking the full value pressed the widgets together and left
+  // a rail-wide gap between the video button and the first widget.
+  let bottomDockEl = $state<HTMLDivElement | null>(null);
+  let bottomDockLeft = $state(0);
+  $effect(() => {
+    void winW; void bottomDockW; // the zone's left edge moves with the window and the layout
+    bottomDockLeft = bottomDockEl?.offsetLeft ?? 0;
+  });
+  const videoReserveDock = $derived(Math.max(0, videoReserve - bottomDockLeft));
   // The phone's widget column overlays the map: no native surface may show through it (the docked
   // frame parks behind it) — the surface router clips at its edge.
   $effect(() => {
@@ -453,10 +464,11 @@
   const sidePxPerUnit   = $derived((sideDockW  - 2 * DOCK_PAD) / LARGE_BASE_VMIN);
 
   // Available space expressed in abstract units (container px / pxPerUnit)
-  // Bottom: subtract edit button (28px) + wrapper gap (6px) + zone padding (12px). Multiply by the row
+  // Bottom: subtract the zone padding (12px) and what the video window takes. (An edit button beside the
+  // panel used to cost another 34px; widget editing is a long-press now.) Multiply by the row
   // count so the sizing algorithm (which lays out in one line) budgets for two rows on phone and keeps
   // the tiles a readable size; flex-wrap then splits them across the rows.
-  const bottomAvailUnits = $derived(Math.max(0, ((bottomDockW - 34 - 2 * DOCK_PAD - videoReserve) / bottomPxPerUnit) * bottomRows));
+  const bottomAvailUnits = $derived(Math.max(0, ((bottomDockW - 2 * DOCK_PAD - videoReserveDock) / bottomPxPerUnit) * bottomRows));
   const rightAvailUnits  = $derived(Math.max(0, (sideDockH - 2 * DOCK_PAD) / sidePxPerUnit));
 
   let appVersion = $state("...");
@@ -4153,7 +4165,7 @@
 
   {#if !phoneUi}
   <!-- ======= BOTTOM WIDGET PANEL ======= -->
-  <div class="zone-bottom-dock" class:zone-hidden={!$layout.bottomDock.visible} class:panel-editing={widgetEditMode} bind:clientWidth={bottomDockW} bind:clientHeight={bottomDockH} style:padding-left="{videoReserve}px">
+  <div class="zone-bottom-dock" class:zone-hidden={!$layout.bottomDock.visible} class:panel-editing={widgetEditMode} bind:this={bottomDockEl} bind:clientWidth={bottomDockW} bind:clientHeight={bottomDockH} style:padding-left="{videoReserveDock}px">
     <div class="panel-bottom-wrap">
       <!-- Edit mode (both docks share it): entered by a long-press on a widget, left by a click
            outside the docks or Escape — the panels own the gesture, the flag lives here. -->
