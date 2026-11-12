@@ -114,6 +114,7 @@
   import FloatingVideoWindow from "$lib/components/video/FloatingVideoWindow.svelte";
   import { startDetachedVideo, stopDetachedVideo } from "$lib/controllers/detachedVideo";
   import PhoneVideoDock from "$lib/components/phone/PhoneVideoDock.svelte";
+  import MapSearch from "$lib/components/MapSearch.svelte";
   import PhoneBottomBar from "$lib/components/phone/PhoneBottomBar.svelte";
   import PhoneDragGhost from "$lib/components/phone/PhoneDragGhost.svelte";
   import { setNativeRightBound } from "$lib/controllers/nativeVideo";
@@ -2965,6 +2966,15 @@
     }
     patchPhoneWidgets(next);
   }
+  // Phone map search: the top-most button of the map's corner column — above the 2D/3D and follow
+  // buttons, and above the docked video's toggle while PhoneVideoDock shows it (a live source, the
+  // video not in a widget tile). Not while the map is the docked frame's mini map: no jump goes there.
+  const PHONE_CTL_STEP_PX = 46; // 38 px button + 8 px gap, as the corner column
+  const phoneSearchShown = $derived(phoneUi && !mapInFrame);
+  const phoneSearchBottomPx = $derived(
+    8 + PHONE_CTL_STEP_PX * (hasVideo && $videoState.status === 'live' && !phoneCtrl.isPhoneWidgetActive(phoneWidgets, 'videoFeed') ? 3 : 2),
+  );
+
   // The video store learns whether a Video widget is on screen (dock or phone grid): Start then
   // leaves the floating window parked — the widget is the picture.
   $effect(() => {
@@ -3965,11 +3975,17 @@
     widgetActive={phoneCtrl.isPhoneWidgetActive(phoneWidgets, 'videoFeed')}
   />
   {/if}
+  {#if phoneSearchShown}
+    <div class="phone-map-search" style:--ms-bottom="{phoneSearchBottomPx}px">
+      <MapSearch variant="phone" />
+    </div>
+  {/if}
   {:else}
   <!-- ======= TOOLBAR ======= -->
   <div class="zone-toolbar" bind:clientHeight={toolbarH}>
     <Toolbar
     {appVersion}
+    mapSearchAvailable={!miniMapLocked}
     {telem}
     {ports}
     {bleDeviceList}
@@ -4993,6 +5009,20 @@
     right: calc(var(--phone-panel-w, 0px) + 8px - var(--phone-shift, 0px));
     z-index: 110;
     transition: right 0.3s ease;
+  }
+  /* Map search (MapSearch, phone variant): on top of the map's corner column, riding along with the
+     widget column like the dock toggle; --ms-bottom (+page) stacks it above the visible buttons. Its
+     line opens to the left, at most up to the burger (12 + 42 + 8); its hit list rises above it, at
+     most up to the top safe edge. Over the chips and tiles, under the panels (150 / 160): the line
+     measures an open side panel when it opens and stays right of it (MapSearch `fitBesidePanel`). */
+  .phone-map-search {
+    position: absolute;
+    right: calc(var(--phone-panel-w, 0px) + 8px - var(--phone-shift, 0px));
+    bottom: calc(var(--ms-bottom, 100px) + var(--safe-bottom, 0px));
+    z-index: 120;
+    transition: right 0.3s ease;
+    --ms-line-max: calc(100vw - var(--phone-panel-w, 0px) + var(--phone-shift, 0px) - 8px - 38px - 6px - 62px - var(--safe-left, 0px));
+    --ms-drop-max: calc(100vh - var(--ms-bottom, 100px) - var(--safe-bottom, 0px) - 38px - 6px - 8px - var(--safe-top, 0px));
   }
   /* Bottom-left corner: arming + sensor chips (under the panels — they peek out left of an open
      panel), then the dev Debug button in the panels layer (over them), then the Leaflet

@@ -104,6 +104,7 @@ Each provider handles the request under its own privacy policy, which we link be
 
 | Action | Service | What is sent |
 | --- | --- | --- |
+| **Map search** — a place name entered in the search line and sent with Enter | OpenStreetMap Nominatim ([privacy](https://osmfoundation.org/wiki/Privacy_Policy)) | The text you typed and the app's language, once per Enter. Nothing is sent while you type, and coordinates you enter are not sent at all — Kite reads them itself. Kite does not log the text |
 | **Update and Restart** in the update notice (desktop) | GitHub release downloads ([GitHub privacy statement](https://docs.github.com/site-policy/privacy-policies)) | Requests for the new release's files: for an installed copy the update manifest (`latest.json`) and the package it names for your platform, for a portable copy the portable ZIP. Nothing is downloaded until you press the button |
 
 ### Only while the feature is enabled

@@ -43,7 +43,12 @@
   import { cachedTileLayer, providerLayerOptions } from "$lib/cache/CachedTileLayer";
   import { initTileCache } from "$lib/cache/tileCache";
   import { isWebKitGtk, isAndroid, hasCustomMaps } from "$lib/platform";
-  import { watchMapProvider, onCustomMapFocus } from "$lib/stores/customMaps";
+  import { watchMapProvider } from "$lib/stores/customMaps";
+  import { onMapFocus, type MapFocusRequest } from "$lib/stores/mapFocus";
+  import {
+    SEARCH_POINT_ZOOM_2D, SEARCH_MAX_ZOOM_2D, SEARCH_FIT_PAD_PX,
+    SEARCH_PIN_SHOW_MS, SEARCH_PIN_FADE_MS, SEARCH_PIN_SVG,
+  } from "$lib/config/mapSearch";
   import CustomMapCoverageLayer from "./CustomMapCoverageLayer.svelte";
   import { homePosition, homeMarkerShown, vehicleHomes, type VehicleHome } from "$lib/stores/home";
   import { editMode, geoWaypoints, launchPoint, replayActive, toDeg } from "$lib/stores/mission";
@@ -2256,6 +2261,53 @@
     map.fitBounds(L.latLngBounds(pts), { padding: [40, 40], maxZoom: 16 });
   }
 
+  // ── Map search jump (stores/mapFocus, source 'search') ──
+  let searchPin: L.Marker | undefined;
+  let searchPinTimers: ReturnType<typeof setTimeout>[] = [];
+
+  function clearSearchPin() {
+    for (const tm of searchPinTimers) clearTimeout(tm);
+    searchPinTimers = [];
+    if (searchPin && map) map.removeLayer(searchPin);
+    searchPin = undefined;
+  }
+
+  /** Fit the hit's box (a city wide, a street close — capped at SEARCH_MAX_ZOOM_2D) or centre a bare
+   *  point at a fixed zoom, both in the uncovered map area (phone: left of the widget column, above
+   *  the bottom tiles), and drop a pin that fades out by itself. */
+  function jumpToSearchTarget(f: MapFocusRequest) {
+    if (!map) return;
+    if (f.bounds) {
+      const [w, s, e, n] = f.bounds;
+      const bounds = L.latLngBounds([s, w], [n, e < w ? e + 360 : e]); // west > east: crosses 180°
+      map.fitBounds(bounds, {
+        paddingTopLeft: [SEARCH_FIT_PAD_PX, SEARCH_FIT_PAD_PX],
+        paddingBottomRight: [SEARCH_FIT_PAD_PX + centerInsetRight, SEARCH_FIT_PAD_PX + centerInsetBottom],
+        maxZoom: SEARCH_MAX_ZOOM_2D,
+      });
+    } else {
+      centerOn([f.lat, f.lon], Math.min(SEARCH_POINT_ZOOM_2D, map.getMaxZoom()));
+    }
+
+    clearSearchPin();
+    searchPin = L.marker([f.lat, f.lon], {
+      icon: L.divIcon({
+        className: 'search-pin',
+        html: `<div class="search-pin-body" style="transition: opacity ${SEARCH_PIN_FADE_MS}ms ease">${SEARCH_PIN_SVG}</div>`,
+        iconSize: [26, 36],
+        iconAnchor: [13, 35],
+      }),
+      interactive: false,
+      keyboard: false,
+      zIndexOffset: 1000,
+    }).addTo(map);
+    const pin = searchPin;
+    searchPinTimers = [
+      setTimeout(() => pin.getElement()?.querySelector('.search-pin-body')?.classList.add('fading'), SEARCH_PIN_SHOW_MS),
+      setTimeout(() => { if (searchPin === pin) clearSearchPin(); }, SEARCH_PIN_SHOW_MS + SEARCH_PIN_FADE_MS),
+    ];
+  }
+
   function updatePlaybackMarker(point: TelemetryRecord | null) {
     if (!map) return;
 
@@ -2553,11 +2605,11 @@
       prevConnStatus = c.status;
     });
 
-    // Custom map "Show map area" (Settings): fit the requested covered region. An explicit request,
-    // so a follow / fleet camera hands over to free pan first (else its next frame undoes the fit),
-    // and a pending go-to-UAV jump is dropped, like frameMission does. Not in the swapped-in mini map:
-    // its view mode belongs to the parent.
-    unsubCustomFocus = onCustomMapFocus((b) => {
+    // Jump requests (stores/mapFocus) — the custom map's "Show map area" and the map search. An
+    // explicit request, so a follow / fleet camera hands over to free pan first (else its next frame
+    // undoes the jump), and a pending go-to-UAV jump is dropped, like frameMission does. Not in the
+    // swapped-in mini map: its view mode belongs to the parent.
+    unsubCustomFocus = onMapFocus((f) => {
       if (!map || miniControls) return;
       pendingUavJump = false;
       if (viewMode !== 'free') {
@@ -2565,7 +2617,12 @@
         appliedViewMode = 'free'; // the $effect would apply it a tick later — after the fit
         applyViewModeEffects('free');
       }
-      map.fitBounds(L.latLngBounds([b[1], b[0]], [b[3], b[2]]), { padding: [40, 40] });
+      if (f.source === 'customMap' && f.bounds) {
+        const b = f.bounds;
+        map.fitBounds(L.latLngBounds([b[1], b[0]], [b[3], b[2]]), { padding: [40, 40] });
+        return;
+      }
+      jumpToSearchTarget(f);
     });
 
     // Foreign-vehicle contacts: rebuild the radar layer on every snapshot / selection change.
@@ -2950,6 +3007,7 @@
     if (unsubTelemetry) unsubTelemetry();
     if (unsubSettings) unsubSettings();
     unsubCustomFocus?.();
+    clearSearchPin();
     unsubFrameMission?.();
     unsubConnForJump?.();
     unsubSafehome?.();
@@ -3006,18 +3064,18 @@
               aria-label={followTitle}>
         {#if viewMode === 'fleet'}
           <!-- Fleet: three small craft inside a frame -->
-          <svg class="heading-icon heading-icon-fleet" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <svg class="heading-icon heading-icon-fleet" viewBox="2.2 2.2 19.6 19.6" width="20" height="20" aria-hidden="true">
             <path d="M3 8V4h4M17 4h4v4M21 16v4h-4M7 20H3v-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
             <polygon class="uav-arrow" points="12,7 9.6,13 12,11.8 14.4,13" />
             <polygon class="uav-arrow" points="7.5,12 5.1,18 7.5,16.8 9.9,18" />
             <polygon class="uav-arrow" points="16.5,12 14.1,18 16.5,16.8 18.9,18" />
           </svg>
         {:else if viewMode === 'heading-follow'}
-          <svg class="heading-icon heading-icon-up" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <svg class="heading-icon heading-icon-up" viewBox="6.25 6 11.5 11.5" width="20" height="20" aria-hidden="true">
             <polygon class="uav-arrow" points="12,6 7.5,17.5 12,15.2 16.5,17.5" />
           </svg>
         {:else}
-          <svg class="heading-icon heading-icon-diag" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <svg class="heading-icon heading-icon-diag" viewBox="4.63 4.6 14.51 14.51" width="20" height="20" aria-hidden="true">
             <polygon class="north-triangle" points="12,4.6 9.9,8.6 14.1,8.6" />
             <g transform="translate(0 -1.5) rotate(-70 12 15)">
               <polygon class="uav-arrow" points="12,8.6 7.7,19.6 12,17.4 16.3,19.6" />
@@ -3061,6 +3119,12 @@
     pointer-events: none;
   }
   :global(.leaflet-tooltip.geozone-label::before) { display: none; }
+
+  /* Map search pin: the fade runs on the inner element — the icon root carries Leaflet's own
+     zoom-animation transition, which an opacity transition there would replace. */
+  :global(.search-pin-body) { width: 26px; height: 36px; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.5)); }
+  :global(.search-pin-body svg) { display: block; }
+  :global(.search-pin-body.fading) { opacity: 0; }
 
   /* Geozone edit handles: strip Leaflet's default div-icon white box (the handle is the inner div). */
   :global(.leaflet-div-icon.gz-handle) { background: transparent; border: none; }
@@ -3314,7 +3378,7 @@
   }
 
   .map-mode-btn {
-    font-size: 13px;
+    font-size: var(--map-btn-text, 21px); /* "2D" / "3D" ≈ 75 % of the button width (app.html) */
     font-weight: 700;
     letter-spacing: 0.03em;
   }
@@ -3339,9 +3403,10 @@
     border-color: rgba(55, 168, 219, 0.75);
   }
 
+  /* The drawing fills 75 % of the button: the viewBoxes are cropped to it (app.html). */
   .heading-icon {
-    width: 45px;
-    height: 45px;
+    width: var(--map-btn-icon, 28.5px);
+    height: var(--map-btn-icon, 28.5px);
     overflow: visible;
   }
 

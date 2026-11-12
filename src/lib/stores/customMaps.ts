@@ -27,6 +27,7 @@ import {
 // Imported for its side effect too: it mirrors the persisted user online maps into the provider
 // registry at load, before any map view (all of which import this module) resolves an id.
 import { syncUserMapRegistry } from '$lib/stores/userMaps';
+import { requestMapFocus } from '$lib/stores/mapFocus';
 
 /** `[west, south, east, north]` in degrees. */
 export type GeoBounds = [number, number, number, number];
@@ -124,9 +125,6 @@ export const customMaps = writable<CustomMapsState>({
 
 /** Coverage per map name, filled on demand by `loadCustomMapCoverage`. Cleared by every listing. */
 export const customMapCoverage = writable<Record<string, CustomMapCoverage>>({});
-
-/** "Jump to map" request for the map views (2D fits the bounds, 3D flies to them). */
-export const customMapFocus = writable<{ bounds: GeoBounds; seq: number } | null>(null);
 
 interface Listing {
   root: string;
@@ -312,11 +310,10 @@ function distToBounds(lat: number, lon: number, b: GeoBounds): number {
   return (dLon * k) ** 2 + dLat ** 2;
 }
 
-let focusSeq = 0;
-
 /** "Show map area": ask the map views to fit the covered area nearest to the current 2D view
- *  centre. `empty` = the map has no tiles; `error` = its coverage could not be read; `cancelled` =
- *  the folder was re-listed meanwhile (the answer may belong to the previous folder — nothing to say). */
+ *  centre (stores/mapFocus). `empty` = the map has no tiles; `error` = its coverage could not be read;
+ *  `cancelled` = the folder was re-listed meanwhile (the answer may belong to the previous folder —
+ *  nothing to say). */
 export async function focusCustomMap(name: string): Promise<'ok' | 'empty' | 'error' | 'cancelled'> {
   const gen = listingGen;
   const cov = await loadCustomMapCoverage(name);
@@ -330,17 +327,11 @@ export async function focusCustomMap(name: string): Promise<'ok' | 'empty' | 'er
     const d = distToBounds(lat, lon, a.bounds);
     if (d < bestD) { bestD = d; best = a.bounds; }
   }
-  customMapFocus.set({ bounds: best, seq: ++focusSeq });
-  return 'ok';
-}
-
-/** Subscribe to NEW "jump to map" requests only — a view mounted after a request (2D↔3D switch) must
- *  not replay the last one. */
-export function onCustomMapFocus(fn: (bounds: GeoBounds) => void): () => void {
-  let seen = get(customMapFocus)?.seq ?? 0;
-  return customMapFocus.subscribe((f) => {
-    if (!f || f.seq <= seen) return;
-    seen = f.seq;
-    fn(f.bounds);
+  requestMapFocus({
+    source: 'customMap',
+    bounds: best,
+    lat: (best[1] + best[3]) / 2,
+    lon: (best[0] + best[2]) / 2,
   });
+  return 'ok';
 }

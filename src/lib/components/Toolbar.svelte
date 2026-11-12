@@ -9,6 +9,7 @@
   import WindowControls from '$lib/components/WindowControls.svelte';
   import ConnectionControls from '$lib/components/ConnectionControls.svelte';
   import LinkManager from '$lib/components/LinkManager.svelte';
+  import MapSearch from '$lib/components/MapSearch.svelte';
   import { isLinux, isMacOS, isMobile } from '$lib/platform';
   import ArmingIndicator from '$lib/components/ArmingIndicator.svelte';
   import BatteryIndicator from '$lib/components/BatteryIndicator.svelte';
@@ -20,6 +21,7 @@
 
   let {
     appVersion,
+    mapSearchAvailable = true,
     telem,
     ports,
     bleDeviceList = [],
@@ -44,6 +46,8 @@
     fleetEnabled = false,
   }: {
     appVersion: string;
+    /** False while the map is the Video widget's mini map: a jump would go nowhere, so no search then. */
+    mapSearchAvailable?: boolean;
     telem: TelemetryData;
     ports: PortInfo[];
     bleDeviceList: BleDeviceInfo[];
@@ -292,6 +296,9 @@
   {/snippet}
 
   <div class="toolbar-right" data-tauri-drag-region>
+    <!-- Map search: left of the protocol selector (of the connection status once connected). Its
+         line opens as an overlay to the left, so the bar's collapse measurement is unaffected. -->
+    {#if mapSearchAvailable}<MapSearch variant="toolbar" />{/if}
     {#if !connOnSecondRow}
       <div class="port-controls">{@render connectionControls()}</div>
     {/if}

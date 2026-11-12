@@ -17,6 +17,7 @@ pub mod hid;
 pub mod storage;
 pub mod info;
 pub mod logging;
+pub mod map_search;
 pub mod mission;
 pub mod radar;
 pub mod rally;

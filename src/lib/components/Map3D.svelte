@@ -59,7 +59,12 @@
   import { getProviderById, isCustomProviderId, isCustomTileUrl } from "$lib/config/mapProviders";
   import { fillTileTemplate } from "$lib/helpers/tileTemplate";
   import type { MapProvider } from "$lib/config/mapProviders";
-  import { ensureCustomMapsLoaded, watchMapProvider, onCustomMapFocus } from "$lib/stores/customMaps";
+  import { ensureCustomMapsLoaded, watchMapProvider } from "$lib/stores/customMaps";
+  import { onMapFocus, type MapFocusRequest } from "$lib/stores/mapFocus";
+  import {
+    SEARCH_POINT_RADIUS_3D_M, SEARCH_MIN_RADIUS_3D_M, SEARCH_PITCH_3D_DEG, SEARCH_TERRAIN_WAIT_MS,
+    SEARCH_PIN_SHOW_MS, SEARCH_PIN_FADE_MS, SEARCH_PIN_SVG,
+  } from "$lib/config/mapSearch";
   import { getCachedTile, putCachedTile, initTileCache } from "$lib/cache/tileCache";
   import { loadTileBytes } from "$lib/cache/tileLoader";
   import { isKnownUnavailable, isPlaceholderTile } from "$lib/cache/tileAvailability";
@@ -1453,12 +1458,22 @@
       firstProviderCall = false;
       if (!skip) applyMapProvider(p);
     });
+    // Jump requests (stores/mapFocus).
     // Custom map "Show map area" (Settings): fly to the requested covered region — like
     // frameMission3d only in free look (follow / orbit / FPV own the camera), dropping a pending
     // go-to-UAV jump. The fleet camera is left for free look the way it is left elsewhere (it only
     // re-fits; it holds no lookAt transform).
-    unsubCustomFocus3d = onCustomMapFocus((b) => {
+    // Map search: only while the 3D view is the one showing (the 2D map takes the jump as well, and
+    // a later switch to 3D starts from there). The user asked for that place, so a follow / orbit /
+    // FPV camera hands over to free look first — ignoring the request would look like a dead search.
+    unsubCustomFocus3d = onMapFocus((f) => {
       if (!viewer) return;
+      if (f.source === 'search') {
+        if (active) void jumpToSearchTarget3d(f);
+        return;
+      }
+      if (!f.bounds) return;
+      const b = f.bounds;
       if (cameraMode === 'fleet') cameraMode = 'free';
       if (!isFreeLook()) return;
       pendingUavJump3d = false;
@@ -1672,6 +1687,7 @@
     unsubSettingsWatch?.();
     unsubProviderWatch?.();
     unsubCustomFocus3d?.();
+    clearSearchPin3d();
     unsubMissionStore?.();
     unsubShowMissionStore?.();
     unsubReplayStore?.();
@@ -5221,6 +5237,116 @@
     }
   }
 
+  // ── Map search jump (stores/mapFocus, source 'search') ──
+  let searchPin3d: Cesium.Entity | undefined;
+  let searchPin3dTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Bumped per search jump: a jump still waiting for its terrain height is dropped by a newer one. */
+  let searchJumpGen3d = 0;
+  const SEARCH_PIN_IMG = "data:image/svg+xml;base64," + btoa(SEARCH_PIN_SVG);
+
+  /** Leave follow / orbit / FPV / fleet for free look — the camera is about to be flown elsewhere.
+   *  The same steps as the camera cycle's own exits (exitFpv; enterFpv's chase/orbit shutdown). */
+  function releaseToFreeLook() {
+    if (cameraMode === 'free') return;
+    if (cameraMode === 'fpv') { exitFpv(); return; }
+    setFollowCameraControls(false);
+    chaseLerpActive = false; orbitLerpActive = false; chaseInited = false; orbitInited = false;
+    viewer?.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
+    cameraMode = 'free';
+  }
+
+  /** Ellipsoid height (m) of the ground at the target: the most detailed terrain sample if it arrives
+   *  within SEARCH_TERRAIN_WAIT_MS, else whatever the loaded tiles say, else 0 (no terrain). Without
+   *  it a jump into the mountains would frame a point inside them. */
+  async function groundHeightAt(lat: number, lon: number): Promise<number> {
+    if (!viewer) return 0;
+    const carto = Cesium.Cartographic.fromDegrees(lon, lat);
+    const tp = viewer.scene.terrainProvider;
+    if (tp && !(tp instanceof Cesium.EllipsoidTerrainProvider)) {
+      try {
+        const sampled = await Promise.race([
+          Cesium.sampleTerrainMostDetailed(tp, [Cesium.Cartographic.clone(carto)]).then((r) => r[0]?.height),
+          new Promise<undefined>((res) => setTimeout(() => res(undefined), SEARCH_TERRAIN_WAIT_MS)),
+        ]);
+        if (sampled !== undefined && Number.isFinite(sampled)) return sampled;
+      } catch (e) {
+        console.warn("[Map3D] search target terrain sample failed", e);
+      }
+    }
+    if (!viewer || viewer.isDestroyed()) return 0;
+    const loaded = viewer.scene.globe.getHeight(carto);
+    return loaded !== undefined && Number.isFinite(loaded) ? loaded : 0;
+  }
+
+  /** Fly to a search target: frame the hit's box (radius at least SEARCH_MIN_RADIUS_3D_M) or a
+   *  fixed sphere around a bare point, keeping the camera's heading, looking down at it. */
+  async function jumpToSearchTarget3d(f: MapFocusRequest) {
+    if (!viewer) return;
+    const gen = ++searchJumpGen3d;
+    releaseToFreeLook();
+    pendingUavJump3d = false;
+    const ground = await groundHeightAt(f.lat, f.lon);
+    // While the height was fetched: a newer jump, the view torn down, or a follow mode picked again.
+    if (gen !== searchJumpGen3d || !viewer || viewer.isDestroyed() || !isFreeLook() || !active) return;
+    let sphere: Cesium.BoundingSphere;
+    if (f.bounds) {
+      const [w, s, e, n] = f.bounds;
+      sphere = Cesium.BoundingSphere.fromRectangle3D(Cesium.Rectangle.fromDegrees(w, s, e, n), Cesium.Ellipsoid.WGS84, ground);
+      sphere.radius = Math.max(sphere.radius, SEARCH_MIN_RADIUS_3D_M);
+    } else {
+      sphere = new Cesium.BoundingSphere(Cesium.Cartesian3.fromDegrees(f.lon, f.lat, ground), SEARCH_POINT_RADIUS_3D_M);
+    }
+    viewer.camera.flyToBoundingSphere(sphere, {
+      duration: 1.5,
+      offset: new Cesium.HeadingPitchRange(viewer.camera.heading, Cesium.Math.toRadians(SEARCH_PITCH_3D_DEG), 0), // range 0 = fit the sphere
+    });
+    showSearchPin3d(f.lat, f.lon);
+  }
+
+  function clearSearchPin3d() {
+    if (searchPin3dTimer) { clearTimeout(searchPin3dTimer); searchPin3dTimer = undefined; }
+    if (searchPin3d && viewer && !viewer.isDestroyed()) {
+      viewer.entities.remove(searchPin3d);
+      viewer.scene.requestRender();
+    }
+    searchPin3d = undefined;
+  }
+
+  /** The search pin: fully visible for SEARCH_PIN_SHOW_MS, then fades out over SEARCH_PIN_FADE_MS
+   *  (rendered frame by frame — requestRenderMode draws nothing on its own) and is removed. */
+  function showSearchPin3d(lat: number, lon: number) {
+    if (!viewer) return;
+    clearSearchPin3d();
+    const fadeFrom = performance.now() + SEARCH_PIN_SHOW_MS;
+    const pin = viewer.entities.add({
+      position: new Cesium.ConstantPositionProperty(Cesium.Cartesian3.fromDegrees(lon, lat)),
+      billboard: {
+        image: SEARCH_PIN_IMG,
+        width: 26,
+        height: 36,
+        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        color: new Cesium.CallbackProperty(() => {
+          const k = Math.min(1, Math.max(0, (performance.now() - fadeFrom) / SEARCH_PIN_FADE_MS));
+          return Cesium.Color.WHITE.withAlpha(1 - k);
+        }, false),
+      },
+    });
+    searchPin3d = pin;
+    viewer.scene.requestRender();
+    searchPin3dTimer = setTimeout(() => {
+      searchPin3dTimer = undefined;
+      const step = () => {
+        if (searchPin3d !== pin || !viewer || viewer.isDestroyed()) return;
+        if (performance.now() >= fadeFrom + SEARCH_PIN_FADE_MS) { clearSearchPin3d(); return; }
+        viewer.scene.requestRender();
+        requestAnimationFrame(step);
+      };
+      step();
+    }, SEARCH_PIN_SHOW_MS);
+  }
+
   // ── Public API ──
 
   export function flyTo(lat: number, lon: number, alt = 500) {
@@ -5290,18 +5416,18 @@
       aria-label={camModeTitle}
     >
       {#if cameraMode === 'fleet'}
-        <svg class="cam-icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+        <svg class="cam-icon" viewBox="2.2 2.2 19.6 19.6" width="20" height="20" aria-hidden="true">
           <path d="M3 8V4h4M17 4h4v4M21 16v4h-4M7 20H3v-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
           <polygon points="12,7 9.6,13 12,11.8 14.4,13" fill="currentColor"/>
           <polygon points="7.5,12 5.1,18 7.5,16.8 9.9,18" fill="currentColor"/>
           <polygon points="16.5,12 14.1,18 16.5,16.8 18.9,18" fill="currentColor"/>
         </svg>
       {:else if cameraMode === 'follow'}
-        <svg class="cam-icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+        <svg class="cam-icon" viewBox="6.25 6 11.5 11.5" width="20" height="20" aria-hidden="true">
           <polygon points="12,6 7.5,17.5 12,15.2 16.5,17.5" fill="currentColor"/>
         </svg>
       {:else if cameraMode === 'orbit'}
-        <svg class="cam-icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+        <svg class="cam-icon" viewBox="3 3 18 18" width="20" height="20" aria-hidden="true">
           <circle cx="12" cy="12" r="3" fill="currentColor"/>
           <path d="M12 4 A8 8 0 0 1 20 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
           <polyline points="18,8 20,12 16,11" fill="currentColor"/>
@@ -5309,12 +5435,12 @@
           <polyline points="6,16 4,12 8,13" fill="currentColor"/>
         </svg>
       {:else if cameraMode === 'fpv'}
-        <svg class="cam-icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+        <svg class="cam-icon" viewBox="1 1 22 22" width="20" height="20" aria-hidden="true">
           <path d="M2 12 C5 6 19 6 22 12 C19 18 5 18 2 12 Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
           <circle cx="12" cy="12" r="3.2" fill="currentColor"/>
         </svg>
       {:else}
-        <svg class="cam-icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+        <svg class="cam-icon" viewBox="4.63 4.6 14.51 14.51" width="20" height="20" aria-hidden="true">
           <polygon class="north-tri" points="12,4.6 9.9,8.6 14.1,8.6"/>
           <g transform="translate(0 -1.5) rotate(-70 12 15)">
             <polygon points="12,8.6 7.7,19.6 12,17.4 16.3,19.6" fill="currentColor"/>
@@ -5409,7 +5535,7 @@
   }
 
   .map-mode-btn {
-    font-size: 13px;
+    font-size: var(--map-btn-text, 21px); /* "2D" ≈ 75 % of the button width (app.html) */
     font-weight: 700;
     letter-spacing: 0.03em;
   }
@@ -5453,6 +5579,7 @@
     color: #37a8db !important;
   }
 
-  .cam-icon { overflow: visible; }
+  /* The drawing fills 75 % of the button: the viewBoxes are cropped to it (app.html). */
+  .cam-icon { overflow: visible; width: var(--map-btn-icon, 28.5px); height: var(--map-btn-icon, 28.5px); }
   .north-tri { fill: currentColor; opacity: 0.9; }
 </style>

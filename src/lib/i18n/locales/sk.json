@@ -1442,6 +1442,21 @@
     "headingUp": "Prepnúť na zobrazenie podľa kurzu",
     "northUp": "Prepnúť na zobrazenie severom nahor"
   },
+  "mapSearch": {
+    "open": "Hľadať miesto alebo súradnice",
+    "search": "Hľadať",
+    "close": "Zavrieť vyhľadávanie",
+    "placeholder": "Miesto alebo súradnice",
+    "myLocation": "Prejsť na moju polohu",
+    "searching": "Hľadá sa…",
+    "noHits": "Nenašlo sa žiadne miesto.",
+    "offline": "Vyhľadávacia služba je nedostupná. Súradnice fungujú aj offline.",
+    "refused": "Vyhľadávacia služba odmietla požiadavku. Súradnice naďalej fungujú.",
+    "failed": "Vyhľadávanie zlyhalo. Súradnice naďalej fungujú.",
+    "locating": "Zisťuje sa poloha…",
+    "locationFailed": "Vaša poloha nie je dostupná (chýba povolenie alebo lokalizačná služba).",
+    "attribution": "© prispievatelia OpenStreetMap"
+  },
   "mission": {
     "editing": "Úpravy",
     "edit": "Upraviť",

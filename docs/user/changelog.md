@@ -267,6 +267,13 @@ inside the box of the feature release they belong to, so the notes for one relea
       The 3D **Altitude Curtain** is off by default for new installations, because it costs a lot of
       performance; an installation that already has the setting keeps it. See
       [Settings](reference/settings.md). [#250]
+    - **Map search.** A magnifier button — in the top bar on the desktop and on tablets, at the top
+      of the map buttons on a phone — jumps the 2D or 3D map to a place or to coordinates, and a
+      location button next to it jumps to your own position. Coordinates work offline; place
+      names are looked up at OpenStreetMap when you press Enter. See
+      [Map search](guides/telemetry-and-display.md#map-search). [#263]
+    - **Bigger icons on the map buttons.** The 2D / 3D, follow, camera-mode and video buttons use
+      one icon size that fills the button, instead of several small ones. [#263]
     - **3D map: leaving FPV puts the camera back at a normal viewpoint.** Switching from the FPV
       view to the free camera left the camera in the cockpit — banked with the aircraft and
       looking at the horizon — and on a touch screen it could then hardly be tilted or turned.
@@ -623,6 +630,7 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#260]: https://github.com/b14ckyy/Kite-GC/pull/260
 [#261]: https://github.com/b14ckyy/Kite-GC/pull/261
 [#262]: https://github.com/b14ckyy/Kite-GC/pull/262
+[#263]: https://github.com/b14ckyy/Kite-GC/pull/263
 [#256]: https://github.com/b14ckyy/Kite-GC/pull/256
 [#259]: https://github.com/b14ckyy/Kite-GC/pull/259
 [#143]: https://github.com/b14ckyy/Kite-GC/pull/143

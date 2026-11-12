@@ -110,6 +110,7 @@ use video::{MediaMtx, MjpegServer};
 use commands::logging::{set_log_level, get_log_path, list_log_files, log_session_settings, log_frontend};
 use commands::tiles::fetch_tile;
 use commands::custom_maps::{custom_maps_list, custom_map_tile, custom_map_resolve, custom_map_coverage};
+use commands::map_search::map_search_places;
 use commands::radar::{radar_configure, radar_set_center, radar_set_node_pos, radar_snapshot};
 use commands::terrain::{
     terrain_cache_clear, terrain_cache_stats, terrain_elevation, terrain_elevations, terrain_fan,
@@ -680,6 +681,7 @@ pub fn run() {
             custom_map_tile,
             custom_map_resolve,
             custom_map_coverage,
+            map_search_places,
             mission_get,
             mission_clear,
             mission_set,
