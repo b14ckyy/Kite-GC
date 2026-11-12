@@ -13,10 +13,12 @@ the serial port the flight controller uses, so it can't disturb your telemetry.
 
 ## Turning it on
 
-Radar is **off by default**. Enable it in **Settings → Data → Telemetry**:
+Radar is **on by default**, with **ADS-B** enabled and **FormationFlight** off. The switches are in
+**Settings → Data → Telemetry**:
 
-1. Switch on the **Radar** master toggle — this reveals the **Radar** tool on the navigation rail.
-2. Turn on the **systems** you want: **ADS-B** and/or **FormationFlight**. Each is independent; leave off
+1. The **Radar** master toggle — it shows the **Radar** tool on the navigation rail; switch it off to
+   hide radar altogether.
+2. The **systems** you want: **ADS-B** and/or **FormationFlight**. Each is independent; leave off
    what you don't use.
 
 Then open the **Radar** tool. The panel has a tab per enabled system for **source configuration** on the
