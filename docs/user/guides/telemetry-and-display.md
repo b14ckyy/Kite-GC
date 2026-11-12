@@ -39,6 +39,27 @@ A small cluster of buttons sits in one corner of the map:
 The map controls — the 2D/3D, follow-mode and zoom buttons (shown here in several states).
 ///
 
+### Map search
+
+The **magnifier** button takes the map to a place or to coordinates. On the desktop and on a tablet
+it sits in the top bar, left of the connection controls; on a phone it is the top button of the map
+control cluster. It opens one text line:
+
+- Type a **place** — a town, a region, an airfield — and press **Enter**. Kite asks OpenStreetMap's
+  search service once per Enter (it does not search while you type) and lists up to five matches;
+  pick one and the map jumps there, zoomed to the size of the place. A single match jumps at once.
+  This needs internet.
+- Type **coordinates** and the map jumps without asking any service, so this works offline. Kite
+  understands decimal degrees (`51.4886, 11.97`), degrees with decimal minutes
+  (`51 29.316 N 11 58.2 E`) and degrees, minutes and seconds (`51°29'19"N 11°58'12"E`), with or
+  without the letters N S E W, latitude first.
+- The **location** button left of the line jumps to your own position: the ground-station position
+  Kite already knows, otherwise it asks the operating system once.
+
+A small pin marks the target for a few seconds. The search works on the 2D and the 3D map; in 3D a
+follow, orbit or FPV camera is released to the free camera for the jump. It is a way to move the
+map, not an address finder: Kite stores no search history and offers no routing.
+
 ## Aircraft status (top bar)
 
 The centre of the top bar is a live health summary of the connected craft:

@@ -31,6 +31,8 @@ The command centre. From left to right:
   mag, baro, GPS, and rangefinder/airspeed when fitted — green = OK, amber = warning, red = fault), and
   the **battery** readout. Tiles only appear for sensors your craft actually reports, so the row adapts
   to the airframe.
+- **Map search (magnifier)** — jump to a place or to coordinates, or to your own position; see
+  [Map search](../guides/telemetry-and-display.md#map-search).
 - **Connection controls (right)** — protocol, transport and port while disconnected; once connected
   they're replaced by the live link status and a **Disconnect** button. See the
   **[Connecting guide](../guides/connecting.md)**.
@@ -306,8 +308,8 @@ room for either the map or a widget, rarely both. Tablets keep the desktop layou
   the free part of the map. On an Android phone the docked video window lies over the slots: park it with its button, or
   use the Video widget in the column when you want both. The Video widget itself cannot go into a
   slot.
-- **Map controls**: pinch to zoom (no zoom buttons); the **2D / 3D** and **follow** buttons sit at the
-  bottom-right of the map, next to the widget column. The map credits follow the arming chip along the
+- **Map controls**: pinch to zoom (no zoom buttons); the **map search**, **2D / 3D** and **follow**
+  buttons sit at the bottom-right of the map, next to the widget column. The map credits follow the arming chip along the
   bottom edge.
 - **Panels and the replay player** get the room they need: the wider panels (logbook, missions and
   the like) may extend over the widget column to the right screen edge, and when the replay player's
