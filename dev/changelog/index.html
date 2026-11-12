@@ -1986,6 +1986,10 @@ internet. <a href="https://github.com/b14ckyy/Kite-GC/pull/246">#246</a></p>
 </ul>
 <p><strong>Improved</strong></p>
 <ul>
+<li><strong>Location names for the logbook keep to the map service's limit.</strong> Kite asks OpenStreetMap's
+  Nominatim for the place name of a flight's take-off point. Requests are now at least a second
+  apart, as the service demands, and flights from the same field reuse the name instead of
+  asking again — a batch import from one site asks once, not once per flight. <a href="https://github.com/b14ckyy/Kite-GC/pull/255">#255</a></li>
 <li><strong>3D map: fewer tiles with High-Resolution 3D switched off.</strong> At half the render resolution
   the globe kept loading map tiles as fine as for the full resolution. It now takes them one
   zoom level coarser — a quarter of the tiles and requests for the same picture, which matters
