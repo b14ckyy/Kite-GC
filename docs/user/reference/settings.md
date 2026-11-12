@@ -141,7 +141,7 @@ how smooth the instruments feel; the rest is automatic.
 | **RC Control** | Enable GCS RC control (reveals the RC tool). See **[RC control](../guides/rc-control.md)**. | Off |
 
 **Airspeed** and **Wind** each request **extra messages** over the link, so they're separate toggles —
-leave them off to save bandwidth on a slow over-the-air radio, turn them on when the link can spare it.
+switch them off to save bandwidth on a slow over-the-air radio, and on when the link can spare it.
 
 ### Flight Logbook
 
