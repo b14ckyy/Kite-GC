@@ -2096,6 +2096,11 @@ the flight controller and Kite (radio link, bridge, or the flight controller its
 and keeping the last <strong>30 days</strong> (older files are pruned on startup), so a failure you only notice after
 restarting Kite isn't lost. <strong>Log File → Open Folder</strong> takes you straight there; on Android <strong>Share log file</strong>
 lists the same day files, newest first, so you can pick yesterday's.</p>
+<p>A log file stops at <strong>50 MB</strong>. Should a day's file ever reach that, it is kept as it is and the log
+continues in a second file for that day, <code>kite-gc-YYYY-MM-DD-2.log</code> (shown as the date with <strong>(2)</strong> in
+the Android list). That second file starts over each time it reaches 50 MB too, so it always holds the
+latest lines. A log that large means something repeats without end — send both files with your report:
+the first shows how it began.</p>
 <div class="admonition tip">
 <p class="admonition-title">Sharing a log</p>
 <p>The log contains port names and firmware/version strings but no personal data. Attach it to a
