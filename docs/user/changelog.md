@@ -121,6 +121,13 @@ inside the box of the feature release they belong to, so the notes for one relea
     - **QuadPlane: QHover was offered without an RC source.** QHover only holds the altitude; the
       pilot holds the position. It is now behind *Show all modes* and locked without an RC source,
       like the other stick-flown modes.
+    - **macOS: a lost network (TCP) connection filled the log file without end.** When the Mac itself
+      dropped a TCP connection to an ArduPilot / PX4 vehicle — a network change, for example — Kite
+      did not notice the loss: the status bar stayed on "connected", and the diagnostic log grew by
+      the same error line many thousand times a second, to several gigabytes within minutes. Kite now
+      treats this as the lost connection it is and disconnects, with the "Device connection lost"
+      prompt for a running recording. On every system, a read error that keeps repeating is written
+      to the log once every few seconds instead of every time.
     ---
 
     **1.0.1**{ .kite-patch } *2026-09-13*{ .kite-badge }

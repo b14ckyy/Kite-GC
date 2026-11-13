@@ -193,6 +193,7 @@ fn handler_loop(
     // Throughput window.
     let mut win_start = Instant::now();
     let mut win_bytes: u64 = 0;
+    let mut read_errors = crate::transport::ReadErrorThrottle::new();
     let mut last_bytes_per_sec: u64 = 0;
 
     let mut last_emit = Instant::now() - EMIT_INTERVAL;
@@ -295,7 +296,8 @@ fn handler_loop(
                 return Some(transport);
             }
             Err(e) => {
-                log::warn!("Passive telemetry read error: {}", e);
+                // Not a known link loss, so no teardown — but it may repeat on every pass.
+                read_errors.on_error("Passive telemetry read error", &e);
             }
         }
 
