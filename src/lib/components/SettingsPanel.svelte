@@ -914,7 +914,7 @@
         </div>
       {/if}
 
-      <!-- RC Control (INAV RC over MSP) — master switch for the RC nav-rail tab. Not on a phone
+      <!-- RC Control (INAV RC over MSP) — master switch for the RC nav-rail tab. Desktop only
            (`hasRcControl`). -->
       {#if hasRcControl}
         <div class="s-row">

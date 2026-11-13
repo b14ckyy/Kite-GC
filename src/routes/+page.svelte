@@ -950,7 +950,7 @@
   // Also hidden on an MSP-over-MAVLink link (INAV 10.0+): the MSP RC stream doesn't run through the tunnel
   // and the ArduPilot override adapter must not drive INAV (rcPlatform is null there). Hidden until
   // Stage 3 — MAVLink-RX mode, see Dev-Docs active/MSP_OVER_MAVLINK.md.
-  // Never on a phone, whatever the stored switch says — see `hasRcControl`.
+  // Never on a phone or tablet, whatever the stored switch says — see `hasRcControl`.
   const rcTabAvailable = $derived(
     hasRcControl && $settings.rcControl.enabled && !isTelemetryConnected && !($connection.status === 'connected' && $connection.mspTunnel)
   );
