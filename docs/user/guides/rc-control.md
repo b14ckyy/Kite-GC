@@ -12,7 +12,7 @@ GCS can never keep stale sticks flying.
     FC's failsafe). Kite adds guards, but **you** are flying.
 
 Open it from the **RC** tool on the navigation rail. It's available once you enable RC control in
-**Settings**, is not offered on a phone, and is hidden on passive-telemetry links (there's no uplink to send on) and on an INAV
+**Settings**, is not offered on phones and tablets, and is hidden on passive-telemetry links (there's no uplink to send on) and on an INAV
 flight controller reached over MAVLink (**MSP/MAV**, see
 **[Connecting](connecting.md#inav-over-mavlink-mspmav)**).
 
