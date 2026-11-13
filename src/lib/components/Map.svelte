@@ -55,7 +55,8 @@
   import { autopilotSystem } from "$lib/stores/autopilotContext";
   import { arduMission, arduVehicleClass, arduEditMode, detectVehicleClass, arduMissionsByVehicle, arduSetWpSelection, type ArduWaypoint } from "$lib/stores/missionArdupilot";
   import { activeSurveyPattern } from "$lib/stores/surveyPattern.svelte";
-  import { guidedActive, guidedTarget, guidedTargets, repositionTo, activeMode, guidedParams, fcLoiterRadius, lastFeedback, type GuidedParams } from "$lib/controllers/vehicleControl";
+  import { guidedActive, guidedTarget, guidedTargets, activeMode, guidedParams, fcLoiterRadius, type GuidedParams } from "$lib/controllers/vehicleControl";
+  import { guidedClickArmed, mapClickOwnedByEditor, guidedTargetMultirotor, sendGuidedTarget } from "$lib/controllers/guidedClick";
   import GuidedTargetForm from "$lib/components/control/GuidedTargetForm.svelte";
   import { cmdHasLocation } from "$lib/helpers/arduCommandCatalog";
   import { connection, linkHasMsp } from "$lib/stores/connection";
@@ -1588,17 +1589,10 @@
   // target coordinates + vehicle-aware params (Copter/VTOL: alt + heading · Plane: alt + loiter
   // radius) and a "Fly Here" button that sends MAV_CMD_DO_REPOSITION. Last values persist for the
   // next click. See docs/active/VEHICLE_CONTROL.md.
+  // The arming rule, the editor guard, the form variant and the send re-check are shared with the 3D
+  // map (controllers/guidedClick).
   let guidedPopup: L.Popup | undefined;
   let guidedForm: ReturnType<typeof mount> | undefined;
-
-  /** Fly-Here click is armed when the Guided toggle is on OR the FC is already in its guided mode —
-   *  a mid-flight connect to a vehicle sitting in GUIDED must be commandable without first toggling
-   *  the panel button (which would re-send the mode change). */
-  function guidedClickArmed(): boolean {
-    // No map target for ArduSub: "Fly Here" sends an altitude above home, which for a Sub is the surface.
-    if (get(autopilotSystem) === "ardupilot" && get(arduVehicleClass) === "sub") return false;
-    return get(guidedActive) || get(activeMode)?.guided === true;
-  }
 
   function closeGuidedPopup() {
     if (guidedForm) { void unmount(guidedForm); guidedForm = undefined; }
@@ -1607,11 +1601,7 @@
 
   function onGuidedClick(e: L.LeafletMouseEvent) {
     if (!map || !guidedClickArmed()) return;
-    // The mission editors and the survey generator own map clicks while active — before, arming
-    // Guided was always an explicit button press, now it can be implicit (FC already in guided),
-    // so these guards must be explicit here too.
-    if (get(editMode) || get(arduEditMode)) return;
-    if (activeSurveyPattern.isActive) return;
+    if (mapClickOwnedByEditor()) return;
     // Ignore clicks that originate inside an open popup (e.g. the "Fly Here" button) — they must not
     // open a second target popup at the cursor.
     const tgt = e.originalEvent?.target as HTMLElement | undefined;
@@ -1622,9 +1612,7 @@
       return;
     }
     const { lat, lng } = e.latlng;
-    const sys = get(autopilotSystem);
-    const cls = get(arduVehicleClass);
-    const multirotor = sys === "px4" ? true : (cls === "copter" || cls === "quadplane");
+    const multirotor = guidedTargetMultirotor();
 
     // Mount the Svelte form (NumberStepper fields) into the popup container.
     const el = document.createElement("div");
@@ -1634,10 +1622,7 @@
       props: {
         lat, lon: lng, multirotor,
         onfly: (flat: number, flon: number, p: GuidedParams) => {
-          // Re-checked at send time: the popup can outlive what armed it — the FC left its guided mode,
-          // or the vehicle is now a Sub (reconnect). Say so instead of dropping the click silently.
-          if (guidedClickArmed()) void repositionTo(flat, flon, p);
-          else lastFeedback.set({ action: 'reposition', ok: false, message: $t('control.guidedGone'), ts: Date.now() });
+          sendGuidedTarget(flat, flon, p); // re-checks the arming at send time
           // Defer the close so the originating click finishes bubbling first (the popup is still in
           // the DOM, so the in-popup guard above suppresses a stray second popup).
           setTimeout(closeGuidedPopup, 0);

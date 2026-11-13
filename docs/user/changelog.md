@@ -267,6 +267,10 @@ inside the box of the feature release they belong to, so the notes for one relea
       The 3D **Altitude Curtain** is off by default for new installations, because it costs a lot of
       performance; an installation that already has the setting keeps it. See
       [Settings](reference/settings.md). [#250]
+    - **Guided "Fly Here" from the 3D map.** A click or tap on the terrain in the 3D view opens
+      the same target form as on the 2D map, in every camera mode except FPV, and the 3D map shows
+      the target the flight controller reports as a green point with a dashed line. See
+      [Vehicle control](guides/vehicle-control.md#guided-flight-fly-here). [#265]
     - **Map search.** A magnifier button — in the top bar on the desktop and on tablets, at the top
       of the map buttons on a phone — jumps the 2D or 3D map to a place or to coordinates, and a
       location button next to it jumps to your own position. Coordinates work offline; place
@@ -643,6 +647,7 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#262]: https://github.com/b14ckyy/Kite-GC/pull/262
 [#263]: https://github.com/b14ckyy/Kite-GC/pull/263
 [#264]: https://github.com/b14ckyy/Kite-GC/pull/264
+[#265]: https://github.com/b14ckyy/Kite-GC/pull/265
 [#256]: https://github.com/b14ckyy/Kite-GC/pull/256
 [#259]: https://github.com/b14ckyy/Kite-GC/pull/259
 [#143]: https://github.com/b14ckyy/Kite-GC/pull/143

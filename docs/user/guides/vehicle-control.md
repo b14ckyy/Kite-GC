@@ -129,12 +129,21 @@ mid-flight connect, or when another ground station put it there. Clicking the ma
 in that case, so Kite never has to re-send a mode change just to let you command a point. (While a
 mission editor or the survey generator is open, those own the map click instead.)
 
+This works on the **2D map and on the 3D map**. In 3D, click or tap the terrain: a marker shows the
+spot, and the same form opens beside it and stays with the spot while you move the camera. A click on
+another vehicle or on a radar contact still selects that instead, and the sky is not a target. The
+**FPV** camera sets no targets — leave it first.
+
 **What you see on the 2D map:** the target is marked where the flight controller says it is, not merely
 where you clicked — Kite reads it back from the FC once per second, so a target set or moved by another
 ground station shows up too. For a **fixed-wing** vehicle a dashed green circle around it draws the
 loiter track the aircraft will actually fly: the radius you set for this Fly Here, or the firmware's
 configured default (`WP_LOITER_RAD` / `NAV_LOITER_RAD`) when you didn't set one. A copter simply holds
 the point, so it gets no circle. Both disappear when the FC leaves guided or the link drops.
+
+**On the 3D map** the target the flight controller reports is a green point on the ground with a dashed
+line from the aircraft, without the loiter circle. It appears with the FC's next report, about a second
+after you send it.
 
 !!! note "Why there's no 'set heading' for planes"
     Set Heading is offered for **ArduCopter in Guided only** (it simply yaws the nose). It is

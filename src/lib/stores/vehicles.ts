@@ -40,7 +40,7 @@ export interface LinkSummary {
   linkId: number;
   /** "MSP" | "MAVLink" | "Telemetry". */
   protocol: string;
-  /** Human-readable transport ("Serial COM7 @ 57600", "UDP 127.0.0.1:14550"). */
+  /** The transport as the backend describes it: `Serial(COM7)`, `TCP(host:port)`, `UDP(host:port)`, `BLE(…)`. */
   transport: string;
   fcInfo: FcInfo;
   primaryVehicleId: string;
