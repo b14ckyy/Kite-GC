@@ -425,6 +425,10 @@ inside the box of the feature release they belong to, so the notes for one relea
       over each time it reaches 50 MB as well. A fault that repeats the same line without end can no
       longer fill the disk, and you still have both ends of it: how it began in the first file, the
       latest lines in the second. [#271]
+    - **macOS 13 / 14 and iOS 16 / 17: panels and widgets get their background blur** — on these
+      systems the blur behind the side panels, the widgets and the map buttons was missing; they
+      were only semi-transparent, which made panels harder to read over a bright map. macOS 15 and
+      iOS 18 were not affected. [#274]
     - **INAV over a MAVLink-only link gets its full MSP feature set** — INAV 10.0 can carry MSP inside
       the MAVLink stream, and Kite detects that automatically when you connect with the MAVLink
       protocol: the status shows **MSP/MAV**, UAV Info shows the real INAV version and craft name, and
@@ -662,6 +666,7 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#265]: https://github.com/b14ckyy/Kite-GC/pull/265
 [#267]: https://github.com/b14ckyy/Kite-GC/pull/267
 [#271]: https://github.com/b14ckyy/Kite-GC/pull/271
+[#274]: https://github.com/b14ckyy/Kite-GC/pull/274
 [#256]: https://github.com/b14ckyy/Kite-GC/pull/256
 [#259]: https://github.com/b14ckyy/Kite-GC/pull/259
 [#143]: https://github.com/b14ckyy/Kite-GC/pull/143
