@@ -2177,6 +2177,10 @@
   :global(.map.tile-overlap img.leaflet-tile) {
     width: 256.5px !important;
     height: 256.5px !important;
+    /* Leaflet's stylesheet draws every tile with `mix-blend-mode: plus-lighter`, a remedy for a
+       Chromium seam bug. Where the engine honours it, the half-pixel overlap above is drawn as the
+       SUM of both tiles: a bright hairline along every tile edge. WebKitGTK needs none of that. */
+    mix-blend-mode: normal;
   }
 
   /* Heading-up: container size set via inline styles (JS),
