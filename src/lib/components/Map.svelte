@@ -3152,6 +3152,10 @@
   :global(.map.tile-overlap canvas.leaflet-tile) {
     width: 256.5px !important;
     height: 256.5px !important;
+    /* Leaflet's stylesheet draws every tile with `mix-blend-mode: plus-lighter`, a remedy for a
+       Chromium seam bug. Where the engine honours it, the half-pixel overlap above is drawn as the
+       SUM of both tiles: a bright hairline along every tile edge. WebKitGTK needs none of that. */
+    mix-blend-mode: normal;
   }
   /* A custom online provider or offline map with 512 / 128 px tiles (layer class from userLayerZoom /
      customLayerZoom; offline-map tiles are canvases): the same

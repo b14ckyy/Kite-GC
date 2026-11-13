@@ -571,6 +571,14 @@ inside the box of the feature release they belong to, so the notes for one relea
       treats this as the lost connection it is and disconnects, with the "Device connection lost"
       prompt for a running recording. On every system, a read error that keeps repeating is written
       to the log once every few seconds instead of every time.
+    - **Linux: bright lines along the map tile edges, and a very slow map.** After a system update
+      to WebKitGTK 2.54 the 2D map showed a thin bright grid, one line at every tile border, with
+      every map provider and at any display scaling — and moving the map dropped to a few frames
+      per second, worst with video running. The tiles are drawn without those lines again, and
+      the map moves as smoothly as before. One thing remains on these systems and is not Kite's to
+      fix: after each zoom step the map shows the previous zoom level for a single frame. That is a
+      fault in WebKitGTK 2.54 itself (WebKit bug 321993), corrected by its developers; it goes away
+      with a later system update.
     ---
 
     **1.0.1**{ .kite-patch } *2026-09-13*{ .kite-badge }
