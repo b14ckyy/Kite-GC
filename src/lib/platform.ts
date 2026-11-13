@@ -56,11 +56,11 @@ export const hasDbCompact = !isMobile;
  *  Settings row and the coverage frames are hidden there; the backend refuses the commands too. */
 export const hasCustomMaps = !isMobile;
 
-/** RC control (the RC tool and its Settings switch) is offered: everywhere but on a phone. A phone has
- *  no joystick, and its on-screen touch sticks are too easy to hit by accident for something that
- *  steers an aircraft; there is also no room to configure the channels (Marc, 2026-11-12). Tablets
- *  keep it for now. */
-export const hasRcControl = !isPhone;
+/** RC control (the RC tool and its Settings switch) is offered: desktop only. A phone or tablet has no
+ *  joystick, and the on-screen touch sticks are too easy to hit by accident for something that steers
+ *  an aircraft; there is also no way to configure the channels there (Marc, 2026-11-12 for phones,
+ *  2026-11-13 for tablets). Planned to come back on mobile with an external controller, not before 2.1. */
+export const hasRcControl = !isMobile;
 
 /** True when running inside the macOS WebView (WKWebView) — used to mirror native window-control
  *  placement and drive the native-capture backend (AVFoundation). Excludes iPadOS, which shares the

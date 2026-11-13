@@ -20,7 +20,7 @@ inside the box of the feature release they belong to, so the notes for one relea
     ??? info "Kite goes mobile — Android, iPhone and iPad"
         Kite now runs natively on **Android** tablets and phones (USB serial, Bluetooth LE and Wi-Fi
         links, touch-friendly layout, shared storage folders) and on **iPhone / iPad** (native build
-        with phone and tablet layouts, touch RC, BLE and Wi-Fi MAVLink — contributed by Sebastian
+        with phone and tablet layouts, BLE and Wi-Fi MAVLink — contributed by Sebastian
         Kumor). Features a device can't provide are hidden by capability, so the mobile app stays
         clean instead of half-working. [#79] · [#16]
 
@@ -173,7 +173,7 @@ inside the box of the feature release they belong to, so the notes for one relea
     - **Bottom widget slots on the phone** — three centred slots on the map's bottom edge (a larger
       middle one, two smaller beside it), filled by dragging widgets out of the column in edit mode;
       the follow centre moves up so the aircraft stays in the free map. [#173]
-    - **iPhone & iPad support** — native iOS/iPadOS build: phone/tablet layout, touch RC, BLE,
+    - **iPhone & iPad support** — native iOS/iPadOS build: phone/tablet layout, BLE,
       Wi-Fi MAVLink. Contributed by Sebastian Kumor. [#16]
     - **Native RTSP video client** — Kite's own RTSP client with OS hardware decode (H.264/H.265)
       on Windows [#85], Android [#88], Linux [#89], macOS [#126] and iPad [#221] (no video on iPhone).
@@ -299,9 +299,9 @@ inside the box of the feature release they belong to, so the notes for one relea
       only. A serial port that a radar source uses is greyed out for the flight connection and the
       other way round, and two sources set to the same UDP port get a warning. See
       [Radar & ADS-B](guides/radar-and-adsb.md#connecting-a-local-device). [#261]
-    - **No RC control on a phone.** The RC tool and its switch in Settings are gone from the phone
-      layout: on-screen touch sticks are too easy to hit by accident for something that steers an
-      aircraft. Tablets and the desktop keep RC control. [#260]
+    - **No RC control on phones and tablets.** The RC tool and its switch in Settings are gone on
+      Android and iOS: on-screen touch sticks are too easy to hit by accident for something that
+      steers an aircraft. RC control stays a desktop feature for now. [#260] · [#267]
 
     **Improved**
 
@@ -648,6 +648,7 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#263]: https://github.com/b14ckyy/Kite-GC/pull/263
 [#264]: https://github.com/b14ckyy/Kite-GC/pull/264
 [#265]: https://github.com/b14ckyy/Kite-GC/pull/265
+[#267]: https://github.com/b14ckyy/Kite-GC/pull/267
 [#256]: https://github.com/b14ckyy/Kite-GC/pull/256
 [#259]: https://github.com/b14ckyy/Kite-GC/pull/259
 [#143]: https://github.com/b14ckyy/Kite-GC/pull/143

@@ -138,7 +138,7 @@ how smooth the instruments feel; the rest is automatic.
 | **Full MAVLink Telemetry** | MAVLink only — hand rate control to the flight controller (streams everything at its own rates, ignoring the two rates above). For fast links / full `.tlog` capture. See **[Telemetry & display](../guides/telemetry-and-display.md)**. | Off |
 | **Telemetry API** | Serve the live telemetry to other programs as JSON, read-only: a **TCP stream** (port 27300), an **HTTP snapshot** (port 27301) and/or **UDP subscribers** (port 27300, a client subscribes by sending the word `subscribe`); **Reachable on the network** switches the listeners from loopback to all interfaces; **Update rate** 1–10 Hz. The status line shows the endpoints and connected clients. Full contract: **[Telemetry API](telemetry-api.md)**. | Off |
 | **Radar Tracking** | Master switch for foreign-vehicle radar, with per-system enables (**ADS-B**, **FormationFlight**). See **[Radar & ADS-B](../guides/radar-and-adsb.md)**. | On (ADS-B on) |
-| **RC Control** *(not on a phone)* | Enable GCS RC control (reveals the RC tool). See **[RC control](../guides/rc-control.md)**. | Off |
+| **RC Control** *(desktop only)* | Enable GCS RC control (reveals the RC tool). See **[RC control](../guides/rc-control.md)**. | Off |
 
 **Airspeed** and **Wind estimate** each request **extra messages** over the link, so they're separate toggles —
 switch them off to save bandwidth on a slow over-the-air radio, and on when the link can spare it.
