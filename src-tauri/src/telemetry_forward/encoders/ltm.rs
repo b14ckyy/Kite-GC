@@ -13,6 +13,7 @@
 
 use super::super::cache::TelemetryCache;
 use super::Encoder;
+use crate::scheduler::telemetry::{FIX_2D, FIX_NONE};
 
 // ── Unified flight-mode bits (must match scheduler::telemetry::box_id_to_flight_mode_bit output) ──
 const FM_ANGLE: u32 = 1 << 0;
@@ -85,8 +86,9 @@ fn g_frame(g: &crate::scheduler::telemetry::GpsData) -> Vec<u8> {
     p.extend_from_slice(&((g.lon * 1e7).round() as i32).to_le_bytes());
     p.push(g.ground_speed.round().clamp(0.0, 255.0) as u8);
     p.extend_from_slice(&((g.alt_msl * 100.0).round() as i32).to_le_bytes()); // m → cm
-    // LTM fix: 1=no fix, 2=2D, 3=3D (our fix_type is 0/2/3); sats in the upper 6 bits.
-    let ltm_fix: u8 = if g.fix_type >= 3 { 3 } else if g.fix_type == 2 { 2 } else { 1 };
+    // LTM fix: 1=no fix, 2=2D, 3=3D, from the unified scale (`scheduler::telemetry::FIX_*`; 3D and
+    // DGPS/RTK both → 3); sats in the upper 6 bits.
+    let ltm_fix: u8 = match g.fix_type { FIX_NONE => 1, FIX_2D => 2, _ => 3 };
     let sats = g.num_sat.min(63);
     p.push((sats << 2) | ltm_fix);
     frame(b'G', &p)
@@ -185,6 +187,20 @@ mod tests {
         ];
         for &(flags, expected) in cases {
             assert_eq!(ltm_mode_from_flags(flags), expected, "flags=0x{flags:X}");
+        }
+    }
+
+    /// The unified fix scale (0 none / 1 2D / 2 3D / 3 DGPS-RTK) maps back to LTM's 1 / 2 / 3 / 3.
+    #[test]
+    fn g_frame_maps_the_unified_fix_scale() {
+        for (fix_type, wire) in [(0u8, 1u8), (1, 2), (2, 3), (3, 3)] {
+            let g = crate::scheduler::telemetry::GpsData {
+                fix_type, num_sat: 9, lat: 48.1, lon: 11.5, alt_msl: 500.0, ground_speed: 12.0, course: 90.0,
+            };
+            let f = g_frame(&g);
+            let satfix = f[f.len() - 2]; // last payload byte, before the CRC
+            assert_eq!(satfix & 0x03, wire, "fix_type={fix_type}");
+            assert_eq!(satfix >> 2, 9);
         }
     }
 }

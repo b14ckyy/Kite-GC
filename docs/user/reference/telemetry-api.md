@@ -86,7 +86,7 @@ delayed, and there is no back-pressure on Kite's side.
   "protocol": "msp",
   "fcVariant": "INAV",
   "telemetry": {
-    "gps": { "lat": 51.4923, "lon": 11.9263, "altMsl": 143.2, "groundSpeed": 18.4, "course": 271.5, "numSat": 14, "fixType": 3, "hdop": 0.9 },
+    "gps": { "lat": 51.4923, "lon": 11.9263, "altMsl": 143.2, "groundSpeed": 18.4, "course": 271.5, "numSat": 14, "fixType": 2, "hdop": 0.9 },
     "attitude": { "roll": -2.1, "pitch": 3.4, "yaw": 271.0 },
     "altitude": { "altitude": 120.5, "vario": 0.8, "airspeed": 19.2 },
     "altRef": { "msl": true },
@@ -137,7 +137,7 @@ integers. **Sources** lists which links fill the group; a field the source does 
 | `groundSpeed` | float | m/s. |
 | `course` | float | Course over ground, degrees 0–360. |
 | `numSat` | int | Satellites used. |
-| `fixType` | int | 0 none · 1 dead reckoning · 2 = 2D · 3 = 3D (INAV/MAVLink `GPS_FIX_TYPE` values). |
+| `fixType` | int | 0 none · 1 = 2D · 2 = 3D · 3 = DGPS/RTK — one scale for every link (MSP, MAVLink and passive telemetry), not the raw MAVLink `GPS_FIX_TYPE`. |
 | `hdop` | float · null | Horizontal dilution of precision. MSP (INAV) and MAVLink; `null` on passive links. |
 
 #### `attitude` — sources: all

@@ -7,8 +7,9 @@
      Vehicle library on the panel framework (docs/active/PANEL_FRAMEWORK.md) — its own PanelShell
      (compact ↔ advanced 1:2 split): vehicle list grouped by type in the main field, the build-sheet
      detail (image header + structured specs + stats + linked flights) in the detail field. Opened
-     from the Flight Logbook's "Vehicles" toggle. Flights soft-link by craft_name.
-     See docs/active/VEHICLE_DB.md.
+     from the Flight Logbook's "Vehicles" toggle. Flights link by their stored `vehicle_id`; giving a
+     vehicle a craft name / FC id offers to link the existing flights flown with it
+     (controllers/vehicleLinkController.ts). See docs/active/VEHICLE_DB.md.
 -->
 <script lang="ts">
   import { t } from 'svelte-i18n';
@@ -19,22 +20,24 @@
   import { convertAltitude, convertDistance, formatConverted } from '$lib/utils/units';
   import {
     vehicleDbList, vehicleDbCreate, vehicleDbUpdate, vehicleDbDelete,
-    vehicleDbFindByCraftName, vehicleDbAggregate, vehicleDbFlights,
+    vehicleDbAggregate, vehicleDbFlights, vehicleDbTransferFlights, flightSetVehicle,
+    vehicleDbFindByFcUid, vehicleDbSetFcUid,
     vehicleDbSetBaseline, vehicleFileWrite, vehicleFileRead, formatDurationSec,
   } from '$lib/stores/flightlog';
   import type { Vehicle, VehicleInput, VehicleAggregate, VehicleFile, FlightSummary, InavStats } from '$lib/stores/flightlogTypes';
   import {
-    vehicleManagerSelectedId, vehicleSearchQuery, vehicleManagerCreateCraft, normalizeCraftName, vehicleLibraryChanged,
+    vehicleManagerSelectedId, vehicleSearchQuery, vehicleManagerCreatePrefill, normalizeCraftName, vehicleLibraryChanged,
   } from '$lib/stores/vehicleManager';
+  import { offerLinkExistingFlights, vehiclePickLabel, vehicleToInput } from '$lib/controllers/vehicleLinkController';
+  import { shortFcUid } from '$lib/helpers/fcUid';
   import { requestOpenFlightId } from '$lib/stores/missionManager';
-  import { connection } from '$lib/stores/connection';
+  import { hasMsp } from '$lib/stores/connection';
   import FcUidChip from '../FcUidChip.svelte';
-  import { autopilotSystem } from '$lib/stores/autopilotContext';
   import { telemetry } from '$lib/stores/telemetry';
   import { setInavCraftName, readInavStats } from '$lib/controllers/connectionController';
   import PanelShell, { type PanelVariant } from '$lib/components/panel/PanelShell.svelte';
   import Button from '$lib/components/panel/Button.svelte';
-  import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+  import ConfirmDialog, { type DialogOptions } from '$lib/components/ConfirmDialog.svelte';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
   import Toggle from '$lib/components/panel/Toggle.svelte';
 
@@ -69,16 +72,34 @@
   let editing = $state(false);
   let isCreate = $state(false);
   let form = $state<VehicleForm>(blankForm());
+  // A create started from a flight (End-Flight / flight detail): that flight is linked to the new vehicle.
+  let createForFlightId: number | null = null;
+  // The FC id the edit form started with — a library change meanwhile (a post-flight "Store FC ID")
+  // updates an untouched field, so Save can neither wipe nor revert it.
+  let editOrigFcUid = '';
+
+  // Delete with linked flights: transfer them to another vehicle, or delete without a transfer.
+  let deleteAsk = $state<{ vehicle: Vehicle; count: number } | null>(null);
+  let transferTo = $state<number | null>(null);
+  let deleteBusy = $state(false);
+  let transferTargets = $derived(
+    deleteAsk
+      ? vehicles.filter((x) => x.id !== deleteAsk?.vehicle.id).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
+      : [],
+  );
+
+  function ask(opts: DialogOptions): Promise<string | null> {
+    return confirmDialog.show(opts);
+  }
 
   // Import preview (.kvehicle).
   let importFile = $state<VehicleFile | null>(null);
   let importBusy = $state(false);
 
-  // Write craft name to FC: only when an INAV FC is connected and disarmed (post-flight use).
+  // Write craft name to FC: only when an INAV FC is connected over MSP (direct or MSP over MAVLink) and
+  // disarmed (post-flight use). Also gates reading the FC `stats` totals.
   let fcWriteBusy = $state(false);
-  let canWriteToFc = $derived(
-    $connection.status === 'connected' && $autopilotSystem === 'inav' && ($telemetry.armingFlags & 0x04) === 0,
-  );
+  let canWriteToFc = $derived($hasMsp && ($telemetry.armingFlags & 0x04) === 0);
 
   // Pending lifetime baseline to apply on save (adopted on request from the FC `stats` totals, or
   // carried in from a `.kvehicle` import). null = leave the stored baseline untouched.
@@ -154,7 +175,7 @@
     const q = $vehicleSearchQuery.trim().toLowerCase();
     if (!q) return vehicles;
     return vehicles.filter((v) =>
-      [v.name, v.craft_name, v.model, v.vehicle_type, v.notes, v.fc_model, v.fc_manufacturer]
+      [v.name, v.craft_name, v.model, v.vehicle_type, v.notes, v.fc_model, v.fc_manufacturer, v.fc_uid]
         .some((f) => f != null && f.toLowerCase().includes(q))
     );
   });
@@ -191,10 +212,9 @@
 
   async function loadDetails(v: Vehicle) {
     detailsFor = v.id;
-    if (!v.craft_name) { aggregate = null; linkedFlights = []; return; }
     try {
-      aggregate = await vehicleDbAggregate(v.craft_name, dbPath());
-      linkedFlights = await vehicleDbFlights(v.craft_name, dbPath());
+      aggregate = await vehicleDbAggregate(v.id, dbPath());
+      linkedFlights = await vehicleDbFlights(v.id, dbPath());
     } catch {
       aggregate = null;
       linkedFlights = [];
@@ -217,6 +237,7 @@
   function startCreate() {
     form = blankForm();
     formBaseline = null;
+    createForFlightId = null;
     isCreate = true;
     editing = true;
   }
@@ -224,6 +245,7 @@
   function startEdit() {
     if (!selected) return;
     const v = selected;
+    editOrigFcUid = v.fc_uid ?? '';
     form = {
       name: v.name, craftName: v.craft_name ?? '', vehicleType: v.vehicle_type, status: v.status,
       image: v.image, notes: v.notes ?? '',
@@ -263,61 +285,138 @@
   async function saveForm() {
     const input = formToInput();
     if (!input.name) { statusMessage = $t('vehicleMgr.nameRequired'); return; }
+    const before = isCreate ? null : selected;
+    const forFlight = isCreate ? createForFlightId : null;
+    // An FC id belongs to one vehicle: a new or changed FC id that another vehicle stores is moved here
+    // only on the user's word — cancel keeps the form open and saves nothing.
+    const uid = input.fc_uid;
+    const uidChanged = uid != null && (!before || uid.toLowerCase() !== (before.fc_uid ?? '').trim().toLowerCase());
+    let moveUid = false;
+    if (uidChanged) {
+      try {
+        const holder = await vehicleDbFindByFcUid(uid, dbPath());
+        if (holder && holder.id !== before?.id) {
+          const ans = await ask({
+            title: $t('vehicleMgr.uidMoveTitle'),
+            message: $t('vehicleMgr.uidMoveMessage', { values: { name: holder.name } }),
+            buttons: [{ label: $t('vehicleMgr.uidMoveYes'), value: 'move', primary: true }],
+          });
+          if (ans !== 'move') return;
+          moveUid = true;
+        }
+      } catch (e) {
+        statusMessage = $t('vehicleMgr.saveFailed', { values: { error: String(e) } });
+        return;
+      }
+    }
+    let targetId: number;
     try {
-      let targetId: number;
       if (isCreate) {
         targetId = await vehicleDbCreate(input, dbPath());
-      } else if (selected) {
-        await vehicleDbUpdate(selected.id, input, dbPath());
-        targetId = selected.id;
+      } else if (before) {
+        await vehicleDbUpdate(before.id, input, dbPath());
+        targetId = before.id;
       } else {
         return;
       }
+      if (moveUid && uid) await vehicleDbSetFcUid(targetId, uid, dbPath());
       // Apply a freshly adopted/imported baseline (overwrites the stored one); else leave it untouched.
       if (formBaseline) {
         const b = formBaseline;
         await vehicleDbSetBaseline(targetId, b.flight_count, b.total_time_s, b.total_dist_m, b.total_energy, dbPath());
         formBaseline = null;
       }
-      await reload();
-      vehicleManagerSelectedId.set(targetId);
-      const v = vehicles.find((x) => x.id === targetId);
-      if (v) await loadDetails(v);
-      editing = false;
-      statusMessage = $t('vehicleMgr.saved');
     } catch (e) {
       statusMessage = $t('vehicleMgr.saveFailed', { values: { error: String(e) } });
+      return;
     }
+    editing = false;
+    createForFlightId = null;
+    // The vehicle is saved — linking flights is a follow-up: a failure there is logged, never reported
+    // as a failed save, and the list / details / listeners are refreshed regardless.
+    let linked = 0;
+    try {
+      // The flight this vehicle was created from belongs to it.
+      if (forFlight != null) await flightSetVehicle(forFlight, targetId, dbPath());
+      // Offer to link the existing flights flown with the vehicle's identity — over both keys, craft name
+      // and FC id: for a new vehicle, and on an edit that changed the craft name or entered an FC id where
+      // there was none. A REPLACED FC id (an FC swap) offers by the new id only — flights already flown
+      // with the new FC and stored unassigned; at count 0 there is no prompt, so a normal swap stays
+      // silent and the earlier flights stay linked through their vehicle id.
+      const craftChanged = input.craft_name != null
+        && (!before || input.craft_name.toLowerCase() !== (before.craft_name ?? '').trim().toLowerCase());
+      const uidAdded = uid != null && !(before?.fc_uid ?? '').trim();
+      if (!before || craftChanged || uidChanged) {
+        const byCraft = !before || craftChanged || uidAdded ? input.craft_name : null;
+        linked = await offerLinkExistingFlights(ask, targetId, byCraft, input.fc_uid, dbPath());
+      }
+    } catch (e) {
+      console.warn('[vehicle-manager] linking flights after save failed', e);
+    }
+    await reload();
+    vehicleManagerSelectedId.set(targetId);
+    const v = vehicles.find((x) => x.id === targetId);
+    if (v) await loadDetails(v);
+    announceLibraryChange();
+    statusMessage = linked > 0
+      ? $t('vehicleMgr.savedLinked', { values: { count: linked } })
+      : $t('vehicleMgr.saved');
   }
 
+  // Delete: without linked flights a plain confirm; with linked flights the transfer dialog (transfer
+  // them to another vehicle, or delete without a transfer — the flights then belong to no vehicle).
   async function deleteVehicle() {
     if (!selected) return;
     const v = selected;
     const count = linkedFlights.length;
+    if (count > 0) {
+      transferTo = null;
+      deleteAsk = { vehicle: v, count };
+      return;
+    }
     const ans = await confirmDialog.show({
       title: $t('vehicleMgr.deleteTitle'),
-      message: count > 0
-        ? $t('vehicleMgr.deleteMsgLinked', { values: { count: String(count) } })
-        : $t('vehicleMgr.deleteMsg'),
-      buttons: [
-        { label: $t('vehicleMgr.deleteYes'), value: 'delete', danger: true },
-        { label: $t('vehicleMgr.cancel'), value: 'cancel' },
-      ],
+      message: $t('vehicleMgr.deleteMsg'),
+      buttons: [{ label: $t('vehicleMgr.deleteYes'), value: 'delete', danger: true }],
     });
-    if (ans !== 'delete') return;
+    if (ans === 'delete') await doDelete(v, null);
+  }
+
+  async function doDelete(v: Vehicle, target: Vehicle | null) {
+    deleteBusy = true;
     try {
+      const moved = target ? await vehicleDbTransferFlights(v.id, target.id, dbPath()) : 0;
       await vehicleDbDelete(v.id, dbPath());
+      deleteAsk = null;
       vehicleManagerSelectedId.set(null);
       aggregate = null;
       linkedFlights = [];
       await reload();
-      statusMessage = $t('vehicleMgr.deleted');
+      announceLibraryChange();
+      statusMessage = target
+        ? $t('vehicleMgr.deletedTransferred', { values: { count: moved, name: target.name } })
+        : $t('vehicleMgr.deleted');
     } catch (e) {
       statusMessage = $t('vehicleMgr.deleteFailed', { values: { error: String(e) } });
+    } finally {
+      deleteBusy = false;
     }
   }
 
+  function confirmDeleteWithTransfer() {
+    const a = deleteAsk;
+    const target = vehicles.find((x) => x.id === transferTo) ?? null;
+    if (a && target) void doDelete(a.vehicle, target);
+  }
+
   function openFlight(id: number | null) { if (id != null) requestOpenFlightId.set(id); }
+
+  // Tell the rest of the app (flight detail) that vehicles or flight links changed — without making
+  // this Manager reload itself through its own listener below.
+  function announceLibraryChange() {
+    seenLibraryChange = get(vehicleLibraryChanged) + 1;
+    vehicleLibraryChanged.set(seenLibraryChange);
+  }
 
   // Push the form's craft name to the connected INAV FC (MSP_SET_NAME + EEPROM) so future flights
   // auto-link. Only offered when an INAV FC is connected + disarmed (typical post-flight situation).
@@ -373,15 +472,6 @@
   // ── Export (.kvehicle) ──────────────────────────────────────────────
   function sanitize(s: string): string { return s.replace(/[^\w\-]+/g, '_').replace(/^_+|_+$/g, ''); }
 
-  function vehicleToInput(v: Vehicle): VehicleInput {
-    const {
-      id: _id, created_at: _c, updated_at: _u,
-      base_flight_count: _bf, base_total_time_s: _bt, base_total_dist_m: _bd, base_total_energy: _be,
-      ...rest
-    } = v;
-    return rest;
-  }
-
   async function exportVehicle() {
     if (!selected) return;
     const v = selected;
@@ -429,17 +519,45 @@
     if (!f.vehicle.name.trim()) { statusMessage = $t('vehicleMgr.nameRequired'); return; }
     importBusy = true;
     try {
+      // The file's FC id stored on another vehicle: move it here only on the user's word (cancel keeps
+      // the preview open, nothing imported) — an FC id belongs to one vehicle.
+      const uid = (f.vehicle.fc_uid ?? '').trim();
+      let moveUid = false;
+      if (uid) {
+        const holder = await vehicleDbFindByFcUid(uid, dbPath());
+        if (holder) {
+          const ans = await ask({
+            title: $t('vehicleMgr.uidMoveTitle'),
+            message: $t('vehicleMgr.uidMoveMessage', { values: { name: holder.name } }),
+            buttons: [{ label: $t('vehicleMgr.uidMoveYes'), value: 'move', primary: true }],
+          });
+          if (ans !== 'move') return;
+          moveUid = true;
+        }
+      }
       const id = await vehicleDbCreate(f.vehicle, dbPath());
+      if (moveUid) await vehicleDbSetFcUid(id, uid, dbPath());
       // Restore the lifetime baseline carried in the file (0s if it was a baseline-free export).
       if (f.base_flight_count || f.base_total_time_s || f.base_total_dist_m || f.base_total_energy) {
         await vehicleDbSetBaseline(id, f.base_flight_count, f.base_total_time_s, f.base_total_dist_m, f.base_total_energy, dbPath());
       }
       importFile = null;
+      // The vehicle exists — linking flights is a follow-up: a failure there is logged, never reported
+      // as a failed import, and the list / details / listeners are refreshed regardless.
+      let linked = 0;
+      try {
+        linked = await offerLinkExistingFlights(ask, id, f.vehicle.craft_name, f.vehicle.fc_uid, dbPath());
+      } catch (e) {
+        console.warn('[vehicle-manager] linking flights after import failed', e);
+      }
       await reload();
       vehicleManagerSelectedId.set(id);
       const v = vehicles.find((x) => x.id === id);
       if (v) await loadDetails(v);
-      statusMessage = $t('vehicleMgr.imported');
+      announceLibraryChange();
+      statusMessage = linked > 0
+        ? $t('vehicleMgr.importedLinked', { values: { count: linked } })
+        : $t('vehicleMgr.imported');
     } catch (e) {
       statusMessage = $t('vehicleMgr.importFailed', { values: { error: String(e) } });
     } finally {
@@ -497,16 +615,18 @@
     return { update() { autoResize(el); } };
   }
 
-  // External "create vehicle from this craft name" trigger: open straight into the create form
-  // with name + craft name pre-filled, then consume the one-shot signal.
+  // External "create vehicle from this flight" trigger: open straight into the create form with name,
+  // craft name and FC id pre-filled (the flight is linked on save), then consume the one-shot signal.
   $effect(() => {
-    const c = $vehicleManagerCreateCraft;
-    if (c == null) return;
+    const p = $vehicleManagerCreatePrefill;
+    if (p == null) return;
     startCreate();
-    const name = normalizeCraftName(c);
+    const name = normalizeCraftName(p.craftName);
     form.name = name;
     form.craftName = name;
-    vehicleManagerCreateCraft.set(null);
+    form.fcUid = p.fcUid ?? '';
+    createForFlightId = p.flightId;
+    vehicleManagerCreatePrefill.set(null);
   });
 
   // Selection set from outside while mounted → load its details (no-op for the in-Manager paths,
@@ -521,14 +641,23 @@
     }
   });
 
-  // The library changed outside the Manager (UAV Info panel save) → reload. The first run only
-  // records the current counter.
+  // The library changed outside the Manager (UAV Info panel save, End-Flight follow-ups) → reload the
+  // list and the open vehicle's details (its FC id or linked flights may have changed).
   let seenLibraryChange = 0;
   $effect(() => {
     const n = $vehicleLibraryChanged;
     if (n === seenLibraryChange) return;
     seenLibraryChange = n;
-    void reload();
+    void (async () => {
+      await reload();
+      const id = get(vehicleManagerSelectedId);
+      const v = id != null ? vehicles.find((x) => x.id === id) : undefined;
+      if (v && editing && !isCreate && form.fcUid === editOrigFcUid) {
+        form.fcUid = v.fc_uid ?? '';
+        editOrigFcUid = form.fcUid;
+      }
+      if (v) await loadDetails(v);
+    })();
   });
 
   // Init once: load + restore selection.
@@ -724,7 +853,7 @@
           </button>
         {/each}
         {#if linkedFlights.length === 0}
-          <div class="flight-none">{v.craft_name ? $t('vehicleMgr.noFlights') : $t('vehicleMgr.noCraftLink')}</div>
+          <div class="flight-none">{$t('vehicleMgr.noFlights')}</div>
         {/if}
       </div>
     </div>
@@ -778,6 +907,31 @@
   </div>
 {/if}
 
+<!-- Delete a vehicle with linked flights: transfer them, or delete without a transfer. -->
+{#if deleteAsk}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="modal-backdrop" onclick={() => { if (!deleteBusy) deleteAsk = null; }}>
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="modal-card" onclick={(e) => e.stopPropagation()}>
+      <div class="section-heading">{$t('vehicleMgr.deleteTitle')}: {deleteAsk.vehicle.name}</div>
+      <div class="vmv-delete-msg">{$t('vehicleMgr.deleteMsgLinked', { values: { count: deleteAsk.count } })}</div>
+      <label class="fld"><span class="fld-label">{$t('vehicleMgr.deleteTransferTo')}</span>
+        <select class="fld-input" bind:value={transferTo} disabled={deleteBusy || transferTargets.length === 0}>
+          <option value={null}>{transferTargets.length ? $t('vehicleMgr.deleteTransferPick') : $t('vehicleMgr.deleteTransferNoTarget')}</option>
+          {#each transferTargets as x (x.id)}<option value={x.id}>{vehiclePickLabel(x)}</option>{/each}
+        </select>
+      </label>
+      <div class="vmv-delete-actions">
+        <Button variant="standard" disabled={deleteBusy} onclick={() => (deleteAsk = null)}>{$t('vehicleMgr.cancel')}</Button>
+        <Button variant="danger" icon="delete" disabled={deleteBusy} onclick={() => { const a = deleteAsk; if (a) void doDelete(a.vehicle, null); }}>{$t('vehicleMgr.deleteNoTransfer')}</Button>
+        <Button variant="data" disabled={deleteBusy || transferTo == null} onclick={confirmDeleteWithTransfer}>{$t('vehicleMgr.deleteTransferYes')}</Button>
+      </div>
+    </div>
+  </div>
+{/if}
+
 {#if statusMessage}<div class="veh-status">{statusMessage}</div>{/if}
 
 <ConfirmDialog bind:this={confirmDialog} />
@@ -802,9 +956,11 @@
     {/if}
     <div class="lib-item-text">
       <div class="lib-item-title">{v.name}</div>
+      <!-- type · craft name (the shortened FC id when there is none) · model -->
       <div class="lib-item-meta">
-        <span>{typeLabel(v.vehicle_type)}</span>
-        {#if v.craft_name}<span class="veh-craft">{v.craft_name}</span>{/if}
+        <span class="veh-meta-line">
+          {typeLabel(v.vehicle_type)}{#if v.craft_name}<span class="veh-sep">·</span><span class="veh-craft">{v.craft_name}</span>{:else if v.fc_uid}<span class="veh-sep">·</span><span class="veh-craft" title={v.fc_uid}>{shortFcUid(v.fc_uid)}</span>{/if}{#if v.model}<span class="veh-sep">·</span>{v.model}{/if}
+        </span>
         {#if v.status !== 'active'}<span class="veh-badge-sm">{statusLabel(v.status)}</span>{/if}
       </div>
     </div>
@@ -1011,6 +1167,11 @@
   .lib-item-title { font-size: 12px; color: #fff; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .lib-item-meta { margin-top: 2px; display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 10px; color: #aaa; align-items: center; }
   .veh-craft { color: #8fb4c5; }
+  .veh-meta-line { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .veh-sep { margin: 0 5px; color: #666; }
+
+  .vmv-delete-msg { font-size: 12px; color: #bbb; line-height: 1.5; margin-bottom: 10px; }
+  .vmv-delete-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; margin-top: 12px; }
   .veh-badge-sm { font-size: 9px; color: #e0b050; border: 1px solid rgba(224, 176, 80, 0.4); border-radius: 999px; padding: 0 5px; text-transform: uppercase; }
 
   .vmv-detail { display: flex; flex-direction: column; gap: 6px; }

@@ -99,6 +99,7 @@ nav:
       - Installation: getting-started/installation.md
       - First connection: getting-started/first-connection.md
       - Quick tour: getting-started/quick-tour.md
+      - Android, iPhone & iPad: getting-started/mobile.md
   - Guides:
       - Connecting: guides/connecting.md
       - Telemetry & display: guides/telemetry-and-display.md
@@ -115,6 +116,7 @@ nav:
       - Radar & ADS-B: guides/radar-and-adsb.md
       - Airspace Manager: guides/airspace.md
       - 3D map: guides/map-3d.md
+      - Your own maps: guides/custom-maps.md
       - Relay & forwarding: guides/relay-and-forwarding.md
   - Reference:
       - Settings: reference/settings.md

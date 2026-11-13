@@ -39,6 +39,27 @@ A small cluster of buttons sits in one corner of the map:
 The map controls — the 2D/3D, follow-mode and zoom buttons (shown here in several states).
 ///
 
+### Map search
+
+The **magnifier** button takes the map to a place or to coordinates. On the desktop and on a tablet
+it sits in the top bar, left of the connection controls; on a phone it is the top button of the map
+control cluster. It opens one text line:
+
+- Type a **place** — a town, a region, an airfield — and press **Enter**. Kite asks OpenStreetMap's
+  search service once per Enter (it does not search while you type) and lists up to five matches;
+  pick one and the map jumps there, zoomed to the size of the place. A single match jumps at once.
+  This needs internet.
+- Type **coordinates** and the map jumps without asking any service, so this works offline. Kite
+  understands decimal degrees (`51.4886, 11.97`), degrees with decimal minutes
+  (`51 29.316 N 11 58.2 E`) and degrees, minutes and seconds (`51°29'19"N 11°58'12"E`), with or
+  without the letters N S E W, latitude first.
+- The **location** button left of the line jumps to your own position: the ground-station position
+  Kite already knows, otherwise it asks the operating system once.
+
+A small pin marks the target for a few seconds. The search works on the 2D and the 3D map; in 3D a
+follow, orbit or FPV camera is released to the free camera for the jump. It is a way to move the
+map, not an address finder: Kite stores no search history and offers no routing.
+
 ## Aircraft status (top bar)
 
 The centre of the top bar is a live health summary of the connected craft:
@@ -61,8 +82,10 @@ along the bottom. Each widget is self-contained and updates live.
 ### Arranging widgets
 
 - **Choose which widgets appear** in **[Settings](../reference/settings.md)** — toggle each on or off.
-- **Rearrange them**: click the **✎ (edit)** button by a dock to enter **edit mode**, then drag
-  widgets to reorder them or move them between the two docks.
+- **Rearrange them**: **long-press** a widget (hold the mouse button or your finger on it for half a
+  second) to enter **edit mode** — the widget is picked up straight away, so you can drag it to a new
+  place or into the other dock. In edit mode a press picks a widget up immediately. Click anywhere
+  outside the docks, or press **Escape**, to leave edit mode.
 - **Resize them**: in edit mode each widget shows a **resize button** in its corner. Every tap steps
   it to its next size — square widgets toggle **small ↔ large**, the wide ones (Live AGL, Video) cycle
   **wide → large square → small square**. The aspect ratio never changes (a widget is only rescaled),
@@ -130,8 +153,10 @@ The **UAV Info** tool on the navigation rail is a quick read-out of *what you're
 - **Flight controller** — craft name, firmware variant and version, board / target, vehicle type, the
   API version, and hardware revision when reported. Shown for any connection (INAV, ArduPilot, PX4).
 - **Features** *(INAV)* — badges for the INAV capabilities Kite can use (autoland, geozones, MSP-RC,
-  AUX-RC, ADS-B), lit when your INAV version supports them. These are version-dependent and INAV-specific,
-  so the section appears only on an INAV link.
+  AUX-RC, ADS-B, MSP over MAVLink), lit when your INAV version supports them. These are version-dependent
+  and INAV-specific, so the section appears only on an INAV link. On an INAV-over-MAVLink link
+  (**MSP/MAV**, see **[Connecting](connecting.md#inav-over-mavlink-mspmav)**) MSP-RC, AUX-RC and ADS-B
+  stay unlit, with *Not available over MSP/MAV* as their tooltip.
 
 The **vehicle type** row is a dropdown. Kite fills it with the type it detected during the handshake (the
 INAV mixer platform, or the MAVLink vehicle type plus the QuadPlane check), and you can change it at any
@@ -140,17 +165,20 @@ link where Kite can only say *Generic*. The map and the 3D model follow your cho
 recorder stores it with the flight, including a flight that is already being recorded. The override is
 not saved: it lasts for the session, and after a reconnect it comes back only when Kite recognises the
 same flight controller. INAV and MAVLink links report a hardware ID for that, shown as **FC ID**
-(shortened, with a copy button for the full value) and stored with each flight; telemetry-only links
-have none and start from *Generic* again.
+(shortened, with a copy button for the full value) and stored with each flight — it is also how a flight
+finds its [vehicle](vehicles.md#linking-flights). Telemetry-only links, INAV over plain MAVLink (without
+MSP/MAV) and simulators that report a placeholder (INAV SITL, PX4 SITL as system ID 1) have none: there
+the override is not restored after a reconnect, and the type starts from what the link detects.
 
 **Save to vehicle library** creates a [vehicle library](vehicles.md) entry from the connected craft in
 one click — name and craft name, the vehicle type, the board as FC model, firmware and version, the FC
 ID, the sensors the flight controller reports (GPS, compass, airspeed, rangefinder, optical flow; RTK only
 while the GPS has an RTK fix at that moment) and whether blackbox / dataflash logging is enabled. It
 appears on INAV and MAVLink links only. When a vehicle already carries this FC ID the button
-reads **View in vehicle library** instead and jumps straight to that entry. After swapping the flight
-controller of an existing vehicle, copy the new FC ID from here into the vehicle's build sheet and the
-button finds it again.
+reads **View in vehicle library** instead and jumps straight to that entry. After saving, Kite offers to
+link the logged flights of this craft name or FC ID that belong to no vehicle yet. After swapping the
+flight controller of an existing vehicle, copy the new FC ID from here into the vehicle's build sheet —
+the button finds it again and the vehicle's earlier flights stay linked.
 
 ![The UAV Info panel](../assets/guides/telemetry/uav_info.png)
 /// caption

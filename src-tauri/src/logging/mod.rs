@@ -9,9 +9,10 @@
 // can't connect to a PX4 board) leave a diagnostic trail the user can hand back.
 //
 // Design:
-// - One TXT file in the app data folder (`<AppData>/kite-gc/kite-gc.log`, or `data/` in portable
-//   mode). The previous session's file is rotated to `kite-gc.log.prev` on each start, so there are
-//   always exactly two: the current run + the one before. Bounded, easy to find, easy to send.
+// - One TXT file per day in the app data folder (`<AppData>/kite-gc/kite-gc-YYYY-MM-DD.log`, or
+//   `data/` in portable mode; app-private storage on Android), sessions appended under a header
+//   block, files older than `LOG_RETENTION_DAYS` pruned on start. Bounded, easy to find, easy to send
+//   — on Android through the share sheet, which is why `log_files` lists the day-files.
 // - The level is user-configurable at runtime via Settings (OFF / Error / Warning / Debug). We rely
 //   on `log::set_max_level` as the gate, so `set_level` is a single atomic store with no relocking.
 // - Every record is flushed immediately: this is a low-volume diagnostic log, and flushing means a
@@ -298,6 +299,71 @@ pub fn set_level(level: LevelFilter) {
 /// The active log file path (for "open log folder" in Settings), if logging is installed.
 pub fn log_path() -> Option<PathBuf> {
     LOGGER.state.lock().ok().and_then(|g| g.path.clone())
+}
+
+/// One day-file in the log folder, as the mobile "Share log" picker lists it.
+#[derive(serde::Serialize)]
+pub struct LogFileInfo {
+    /// `kite-gc-YYYY-MM-DD.log` — the date lives in the name, the picker reads it from there.
+    pub name: String,
+    /// Absolute path, what `share_file` takes.
+    pub path: String,
+    /// Size in bytes at call time; the active file is flushed first so its figure is current.
+    pub size: u64,
+    /// The file this session appends to.
+    pub active: bool,
+}
+
+/// Is `name` a day-file of the current scheme (`kite-gc-YYYY-MM-DD.log`)? Deliberately narrower than
+/// the `prune_old_logs` match, which must also sweep the legacy `kite-gc.log`/`.prev` pair — the
+/// picker has no date to show for those.
+fn is_day_file(name: &str) -> bool {
+    name.starts_with("kite-gc-") && name.ends_with(".log")
+}
+
+/// The day-files next to the active log, newest first; empty when logging is not installed.
+///
+/// On Android the log folder is app-private — no file manager and no MTP connection can reach it —
+/// so the share sheet in Settings is the only way a log leaves the device, and after a restart the
+/// file a tester needs is yesterday's, not the active one. This lists what is there so the frontend
+/// can offer a choice. Newest first falls out of sorting by name: the zero-padded date is in it.
+/// Best-effort: an unreadable entry is skipped, an unreadable folder yields an empty list.
+pub fn log_files() -> Vec<LogFileInfo> {
+    let active = match log_path() {
+        Some(p) => p,
+        None => return Vec::new(),
+    };
+    let dir = match active.parent() {
+        Some(d) => d,
+        None => return Vec::new(),
+    };
+    // Every record is flushed as it is written, but the size below must not depend on that detail.
+    LOGGER.flush();
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return Vec::new(),
+    };
+    let mut files: Vec<LogFileInfo> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().to_str()?.to_string();
+            if !is_day_file(&name) {
+                return None;
+            }
+            let meta = entry.metadata().ok()?;
+            if !meta.is_file() {
+                return None;
+            }
+            Some(LogFileInfo {
+                active: active.file_name() == Some(entry.file_name().as_os_str()),
+                path: entry.path().to_string_lossy().to_string(),
+                size: meta.len(),
+                name,
+            })
+        })
+        .collect();
+    files.sort_by(|a, b| b.name.cmp(&a.name));
+    files
 }
 
 /// True when `p` is the current log file or its `.prev` sibling — used by callers that want to avoid

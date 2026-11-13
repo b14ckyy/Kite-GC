@@ -136,6 +136,14 @@
     transition: width 0.25s ease, height 0.25s ease, top 0.25s ease, transform 0.25s ease, opacity 0.25s ease;
     animation: ps-in 0.18s ease-out;
   }
+  /* Low-power mode switches the blur off (--panel-blur: none), and with it the panel loses its own
+     compositor layer: it gets one only while the enter animation or a transition runs, and when that
+     ends the panel is rastered again. Over a native video the window is transparent, so this showed
+     as the panel vanishing for a frame or two after every open (Android tablet). Keeping the layer
+     costs one texture for the one visible panel. */
+  :global(html.kite-low-power) .ps {
+    will-change: transform;
+  }
   /* Parked: the rail's active button was clicked again — the panel slides out to the left with
      its state intact (+page sets .panels-hidden on the host); the next click slides it back. */
   :global(.panels-hidden) .ps {

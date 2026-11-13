@@ -14,8 +14,9 @@
   import 'leaflet/dist/leaflet.css';
   import { get } from 'svelte/store';
   import { settings } from '$lib/stores/settings';
-  import { getProviderById } from '$lib/config/mapProviders';
-  import { cachedTileLayer } from '$lib/cache/CachedTileLayer';
+  import { getProviderById, isCustomProviderId } from '$lib/config/mapProviders';
+  import { cachedTileLayer, providerLayerOptions } from '$lib/cache/CachedTileLayer';
+  import { ensureCustomMapsLoaded } from '$lib/stores/customMaps';
   import { hasLocation, toDeg, type Waypoint } from '$lib/stores/mission';
   import { arduHasLocation, type ArduWaypoint } from '$lib/stores/missionArdupilot';
 
@@ -89,16 +90,24 @@
       boxZoom: false, keyboard: false, touchZoom: false,
     });
     map.setView([0, 0], 2);
-    const provider = getProviderById(s.mapProvider);
-    // maxNativeZoom caps tile *requests* at the provider's real max, but maxZoom lets the map (and
-    // thus fitBounds) zoom further by upscaling those tiles — so a small mission still fills the
-    // preview to the ~10px border instead of being capped tiny at the provider's native zoom.
-    cachedTileLayer(provider.url, {
-      attribution: '',
-      maxZoom: 21,
-      maxNativeZoom: provider.maxZoom,
-      providerId: provider.detectPlaceholders ? provider.id : undefined,
-    }).addTo(map);
+    const addBase = () => {
+      if (!map) return;
+      const provider = getProviderById(s.mapProvider);
+      // maxNativeZoom caps tile *requests* at the provider's real max, but maxZoom lets the map (and
+      // thus fitBounds) zoom further by upscaling those tiles — so a small mission still fills the
+      // preview to the ~10px border instead of being capped tiny at the provider's native zoom.
+      cachedTileLayer(provider.url, {
+        attribution: '',
+        maxNativeZoom: provider.maxNativeZoom ?? provider.maxZoom,
+        providerId: provider.detectPlaceholders ? provider.id : undefined,
+        ...providerLayerOptions(provider),
+        // After the spread: a user online map's over-zoom limit (20) must not lower the preview's 21.
+        maxZoom: 21,
+      }).addTo(map);
+    };
+    // A custom map resolves only once the custom-map folder is listed.
+    if (isCustomProviderId(s.mapProvider)) void ensureCustomMapsLoaded().then(addBase);
+    else addBase();
     draw(waypointsJson);
     // The detail box lays out after mount (and the panel may still be animating its width
     // wider on the first selection) → fix the size + refit on every resize.

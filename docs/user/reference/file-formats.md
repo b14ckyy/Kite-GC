@@ -19,8 +19,8 @@ You can also drag a mission file straight onto the map. See **[Missions](../guid
 
 | Format | Extension | Notes |
 |---|---|---|
-| **INAV Blackbox** | `.bbl`, `.txt` | Onboard-flash (`.bbl`) or SD-card (`.txt`) blackbox. Needs the `blackbox_decode` helper, which Kite fetches automatically on first use. |
-| **ArduPilot Dataflash** | `.bin` | ArduPilot onboard logs. |
+| **INAV Blackbox** | `.bbl`, `.bfl`, `.txt` | Onboard-flash (`.bbl` / `.bfl`) or SD-card (`.txt`) blackbox. INAV logs only — a Blackbox log from another firmware (e.g. Betaflight) is refused. |
+| **ArduPilot Dataflash** | `.bin` | ArduPilot (4.1 or newer) onboard logs. |
 | **PX4 ULog** | `.ulg` | PX4 onboard flash / SD-card logs. PX4 logs no throttle output, so replayed throttle shows the thrust setpoint. |
 | **MAVLink telemetry** | `.tlog` | A MAVLink ground-station recording. |
 | **MWPTools raw-MSP** | `.rawmsp` | mwp's raw telemetry capture. |
@@ -56,5 +56,12 @@ See **[Flight logbook](../guides/logbook.md)**.
 
 - **Flight database** — your logbook (flights, vehicles, batteries, saved missions) is one local SQLite
   database; its location is configurable in **[Settings → Data](settings.md)**.
-- **Caches** — 2D map tiles and terrain are cached on disk (also under Settings → Data); these are the
+- **Next to the database** — `flights.pre-migration-backup.db`, the full backup Kite writes before an
+  update upgrades the database format (only the latest is kept), and a `hires-cache/` folder that holds
+  the temporary decode of a flight in **HI-RES** replay and is emptied when you close the flight. See
+  **[Flight logbook](../guides/logbook.md#the-database-updates-and-the-automatic-backup)**.
+- **Caches** — 2D map tiles and terrain are cached on disk (under Settings → Map → Cache); these are the
   files that make the 2D map usable offline.
+- **Custom maps** (desktop) — your own map tiles in the custom map location, one `Z/X/Y` folder per
+  map, plus a small `.kite-coverage.json` index Kite writes into each map folder. See
+  **[Custom maps from a folder](../guides/custom-maps.md#custom-maps-from-a-folder)**.

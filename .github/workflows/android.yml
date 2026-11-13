@@ -82,6 +82,11 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # The action's default is "tools platform-tools"; "tools" is the legacy SDK Tools package
+          # (deprecated 2019) that Google's repository stopped listing on 2026-09-14 — sdkmanager then
+          # fails the whole step ("Failed to find package 'tools'"). Nothing here needed it.
+          packages: platform-tools
 
       - name: Install NDK ${{ env.NDK_VERSION }}
         run: sdkmanager --install "ndk;${{ env.NDK_VERSION }}"

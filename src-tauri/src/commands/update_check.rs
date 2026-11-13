@@ -93,7 +93,7 @@ fn pick<'a>(releases: &'a [Value], channel: UpdateChannel, current: &str) -> Opt
 pub async fn check_for_update(app: tauri::AppHandle, channel: UpdateChannel) -> Result<Option<UpdateInfo>, String> {
     let current = app.package_info().version.to_string();
     let client = reqwest::Client::builder()
-        .user_agent(format!("Kite-GC/{current} update-check"))
+        .user_agent(crate::user_agent::user_agent("update-check"))
         .build()
         .map_err(|e| format!("HTTP client error: {e}"))?;
 

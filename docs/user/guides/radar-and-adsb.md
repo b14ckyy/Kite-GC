@@ -13,10 +13,12 @@ the serial port the flight controller uses, so it can't disturb your telemetry.
 
 ## Turning it on
 
-Radar is **off by default**. Enable it in **Settings → Data → Telemetry**:
+Radar is **on by default**, with **ADS-B** enabled and **FormationFlight** off. The switches are in
+**Settings → Data → Telemetry**:
 
-1. Switch on the **Radar** master toggle — this reveals the **Radar** tool on the navigation rail.
-2. Turn on the **systems** you want: **ADS-B** and/or **FormationFlight**. Each is independent; leave off
+1. The **Radar** master toggle — it shows the **Radar** tool on the navigation rail; switch it off to
+   hide radar altogether.
+2. The **systems** you want: **ADS-B** and/or **FormationFlight**. Each is independent; leave off
    what you don't use.
 
 Then open the **Radar** tool. The panel has a tab per enabled system for **source configuration** on the
@@ -42,11 +44,11 @@ address, so the same plane seen by two feeds appears once):
   (10–100 km) and the **poll interval** (2–30 s) under **Online service**. Online feeds are fetched
   **around the area you're looking at** — the 2D map centre or the 3D camera focus — so panning the map
   moves the query. No hardware needed.
-- **Local receiver** — a USB ADS-B receiver (e.g. ADSBee, PicoADSB) that streams **MAVLink
-  `ADSB_VEHICLE` (message #246)**. Add a receiver row under **Local sources**, pick its **serial port**
-  and **baud**, and Kite reads the traffic directly — fully offline. Kite accepts **both MAVLink v1 and
-  v2** automatically (it detects the frame version itself — there's no setting to match), so just point
-  the receiver at the port. (Network / Wi-Fi receivers are coming.)
+- **Local receiver** — an ADS-B receiver (e.g. ADSBee, PicoADSB) that streams **MAVLink
+  `ADSB_VEHICLE` (message #246)**. Add a receiver row under **Local sources** and choose how it is
+  connected — **Serial**, **TCP** or **UDP** (see [Connecting a local device](#connecting-a-local-device)).
+  Kite reads the traffic directly — fully offline. Kite accepts **both MAVLink v1 and v2**
+  automatically (it detects the frame version itself — there's no setting to match).
 - **From your UAV** — on **INAV 8.0+**, if your aircraft has its own ADS-B receiver, Kite can download
   its traffic list over the existing flight link (the **UAV Source** toggle). This appears only when the
   connected FC supports it; ArduPilot and PX4 don't offer this path.
@@ -66,9 +68,8 @@ feed that fails (typically a provider's rate limit, HTTP 429) is **backed off au
 the spacing of that feed's requests after every failed attempt, up to one minute, and returns to your
 poll interval as soon as a request succeeds again. The other feeds keep their normal rate. An
 **enabled** row collapses to a single line (name · count · toggle); a **disabled** row expands to show
-its fields (URL / API key for online, port / baud for a receiver) and a **delete** button. New rows
-start disabled so you can fill them in first. A serial port already used by another source is shown as
-*in use* in the other pickers.
+its fields (URL / API key for online, the connection for a receiver) and a **delete** button. New rows
+start disabled so you can fill them in first.
 
 !!! tip "Online ADS-B needs internet"
     The online services need connectivity. In the field with no connection, a **local receiver** or the
@@ -78,8 +79,9 @@ start disabled so you can fill them in first. A serial port already used by anot
 
 **FormationFlight** (the open-source ESP32 mesh radar, formerly INAV-Radar) lets a group of pilots see
 each other. Each aircraft carries an ESP32 module that broadcasts its position over its radio and relays
-the peers it hears. Connect a **receiver module** to Kite over **serial** (on the FormationFlight tab:
-pick the port, set a **node name**).
+the peers it hears. Connect a **receiver module** to Kite over **Serial**, **TCP** or **UDP** (on the
+FormationFlight tab: choose the connection as described under
+[Connecting a local device](#connecting-a-local-device), set a **node name**).
 
 To join the mesh, Kite presents itself to the module as an INAV flight controller located at your **GCS
 position**, so the module shares your location with the formation and relays the other peers back to you.
@@ -91,6 +93,32 @@ collision alerts (those are ADS-B only, below).
 
 For the module firmware and hardware, see the
 [FormationFlight project](https://github.com/FormationFlight/FormationFlight).
+
+## Connecting a local device
+
+An ADS-B receiver and the FormationFlight module are each connected in one of three ways, chosen in the
+first field of their row:
+
+- **Serial** — pick the **port** and the **baud rate**. Not offered on iPhone and iPad, which have no
+  serial ports.
+- **TCP** — enter the device's **IP address** and **port**; Kite connects to it. A host name does not
+  work here, it has to be the address.
+- **UDP** — enter the **port**. Kite listens on that port on this computer and the device (or the
+  bridge it hangs on) must send its data there; the IP address is optional. New rows start on **14551**
+  for an ADS-B receiver and **14552** for FormationFlight, so they stay clear of 14550, where a UDP
+  flight link normally listens.
+
+A TCP or UDP link carries the same bytes the device would send over a serial cable, so any
+serial-to-network bridge works as long as it passes them through unchanged.
+
+Kite keeps the connections apart for you:
+
+- A **serial port** that another radar source or the flight connection already uses is shown as
+  *in use* and cannot be picked. The same holds the other way round: in the connection bar, a port
+  held by a running radar source is greyed out with *used by radar*.
+- Two UDP links cannot listen on the same port. If a radar source uses a port that another source or
+  the flight connection is set to, the row shows a warning, and the source that comes second gets no
+  data until the port is free.
 
 ## The tracked-vehicle list
 

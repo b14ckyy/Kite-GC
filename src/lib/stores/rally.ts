@@ -55,23 +55,51 @@ export async function loadRallyConfig(): Promise<void> {
   }
 }
 
-/** "Save to FC": upload the working copy (points + params), then re-read so loaded == FC truth. */
+/** Outcome of the last "Save to FC" worth showing in the panel: the upload failed, or parameters Kite
+ *  could not write (`NAME: reason; …`). Kept here, not in the panel, so it survives the panel being
+ *  rebuilt mid-save. Cleared on save start / revert / disconnect — not on load, which the save itself runs. */
+export type RallySaveIssue = { kind: 'failed' | 'params'; detail: string };
+export const rallySaveIssue = writable<RallySaveIssue | null>(null);
+
+/** Bumped on disconnect so a save still in flight does not report into the next connection. */
+let rallyGeneration = 0;
+
+/** "Save to FC": upload the working copy's points plus only the params whose value differs from the
+ *  last FC snapshot (a param missing there counts as changed), then re-read so loaded == FC truth.
+ *  Untouched params are not sent: on PX4 every write costs a type read, and on a lossy link a parameter
+ *  the user never touched would end up in the warning. Sets `rallySaveIssue` and never throws — a
+ *  parameter Kite could not write is a warning (the points are on the vehicle by then), an upload
+ *  that throws is a failed save. */
 export async function saveRallyConfig(): Promise<void> {
   const cfg = get(rallyWorking);
   if (!cfg) return;
-  await invoke('rally_write_all', { config: cfg });
-  await loadRallyConfig();
+  const generation = rallyGeneration;
+  rallySaveIssue.set(null);
+  const loaded = get(rallyConfig)?.params ?? [];
+  const changed = cfg.params.filter((p) => loaded.find((l) => l.name === p.name)?.value !== p.value);
+  try {
+    const warnings = await invoke<string[]>('rally_write_all', { config: { ...cfg, params: changed } });
+    await loadRallyConfig();
+    if (generation === rallyGeneration && warnings.length > 0) {
+      rallySaveIssue.set({ kind: 'params', detail: warnings.join('; ') });
+    }
+  } catch (e) {
+    if (generation === rallyGeneration) rallySaveIssue.set({ kind: 'failed', detail: String(e) });
+  }
 }
 
 export function revertRallyWorking(): void {
   const loaded = get(rallyConfig);
   rallyWorking.set(loaded ? structuredClone(loaded) : null);
+  rallySaveIssue.set(null);
 }
 
 export function clearRally(): void {
   rallyConfig.set(null);
   rallyWorking.set(null);
   rallyEditing.set(false);
+  rallySaveIssue.set(null);
+  rallyGeneration++;
 }
 
 // ── Working-copy mutations (panel + map editing). Points are identified by array index. ─────────────

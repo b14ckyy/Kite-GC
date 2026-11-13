@@ -65,7 +65,9 @@ export const rcLayout = derived([connection, rcPlatform], ([$c, $platform]): RcL
     return { platform: 'px4', split: false, rawMax: 4, auxMin: 5, auxMax: 4, supported: true };
   }
 
-  // INAV / MSP.
+  // INAV / MSP. `protocolType === 'msp'` on purpose (not `hasMsp`): this layout is the MSP RC stream's,
+  // which only a direct MSP link runs. An MSP-over-MAVLink link has no RC path yet (tab hidden until
+  // Stage 3 — MAVLink-RX mode, see Dev-Docs active/MSP_OVER_MAVLINK.md).
   const connectedMsp = $c.status === 'connected' && $c.protocolType === 'msp';
   const features = $c.fcInfo?.features ?? null;
   // Offline/unknown → assume 9.1+ (split). When connected, follow the FC's AUX_RC capability.

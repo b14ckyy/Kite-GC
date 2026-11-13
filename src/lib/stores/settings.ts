@@ -5,9 +5,12 @@
 // Stores user preferences in localStorage, survives between sessions
 
 import { writable } from 'svelte/store';
+import { currentProviderId } from '$lib/config/mapProviders';
 import type { RelayConfig } from '$lib/stores/relay';
 import { isMobile } from '$lib/platform';
 import type { WidgetSize } from '$lib/config/widgetRegistry';
+import { normalizeTileSize, type UserMapSpec } from '$lib/config/mapProviders';
+import { validateTileTemplate } from '$lib/helpers/tileTemplate';
 import { DEFAULT_PHONE_WIDGETS, type PhoneWidgetsConfig } from '$lib/controllers/phoneWidgetController';
 
 export interface MapState {
@@ -33,6 +36,9 @@ export type TemperatureUnit = 'c' | 'f';
 export type NightMode = 'off' | 'auto' | 'on';
 /** GCS marker behaviour: hidden / placed once + draggable / live OS tracking. */
 export type GcsMode = 'off' | 'manual' | 'continuous';
+/** How the OTHER connected vehicles are drawn on the 2D map (multi-vehicle): the same top-down 3D
+ *  model as the active vehicle (tinted in the vehicle's colour) or a flat heading arrow. */
+export type FleetMarkerStyle = 'model' | 'symbol';
 
 export interface InterfaceSettings {
   speedUnit: SpeedUnit;
@@ -51,17 +57,38 @@ export interface AdsbOnlineProvider {
   enabled: boolean;
 }
 
-/** A local hardware ADS-B receiver (MAVLink ADSB_VEHICLE). Phase 2: serial; TCP later. */
-export interface AdsbLocalSource {
-  name: string;
-  transport: 'serial' | 'tcp';
+/** How a local radar source is reached: a serial port, a TCP connection Kite opens, or a UDP port Kite
+ *  listens on. */
+export type RadarLinkTransport = 'serial' | 'tcp' | 'udp';
+
+/** The link fields shared by every local radar source (ADS-B receivers, the FormationFlight module).
+ *  Only the fields of the selected transport are used; the others are kept for switching back. */
+export interface RadarLinkFields {
+  transport: RadarLinkTransport;
   /** serial */
   port: string;
   baud: number;
-  /** tcp (later) */
-  host?: string;
-  tcpPort?: number;
+  /** tcp / udp — an empty host or port 0 leaves the source stopped. */
+  host: string;
+  netPort: number;
+}
+
+/** A local hardware ADS-B receiver (MAVLink ADSB_VEHICLE over serial, TCP or UDP). */
+export interface AdsbLocalSource extends RadarLinkFields {
+  name: string;
   enabled: boolean;
+}
+
+/** Fill the link fields a stored source may lack (saved before TCP / UDP existed): no or an unknown
+ *  transport is serial, no host is empty, no port is 0. */
+function normalizeRadarLink<T extends Partial<RadarLinkFields>>(src: T): T & Pick<RadarLinkFields, 'transport' | 'host' | 'netPort'> {
+  const transport: RadarLinkTransport = src.transport === 'tcp' || src.transport === 'udp' ? src.transport : 'serial';
+  return {
+    ...src,
+    transport,
+    host: typeof src.host === 'string' ? src.host : '',
+    netPort: typeof src.netPort === 'number' && Number.isFinite(src.netPort) ? src.netPort : 0,
+  };
 }
 
 /** Fixed, always-present ADS-B providers (URL defined in code, not editable/deletable). Only their
@@ -82,7 +109,7 @@ export interface RadarSettings {
     builtins: Record<string, boolean>;
     /** User-editable custom providers (e.g. adsb.fi example). Merged with the built-ins by ICAO. */
     online: AdsbOnlineProvider[];
-    /** Local hardware receivers (serial MAVLink; TCP later). */
+    /** Local hardware receivers (MAVLink over serial / TCP / UDP). */
     local: AdsbLocalSource[];
     /** Pull the ADS-B list from the connected UAV via MSP (INAV 8.0+). Bandwidth-heavy → opt-in. */
     mspFromFc: boolean;
@@ -101,14 +128,11 @@ export interface RadarSettings {
   sim: boolean;
 }
 
-/** FormationFlight (INAV-Radar / ESP32): one serial module Kite speaks MSP to as an emulated FC.
+/** FormationFlight (INAV-Radar / ESP32): one module Kite speaks MSP to as an emulated FC, over serial
+ *  (`port`, `baud` — default 115200) or TCP / UDP (`host`, `netPort`).
  *  See docs/active/RADAR_FORMATION_FLIGHT.md. */
-export interface RadarFormationFlightSettings {
+export interface RadarFormationFlightSettings extends RadarLinkFields {
   enabled: boolean;
-  /** Serial port the ESP32 module is on. */
-  port: string;
-  /** Baud (default 115200). */
-  baud: number;
   /** Name we advertise via MSP_NAME (our node's broadcast name). Empty ⇒ a default is used. */
   nodeName: string;
 }
@@ -165,7 +189,7 @@ export const DEFAULT_RADAR: RadarSettings = {
     radiusKm: 25,
     pollSec: 5,
   },
-  formationFlight: { enabled: false, port: '', baud: 115200, nodeName: '' },
+  formationFlight: { enabled: false, transport: 'serial', port: '', baud: 115200, host: '', netPort: 0, nodeName: '' },
   radio: { enabled: false },
   map: {
     radiusKm: 50,
@@ -310,7 +334,7 @@ export const DEFAULT_UPDATE_CHECK: UpdateCheckSettings = {
 };
 
 /** FC system-message (STATUSTEXT) toast verbosity: off, errors only, warnings+errors, or everything. */
-export type SystemMessagesLevel = 'off' | 'error' | 'warning' | 'all';
+export type SystemMessagesLevel = 'off' | 'error' | 'warning' | 'all' | 'debug';
 
 /** Backend diagnostic file-log verbosity. "debug" also captures info-level connection milestones.
  *  Written to `<AppData>/kite-gc/kite-gc.log` (portable: `data/`). See src-tauri/src/logging. */
@@ -320,7 +344,7 @@ export interface AppSettings {
   lastPort: string;
   lastBaud: number;
   lastProtocol: string;
-  /** Startup protocol preference (Settings → Connection). `last` = restore `lastProtocol`. */
+  /** Startup protocol preference (Settings → Interface → UI). `last` = restore `lastProtocol`. */
   defaultProtocol: DefaultProtocol;
   // Full last-used connection path (restored on startup so nothing has to be re-entered)
   lastTransport: string;
@@ -337,6 +361,12 @@ export interface AppSettings {
   map: MapState;
   mapProvider: string;
   mapCacheMaxMB: number;
+  /** Folder holding the custom (local tile) maps, one subfolder per map; '' = the default
+   *  `<app data>/custom_maps`. Desktop only. */
+  customMapsPath: string;
+  /** User online maps (tile URL templates, may hold an API key — never log them). Selected as
+   *  `user:<id>`; see `stores/userMaps.ts`. */
+  userMapProviders: UserMapSpec[];
   /** The swapped-in mini map (video frame / widget tile) follows the aircraft heading-up (true) or
    *  north-up (false); a tap on it toggles (Map.svelte). Remembered across swaps and restarts. */
   miniMapHeadingUp: boolean;
@@ -416,6 +446,7 @@ export interface AppSettings {
   nightMode2D: NightMode;
   /** GCS marker mode: off / manual (drag) / continuous (live OS location). */
   gcsMode: GcsMode;
+  fleetMarkerStyle: FleetMarkerStyle;
   /** Last known physical user location (for Night-Mode auto sunset timing); persisted across sessions. */
   userLocation: { lat: number; lon: number } | null;
   /** Radar (foreign-vehicle tracking) subsystem settings. */
@@ -439,7 +470,7 @@ const defaults: AppSettings = {
   lastProtocol: 'msp',
   defaultProtocol: 'last',
   lastTransport: 'serial',
-  lastHost: '192.168.1.1',
+  lastHost: '',
   lastTcpPort: 5761,
   lastBleDevice: '',
   btPortNames: {},
@@ -449,6 +480,8 @@ const defaults: AppSettings = {
   },
   mapProvider: 'esri-hybrid',
   mapCacheMaxMB: 200,
+  customMapsPath: '',
+  userMapProviders: [],
   miniMapHeadingUp: true,
   navPanelOpen: true,
   activeTab: 'uav-info',
@@ -474,7 +507,7 @@ const defaults: AppSettings = {
   warnAltitudeM: 120,
   batteryAlertPct: 30,
   batterySelect: {},
-  systemMessages: 'all',
+  systemMessages: 'warning',
   logLevel: 'warning',
   interface: {
     speedUnit: 'kmh',
@@ -494,7 +527,7 @@ const defaults: AppSettings = {
   cesiumKeyPromptDismissed: false,
   lowPower3D: 'auto',
   highRes3D: !isMobile,
-  altitudeCurtain3D: true,
+  altitudeCurtain3D: false,
   realLighting3D: true,
   // Off by default: the tileset is a live download and real GPU work, and it is only useful close to
   // the ground over a built-up area. Needs an Ion token, like World Terrain.
@@ -502,6 +535,7 @@ const defaults: AppSettings = {
   logReplayTime: true,
   nightMode2D: 'auto',
   gcsMode: 'continuous',
+  fleetMarkerStyle: 'model',
   userLocation: null,
   radar: DEFAULT_RADAR,
   airspace: DEFAULT_AIRSPACE,
@@ -519,6 +553,24 @@ function load(): AppSettings {
       return {
         ...defaults,
         ...parsed,
+        // A map provider that no longer exists is replaced by its successor.
+        mapProvider: currentProviderId(parsed.mapProvider ?? defaults.mapProvider),
+        // Every map view resolves these on mount — drop anything a hand-edited profile broke: a wrong
+        // shape, a template the 2D map would throw on, a repeated id (the first one wins).
+        userMapProviders: (() => {
+          if (!Array.isArray(parsed.userMapProviders)) return [];
+          const seen = new Set<string>();
+          return parsed.userMapProviders
+            .filter((m) => {
+              const ok = m && typeof m.id === 'string' && typeof m.name === 'string' && typeof m.url === 'string'
+                && typeof m.maxZoom === 'number' && typeof m.attribution === 'string'
+                && !seen.has(m.id) && validateTileTemplate(m.url) === null;
+              if (ok) seen.add(m.id);
+              return ok;
+            })
+            // No tile size yet (stored before it existed) → 256; an odd value → the nearest supported.
+            .map((m) => ({ ...m, tileSize: normalizeTileSize(m.tileSize) }));
+        })(),
         interface: {
           ...defaults.interface,
           ...(parsed.interface ?? {}),
@@ -538,9 +590,9 @@ function load(): AppSettings {
               // Strip any built-in-named entries from the custom list (migration from the old flat
               // `online` array, where adsb.lol/.one lived as custom rows).
               online: (pa.online ?? dr.adsb.online).filter((p) => !builtinNames.has(p.name)),
-              local: pa.local ?? dr.adsb.local,
+              local: (pa.local ?? dr.adsb.local).map(normalizeRadarLink),
             },
-            formationFlight: { ...dr.formationFlight, ...(pr.formationFlight ?? {}) },
+            formationFlight: normalizeRadarLink({ ...dr.formationFlight, ...(pr.formationFlight ?? {}) }),
             radio: { ...dr.radio, ...(pr.radio ?? {}) },
             map: {
               ...dr.map,

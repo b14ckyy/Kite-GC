@@ -9,6 +9,7 @@
   import { isLoading } from 'svelte-i18n';
   import { settings } from '$lib/stores/settings';
   import { get } from 'svelte/store';
+  import { invoke } from '@tauri-apps/api/core';
 
   // Initialize i18n with the persisted locale (or browser default)
   const saved = get(settings);
@@ -24,9 +25,32 @@
   // NOTE: Linux/WebKitGTK handles the pinch natively in GTK and ignores preventDefault entirely, so the
   // frame zoom there is suppressed in the Rust setup hook (lib.rs, pins the WebView zoom-level at 1.0).
   onMount(() => {
+    // Uncaught frontend errors go to the backend file log (log_frontend) — the only diagnostic a
+    // tester can hand over from a release build; in dev it saves opening the WebView console.
+    const report = (kind: string, detail: unknown) => {
+      const msg = detail instanceof Error ? `${detail.message}
+${detail.stack ?? ''}` : String(detail);
+      void invoke('log_frontend', { level: 'error', area: 'ui', message: `${kind}: ${msg}` }).catch(() => {});
+    };
+    const onError = (e: ErrorEvent) => report('uncaught', e.error ?? e.message);
+    const onRejection = (e: PromiseRejectionEvent) => report('unhandled rejection', e.reason);
+    window.addEventListener('error', onError);
+    window.addEventListener('unhandledrejection', onRejection);
+
     const onWheel = (e: WheelEvent) => { if (e.ctrlKey) e.preventDefault(); };
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && ['+', '-', '=', '0'].includes(e.key)) e.preventDefault();
+      // Block the WebView's page reload (F5, Ctrl/Cmd+R, with or without Shift) in a release build. A
+      // reload restarts only the frontend. The backend keeps its links and `recoverBackendLinks` brings
+      // the connection back, but not everything a pilot relies on: the live track, the mission in the
+      // editor and Kite's own RC stream are gone (Dev-Docs CHANGELOG, 2026-11-11). Nobody needs a
+      // reload in a ground station, so the keys do nothing. Dev builds keep the reload.
+      // `e.code` covers layouts whose R key types another letter (Cyrillic, Greek): the WebView still
+      // reloads on the physical key. Not with Alt: AltGr (= Ctrl+Alt on Windows) + R is a character on
+      // some layouts, and the reload accelerator never includes Alt.
+      const reloadKey = e.key === 'F5' || e.key === 'BrowserRefresh'
+        || ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key.toLowerCase() === 'r' || e.code === 'KeyR'));
+      if (!import.meta.env.DEV && reloadKey) e.preventDefault();
     };
     const onGesture: EventListener = (e) => e.preventDefault();
     const gestureEvents = ['gesturestart', 'gesturechange', 'gestureend'];
@@ -36,6 +60,8 @@
     for (const name of gestureEvents) window.addEventListener(name, onGesture, { passive: false });
 
     return () => {
+      window.removeEventListener('error', onError);
+      window.removeEventListener('unhandledrejection', onRejection);
       window.removeEventListener('wheel', onWheel, { capture: true });
       window.removeEventListener('keydown', onKey, { capture: true });
       for (const name of gestureEvents) window.removeEventListener(name, onGesture);

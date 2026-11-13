@@ -20,7 +20,7 @@ const MAX_PAGES: i64 = 30; // safety cap per layer
 
 pub async fn fetch(api_key: &str, lat: f64, lon: f64, radius_km: f64, layers: &[String]) -> Result<AeroData, String> {
     let client = reqwest::Client::builder()
-        .user_agent("Kite-GC/0.5 aero")
+        .user_agent(crate::user_agent::user_agent("aero"))
         .timeout(Duration::from_secs(20))
         .build()
         .map_err(|e| e.to_string())?;

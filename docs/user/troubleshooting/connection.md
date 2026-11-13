@@ -57,6 +57,12 @@ may still hit:
   (e.g. a second **SITL on 5762**).
 - Make sure the bridge/router/simulator is actually **running and reachable** (firewall, same network),
   and that the **protocol** matches what it speaks.
+- **UDP: is another program already listening on that port?** A second ground station (Mission
+  Planner on `14550`, for example) holds the port, so the vehicle's telemetry goes to it, not to Kite.
+  Kite then listens on the port **plus 10000** instead (`24550`), and the failed handshake says which
+  port was busy. Close the other program's UDP connection, or point the vehicle — or the other
+  program's MAVLink forward — at a port Kite can own. See
+  **[Connecting → TCP and UDP](../guides/connecting.md#tcp-and-udp-network-links)**.
 
 !!! tip "`read 0 bytes … parser errors=0` in the log"
     A MAVLink handshake timeout that reports **0 bytes read and 0 parser errors** means *nothing arrived
@@ -94,6 +100,11 @@ a ground station speaks to it first. Kite's initial GCS **HEARTBEAT** is what se
 - **Cable / radio quality.** A marginal USB cable or a weak Bluetooth/telemetry link causes dropouts;
   try a different cable or move closer.
 
+**"Reconnecting…" in the status bar** is not a dropped connection: the aircraft has sent nothing for
+three seconds while the link itself is still open — a radio hole, typically. Kite keeps the link and
+switches back by itself once data arrives. If it stays there, the data path is broken somewhere between
+the flight controller and Kite (radio link, bridge, or the flight controller itself).
+
 ## Getting a diagnostic log
 
 Kite writes a plain-text log you can hand back when something won't connect.
@@ -102,7 +113,8 @@ Kite writes a plain-text log you can hand back when something won't connect.
 2. Set **Log Level** to **Debug (verbose)** to capture the full connection sequence (the Bluetooth
    diagnostics are recorded even at the default **Warnings** level).
 3. Reproduce the failed connection.
-4. Click **Log File → Open Folder** and grab the log.
+4. Click **Log File → Open Folder** and grab the log (on Android **Share log file**, pick the day, share it
+   to mail or a messenger).
 
 The log lives in your app-data folder:
 
@@ -112,10 +124,12 @@ The log lives in your app-data folder:
 | **Linux** | `~/.local/share/kite-gc/` |
 | **macOS** | `~/Library/Application Support/kite-gc/` |
 | **Portable** | `data\` (next to the executable) |
+| **Android** | App-private storage — no file manager or USB connection can reach it. Use **Settings → Diagnostics → Share log file**: pick the day, share it to mail or a messenger. |
 
 Kite writes **one file per day** — `kite-gc-YYYY-MM-DD.log` — appending each session under a header block
 and keeping the last **30 days** (older files are pruned on startup), so a failure you only notice after
-restarting Kite isn't lost. **Log File → Open Folder** takes you straight there.
+restarting Kite isn't lost. **Log File → Open Folder** takes you straight there; on Android **Share log file**
+lists the same day files, newest first, so you can pick yesterday's.
 
 !!! tip "Sharing a log"
     The log contains port names and firmware/version strings but no personal data. Attach it to a

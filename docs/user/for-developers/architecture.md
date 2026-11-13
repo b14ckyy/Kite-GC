@@ -14,7 +14,7 @@ decision record (ADRs) is kept internally.
 | 3D globe | [CesiumJS](https://cesium.com/platform/cesiumjs/) |
 | Database | SQLite via `rusqlite` (bundled) |
 | Serial | `serialport` (Rust) |
-| i18n | `svelte-i18n` (ICU Message Format) — English, German, French, Chinese, Bulgarian |
+| i18n | `svelte-i18n` (ICU Message Format) — English, German, French, Chinese, Bulgarian, Slovak, Spanish |
 
 The frontend (WebView) and the Rust backend communicate through **Tauri commands** (frontend → backend
 calls returning `Result<T, String>`) and **events** (backend → frontend streams). A deliberate rule:
@@ -34,7 +34,7 @@ The backend is organised as one module folder per feature area (`msp/`, `mavlink
   plus passive listen-only decoders (SmartPort / CRSF / LTM) and a relay that re-encodes telemetry for
   other ground stations.
 - **Feature gating** keys off the detected firmware/version and capability flags so the UI only offers
-  what the connected aircraft supports (minimum INAV 7.0).
+  what the connected aircraft supports (minimum INAV 7.0, ArduPilot 4.1).
 - **Database** uses an incremental `PRAGMA user_version` migration chain (earlier migrations are never
   modified) for the flight log, vehicle and battery libraries.
 

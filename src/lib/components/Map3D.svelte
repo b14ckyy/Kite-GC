@@ -43,12 +43,30 @@
   }
     import { telemetry, altReference, groundAnchor, resolveTrueMsl } from "$lib/stores/telemetry";
   import { liveTrack, type LiveTrackPoint } from "$lib/stores/liveTrack";
-  import { homePosition, homeLocked, type HomePosition } from "$lib/stores/home";
+  import { homePosition, homeLocked, vehicleHomes, type HomePosition, type VehicleHome } from "$lib/stores/home";
+  import { allTelemetry, type TelemetryData } from "$lib/stores/telemetry";
+  import { vehicles, activeVehicleId, type VehicleSummary } from "$lib/stores/vehicles";
+  import { selectedVehicleIds, toggleSelected } from "$lib/stores/fleetSelection";
+  import { fleetEnabled } from "$lib/stores/fleetMode";
+  import { switchVehicle } from "$lib/controllers/connectionController";
+  import { guidedTargets, guidedActive, activeMode, type GuidedParams } from "$lib/controllers/vehicleControl";
+  import { guidedClickArmed, mapClickOwnedByEditor, guidedTargetMultirotor, sendGuidedTarget } from "$lib/controllers/guidedClick";
+  import GuidedTargetForm from "$lib/components/control/GuidedTargetForm.svelte";
+  import { matchActiveMode } from "$lib/helpers/mavModes";
+  import { detectVehicleClass, arduMissionsByVehicle } from "$lib/stores/missionArdupilot";
+  import { vehicleColor } from "$lib/helpers/vehicleColors";
   import { connection, type ConnectionStatus } from "$lib/stores/connection";
   import { settings } from "$lib/stores/settings";
   import { gcsLocation } from "$lib/stores/gcsLocation";
-  import { getProviderById } from "$lib/config/mapProviders";
+  import { getProviderById, isCustomProviderId, isCustomTileUrl } from "$lib/config/mapProviders";
+  import { fillTileTemplate } from "$lib/helpers/tileTemplate";
   import type { MapProvider } from "$lib/config/mapProviders";
+  import { ensureCustomMapsLoaded, watchMapProvider } from "$lib/stores/customMaps";
+  import { onMapFocus, type MapFocusRequest } from "$lib/stores/mapFocus";
+  import {
+    SEARCH_POINT_RADIUS_3D_M, SEARCH_MIN_RADIUS_3D_M, SEARCH_PITCH_3D_DEG, SEARCH_TERRAIN_WAIT_MS,
+    SEARCH_PIN_SHOW_MS, SEARCH_PIN_FADE_MS, SEARCH_PIN_SVG,
+  } from "$lib/config/mapSearch";
   import { getCachedTile, putCachedTile, initTileCache } from "$lib/cache/tileCache";
   import { loadTileBytes } from "$lib/cache/tileLoader";
   import { isKnownUnavailable, isPlaceholderTile } from "$lib/cache/tileAvailability";
@@ -83,7 +101,7 @@
   import { cmdHasLocation, cmdStandaloneCoordinate, cmdIsTakeoff } from "$lib/helpers/arduCommandCatalog";
   import { arduWpIconSpec } from "$lib/helpers/missionIconsArdupilot";
   import { autopilotSystem, type AutopilotSystem } from "$lib/stores/autopilotContext";
-  import { frameMissionSignal } from "$lib/stores/mapCamera";
+  import { frameMissionSignal, frameFleetSignal } from "$lib/stores/mapCamera";
   import { activeWpNumber } from "$lib/stores/navStatus";
   import {
     buildDisplayNumbers, isFlightPathWp, findMissionEndIndex, findPreviousGeoWp,
@@ -226,7 +244,7 @@
   let decoTrailingTimer: ReturnType<typeof setTimeout> | null = null;
   let decoRebuildTimer: ReturnType<typeof setTimeout> | null = null; // reverse-scrub debounce
   let decoLoading = false;                           // suppress deco growth during an (async) track load
-  let curtainEnabled = true;                         // settings.altitudeCurtain3D
+  let curtainEnabled = false;                        // settings.altitudeCurtain3D
   const DECO_CHUNK_MAX = 150;                        // finalize a chunk at this many points
   const SHADOW_MERGE_POINTS = 1200;                  // consolidate pending shadow chunks at this size
   const TRACK_MIN_STEP_M = 2.5;                      // decimation: drop steps shorter than this (3D only)
@@ -295,6 +313,8 @@
   let unsubTelemetry: (() => void) | undefined;
   let unsubHome: (() => void) | undefined;
   let unsubSettingsWatch: (() => void) | undefined;
+  let unsubProviderWatch: (() => void) | undefined;
+  let unsubCustomFocus3d: (() => void) | undefined;
   let unsubMissionStore: (() => void) | undefined;
   let unsubShowMissionStore: (() => void) | undefined;
   let unsubReplayStore: (() => void) | undefined;
@@ -347,7 +367,8 @@
 
   // Camera mode: free (no lock) | follow (smooth chase) | orbit (locked target, free orbit)
   //            | fpv (first-person: camera replaces the model, follows all axes)
-  type Camera3DMode = 'free' | 'follow' | 'orbit' | 'fpv';
+  //            | fleet (frame every connected vehicle — or the 2+ selected ones — and keep them in view)
+  type Camera3DMode = 'free' | 'fleet' | 'follow' | 'orbit' | 'fpv';
   let cameraMode = $state<Camera3DMode>('free');
 
   // ── FPV (first-person view) ──
@@ -602,18 +623,11 @@
   }
 
   /**
-   * Build the actual tile URL from a template + tile coordinates.
+   * Build the actual tile URL from a template + tile coordinates (incl. a user map's `{-y}` TMS row).
    * Used as the IndexedDB cache key.
    */
   function buildTileUrl(template: string, x: number, y: number, z: number, subdomains: string[]): string {
-    let url = template
-      .replace('{x}', String(x))
-      .replace('{y}', String(y))
-      .replace('{z}', String(z));
-    if (subdomains.length > 0) {
-      url = url.replace('{s}', subdomains[(x + y + z) % subdomains.length]);
-    }
-    return url;
+    return fillTileTemplate(template, z, x, y, subdomains);
   }
 
   /** Tile coordinates + provider for over-zoom placeholder detection. */
@@ -623,6 +637,9 @@
    * Load a tile image — checks IndexedDB cache first, then fetches from network.
    */
   async function loadCachedImage(url: string, meta: TileMeta | undefined, layerKey: string): Promise<HTMLImageElement> {
+    // Custom (local folder) map: read straight from disk — never through the IndexedDB cache. A
+    // missing tile rejects, so Cesium keeps the parent tile (same as a 404).
+    if (isCustomTileUrl(url)) return decodeTileImage(await loadTileBytes(url, layerKey));
     // Check IndexedDB cache
     const cached = await getCachedTile(url);
     if (cached) {
@@ -661,6 +678,11 @@
       throw new Error('placeholder tile (over-zoom)');
     }
     putCachedTile(url, buf).catch(() => {}); // fire-and-forget
+    return decodeTileImage(buf);
+  }
+
+  /** Tile bytes → Image (any pixel size: Cesium takes non-power-of-two textures, without mipmaps). */
+  function decodeTileImage(buf: ArrayBuffer): Promise<HTMLImageElement> {
     return new Promise<HTMLImageElement>((resolve, reject) => {
       const blob = new Blob([buf]);
       const blobUrl = URL.createObjectURL(blob);
@@ -684,10 +706,28 @@
     const hasSubdomains = cesiumUrl.includes('{s}');
     const subdomains = hasSubdomains ? ['a', 'b', 'c'] : [];
 
+    // With High-Resolution 3D off the globe renders at half the display's pixel density, but Cesium
+    // picks tile levels in CSS pixels (QuadtreePrimitive divides the screen-space error by pixelRatio).
+    // Where that leaves fewer than one rendered pixel per CSS pixel — a DPR-1 screen at half density —
+    // the tiles would be finer than the picture can show; telling Cesium the tiles are wider makes it
+    // take the imagery from a lower level (factor 2 = one level, a quarter of the tiles). On a DPR ≥ 2
+    // screen half density is still ≥ 1 rendered pixel per CSS pixel, so nothing is coarsened there.
+    // A custom (local folder) map is left alone: its tiles cost no requests, and a lower level would
+    // fall below its lowest folder level sooner (rejected below → blank globe).
+    const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+    const coarser = highRes3DSetting || provider.custom ? 1 : Math.max(1, 2 / dpr);
+    const texelPx = Math.round((provider.custom?.tileSize ?? provider.tileSize ?? 256) * coarser);
+
     const imgProvider = new Cesium.UrlTemplateImageryProvider({
       url: cesiumUrl,
       subdomains: hasSubdomains ? subdomains : undefined,
       maximumLevel: provider.cesiumMaxZoom ?? provider.maxZoom,
+      // A user online map's / custom map's real tile pixel size (Cesium default 256): Cesium picks the
+      // imagery level from texel spacing (ImageryLayer getLevelWithMaximumTexelSpacing divides by
+      // tileWidth), so a 512 px source is drawn from one level lower — its own native density. Levels
+      // stay file levels (maximumLevel = a custom map's highest level, the below-lowest check below).
+      tileWidth: texelPx,
+      tileHeight: texelPx,
       credit: new Cesium.Credit(provider.attribution, false),
     });
 
@@ -695,9 +735,14 @@
     // Errors (404, CORS) propagate as rejections → Cesium marks tile as FAILED
     // → parent tile remains visible (correct upsampling behavior).
     const detectId = provider.detectPlaceholders ? provider.id : undefined;
+    const customMin = provider.custom?.minZoom;
     (imgProvider as any).requestImage = function (
       x: number, y: number, level: number, _request?: unknown
     ): Promise<HTMLImageElement> {
+      // Custom map below its lowest level: nothing on disk — fail without a backend round-trip.
+      if (customMin !== undefined && level < customMin) {
+        return Promise.reject(new Error('tile unavailable (below custom map levels)'));
+      }
       // Known over-zoom placeholder for this region → fail fast so Cesium keeps
       // the parent (z-1) tile, no network round-trip.
       if (detectId && isKnownUnavailable(detectId, level, x, y)) {
@@ -719,10 +764,9 @@
   /**
    * Apply the selected map provider (base + overlays) to the Cesium viewer.
    */
-  function applyMapProvider(providerId: string) {
+  function applyMapProvider(provider: MapProvider) {
     if (!viewer) return;
 
-    const provider = getProviderById(providerId);
     const layers = viewer.imageryLayers;
 
     // Remove all existing layers
@@ -881,6 +925,7 @@
       if (q) updateFpvCamera(q, pToLat, pToLon, pToAlt);
     } else if (cameraMode === 'follow') updateChaseCamera(pToLat, pToLon, pToAlt, aToHead);
     else if (cameraMode === 'orbit') updateOrbitCamera(pToLat, pToLon, pToAlt);
+    else if (cameraMode === 'fleet') fitFleet3D(true);
     viewer?.scene.requestRender();
   }
 
@@ -1077,6 +1122,7 @@
         updateFence3D();      // (re)build geofence volumes for the now-visible 3D view
         updateRally3D();      // (re)build rally markers for the now-visible 3D view
       } else {
+        closeGuided3d(); // a Fly-Here form must not wait, unseen, for the next 3D session
         // Leaving 3D while in FPV: undo FPV's viewer changes (camera inputs, model/track, wheel handler)
         // so nothing carries over and blocks the map — but keep cameraMode 'fpv' to re-enter next activate.
         if (cameraMode === 'fpv') restoreFromFpv();
@@ -1105,7 +1151,7 @@
       ionToken = s.cesiumIonToken || '';
       mapProviderId = s.mapProvider || 'osm';
       cacheMaxMB = s.mapCacheMaxMB || 0;
-      curtainEnabled = s.altitudeCurtain3D ?? true;
+      curtainEnabled = s.altitudeCurtain3D ?? false;
       lightingEnabled = s.realLighting3D ?? false;
       buildingsEnabled = s.buildings3D ?? false;
       replayTimeEnabled = s.logReplayTime ?? false;
@@ -1130,7 +1176,9 @@
     creditDiv.style.display = 'none';
     cesiumContainer.appendChild(creditDiv);
 
-    // Build the base imagery provider from the selected map provider
+    // Build the base imagery provider from the selected map provider (a custom map needs the
+    // custom-map folder listed first, or it would resolve to the fallback provider).
+    if (isCustomProviderId(mapProviderId)) await ensureCustomMapsLoaded();
     const baseProvider = getProviderById(mapProviderId);
 
     const viewerOptions: Cesium.Viewer.ConstructorOptions = {
@@ -1333,7 +1381,7 @@
 
       // Go-to-UAV on connect: jump once to the craft (range ~600 m ≈ 2D zoom 16), deferred to the first
       // 3D fix. Free look only; follow/orbit/fpv already track the UAV.
-      if (pendingUavJump3d && isFreeLook() && telem.fixType >= 3 && telem.numSat >= MIN_FIX_SATELLITES) {
+      if (pendingUavJump3d && isFreeLook() && telem.fixType >= 2 && telem.numSat >= MIN_FIX_SATELLITES) {
         pendingUavJump3d = false;
         viewer.camera.flyToBoundingSphere(
           new Cesium.BoundingSphere(Cesium.Cartesian3.fromDegrees(telem.lon, telem.lat, alt), 1),
@@ -1405,14 +1453,39 @@
       viewer.scene.requestRender();
     });
 
-    // Watch for live setting changes (map provider, altitude curtain toggle)
-    let currentProviderId = mapProviderId;
-    unsubSettingsWatch = settings.subscribe((next) => {
-      if (next.mapProvider !== currentProviderId) {
-        currentProviderId = next.mapProvider;
-        applyMapProvider(currentProviderId);
+    // Map provider changes (selection, custom-map listing). The first call reports the provider the
+    // viewer was just built with — skip that one.
+    let firstProviderCall = true;
+    unsubProviderWatch = watchMapProvider((p) => {
+      const skip = firstProviderCall && p === baseProvider;
+      firstProviderCall = false;
+      if (!skip) applyMapProvider(p);
+    });
+    // Jump requests (stores/mapFocus).
+    // Custom map "Show map area" (Settings): fly to the requested covered region — like
+    // frameMission3d only in free look (follow / orbit / FPV own the camera), dropping a pending
+    // go-to-UAV jump. The fleet camera is left for free look the way it is left elsewhere (it only
+    // re-fits; it holds no lookAt transform).
+    // Map search: only while the 3D view is the one showing (the 2D map takes the jump as well, and
+    // a later switch to 3D starts from there). The user asked for that place, so a follow / orbit /
+    // FPV camera hands over to free look first — ignoring the request would look like a dead search.
+    unsubCustomFocus3d = onMapFocus((f) => {
+      if (!viewer) return;
+      if (f.source === 'search') {
+        if (active) void jumpToSearchTarget3d(f);
+        return;
       }
-      const curtain = next.altitudeCurtain3D ?? true;
+      if (!f.bounds) return;
+      const b = f.bounds;
+      if (cameraMode === 'fleet') cameraMode = 'free';
+      if (!isFreeLook()) return;
+      pendingUavJump3d = false;
+      viewer.camera.flyTo({ destination: Cesium.Rectangle.fromDegrees(b[0], b[1], b[2], b[3]), duration: 1.2 });
+    });
+
+    // Watch for live setting changes (altitude curtain toggle, lighting, …)
+    unsubSettingsWatch = settings.subscribe((next) => {
+      const curtain = next.altitudeCurtain3D ?? false;
       if (curtain !== curtainEnabled) {
         curtainEnabled = curtain;
         forceDecoRebuild(); // add/remove the curtain walls
@@ -1449,6 +1522,8 @@
       if (highRes !== highRes3DSetting) {
         highRes3DSetting = highRes;
         applyRenderResolution();
+        // The imagery level follows the render resolution — rebuild the layers with the new tile width.
+        applyMapProvider(getProviderById(next.mapProvider));
       }
       const aspEnabledChg = next.airspace.enabled !== airspaceEnabled;
       if (aspEnabledChg || next.airspace.layers.obstacles.d3 !== obstacleD3 || next.airspace.obstacleDistanceKm !== obstacleDistKm) {
@@ -1505,12 +1580,26 @@
     // Foreign-vehicle contacts: click to select (sync with list/2D), hover → pointer cursor.
     radar3dPickHandler = new Cesium.ScreenSpaceEventHandler(viewer.canvas);
     radar3dPickHandler.setInputAction((e: Cesium.ScreenSpaceEventHandler.PositionedEvent) => {
+      // Fleet (other connected vehicles) first: a click makes that vehicle the active one.
+      const vid = fleet3dPickId(e.position);
+      if (vid != null) { void switchVehicle(vid); return; }
       const id = radarPickId(e.position);
-      if (id != null) radarSelection.update((cur) => (cur === id ? null : id));
+      if (id != null) { radarSelection.update((cur) => (cur === id ? null : id)); return; }
+      // The own aircraft: the terrain behind it along the ray is not what the tap meant. Looked for
+      // through everything under the click — its own track ends in the model and is usually on top.
+      if (uavEntity && viewer?.scene.drillPick(e.position, 8).some((p) => p?.id === uavEntity)) return;
+      // Neither: the terrain under the click may be a Guided "Fly Here" target.
+      onGuided3dClick(e.position);
     }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+    // Ctrl+click on a fleet vehicle toggles it in the group selection (same gesture as the 2D map).
+    radar3dPickHandler.setInputAction((e: Cesium.ScreenSpaceEventHandler.PositionedEvent) => {
+      const vid = fleet3dPickId(e.position);
+      if (vid != null) toggleSelected(vid);
+    }, Cesium.ScreenSpaceEventType.LEFT_CLICK, Cesium.KeyboardEventModifier.CTRL);
     radar3dPickHandler.setInputAction((e: Cesium.ScreenSpaceEventHandler.MotionEvent) => {
-      if (viewer) viewer.canvas.style.cursor = radarPickId(e.endPosition) != null ? 'pointer' : '';
+      if (viewer) viewer.canvas.style.cursor = (fleet3dPickId(e.endPosition) != null || radarPickId(e.endPosition) != null) ? 'pointer' : '';
     }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+    updateFleet3D();
 
     // Foreign-vehicle contacts: rebuild the 3D radar entities on snapshot / selection change.
     unsubRadar3d = radarVehicles.subscribe((s) => { radar3dSnap = s; updateRadar3D(); });
@@ -1588,6 +1677,7 @@
     if (decoRebuildTimer != null) clearTimeout(decoRebuildTimer);
     if (camDragHandler) { camDragHandler.destroy(); camDragHandler = undefined; }
     uninstallFpvWheel();
+    closeGuided3d();
     unsubTelemetry?.();
     unsubRadar3d?.();
     unsubRadarSel3d?.();
@@ -1601,8 +1691,12 @@
     unsubAero3d?.();
     if (obstacleMoveTimer) clearTimeout(obstacleMoveTimer);
     radar3dPickHandler?.destroy();
+    for (const u of unsubFleet3d) u();
     unsubHome?.();
     unsubSettingsWatch?.();
+    unsubProviderWatch?.();
+    unsubCustomFocus3d?.();
+    clearSearchPin3d();
     unsubMissionStore?.();
     unsubShowMissionStore?.();
     unsubReplayStore?.();
@@ -1776,6 +1870,391 @@
   }
 
   /** Contact id under a window position (click/hover), or null. */
+  // ── Fleet: the OTHER connected vehicles (multi-vehicle) ──────────────────────────────────────
+  // Mirrors the 2D fleet layer: every vehicle the backend knows, except the active one, gets its own
+  // tinted model + name label (click = make it active), a plain trail in its colour while inactive,
+  // its FC home, and — while in its guided mode — its FC-confirmed target with a vehicle→target line.
+  // The active vehicle only gets the target/line here (its model, trail and home are the main ones).
+  interface Fleet3dRec {
+    model?: Cesium.Entity;
+    trail?: Cesium.Entity;
+    trailPts: Cesium.Cartesian3[];
+    trailLast?: { lat: number; lon: number };
+    trailArmed: boolean;
+    home?: Cesium.Entity;
+    target?: Cesium.Entity;
+    line?: Cesium.Entity;
+    /** CSS colour the line's material was built with. */
+    lineCss?: string;
+    /** Group-selection ring under the craft (stores/fleetSelection). */
+    ring?: Cesium.Entity;
+    mission?: Cesium.Entity[];
+    missionKey?: string;
+    color: string;
+  }
+  const fleet3d = new Map<string, Fleet3dRec>();
+  const FLEET3D_RING_RADIUS_M = 8;
+  const fleet3dEntityIds = new WeakMap<Cesium.Entity, string>();
+  let fleet3dTelem: ReadonlyMap<string, TelemetryData> = new Map();
+  let fleet3dKnown: Map<string, VehicleSummary> = new Map();
+  let fleet3dActive: string | null = null;
+  let fleet3dSelected: ReadonlySet<string> = new Set();
+  let fleet3dCount = $state(0); // reactive registry size (the fleet camera step needs 2+)
+  let fleet3dOn = false; // the `--fleet` launch flag (stores/fleetMode)
+  let fleet3dDrawnOn = false; // the flag state the entities in `fleet3d` were drawn under
+  let fleet3dTargets: ReadonlyMap<string, { lat: number; lon: number; ts: number }> = new Map();
+  let fleet3dHomes: ReadonlyMap<string, VehicleHome> = new Map();
+  let fleet3dMissions: ReadonlyMap<string, ArduWaypoint[]> = new Map();
+  const FLEET3D_TARGET_STALE_MS = 10_000;
+  const FLEET3D_TRAIL_MIN_M = 5;
+  const FLEET3D_MODEL_TINT = 0.55;
+
+  function fleet3dPickId(windowPos: Cesium.Cartesian2): string | null {
+    if (!viewer) return null;
+    const picked = viewer.scene.pick(windowPos);
+    const ent = picked?.id;
+    return ent instanceof Cesium.Entity ? (fleet3dEntityIds.get(ent) ?? null) : null;
+  }
+  function fleet3dInGuided(v: VehicleSummary, tv: TelemetryData): boolean {
+    const variant = v.fcVariant.toLowerCase();
+    const sys = variant === 'px4' ? 'px4' : variant.startsWith('ardu') ? 'ardupilot' : null;
+    if (!sys) return false;
+    const cls = detectVehicleClass(v.fcVariant, v.mavType) ?? 'copter';
+    return matchActiveMode(sys, cls, tv.flightModeFlags)?.guided === true;
+  }
+  function fleet3dLabel(text: string, color: Cesium.Color, offsetY: number) {
+    return {
+      text,
+      font: "bold 11px 'Segoe UI', sans-serif",
+      fillColor: Cesium.Color.WHITE,
+      showBackground: true,
+      backgroundColor: color.withAlpha(0.8),
+      verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+      pixelOffset: new Cesium.Cartesian2(0, offsetY),
+      disableDepthTestDistance: Number.POSITIVE_INFINITY,
+    };
+  }
+  /** Vehicle-name label: white text with a black outline on a see-through box in the vehicle colour —
+   *  `opaque` for the ACTIVE vehicle's name (applyUavLabel), so it stands out among the others. */
+  function fleet3dNameLabel(text: string, color: Cesium.Color, offsetY: number, opaque = false) {
+    return {
+      text,
+      font: "bold 11px 'Segoe UI', sans-serif",
+      fillColor: Cesium.Color.WHITE,
+      outlineColor: Cesium.Color.BLACK,
+      outlineWidth: 2,
+      style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+      showBackground: true,
+      backgroundColor: color.withAlpha(opaque ? 1 : 0.45),
+      verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+      pixelOffset: new Cesium.Cartesian2(0, offsetY),
+      disableDepthTestDistance: Number.POSITIVE_INFINITY,
+    };
+  }
+  /** Fleet home marker: an "H" in a dot of the vehicle colour, so it reads apart from the plain dot of
+   *  the same vehicle's Guided target without a text label. Drawn at 2× for a crisp billboard; one
+   *  canvas per colour. */
+  const FLEET3D_HOME_PX = 18;
+  const fleet3dHomeBadges = new Map<string, HTMLCanvasElement>();
+  function fleet3dHomeBadge(css: string): HTMLCanvasElement {
+    const cached = fleet3dHomeBadges.get(css);
+    if (cached) return cached;
+    const s = FLEET3D_HOME_PX * 2;
+    const c = document.createElement('canvas');
+    c.width = s;
+    c.height = s;
+    const g = c.getContext('2d');
+    if (g) {
+      g.beginPath();
+      g.arc(s / 2, s / 2, s / 2 - 2, 0, Math.PI * 2);
+      g.fillStyle = css;
+      g.fill();
+      g.lineWidth = 3;
+      g.strokeStyle = '#fff';
+      g.stroke();
+      g.font = `bold ${Math.round(s * 0.55)}px 'Segoe UI', Tahoma, sans-serif`;
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.lineJoin = 'round';
+      g.lineWidth = 3;
+      g.strokeStyle = 'rgba(0, 0, 0, 0.75)';
+      g.strokeText('H', s / 2, s / 2 + 1);
+      g.fillStyle = '#fff';
+      g.fillText('H', s / 2, s / 2 + 1);
+    }
+    fleet3dHomeBadges.set(css, c);
+    return c;
+  }
+  // Fleet mode: the ACTIVE vehicle has no fleet model (the main UAV entity is it), so its name label
+  // lives on `uavEntity` — opaque, unlike the others. null = the single-vehicle "UAV" label.
+  const UAV_LABEL_DEFAULT: Cesium.LabelGraphics.ConstructorOptions = {
+    text: 'UAV',
+    font: '11px monospace',
+    fillColor: Cesium.Color.WHITE,
+    outlineColor: Cesium.Color.BLACK,
+    outlineWidth: 2,
+    style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+    verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+    pixelOffset: new Cesium.Cartesian2(0, -18),
+    disableDepthTestDistance: Number.POSITIVE_INFINITY,
+  };
+  let uavFleetLabel: { name: string; color: string } | null = null;
+  let uavLabelSig = ''; // what uavEntity's label currently shows ('' = UAV_LABEL_DEFAULT)
+  function applyUavLabel() {
+    if (!uavEntity) return;
+    const sig = uavFleetLabel ? `${uavFleetLabel.name}|${uavFleetLabel.color}` : '';
+    if (sig === uavLabelSig) return;
+    uavLabelSig = sig;
+    uavEntity.label = new Cesium.LabelGraphics(uavFleetLabel
+      ? fleet3dNameLabel(uavFleetLabel.name, Cesium.Color.fromCssColorString(uavFleetLabel.color), -18, true)
+      : UAV_LABEL_DEFAULT);
+    viewer?.scene.requestRender();
+  }
+  function fleet3dRemove(rec: Fleet3dRec, keys: (keyof Fleet3dRec)[]) {
+    for (const k of keys) {
+      const e = rec[k];
+      if (e instanceof Cesium.Entity) { viewer?.entities.remove(e); (rec as unknown as Record<string, unknown>)[k] = undefined; }
+    }
+  }
+  function updateFleet3D() {
+    if (!viewer) return;
+    // GATE(fleet): without the `--fleet` launch flag only the ACTIVE vehicle's sent Guided target is
+    // drawn here (green point + dashed vehicle→target line — Guided from the map is a single-vehicle
+    // feature). No other vehicle, no fleet model / trail / home / mission, no selection ring, no fleet
+    // name label on the main UAV entity ("UAV" stays), no fleet camera.
+    // Entities drawn under the other flag state go first, so a runtime flip leaves nothing stale.
+    if (fleet3dDrawnOn !== fleet3dOn) {
+      if (fleet3d.size) clearFleet3D();
+      fleet3dDrawnOn = fleet3dOn;
+    }
+    const vw = viewer; // narrowed copy for the closures below
+    const ordered = [...fleet3dKnown.values()].sort((a, b) => a.linkId - b.linkId || a.sysid - b.sysid);
+    // The active vehicle's name on the main model, in its fleet colour (index = the colour slot below).
+    const activeIdx = fleet3dOn && fleet3dActive ? ordered.findIndex((v) => v.vehicleId === fleet3dActive) : -1;
+    uavFleetLabel = activeIdx >= 0 ? { name: ordered[activeIdx].name, color: vehicleColor(activeIdx) } : null;
+    applyUavLabel();
+    const now = Date.now();
+    const seen = new Set<string>();
+    if (cameraMode === 'fleet') fitFleet3D(false); // keep every (selected) vehicle in view
+    ordered.forEach((v, idx) => {
+      // Without the flag a vehicle that is not (or no longer) the active one draws nothing (its old
+      // entities go in the cleanup below the loop).
+      if (!fleet3dOn && v.vehicleId !== fleet3dActive) return;
+      const tv = fleet3dTelem.get(v.vehicleId);
+      if (!tv || !tv.lastUpdate || !isValidGpsCoordinate(tv.lat, tv.lon)) return;
+      seen.add(v.vehicleId);
+      const color = vehicleColor(idx);
+      const cesColor = Cesium.Color.fromCssColorString(color);
+      const isActiveVehicle = v.vehicleId === fleet3dActive;
+      const rec: Fleet3dRec = fleet3d.get(v.vehicleId) ?? { trailPts: [], trailArmed: false, color };
+      rec.color = color;
+      fleet3d.set(v.vehicleId, rec);
+      const altMsl = resolveTrueMsl(tv.altMsl, get(altReference), get(groundAnchor)) ?? tv.altMsl ?? tv.altitude;
+      const alt = Math.max(altMsl + geoidOffset, 0);
+      const position = Cesium.Cartesian3.fromDegrees(tv.lon, tv.lat, alt);
+      const armed = (tv.armingFlags & (1 << ARMING_FLAG_ARMED)) !== 0;
+
+      // Group-selection ring (active vehicle included — its main entity has no other selection cue).
+      if (fleet3dOn && fleet3dSelected.has(v.vehicleId)) {
+        if (!rec.ring) {
+          rec.ring = vw.entities.add({
+            position,
+            ellipse: {
+              semiMajorAxis: FLEET3D_RING_RADIUS_M, semiMinorAxis: FLEET3D_RING_RADIUS_M,
+              height: alt, material: cesColor.withAlpha(0.35),
+              outline: true, outlineColor: Cesium.Color.WHITE.withAlpha(0.9),
+            },
+          });
+        } else {
+          (rec.ring.position as Cesium.ConstantPositionProperty).setValue(position);
+          if (rec.ring.ellipse) {
+            rec.ring.ellipse.height = new Cesium.ConstantProperty(alt);
+            rec.ring.ellipse.material = new Cesium.ColorMaterialProperty(cesColor.withAlpha(0.35));
+          }
+        }
+      } else if (rec.ring) {
+        fleet3dRemove(rec, ['ring']);
+      }
+
+      if (isActiveVehicle) {
+        // The main UAV entity / live trail / home marker already show this vehicle.
+        fleet3dRemove(rec, ['model', 'home']);
+        if (rec.trail) { fleet3dRemove(rec, ['trail']); rec.trailPts = []; rec.trailLast = undefined; }
+        if (rec.mission) { for (const e of rec.mission) vw.entities.remove(e); rec.mission = undefined; rec.missionKey = undefined; }
+      } else {
+        // Model + name
+        if (!rec.model) {
+          rec.model = vw.entities.add({
+            position,
+            orientation: uavOrientation(position, tv.yaw, tv.pitch, tv.roll),
+            model: { ...uavModelGraphics(cesColor, modelUriForPlatform(v.platformType as PlatformType, modelOverride)), colorBlendAmount: FLEET3D_MODEL_TINT },
+            label: fleet3dNameLabel(v.name, cesColor, -18),
+          });
+          fleet3dEntityIds.set(rec.model, v.vehicleId);
+        } else {
+          (rec.model.position as Cesium.ConstantPositionProperty).setValue(position);
+          rec.model.orientation = new Cesium.ConstantProperty(uavOrientation(position, tv.yaw, tv.pitch, tv.roll));
+          if (rec.model.label) rec.model.label.text = new Cesium.ConstantProperty(v.name);
+        }
+        // Plain trail in the vehicle colour (arming = new flight)
+        if (armed && !rec.trailArmed) { fleet3dRemove(rec, ['trail']); rec.trailPts = []; rec.trailLast = undefined; }
+        rec.trailArmed = armed;
+        // The track only from positions with at least a 2D fix (§5e M1 — no lines across the map while
+        // the GPS acquires).
+        if (tv.fixType >= 1 && (!rec.trailLast || haversineDistance(rec.trailLast.lat, rec.trailLast.lon, tv.lat, tv.lon) >= FLEET3D_TRAIL_MIN_M)) {
+          rec.trailPts.push(position);
+          rec.trailLast = { lat: tv.lat, lon: tv.lon };
+          if (rec.trailPts.length >= 2) {
+            if (!rec.trail) {
+              rec.trail = vw.entities.add({
+                polyline: { positions: rec.trailPts.slice(), width: armed ? 3 : 1.5, material: cesColor.withAlpha(0.8) },
+              });
+            } else if (rec.trail.polyline) {
+              rec.trail.polyline.positions = new Cesium.ConstantProperty(rec.trailPts.slice());
+              rec.trail.polyline.width = new Cesium.ConstantProperty(armed ? 3 : 1.5);
+            }
+          }
+        }
+        // Home: an "H" badge in the vehicle colour, no text label (the colour says whose it is)
+        const h = fleet3dHomes.get(v.vehicleId);
+        if (h) {
+          const hp = Cesium.Cartesian3.fromDegrees(h.lon, h.lat);
+          if (!rec.home) {
+            rec.home = vw.entities.add({
+              position: hp,
+              billboard: {
+                image: fleet3dHomeBadge(color),
+                width: FLEET3D_HOME_PX,
+                height: FLEET3D_HOME_PX,
+                heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+                disableDepthTestDistance: Number.POSITIVE_INFINITY,
+              },
+            });
+          } else {
+            (rec.home.position as Cesium.ConstantPositionProperty).setValue(hp);
+          }
+        } else {
+          fleet3dRemove(rec, ['home']);
+        }
+        // Planned mission (read-only): route line + numbered dots in the vehicle colour. Relative
+        // altitudes are stacked on the vehicle's home (or the ground when no home is known).
+        {
+          const wps = fleet3dMissions.get(v.vehicleId) ?? [];
+          const homeAlt = fleet3dHomes.get(v.vehicleId)?.alt ?? 0;
+          const pts: { n: number; pos: Cesium.Cartesian3 }[] = [];
+          let n = 0;
+          for (const wp of wps) {
+            if (!cmdHasLocation(wp.command)) continue;
+            n++;
+            if (wp.lat === 0 && wp.lon === 0) continue;
+            const relative = wp.frame === 3 || wp.frame === 10; // home-relative / terrain (MavFrame = 0 | 3 | 10)
+            const wpAlt = relative ? homeAlt + wp.alt : wp.alt;
+            pts.push({ n, pos: Cesium.Cartesian3.fromDegrees(wp.lon / 1e7, wp.lat / 1e7, Math.max(wpAlt + geoidOffset, 0)) });
+          }
+          const key = `${color}|${pts.map((p) => `${p.n}:${p.pos.x.toFixed(1)},${p.pos.y.toFixed(1)},${p.pos.z.toFixed(1)}`).join(';')}`;
+          if (rec.missionKey !== key) {
+            rec.missionKey = key;
+            for (const e of rec.mission ?? []) vw.entities.remove(e);
+            rec.mission = [];
+            if (pts.length >= 2) {
+              rec.mission.push(vw.entities.add({
+                polyline: { positions: pts.map((p) => p.pos), width: 2, material: new Cesium.PolylineDashMaterialProperty({ color: cesColor.withAlpha(0.7), dashLength: 12 }) },
+              }));
+            }
+            for (const p of pts) {
+              rec.mission.push(vw.entities.add({
+                position: p.pos,
+                point: { pixelSize: 9, color: Cesium.Color.fromCssColorString('#1e1e1e').withAlpha(0.8), outlineColor: cesColor, outlineWidth: 2, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+                label: { ...fleet3dLabel(String(p.n), cesColor, -8), font: "bold 10px 'Segoe UI', sans-serif" },
+              }));
+            }
+          }
+        }
+      }
+
+      // Guided target + vehicle→target line (every vehicle; the active one in the Guided green). No label:
+      // the colour says whose target it is.
+      const tgt = fleet3dTargets.get(v.vehicleId);
+      // The active vehicle by its FC mode alone, not the panel's Guided toggle: `guidedTargets` takes every
+      // position target the FC reports, and outside the guided mode that is the next mission waypoint.
+      const inGuided = isActiveVehicle ? get(activeMode)?.guided === true : fleet3dInGuided(v, tv);
+      if (tgt && inGuided && now - tgt.ts < FLEET3D_TARGET_STALE_MS && isValidGpsCoordinate(tgt.lat, tgt.lon)) {
+        const lineCss = isActiveVehicle ? '#59aa29' : color;
+        const lineColor = Cesium.Color.fromCssColorString(lineCss);
+        const tp = Cesium.Cartesian3.fromDegrees(tgt.lon, tgt.lat, alt); // target at the vehicle's altitude
+        const tgtGround = Cesium.Cartesian3.fromDegrees(tgt.lon, tgt.lat);
+        if (!rec.target) {
+          rec.target = vw.entities.add({
+            position: tgtGround,
+            point: { pixelSize: 12, color: lineColor, outlineColor: Cesium.Color.WHITE, outlineWidth: 2, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+          });
+        } else {
+          (rec.target.position as Cesium.ConstantPositionProperty).setValue(tgtGround);
+          if (rec.target.point && rec.lineCss !== lineCss) rec.target.point.color = new Cesium.ConstantProperty(lineColor);
+        }
+        if (!rec.line) {
+          rec.line = vw.entities.add({
+            polyline: { positions: [position, tp], width: 2, material: new Cesium.PolylineDashMaterialProperty({ color: lineColor, dashLength: 16 }) },
+          });
+          rec.lineCss = lineCss;
+        } else if (rec.line.polyline) {
+          rec.line.polyline.positions = new Cesium.ConstantProperty([position, tp]);
+          // A new material only when the colour changed — this runs on every telemetry tick.
+          if (rec.lineCss !== lineCss) {
+            rec.line.polyline.material = new Cesium.PolylineDashMaterialProperty({ color: lineColor, dashLength: 16 });
+            rec.lineCss = lineCss;
+          }
+        }
+      } else {
+        fleet3dRemove(rec, ['target', 'line']);
+      }
+    });
+    // Vehicles that are gone (or have no fix yet) lose their entities; a disconnect-all keeps the last picture.
+    if (fleet3dKnown.size > 0) {
+      for (const [id, rec] of fleet3d) {
+        if (!fleet3dKnown.has(id)) { fleet3dRemove(rec, ['model', 'trail', 'home', 'target', 'line', 'ring']); for (const e of rec.mission ?? []) vw.entities.remove(e); fleet3d.delete(id); }
+      }
+    }
+    // Without the flag nothing outlives the active vehicle: a disconnect (no active vehicle, empty
+    // registry) takes its Guided target with it, like the 2D marker that hides on disconnect.
+    if (!fleet3dOn) {
+      for (const [id, rec] of fleet3d) {
+        if (id !== fleet3dActive || !fleet3dKnown.has(id)) { fleet3dRemove(rec, ['model', 'trail', 'home', 'target', 'line', 'ring']); for (const e of rec.mission ?? []) vw.entities.remove(e); fleet3d.delete(id); }
+      }
+    }
+    vw.scene.requestRender();
+  }
+  /** A new session after a disconnect-all: the previous fleet's picture goes. */
+  function clearFleet3D() {
+    for (const rec of fleet3d.values()) { fleet3dRemove(rec, ['model', 'trail', 'home', 'target', 'line', 'ring']); for (const e of rec.mission ?? []) viewer?.entities.remove(e); }
+    fleet3d.clear();
+  }
+  const unsubFleet3d: (() => void)[] = [
+    fleetEnabled.subscribe((on) => {
+      fleet3dOn = on;
+      if (!on && cameraMode === 'fleet') cameraMode = 'free';
+      if (viewer) updateFleet3D();
+    }),
+    allTelemetry.subscribe((v) => { fleet3dTelem = v; if (viewer) updateFleet3D(); }),
+    vehicles.subscribe((v) => {
+      const wasEmpty = fleet3dKnown.size === 0;
+      fleet3dKnown = v;
+      fleet3dCount = v.size;
+      if (wasEmpty && v.size > 0 && viewer) clearFleet3D();
+      if (v.size < 2 && cameraMode === 'fleet') cameraMode = 'free'; // fleet camera needs 2+
+      if (viewer) updateFleet3D();
+    }),
+    activeVehicleId.subscribe((v) => { fleet3dActive = v; if (viewer) updateFleet3D(); }),
+    selectedVehicleIds.subscribe((s) => { fleet3dSelected = s; if (viewer) updateFleet3D(); }),
+    frameFleetSignal.subscribe((n) => {
+      if (n > 0 && viewer && active && (cameraMode === 'free' || cameraMode === 'fleet')) fitFleet3D(true);
+    }),
+    guidedTargets.subscribe((v) => { fleet3dTargets = v; if (viewer) updateFleet3D(); }),
+    vehicleHomes.subscribe((v) => { fleet3dHomes = v; if (viewer) updateFleet3D(); }),
+    arduMissionsByVehicle.subscribe((v) => { fleet3dMissions = v; if (viewer) updateFleet3D(); }),
+    guidedActive.subscribe(() => { if (viewer) updateFleet3D(); }),
+  ];
+
   function radarPickId(windowPos: Cesium.Cartesian2): string | null {
     if (!viewer) return null;
     const picked = viewer.scene.pick(windowPos);
@@ -2872,7 +3351,7 @@
       const cesiumFactor = lightingActive
         ? cesiumLikeBrightness(sunAltitudeDeg(clockDate, view.lat, view.lon))
         : 1.0;
-      const u = resolveUserLocation(); // OS geo → UAV GPS → home → persisted map centre (NOT camera)
+      const u = resolveUserLocation(); // OS geo → home → persisted map centre (NOT camera)
       const nightFactor = cesiumLikeBrightness(sunAltitudeDeg(new Date(), u.lat, u.lon));
       factor = Math.min(cesiumFactor, nightFactor) / cesiumFactor;
     }
@@ -3119,18 +3598,10 @@
         position,
         orientation: orientation as any,
         model: uavModelGraphics(cesiumColor, currentModelUri()),
-        label: {
-          text: 'UAV',
-          font: '11px monospace',
-          fillColor: Cesium.Color.WHITE,
-          outlineColor: Cesium.Color.BLACK,
-          outlineWidth: 2,
-          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-          verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-          pixelOffset: new Cesium.Cartesian2(0, -18),
-          disableDepthTestDistance: Number.POSITIVE_INFINITY,
-        },
+        label: UAV_LABEL_DEFAULT,
       });
+      uavLabelSig = '';
+      applyUavLabel(); // fleet mode: the active vehicle's name instead of "UAV"
     } else if (uavEntity.model) {
       uavEntity.model.color = new Cesium.ConstantProperty(cesiumColor);
     }
@@ -4683,6 +5154,7 @@
 
   function enterFpv() {
     if (!viewer) return;
+    closeGuided3d(); // no Fly-Here target from the cockpit view
     cameraMode = 'fpv';
     setFollowCameraControls(false);
     chaseLerpActive = false; orbitLerpActive = false; chaseInited = false; orbitInited = false;
@@ -4713,15 +5185,88 @@
     viewer.scene.requestRender();
   }
 
+  /** Where the free camera lands after FPV: behind and above the aircraft, looking down at it. */
+  const FPV_EXIT_RANGE_M = 200;
+  const FPV_EXIT_PITCH = -30 * (Math.PI / 180);
+
   function exitFpv() {
     restoreFromFpv();
     cameraMode = 'free';
+    // FPV leaves the camera in the cockpit: at the aircraft, banked with it and looking at the horizon.
+    // Cesium's free controls cannot work from there — tilt and rotate pivot on the ground point under
+    // the gesture, and a level view has none, so on a touch screen the camera was stuck. Step back to
+    // an ordinary viewpoint instead: same compass direction, level horizon, the aircraft in view.
+    if (viewer && (lastFollowLat !== 0 || lastFollowLon !== 0)) {
+      const target = Cesium.Cartesian3.fromDegrees(lastFollowLon, lastFollowLat, Math.max(lastFollowAlt, 1));
+      viewer.camera.lookAt(target, new Cesium.HeadingPitchRange(viewer.camera.heading, FPV_EXIT_PITCH, FPV_EXIT_RANGE_M));
+      viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY); // release the frame so manual controls work
+      viewer.scene.requestRender();
+    }
+  }
+
+  // ── Fleet camera: frame every connected vehicle (or the 2+ selected ones) ──────────────────────
+  // Re-flies only when a vehicle has left the view or the fleet's extent changed by ~a third, at most
+  // once a second, so the 10 Hz telemetry flush doesn't keep the camera in perpetual motion.
+  let fleetFitLastMs = 0;
+  let fleetFitLastRadius = 0;
+  const FLEET3D_FIT_MIN_INTERVAL_MS = 1000;
+  const FLEET3D_SINGLE_RADIUS_M = 150;
+  function fleet3dFitPoints(): Cesium.Cartesian3[] {
+    const useSelection = fleet3dSelected.size >= 2;
+    const pts: Cesium.Cartesian3[] = [];
+    for (const v of fleet3dKnown.values()) {
+      if (useSelection && !fleet3dSelected.has(v.vehicleId)) continue;
+      const tv = fleet3dTelem.get(v.vehicleId);
+      if (!tv || !tv.lastUpdate || !isValidGpsCoordinate(tv.lat, tv.lon)) continue;
+      const altMsl = resolveTrueMsl(tv.altMsl, get(altReference), get(groundAnchor)) ?? tv.altMsl ?? tv.altitude;
+      pts.push(Cesium.Cartesian3.fromDegrees(tv.lon, tv.lat, Math.max(altMsl + geoidOffset, 0)));
+    }
+    return pts;
+  }
+  function fitFleet3D(force: boolean) {
+    if (!viewer) return;
+    const pts = fleet3dFitPoints();
+    if (pts.length === 0) return;
+    const now = Date.now();
+    const sphere = pts.length === 1
+      ? new Cesium.BoundingSphere(pts[0], FLEET3D_SINGLE_RADIUS_M)
+      : Cesium.BoundingSphere.fromPoints(pts);
+    const cam = viewer.camera;
+    if (!force) {
+      if (now - fleetFitLastMs < FLEET3D_FIT_MIN_INTERVAL_MS) return;
+      const cv = cam.frustum.computeCullingVolume(cam.position, cam.direction, cam.up);
+      const outside = pts.some((p) => cv.computeVisibility(new Cesium.BoundingSphere(p, 30)) === Cesium.Intersect.OUTSIDE);
+      const shrunk = fleetFitLastRadius > 0 && sphere.radius < fleetFitLastRadius * 0.6;
+      const grown = fleetFitLastRadius > 0 && sphere.radius > fleetFitLastRadius * 1.3;
+      if (!outside && !shrunk && !grown) return;
+    }
+    fleetFitLastMs = now;
+    fleetFitLastRadius = sphere.radius;
+    // Keep the operator's heading; never flatter than -20° so the whole fleet stays on screen.
+    const pitch = Math.min(cam.pitch, Cesium.Math.toRadians(-20));
+    cam.flyToBoundingSphere(sphere, {
+      duration: force ? 1.0 : 0.8,
+      offset: new Cesium.HeadingPitchRange(cam.heading, pitch, 0), // range 0 = fit the sphere
+    });
+  }
+  function enterFleetCamera() {
+    cameraMode = 'fleet';
+    setFollowCameraControls(false);
+    chaseLerpActive = false;
+    chaseInited = false;
+    orbitLerpActive = false;
+    orbitInited = false;
+    viewer?.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
+    fleetFitLastMs = 0;
+    fleetFitLastRadius = 0;
+    fitFleet3D(true);
   }
 
   function cycleCameraMode() {
     if (cameraMode === 'orbit') { enterFpv(); return; }
     if (cameraMode === 'fpv') { exitFpv(); return; }
-    if (cameraMode === 'free') {
+    if (cameraMode === 'free' && fleet3dOn && fleet3dCount >= 2) { enterFleetCamera(); return; }
+    if (cameraMode === 'free' || cameraMode === 'fleet') {
       cameraMode = 'follow';
       lockRange = 200;
       followPitch = -20 * (Math.PI / 180);
@@ -4801,6 +5346,278 @@
     }
   }
 
+  // ── Guided "Fly Here" from the 3D map ──
+  // The 3D twin of the 2D map's Fly-Here popup (Map.svelte onGuidedClick); the arming rule, the editor
+  // guard, the form variant and the send re-check are shared (controllers/guidedClick). A click on the
+  // terrain opens GuidedTargetForm in an HTML overlay that is re-projected onto the clicked point on
+  // every rendered frame, with a reticle on the ground where the target will be. Not in FPV (the camera
+  // is the aircraft). The SENT target is the fleet layer's (updateFleet3D), not this marker.
+  const GUIDED3D_RETICLE_SVG =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28">' +
+    '<g fill="none" stroke="#000" stroke-opacity=".55" stroke-width="4" stroke-linecap="round">' +
+    '<circle cx="14" cy="14" r="8.5"/><path d="M14 2v6M14 20v6M2 14h6M20 14h6"/></g>' +
+    '<circle cx="14" cy="14" r="8.5" fill="#37a8db" fill-opacity=".3" stroke="#37a8db" stroke-width="2"/>' +
+    '<path d="M14 2v6M14 20v6M2 14h6M20 14h6" stroke="#fff" stroke-width="2" stroke-linecap="round"/>' +
+    '<circle cx="14" cy="14" r="2" fill="#fff"/></svg>';
+  const GUIDED3D_RETICLE_IMG = "data:image/svg+xml;base64," + btoa(GUIDED3D_RETICLE_SVG);
+  const GUIDED3D_RETICLE_PX = 28;
+  /** Clicked point → popup edge: half the reticle plus the tip. */
+  const GUIDED3D_GAP_PX = GUIDED3D_RETICLE_PX / 2 + 8;
+  /** Popup ↔ edge of the visible map area. */
+  const GUIDED3D_PAD_PX = 8;
+  let guided3d = $state<{ lat: number; lon: number; multirotor: boolean } | null>(null);
+  let guided3dEl = $state<HTMLDivElement | undefined>(undefined);
+  let guided3dTipEl = $state<HTMLDivElement | undefined>(undefined);
+  let guided3dAnchor: Cesium.Cartesian3 | undefined;    // clicked terrain point (world)
+  let guided3dMarker: Cesium.Entity | undefined;
+  let guided3dSize = { w: 0, h: 0 };                    // popup box (css px), from a ResizeObserver
+  let guided3dUnsubRender: Cesium.Event.RemoveCallback | undefined;
+  const guided3dScratch = new Cesium.Cartesian3();
+  const guided3dScratchWin = new Cesium.Cartesian2();
+
+  /** Terrain point under a window position — the globe only, so a model, a building or a volume in
+   *  the way never becomes the target. Cesium's getPickRay ignores the frustum offsets of
+   *  applyCenterInset (the rendered picture is shifted, the ray is not), so the click is first mapped
+   *  back to where it lies in the un-shifted projection: on the phone the target would otherwise land
+   *  half the widget column / bottom tiles away from the finger. */
+  function pickGround3d(pos: Cesium.Cartesian2): Cesium.Cartesian3 | undefined {
+    if (!viewer) return undefined;
+    const p = pos.clone();
+    const f = viewer.camera.frustum;
+    if (f instanceof Cesium.PerspectiveFrustum && (f.xOffset !== 0 || f.yOffset !== 0)) {
+      const w = viewer.canvas.clientWidth;
+      const h = viewer.canvas.clientHeight;
+      const aspect = f.aspectRatio;
+      let fovy: number | undefined;
+      try { fovy = f.fovy; } catch { fovy = undefined; }
+      if (w && h && aspect !== undefined && fovy !== undefined && isFinite(fovy) && fovy > 0) {
+        const top = f.near * Math.tan(fovy / 2);   // un-offset near-plane half height
+        const right = aspect * top;                // … and half width
+        // Near-plane x of pixel x is xOffset + (2x/w − 1)·right; the un-offset ray reaches it at
+        // x + xOffset·w / (2·right). Vertically (pixel y downwards) the window moves by yOffset.
+        p.x += (f.xOffset * w) / (2 * right);
+        p.y -= (f.yOffset * h) / (2 * top);
+      }
+    }
+    const ray = viewer.camera.getPickRay(p);
+    // Rendered terrain only. No fallback to the ellipsoid: a tap on the haze above the last rendered tile
+    // would hit it tens of kilometres away, and the form does not show how far the target is.
+    return ray ? viewer.scene.globe.pick(ray, viewer.scene) : undefined;
+  }
+
+  function onGuided3dClick(pos: Cesium.Cartesian2) {
+    if (!viewer || cameraMode === 'fpv' || !guidedClickArmed()) return;
+    if (mapClickOwnedByEditor()) return;
+    // Toggle off if the form is already open (taps inside the form never reach the canvas).
+    if (guided3d) { closeGuided3d(); return; }
+    const ground = pickGround3d(pos);
+    if (!ground) return; // sky
+    const carto = Cesium.Cartographic.fromCartesian(ground);
+    if (!carto) return;
+    const lat = Cesium.Math.toDegrees(carto.latitude);
+    const lon = Cesium.Math.toDegrees(carto.longitude);
+    guided3dAnchor = ground;
+    guided3dMarker = viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(lon, lat),
+      billboard: {
+        image: GUIDED3D_RETICLE_IMG,
+        width: GUIDED3D_RETICLE_PX,
+        height: GUIDED3D_RETICLE_PX,
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    });
+    guided3dUnsubRender = viewer.scene.postRender.addEventListener(placeGuided3d);
+    guided3d = { lat, lon, multirotor: guidedTargetMultirotor() };
+    viewer.scene.requestRender();
+  }
+
+  function closeGuided3d() {
+    guided3dUnsubRender?.();
+    guided3dUnsubRender = undefined;
+    if (guided3dMarker && viewer && !viewer.isDestroyed()) {
+      viewer.entities.remove(guided3dMarker);
+      viewer.scene.requestRender();
+    }
+    guided3dMarker = undefined;
+    guided3dAnchor = undefined;
+    guided3dSize = { w: 0, h: 0 };
+    guided3d = null;
+  }
+
+  function onGuided3dFly(lat: number, lon: number, p: GuidedParams) {
+    sendGuidedTarget(lat, lon, p); // re-checks the arming at send time
+    setTimeout(closeGuided3d, 0);  // like 2D: let the originating click finish first
+  }
+
+  /** Re-anchor the popup on the clicked point (postRender, so it follows every camera move): above the
+   *  point, below it when there is no room above, clamped into the visible map area (the screen minus
+   *  the phone's widget column / bottom tiles). Hidden while the point itself is off that area or
+   *  behind the camera — like a 2D popup scrolled out of view. Writes the transform only (no layout). */
+  function placeGuided3d() {
+    const el = guided3dEl;
+    if (!el || !viewer || !guided3dAnchor || guided3dSize.w === 0) return; // not measured yet → stays hidden
+    const cam = viewer.camera;
+    const right = viewer.canvas.clientWidth - Math.max(0, centerInsetRight);
+    const bottom = viewer.canvas.clientHeight - Math.max(0, centerInsetBottom);
+    const toAnchor = Cesium.Cartesian3.subtract(guided3dAnchor, cam.positionWC, guided3dScratch);
+    const p = Cesium.Cartesian3.dot(toAnchor, cam.directionWC) > 0
+      ? Cesium.SceneTransforms.worldToWindowCoordinates(viewer.scene, guided3dAnchor, guided3dScratchWin)
+      : undefined;
+    if (!p || p.x < 0 || p.x > right || p.y < 0 || p.y > bottom) {
+      el.style.visibility = 'hidden';
+      return;
+    }
+    const { w, h } = guided3dSize;
+    let below = false;
+    let top = p.y - GUIDED3D_GAP_PX - h;
+    if (top < GUIDED3D_PAD_PX) { below = true; top = p.y + GUIDED3D_GAP_PX; }
+    const topC = Math.max(GUIDED3D_PAD_PX, Math.min(top, bottom - GUIDED3D_PAD_PX - h));
+    const left = Math.max(GUIDED3D_PAD_PX, Math.min(p.x - w / 2, right - GUIDED3D_PAD_PX - w));
+    el.style.transform = `translate(${Math.round(left)}px, ${Math.round(topC)}px)`;
+    el.style.visibility = 'visible';
+    const tip = guided3dTipEl;
+    if (tip) {
+      // The tip points at the reticle only while the box sits right above / below it.
+      const tipX = p.x - left;
+      tip.style.display = topC === top && tipX >= 12 && tipX <= w - 12 ? '' : 'none';
+      tip.style.left = `${Math.round(tipX)}px`;
+      tip.classList.toggle('below', below);
+    }
+  }
+
+  // Popup mounted / resized → measure once (not per frame) and place it.
+  $effect(() => {
+    const el = guided3dEl;
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      guided3dSize = { w: el.offsetWidth, h: el.offsetHeight };
+      placeGuided3d();
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  });
+  // Same closing rules as the 2D popup: Guided switched off in the panel, or another active vehicle.
+  $effect(() => { if (!$guidedActive) untrack(closeGuided3d); });
+  $effect(() => { void $activeVehicleId; untrack(closeGuided3d); });
+
+  /** Clicks, presses and the wheel inside the form stay in the form — the events the 2D popup stops
+   *  (Leaflet's disableClickPropagation + disableScrollPropagation). The canvas never sees them anyway:
+   *  the form is its sibling, and Cesium's handlers listen on the canvas. */
+  function stopGuided3dEvent(e: Event) {
+    e.stopPropagation();
+  }
+
+  // ── Map search jump (stores/mapFocus, source 'search') ──
+  let searchPin3d: Cesium.Entity | undefined;
+  let searchPin3dTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Bumped per search jump: a jump still waiting for its terrain height is dropped by a newer one. */
+  let searchJumpGen3d = 0;
+  const SEARCH_PIN_IMG = "data:image/svg+xml;base64," + btoa(SEARCH_PIN_SVG);
+
+  /** Leave follow / orbit / FPV / fleet for free look — the camera is about to be flown elsewhere.
+   *  The same steps as the camera cycle's own exits (exitFpv; enterFpv's chase/orbit shutdown). */
+  function releaseToFreeLook() {
+    if (cameraMode === 'free') return;
+    if (cameraMode === 'fpv') { exitFpv(); return; }
+    setFollowCameraControls(false);
+    chaseLerpActive = false; orbitLerpActive = false; chaseInited = false; orbitInited = false;
+    viewer?.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
+    cameraMode = 'free';
+  }
+
+  /** Ellipsoid height (m) of the ground at the target: the most detailed terrain sample if it arrives
+   *  within SEARCH_TERRAIN_WAIT_MS, else whatever the loaded tiles say, else 0 (no terrain). Without
+   *  it a jump into the mountains would frame a point inside them. */
+  async function groundHeightAt(lat: number, lon: number): Promise<number> {
+    if (!viewer) return 0;
+    const carto = Cesium.Cartographic.fromDegrees(lon, lat);
+    const tp = viewer.scene.terrainProvider;
+    if (tp && !(tp instanceof Cesium.EllipsoidTerrainProvider)) {
+      try {
+        const sampled = await Promise.race([
+          Cesium.sampleTerrainMostDetailed(tp, [Cesium.Cartographic.clone(carto)]).then((r) => r[0]?.height),
+          new Promise<undefined>((res) => setTimeout(() => res(undefined), SEARCH_TERRAIN_WAIT_MS)),
+        ]);
+        if (sampled !== undefined && Number.isFinite(sampled)) return sampled;
+      } catch (e) {
+        console.warn("[Map3D] search target terrain sample failed", e);
+      }
+    }
+    if (!viewer || viewer.isDestroyed()) return 0;
+    const loaded = viewer.scene.globe.getHeight(carto);
+    return loaded !== undefined && Number.isFinite(loaded) ? loaded : 0;
+  }
+
+  /** Fly to a search target: frame the hit's box (radius at least SEARCH_MIN_RADIUS_3D_M) or a
+   *  fixed sphere around a bare point, keeping the camera's heading, looking down at it. */
+  async function jumpToSearchTarget3d(f: MapFocusRequest) {
+    if (!viewer) return;
+    const gen = ++searchJumpGen3d;
+    releaseToFreeLook();
+    pendingUavJump3d = false;
+    const ground = await groundHeightAt(f.lat, f.lon);
+    // While the height was fetched: a newer jump, the view torn down, or a follow mode picked again.
+    if (gen !== searchJumpGen3d || !viewer || viewer.isDestroyed() || !isFreeLook() || !active) return;
+    let sphere: Cesium.BoundingSphere;
+    if (f.bounds) {
+      const [w, s, e, n] = f.bounds;
+      sphere = Cesium.BoundingSphere.fromRectangle3D(Cesium.Rectangle.fromDegrees(w, s, e, n), Cesium.Ellipsoid.WGS84, ground);
+      sphere.radius = Math.max(sphere.radius, SEARCH_MIN_RADIUS_3D_M);
+    } else {
+      sphere = new Cesium.BoundingSphere(Cesium.Cartesian3.fromDegrees(f.lon, f.lat, ground), SEARCH_POINT_RADIUS_3D_M);
+    }
+    viewer.camera.flyToBoundingSphere(sphere, {
+      duration: 1.5,
+      offset: new Cesium.HeadingPitchRange(viewer.camera.heading, Cesium.Math.toRadians(SEARCH_PITCH_3D_DEG), 0), // range 0 = fit the sphere
+    });
+    showSearchPin3d(f.lat, f.lon);
+  }
+
+  function clearSearchPin3d() {
+    if (searchPin3dTimer) { clearTimeout(searchPin3dTimer); searchPin3dTimer = undefined; }
+    if (searchPin3d && viewer && !viewer.isDestroyed()) {
+      viewer.entities.remove(searchPin3d);
+      viewer.scene.requestRender();
+    }
+    searchPin3d = undefined;
+  }
+
+  /** The search pin: fully visible for SEARCH_PIN_SHOW_MS, then fades out over SEARCH_PIN_FADE_MS
+   *  (rendered frame by frame — requestRenderMode draws nothing on its own) and is removed. */
+  function showSearchPin3d(lat: number, lon: number) {
+    if (!viewer) return;
+    clearSearchPin3d();
+    const fadeFrom = performance.now() + SEARCH_PIN_SHOW_MS;
+    const pin = viewer.entities.add({
+      position: new Cesium.ConstantPositionProperty(Cesium.Cartesian3.fromDegrees(lon, lat)),
+      billboard: {
+        image: SEARCH_PIN_IMG,
+        width: 26,
+        height: 36,
+        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        color: new Cesium.CallbackProperty(() => {
+          const k = Math.min(1, Math.max(0, (performance.now() - fadeFrom) / SEARCH_PIN_FADE_MS));
+          return Cesium.Color.WHITE.withAlpha(1 - k);
+        }, false),
+      },
+    });
+    searchPin3d = pin;
+    viewer.scene.requestRender();
+    searchPin3dTimer = setTimeout(() => {
+      searchPin3dTimer = undefined;
+      const step = () => {
+        if (searchPin3d !== pin || !viewer || viewer.isDestroyed()) return;
+        if (performance.now() >= fadeFrom + SEARCH_PIN_FADE_MS) { clearSearchPin3d(); return; }
+        viewer.scene.requestRender();
+        requestAnimationFrame(step);
+      };
+      step();
+    }, SEARCH_PIN_SHOW_MS);
+  }
+
   // ── Public API ──
 
   export function flyTo(lat: number, lon: number, alt = 500) {
@@ -4818,6 +5635,7 @@
 
   const camModeTitle = $derived(
     cameraMode === 'free'   ? 'Camera: Free'        :
+    cameraMode === 'fleet'  ? 'Camera: Fleet (frame all vehicles)' :
     cameraMode === 'follow' ? 'Camera: Follow UAV'  :
     cameraMode === 'orbit'  ? 'Camera: Orbit UAV'   :
                               'Camera: FPV (first-person)'
@@ -4847,6 +5665,29 @@
     />
   {/if}
 
+  {#if guided3d}
+    <!-- Guided "Fly Here" form (onGuided3dClick); positioned by placeGuided3d, hidden until placed. -->
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="guided3d-pop"
+      style="visibility: hidden"
+      bind:this={guided3dEl}
+      onclick={stopGuided3dEvent}
+      ondblclick={stopGuided3dEvent}
+      onmousedown={stopGuided3dEvent}
+      ontouchstart={stopGuided3dEvent}
+      oncontextmenu={stopGuided3dEvent}
+      onwheel={stopGuided3dEvent}
+    >
+      <button class="guided3d-close" onclick={closeGuided3d} title={$t('window.close')} aria-label={$t('window.close')}>×</button>
+      <div class="guided-popup">
+        <GuidedTargetForm lat={guided3d.lat} lon={guided3d.lon} multirotor={guided3d.multirotor} onfly={onGuided3dFly} />
+      </div>
+      <div class="guided3d-tip" bind:this={guided3dTipEl}></div>
+    </div>
+  {/if}
+
   <div class="map-controls-corner">
     <button
       class="map-control-btn map-mode-btn"
@@ -4863,16 +5704,24 @@
       class:mode-follow={cameraMode === 'follow'}
       class:mode-orbit={cameraMode === 'orbit'}
       class:mode-fpv={cameraMode === 'fpv'}
+      class:mode-fleet={cameraMode === 'fleet'}
       onclick={cycleCameraMode}
       title={camModeTitle}
       aria-label={camModeTitle}
     >
-      {#if cameraMode === 'follow'}
-        <svg class="cam-icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+      {#if cameraMode === 'fleet'}
+        <svg class="cam-icon" viewBox="2.2 2.2 19.6 19.6" width="20" height="20" aria-hidden="true">
+          <path d="M3 8V4h4M17 4h4v4M21 16v4h-4M7 20H3v-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+          <polygon points="12,7 9.6,13 12,11.8 14.4,13" fill="currentColor"/>
+          <polygon points="7.5,12 5.1,18 7.5,16.8 9.9,18" fill="currentColor"/>
+          <polygon points="16.5,12 14.1,18 16.5,16.8 18.9,18" fill="currentColor"/>
+        </svg>
+      {:else if cameraMode === 'follow'}
+        <svg class="cam-icon" viewBox="6.25 6 11.5 11.5" width="20" height="20" aria-hidden="true">
           <polygon points="12,6 7.5,17.5 12,15.2 16.5,17.5" fill="currentColor"/>
         </svg>
       {:else if cameraMode === 'orbit'}
-        <svg class="cam-icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+        <svg class="cam-icon" viewBox="3 3 18 18" width="20" height="20" aria-hidden="true">
           <circle cx="12" cy="12" r="3" fill="currentColor"/>
           <path d="M12 4 A8 8 0 0 1 20 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
           <polyline points="18,8 20,12 16,11" fill="currentColor"/>
@@ -4880,12 +5729,12 @@
           <polyline points="6,16 4,12 8,13" fill="currentColor"/>
         </svg>
       {:else if cameraMode === 'fpv'}
-        <svg class="cam-icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+        <svg class="cam-icon" viewBox="1 1 22 22" width="20" height="20" aria-hidden="true">
           <path d="M2 12 C5 6 19 6 22 12 C19 18 5 18 2 12 Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
           <circle cx="12" cy="12" r="3.2" fill="currentColor"/>
         </svg>
       {:else}
-        <svg class="cam-icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+        <svg class="cam-icon" viewBox="4.63 4.6 14.51 14.51" width="20" height="20" aria-hidden="true">
           <polygon class="north-tri" points="12,4.6 9.9,8.6 14.1,8.6"/>
           <g transform="translate(0 -1.5) rotate(-70 12 15)">
             <polygon points="12,8.6 7.7,19.6 12,17.4 16.3,19.6" fill="currentColor"/>
@@ -4923,6 +5772,61 @@
     right: auto !important;
     bottom: 8px;
     left: 8px;
+  }
+
+  /* ── Guided "Fly Here" form — the 2D popup's look (Map.svelte .guided-popup-wrap + Leaflet's popup
+     box), below the corner controls like a Leaflet popup below its controls. ── */
+  .guided3d-pop {
+    position: absolute;
+    left: 0;
+    top: 0;
+    z-index: 9000;
+    box-sizing: content-box;
+    max-width: 300px; /* content width, as the 2D popup's maxWidth: the fixed-wing pair needs ~274 px */
+    padding: 13px 24px 13px 20px;
+    background: rgba(46, 46, 46, 0.97);
+    color: #e0e0e0;
+    border: 1px solid #37a8db;
+    border-radius: 6px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+    font-family: 'Segoe UI', Tahoma, sans-serif;
+    font-size: 13px;
+    line-height: 1.3;
+    pointer-events: auto;
+    touch-action: manipulation;
+  }
+  .guided3d-close {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: none;
+    background: none;
+    color: #949494;
+    font: 18px/28px Tahoma, sans-serif;
+    cursor: pointer;
+  }
+  .guided3d-close:hover { color: #e0e0e0; }
+  /* Leaflet-style tip: a rotated square half-hidden behind the box edge, pointing at the reticle. */
+  .guided3d-tip {
+    position: absolute;
+    bottom: -7px;
+    width: 12px;
+    height: 12px;
+    background: rgba(46, 46, 46, 0.97);
+    border-right: 1px solid #37a8db;
+    border-bottom: 1px solid #37a8db;
+    transform: translateX(-50%) rotate(45deg);
+    pointer-events: none;
+  }
+  .guided3d-tip:global(.below) {
+    bottom: auto;
+    top: -7px;
+    border: none;
+    border-left: 1px solid #37a8db;
+    border-top: 1px solid #37a8db;
   }
 
   /* ── Controls corner — identical layout to Map.svelte ── */
@@ -4980,7 +5884,7 @@
   }
 
   .map-mode-btn {
-    font-size: 13px;
+    font-size: var(--map-btn-text, 21px); /* "2D" ≈ 75 % of the button width (app.html) */
     font-weight: 700;
     letter-spacing: 0.03em;
   }
@@ -4993,6 +5897,11 @@
   }
 
   /* Follow = full blue (smooth chase) */
+  .map-cam-btn.mode-fleet {
+    background: rgba(55, 168, 219, 0.35);
+    border-color: #37a8db;
+    color: #fff;
+  }
   .map-cam-btn.mode-follow {
     background: rgba(46, 46, 46, 0.92);
     border-color: rgba(55, 168, 219, 0.7);
@@ -5019,6 +5928,7 @@
     color: #37a8db !important;
   }
 
-  .cam-icon { overflow: visible; }
+  /* The drawing fills 75 % of the button: the viewBoxes are cropped to it (app.html). */
+  .cam-icon { overflow: visible; width: var(--map-btn-icon, 28.5px); height: var(--map-btn-icon, 28.5px); }
   .north-tri { fill: currentColor; opacity: 0.9; }
 </style>

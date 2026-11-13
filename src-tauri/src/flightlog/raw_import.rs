@@ -23,7 +23,7 @@ use ::mavlink::ardupilotmega::{GpsFixType, MavAutopilot, MavMessage, MavModeFlag
 use super::db;
 use super::timezone;
 use super::types::{Flight, TelemetryRecord};
-use crate::mavlink_proto::parser::MavParser;
+use crate::mavlink_proto::parser::{MavParser, Parsed};
 use crate::msp::{
     MspParser, MSPV2_INAV_AIR_SPEED, MSPV2_INAV_ANALOG, MSPV2_INAV_MIXER, MSPV2_INAV_STATUS,
     MSP_ALTITUDE, MSP_ATTITUDE, MSP_BOARD_INFO, MSP_FC_VARIANT, MSP_FC_VERSION, MSP_GPSSTATISTICS,
@@ -152,6 +152,7 @@ fn snap_to_record(s: &Snap, t_ms: i64) -> TelemetryRecord {
         mode_modifiers: s.mode_modifiers.clone(),
         link_snr: None,
         link_rssi_dbm: None,
+        wall_ms: None,
     }
 }
 
@@ -311,7 +312,15 @@ fn decode_tlog(bytes: &[u8]) -> (Vec<Sample>, Identity) {
             let b = bytes[i];
             i += 1;
             guard += 1;
-            if let Some(frame) = parser.push(b) {
+            let parsed = parser.push_any(b);
+            // TUNNEL (#385) — Kite's own MSP-over-MAVLink traffic, recorded into every tlog of a tunnel
+            // link. A complete record like any other (so the importer stays on the frame boundary), but
+            // not telemetry: skipped.
+            if matches!(parsed, Some(Parsed::Tunnel { .. })) {
+                got = true;
+                continue;
+            }
+            if let Some(Parsed::Msg(frame)) = parsed {
                 got = true;
                 // A tlog carries every component on the link, not just the autopilot. Peripherals that
                 // share the vehicle's system id — a camera on component 100, a gimbal on 154 — publish
@@ -336,6 +345,11 @@ fn decode_tlog(bytes: &[u8]) -> (Vec<Sample>, Identity) {
                         variant = v;
                         platform = p;
                     }
+                } else if let Some((sysid, _)) = fc_id {
+                    // A tlog of a link shared by several vehicles (fleet mode) carries every vehicle's
+                    // frames: once the autopilot is locked, another system id's telemetry is not this
+                    // flight's — merged, it would replay as one garbled track.
+                    consume = frame.header.system_id == sysid;
                 }
                 if consume && update_from_mav(&frame.message, &mut snap, &mut armed, &variant) {
                     samples.push(Sample { t_ms, rec: snap_to_record(&snap, t_ms), armed });
@@ -632,6 +646,8 @@ pub fn import_raw_log_with_progress<F: Fn(u8, &str, &str)>(
             board_id: id.board.clone(),
             platform_type: id.platform_type,
             fc_uid: None,
+            group_id: None,
+            vehicle_id: None,
             protocol: protocol.to_string(),
             start_lat,
             start_lon,
@@ -737,6 +753,61 @@ mod tests {
         let sample = samples.last().expect("ATTITUDE should emit a sample");
         assert_eq!(sample.rec.mode_primary.as_deref(), Some("guided"));
         assert!(sample.armed, "the autopilot heartbeat is armed");
+    }
+
+    /// A tlog of a link shared by two vehicles (fleet mode): once the first autopilot is locked from its
+    /// HEARTBEAT, the other vehicle's telemetry is skipped — only the first vehicle's samples remain.
+    #[test]
+    fn a_second_vehicle_in_the_tlog_is_skipped() {
+        let att = |roll: f32| MavMessage::ATTITUDE(ATTITUDE_DATA { roll, ..Default::default() });
+        let log = tlog(vec![
+            (1, 1, heartbeat(MavType::MAV_TYPE_FIXED_WING, MavAutopilot::MAV_AUTOPILOT_ARDUPILOTMEGA, 15)),
+            (2, 1, heartbeat(MavType::MAV_TYPE_QUADROTOR, MavAutopilot::MAV_AUTOPILOT_PX4, 0)),
+            (1, 1, att(0.1)),
+            (2, 1, att(0.9)),
+            (1, 1, att(0.2)),
+            (2, 1, att(0.8)),
+        ]);
+        let (samples, identity) = decode_tlog(&log);
+        assert_eq!(identity.fc_variant.as_deref(), Some("ArduPlane"));
+        let rolls: Vec<f64> = samples.iter().map(|s| (s.rec.roll.unwrap() * 100.0).round() / 100.0).collect();
+        let expected: Vec<f64> = [0.1f32, 0.2].iter().map(|r| (r.to_degrees() as f64 * 100.0).round() / 100.0).collect();
+        assert_eq!(rolls, expected);
+        assert_eq!(samples.iter().map(|s| s.t_ms).collect::<Vec<_>>(), [3000, 5000]);
+    }
+
+    /// A tunnel link records Kite's MSP-over-MAVLink TUNNEL frames (INAV 10.0+) into the tlog. The typed
+    /// parser skips them; the importer must still treat each as one complete record, or it reads on
+    /// into the next record's timestamp and loses the frame boundary for the rest of the log.
+    #[test]
+    fn tunnel_frames_in_a_tlog_keep_the_importer_in_sync() {
+        use crate::mavlink_proto::{codec, tunnel};
+        let mut log = tlog(vec![(
+            1,
+            1,
+            heartbeat(MavType::MAV_TYPE_FIXED_WING, MavAutopilot::MAV_AUTOPILOT_ARDUPILOTMEGA, 15),
+        )]);
+        let mut seq = MavSequence::new();
+        for (n, from) in [(255u8, 190u8), (1, 1)].into_iter().enumerate() {
+            log.extend_from_slice(&((n as u64 + 2) * 1_000_000).to_be_bytes());
+            let header = MavHeader { system_id: from.0, component_id: from.1, sequence: 0 };
+            let payload = tunnel::encode_chunk(1, 1, &[0x24, 0x58, 0x3C, 0x00, 0x01, 0x00, 0x00, 0x00, 0x8F]);
+            log.extend_from_slice(&codec::serialize_raw_v2(
+                &header,
+                tunnel::TUNNEL_MSG_ID,
+                tunnel::TUNNEL_CRC_EXTRA,
+                &payload,
+                &mut seq,
+            ));
+        }
+        log.extend_from_slice(&4_000_000u64.to_be_bytes());
+        let att_header = MavHeader { system_id: 1, component_id: 1, sequence: 0 };
+        log.extend_from_slice(&serialize_v2(&att_header, &MavMessage::ATTITUDE(ATTITUDE_DATA::default()), &mut seq));
+
+        let (samples, identity) = decode_tlog(&log);
+        assert_eq!(identity.fc_variant.as_deref(), Some("ArduPlane"));
+        assert_eq!(samples.len(), 1, "the ATTITUDE after the TUNNEL records must still be decoded");
+        assert_eq!(samples[0].t_ms, 4000);
     }
 
     /// The `heading` column is course over ground, not the vehicle heading — `GLOBAL_POSITION_INT.hdg`
