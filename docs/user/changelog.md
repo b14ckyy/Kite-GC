@@ -420,6 +420,15 @@ inside the box of the feature release they belong to, so the notes for one relea
       today's file. It now lists the day files, newest first, with date and size (the one this session
       writes is tagged *current*); tap one to send it to mail or a messenger — so yesterday's log is
       there after a restart. [#198]
+    - **The diagnostics log has a size limit** — a day's log file stops at 50 MB and is kept; the
+      log then continues in a second file for that day (`kite-gc-YYYY-MM-DD-2.log`), which starts
+      over each time it reaches 50 MB as well. A fault that repeats the same line without end can no
+      longer fill the disk, and you still have both ends of it: how it began in the first file, the
+      latest lines in the second. [#271]
+    - **macOS 13 / 14 and iOS 16 / 17: panels and widgets get their background blur** — on these
+      systems the blur behind the side panels, the widgets and the map buttons was missing; they
+      were only semi-transparent, which made panels harder to read over a bright map. macOS 15 and
+      iOS 18 were not affected. [#274]
     - **INAV over a MAVLink-only link gets its full MSP feature set** — INAV 10.0 can carry MSP inside
       the MAVLink stream, and Kite detects that automatically when you connect with the MAVLink
       protocol: the status shows **MSP/MAV**, UAV Info shows the real INAV version and craft name, and
@@ -555,6 +564,21 @@ inside the box of the feature release they belong to, so the notes for one relea
     - **QuadPlane: QHover was offered without an RC source.** QHover only holds the altitude; the
       pilot holds the position. It is now behind *Show all modes* and locked without an RC source,
       like the other stick-flown modes.
+    - **macOS: a lost network (TCP) connection filled the log file without end.** When the Mac itself
+      dropped a TCP connection to an ArduPilot / PX4 vehicle — a network change, for example — Kite
+      did not notice the loss: the status bar stayed on "connected", and the diagnostic log grew by
+      the same error line many thousand times a second, to several gigabytes within minutes. Kite now
+      treats this as the lost connection it is and disconnects, with the "Device connection lost"
+      prompt for a running recording. On every system, a read error that keeps repeating is written
+      to the log once every few seconds instead of every time.
+    - **Linux: bright lines along the map tile edges, and a very slow map.** After a system update
+      to WebKitGTK 2.54 the 2D map showed a thin bright grid, one line at every tile border, with
+      every map provider and at any display scaling — and moving the map dropped to a few frames
+      per second, worst with video running. The tiles are drawn without those lines again, and
+      the map moves as smoothly as before. One thing remains on these systems and is not Kite's to
+      fix: after each zoom step the map shows the previous zoom level for a single frame. That is a
+      fault in WebKitGTK 2.54 itself (WebKit bug 321993), corrected by its developers; it goes away
+      with a later system update.
     ---
 
     **1.0.1**{ .kite-patch } *2026-09-13*{ .kite-badge }
@@ -649,6 +673,8 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#264]: https://github.com/b14ckyy/Kite-GC/pull/264
 [#265]: https://github.com/b14ckyy/Kite-GC/pull/265
 [#267]: https://github.com/b14ckyy/Kite-GC/pull/267
+[#271]: https://github.com/b14ckyy/Kite-GC/pull/271
+[#274]: https://github.com/b14ckyy/Kite-GC/pull/274
 [#256]: https://github.com/b14ckyy/Kite-GC/pull/256
 [#259]: https://github.com/b14ckyy/Kite-GC/pull/259
 [#143]: https://github.com/b14ckyy/Kite-GC/pull/143

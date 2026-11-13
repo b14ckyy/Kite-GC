@@ -3152,6 +3152,10 @@
   :global(.map.tile-overlap canvas.leaflet-tile) {
     width: 256.5px !important;
     height: 256.5px !important;
+    /* Leaflet's stylesheet draws every tile with `mix-blend-mode: plus-lighter`, a remedy for a
+       Chromium seam bug. Where the engine honours it, the half-pixel overlap above is drawn as the
+       SUM of both tiles: a bright hairline along every tile edge. WebKitGTK needs none of that. */
+    mix-blend-mode: normal;
   }
   /* A custom online provider or offline map with 512 / 128 px tiles (layer class from userLayerZoom /
      customLayerZoom; offline-map tiles are canvases): the same
@@ -3348,6 +3352,7 @@
     align-items: center;
     justify-content: center;
     backdrop-filter: var(--glass-blur, blur(6px));
+    -webkit-backdrop-filter: var(--glass-blur, blur(6px));
     transition: background 0.2s, border-color 0.2s, color 0.2s;
     padding: 0;
   }
@@ -3374,6 +3379,7 @@
     border-color: rgba(55, 168, 219, 0.45);
     color: rgba(199, 223, 232, 0.95);
     backdrop-filter: var(--glass-blur, blur(6px));
+    -webkit-backdrop-filter: var(--glass-blur, blur(6px));
   }
 
   .map-heading-btn.mode-follow,
@@ -3382,6 +3388,7 @@
     border-color: rgba(55, 168, 219, 0.7);
     color: #37a8db;
     backdrop-filter: var(--glass-blur, blur(6px));
+    -webkit-backdrop-filter: var(--glass-blur, blur(6px));
   }
 
   .map-heading-btn.mode-free:hover {

@@ -113,6 +113,7 @@
     border-radius: 6px;
     background: rgba(0, 0, 0, 0.55);
     backdrop-filter: var(--panel-blur, blur(10px));
+    -webkit-backdrop-filter: var(--panel-blur, blur(10px));
   }
   .pg-sw {
     padding: 2px 7px; font-size: 10px; border: 1px solid #555; border-radius: 4px;
