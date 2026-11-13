@@ -49,7 +49,9 @@
   import { selectedVehicleIds, toggleSelected } from "$lib/stores/fleetSelection";
   import { fleetEnabled } from "$lib/stores/fleetMode";
   import { switchVehicle } from "$lib/controllers/connectionController";
-  import { guidedTargets, guidedActive, activeMode } from "$lib/controllers/vehicleControl";
+  import { guidedTargets, guidedActive, activeMode, type GuidedParams } from "$lib/controllers/vehicleControl";
+  import { guidedClickArmed, mapClickOwnedByEditor, guidedTargetMultirotor, sendGuidedTarget } from "$lib/controllers/guidedClick";
+  import GuidedTargetForm from "$lib/components/control/GuidedTargetForm.svelte";
   import { matchActiveMode } from "$lib/helpers/mavModes";
   import { detectVehicleClass, arduMissionsByVehicle } from "$lib/stores/missionArdupilot";
   import { vehicleColor } from "$lib/helpers/vehicleColors";
@@ -1120,6 +1122,7 @@
         updateFence3D();      // (re)build geofence volumes for the now-visible 3D view
         updateRally3D();      // (re)build rally markers for the now-visible 3D view
       } else {
+        closeGuided3d(); // a Fly-Here form must not wait, unseen, for the next 3D session
         // Leaving 3D while in FPV: undo FPV's viewer changes (camera inputs, model/track, wheel handler)
         // so nothing carries over and blocks the map — but keep cameraMode 'fpv' to re-enter next activate.
         if (cameraMode === 'fpv') restoreFromFpv();
@@ -1581,7 +1584,11 @@
       const vid = fleet3dPickId(e.position);
       if (vid != null) { void switchVehicle(vid); return; }
       const id = radarPickId(e.position);
-      if (id != null) radarSelection.update((cur) => (cur === id ? null : id));
+      if (id != null) { radarSelection.update((cur) => (cur === id ? null : id)); return; }
+      // The own aircraft: the terrain behind it along the ray is not what the tap meant.
+      if (uavEntity && viewer?.scene.pick(e.position)?.id === uavEntity) return;
+      // Neither: the terrain under the click may be a Guided "Fly Here" target.
+      onGuided3dClick(e.position);
     }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
     // Ctrl+click on a fleet vehicle toggles it in the group selection (same gesture as the 2D map).
     radar3dPickHandler.setInputAction((e: Cesium.ScreenSpaceEventHandler.PositionedEvent) => {
@@ -1669,6 +1676,7 @@
     if (decoRebuildTimer != null) clearTimeout(decoRebuildTimer);
     if (camDragHandler) { camDragHandler.destroy(); camDragHandler = undefined; }
     uninstallFpvWheel();
+    closeGuided3d();
     unsubTelemetry?.();
     unsubRadar3d?.();
     unsubRadarSel3d?.();
@@ -1875,6 +1883,8 @@
     home?: Cesium.Entity;
     target?: Cesium.Entity;
     line?: Cesium.Entity;
+    /** CSS colour the line's material was built with. */
+    lineCss?: string;
     /** Group-selection ring under the craft (stores/fleetSelection). */
     ring?: Cesium.Entity;
     mission?: Cesium.Entity[];
@@ -1890,6 +1900,7 @@
   let fleet3dSelected: ReadonlySet<string> = new Set();
   let fleet3dCount = $state(0); // reactive registry size (the fleet camera step needs 2+)
   let fleet3dOn = false; // the `--fleet` launch flag (stores/fleetMode)
+  let fleet3dDrawnOn = false; // the flag state the entities in `fleet3d` were drawn under
   let fleet3dTargets: ReadonlyMap<string, { lat: number; lon: number; ts: number }> = new Map();
   let fleet3dHomes: ReadonlyMap<string, VehicleHome> = new Map();
   let fleet3dMissions: ReadonlyMap<string, ArduWaypoint[]> = new Map();
@@ -1922,6 +1933,82 @@
       disableDepthTestDistance: Number.POSITIVE_INFINITY,
     };
   }
+  /** Vehicle-name label: white text with a black outline on a see-through box in the vehicle colour —
+   *  `opaque` for the ACTIVE vehicle's name (applyUavLabel), so it stands out among the others. */
+  function fleet3dNameLabel(text: string, color: Cesium.Color, offsetY: number, opaque = false) {
+    return {
+      text,
+      font: "bold 11px 'Segoe UI', sans-serif",
+      fillColor: Cesium.Color.WHITE,
+      outlineColor: Cesium.Color.BLACK,
+      outlineWidth: 2,
+      style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+      showBackground: true,
+      backgroundColor: color.withAlpha(opaque ? 1 : 0.45),
+      verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+      pixelOffset: new Cesium.Cartesian2(0, offsetY),
+      disableDepthTestDistance: Number.POSITIVE_INFINITY,
+    };
+  }
+  /** Fleet home marker: an "H" in a dot of the vehicle colour, so it reads apart from the plain dot of
+   *  the same vehicle's Guided target without a text label. Drawn at 2× for a crisp billboard; one
+   *  canvas per colour. */
+  const FLEET3D_HOME_PX = 18;
+  const fleet3dHomeBadges = new Map<string, HTMLCanvasElement>();
+  function fleet3dHomeBadge(css: string): HTMLCanvasElement {
+    const cached = fleet3dHomeBadges.get(css);
+    if (cached) return cached;
+    const s = FLEET3D_HOME_PX * 2;
+    const c = document.createElement('canvas');
+    c.width = s;
+    c.height = s;
+    const g = c.getContext('2d');
+    if (g) {
+      g.beginPath();
+      g.arc(s / 2, s / 2, s / 2 - 2, 0, Math.PI * 2);
+      g.fillStyle = css;
+      g.fill();
+      g.lineWidth = 3;
+      g.strokeStyle = '#fff';
+      g.stroke();
+      g.font = `bold ${Math.round(s * 0.55)}px 'Segoe UI', Tahoma, sans-serif`;
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.lineJoin = 'round';
+      g.lineWidth = 3;
+      g.strokeStyle = 'rgba(0, 0, 0, 0.75)';
+      g.strokeText('H', s / 2, s / 2 + 1);
+      g.fillStyle = '#fff';
+      g.fillText('H', s / 2, s / 2 + 1);
+    }
+    fleet3dHomeBadges.set(css, c);
+    return c;
+  }
+  // Fleet mode: the ACTIVE vehicle has no fleet model (the main UAV entity is it), so its name label
+  // lives on `uavEntity` — opaque, unlike the others. null = the single-vehicle "UAV" label.
+  const UAV_LABEL_DEFAULT: Cesium.LabelGraphics.ConstructorOptions = {
+    text: 'UAV',
+    font: '11px monospace',
+    fillColor: Cesium.Color.WHITE,
+    outlineColor: Cesium.Color.BLACK,
+    outlineWidth: 2,
+    style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+    verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+    pixelOffset: new Cesium.Cartesian2(0, -18),
+    disableDepthTestDistance: Number.POSITIVE_INFINITY,
+  };
+  let uavFleetLabel: { name: string; color: string } | null = null;
+  let uavLabelSig = ''; // what uavEntity's label currently shows ('' = UAV_LABEL_DEFAULT)
+  function applyUavLabel() {
+    if (!uavEntity) return;
+    const sig = uavFleetLabel ? `${uavFleetLabel.name}|${uavFleetLabel.color}` : '';
+    if (sig === uavLabelSig) return;
+    uavLabelSig = sig;
+    uavEntity.label = new Cesium.LabelGraphics(uavFleetLabel
+      ? fleet3dNameLabel(uavFleetLabel.name, Cesium.Color.fromCssColorString(uavFleetLabel.color), -18, true)
+      : UAV_LABEL_DEFAULT);
+    viewer?.scene.requestRender();
+  }
   function fleet3dRemove(rec: Fleet3dRec, keys: (keyof Fleet3dRec)[]) {
     for (const k of keys) {
       const e = rec[k];
@@ -1930,19 +2017,28 @@
   }
   function updateFleet3D() {
     if (!viewer) return;
-    // GATE(fleet): without the `--fleet` launch flag nothing is drawn here (no other vehicle, no guided
-    // target line for the active one) — the single-vehicle 3D view.
-    if (!fleet3dOn) {
-      if (fleet3d.size) { clearFleet3D(); viewer.scene.requestRender(); }
-      return;
+    // GATE(fleet): without the `--fleet` launch flag only the ACTIVE vehicle's sent Guided target is
+    // drawn here (green point + dashed vehicle→target line — Guided from the map is a single-vehicle
+    // feature). No other vehicle, no fleet model / trail / home / mission, no selection ring, no fleet
+    // name label on the main UAV entity ("UAV" stays), no fleet camera.
+    // Entities drawn under the other flag state go first, so a runtime flip leaves nothing stale.
+    if (fleet3dDrawnOn !== fleet3dOn) {
+      if (fleet3d.size) clearFleet3D();
+      fleet3dDrawnOn = fleet3dOn;
     }
     const vw = viewer; // narrowed copy for the closures below
     const ordered = [...fleet3dKnown.values()].sort((a, b) => a.linkId - b.linkId || a.sysid - b.sysid);
+    // The active vehicle's name on the main model, in its fleet colour (index = the colour slot below).
+    const activeIdx = fleet3dOn && fleet3dActive ? ordered.findIndex((v) => v.vehicleId === fleet3dActive) : -1;
+    uavFleetLabel = activeIdx >= 0 ? { name: ordered[activeIdx].name, color: vehicleColor(activeIdx) } : null;
+    applyUavLabel();
     const now = Date.now();
     const seen = new Set<string>();
-    const tr = get(t);
     if (cameraMode === 'fleet') fitFleet3D(false); // keep every (selected) vehicle in view
     ordered.forEach((v, idx) => {
+      // Without the flag a vehicle that is not (or no longer) the active one draws nothing (its old
+      // entities go in the cleanup below the loop).
+      if (!fleet3dOn && v.vehicleId !== fleet3dActive) return;
       const tv = fleet3dTelem.get(v.vehicleId);
       if (!tv || !tv.lastUpdate || !isValidGpsCoordinate(tv.lat, tv.lon)) return;
       seen.add(v.vehicleId);
@@ -1958,7 +2054,7 @@
       const armed = (tv.armingFlags & (1 << ARMING_FLAG_ARMED)) !== 0;
 
       // Group-selection ring (active vehicle included — its main entity has no other selection cue).
-      if (fleet3dSelected.has(v.vehicleId)) {
+      if (fleet3dOn && fleet3dSelected.has(v.vehicleId)) {
         if (!rec.ring) {
           rec.ring = vw.entities.add({
             position,
@@ -1991,7 +2087,7 @@
             position,
             orientation: uavOrientation(position, tv.yaw, tv.pitch, tv.roll),
             model: { ...uavModelGraphics(cesColor, modelUriForPlatform(v.platformType as PlatformType, modelOverride)), colorBlendAmount: FLEET3D_MODEL_TINT },
-            label: fleet3dLabel(v.name, cesColor, -18),
+            label: fleet3dNameLabel(v.name, cesColor, -18),
           });
           fleet3dEntityIds.set(rec.model, v.vehicleId);
         } else {
@@ -2018,15 +2114,20 @@
             }
           }
         }
-        // Home
+        // Home: an "H" badge in the vehicle colour, no text label (the colour says whose it is)
         const h = fleet3dHomes.get(v.vehicleId);
         if (h) {
           const hp = Cesium.Cartesian3.fromDegrees(h.lon, h.lat);
           if (!rec.home) {
             rec.home = vw.entities.add({
               position: hp,
-              point: { pixelSize: 11, color: cesColor, outlineColor: Cesium.Color.WHITE, outlineWidth: 2, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY },
-              label: { ...fleet3dLabel(`${v.name} · ${tr('connection.vehicleHome')}`, cesColor, -12), heightReference: Cesium.HeightReference.CLAMP_TO_GROUND },
+              billboard: {
+                image: fleet3dHomeBadge(color),
+                width: FLEET3D_HOME_PX,
+                height: FLEET3D_HOME_PX,
+                heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+                disableDepthTestDistance: Number.POSITIVE_INFINITY,
+              },
             });
           } else {
             (rec.home.position as Cesium.ConstantPositionProperty).setValue(hp);
@@ -2070,9 +2171,12 @@
         }
       }
 
-      // Guided target + vehicle→target line (every vehicle; the active one in the Guided green)
+      // Guided target + vehicle→target line (every vehicle; the active one in the Guided green). No label:
+      // the colour says whose target it is.
       const tgt = fleet3dTargets.get(v.vehicleId);
-      const inGuided = isActiveVehicle ? (get(activeMode)?.guided === true || get(guidedActive)) : fleet3dInGuided(v, tv);
+      // The active vehicle by its FC mode alone, not the panel's Guided toggle: `guidedTargets` takes every
+      // position target the FC reports, and outside the guided mode that is the next mission waypoint.
+      const inGuided = isActiveVehicle ? get(activeMode)?.guided === true : fleet3dInGuided(v, tv);
       if (tgt && inGuided && now - tgt.ts < FLEET3D_TARGET_STALE_MS && isValidGpsCoordinate(tgt.lat, tgt.lon)) {
         const lineCss = isActiveVehicle ? '#59aa29' : color;
         const lineColor = Cesium.Color.fromCssColorString(lineCss);
@@ -2082,19 +2186,23 @@
           rec.target = vw.entities.add({
             position: tgtGround,
             point: { pixelSize: 12, color: lineColor, outlineColor: Cesium.Color.WHITE, outlineWidth: 2, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY },
-            label: { ...fleet3dLabel(`${v.name} → ${tr('control.guidedTarget')}`, lineColor, -14), heightReference: Cesium.HeightReference.CLAMP_TO_GROUND },
           });
         } else {
           (rec.target.position as Cesium.ConstantPositionProperty).setValue(tgtGround);
-          if (rec.target.point) rec.target.point.color = new Cesium.ConstantProperty(lineColor);
+          if (rec.target.point && rec.lineCss !== lineCss) rec.target.point.color = new Cesium.ConstantProperty(lineColor);
         }
         if (!rec.line) {
           rec.line = vw.entities.add({
             polyline: { positions: [position, tp], width: 2, material: new Cesium.PolylineDashMaterialProperty({ color: lineColor, dashLength: 16 }) },
           });
+          rec.lineCss = lineCss;
         } else if (rec.line.polyline) {
           rec.line.polyline.positions = new Cesium.ConstantProperty([position, tp]);
-          rec.line.polyline.material = new Cesium.PolylineDashMaterialProperty({ color: lineColor, dashLength: 16 });
+          // A new material only when the colour changed — this runs on every telemetry tick.
+          if (rec.lineCss !== lineCss) {
+            rec.line.polyline.material = new Cesium.PolylineDashMaterialProperty({ color: lineColor, dashLength: 16 });
+            rec.lineCss = lineCss;
+          }
         }
       } else {
         fleet3dRemove(rec, ['target', 'line']);
@@ -2104,6 +2212,13 @@
     if (fleet3dKnown.size > 0) {
       for (const [id, rec] of fleet3d) {
         if (!fleet3dKnown.has(id)) { fleet3dRemove(rec, ['model', 'trail', 'home', 'target', 'line', 'ring']); for (const e of rec.mission ?? []) vw.entities.remove(e); fleet3d.delete(id); }
+      }
+    }
+    // Without the flag nothing outlives the active vehicle: a disconnect (no active vehicle, empty
+    // registry) takes its Guided target with it, like the 2D marker that hides on disconnect.
+    if (!fleet3dOn) {
+      for (const [id, rec] of fleet3d) {
+        if (id !== fleet3dActive || !fleet3dKnown.has(id)) { fleet3dRemove(rec, ['model', 'trail', 'home', 'target', 'line', 'ring']); for (const e of rec.mission ?? []) vw.entities.remove(e); fleet3d.delete(id); }
       }
     }
     vw.scene.requestRender();
@@ -3482,18 +3597,10 @@
         position,
         orientation: orientation as any,
         model: uavModelGraphics(cesiumColor, currentModelUri()),
-        label: {
-          text: 'UAV',
-          font: '11px monospace',
-          fillColor: Cesium.Color.WHITE,
-          outlineColor: Cesium.Color.BLACK,
-          outlineWidth: 2,
-          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-          verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-          pixelOffset: new Cesium.Cartesian2(0, -18),
-          disableDepthTestDistance: Number.POSITIVE_INFINITY,
-        },
+        label: UAV_LABEL_DEFAULT,
       });
+      uavLabelSig = '';
+      applyUavLabel(); // fleet mode: the active vehicle's name instead of "UAV"
     } else if (uavEntity.model) {
       uavEntity.model.color = new Cesium.ConstantProperty(cesiumColor);
     }
@@ -5046,6 +5153,7 @@
 
   function enterFpv() {
     if (!viewer) return;
+    closeGuided3d(); // no Fly-Here target from the cockpit view
     cameraMode = 'fpv';
     setFollowCameraControls(false);
     chaseLerpActive = false; orbitLerpActive = false; chaseInited = false; orbitInited = false;
@@ -5237,6 +5345,168 @@
     }
   }
 
+  // ── Guided "Fly Here" from the 3D map ──
+  // The 3D twin of the 2D map's Fly-Here popup (Map.svelte onGuidedClick); the arming rule, the editor
+  // guard, the form variant and the send re-check are shared (controllers/guidedClick). A click on the
+  // terrain opens GuidedTargetForm in an HTML overlay that is re-projected onto the clicked point on
+  // every rendered frame, with a reticle on the ground where the target will be. Not in FPV (the camera
+  // is the aircraft). The SENT target is the fleet layer's (updateFleet3D), not this marker.
+  const GUIDED3D_RETICLE_SVG =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28">' +
+    '<g fill="none" stroke="#000" stroke-opacity=".55" stroke-width="4" stroke-linecap="round">' +
+    '<circle cx="14" cy="14" r="8.5"/><path d="M14 2v6M14 20v6M2 14h6M20 14h6"/></g>' +
+    '<circle cx="14" cy="14" r="8.5" fill="#37a8db" fill-opacity=".3" stroke="#37a8db" stroke-width="2"/>' +
+    '<path d="M14 2v6M14 20v6M2 14h6M20 14h6" stroke="#fff" stroke-width="2" stroke-linecap="round"/>' +
+    '<circle cx="14" cy="14" r="2" fill="#fff"/></svg>';
+  const GUIDED3D_RETICLE_IMG = "data:image/svg+xml;base64," + btoa(GUIDED3D_RETICLE_SVG);
+  const GUIDED3D_RETICLE_PX = 28;
+  /** Clicked point → popup edge: half the reticle plus the tip. */
+  const GUIDED3D_GAP_PX = GUIDED3D_RETICLE_PX / 2 + 8;
+  /** Popup ↔ edge of the visible map area. */
+  const GUIDED3D_PAD_PX = 8;
+  let guided3d = $state<{ lat: number; lon: number; multirotor: boolean } | null>(null);
+  let guided3dEl = $state<HTMLDivElement | undefined>(undefined);
+  let guided3dTipEl = $state<HTMLDivElement | undefined>(undefined);
+  let guided3dAnchor: Cesium.Cartesian3 | undefined;    // clicked terrain point (world)
+  let guided3dMarker: Cesium.Entity | undefined;
+  let guided3dSize = { w: 0, h: 0 };                    // popup box (css px), from a ResizeObserver
+  let guided3dUnsubRender: Cesium.Event.RemoveCallback | undefined;
+  const guided3dScratch = new Cesium.Cartesian3();
+  const guided3dScratchWin = new Cesium.Cartesian2();
+
+  /** Terrain point under a window position — the globe only, so a model, a building or a volume in
+   *  the way never becomes the target. Cesium's getPickRay ignores the frustum offsets of
+   *  applyCenterInset (the rendered picture is shifted, the ray is not), so the click is first mapped
+   *  back to where it lies in the un-shifted projection: on the phone the target would otherwise land
+   *  half the widget column / bottom tiles away from the finger. */
+  function pickGround3d(pos: Cesium.Cartesian2): Cesium.Cartesian3 | undefined {
+    if (!viewer) return undefined;
+    const p = pos.clone();
+    const f = viewer.camera.frustum;
+    if (f instanceof Cesium.PerspectiveFrustum && (f.xOffset !== 0 || f.yOffset !== 0)) {
+      const w = viewer.canvas.clientWidth;
+      const h = viewer.canvas.clientHeight;
+      const aspect = f.aspectRatio;
+      let fovy: number | undefined;
+      try { fovy = f.fovy; } catch { fovy = undefined; }
+      if (w && h && aspect !== undefined && fovy !== undefined && isFinite(fovy) && fovy > 0) {
+        const top = f.near * Math.tan(fovy / 2);   // un-offset near-plane half height
+        const right = aspect * top;                // … and half width
+        // Near-plane x of pixel x is xOffset + (2x/w − 1)·right; the un-offset ray reaches it at
+        // x + xOffset·w / (2·right). Vertically (pixel y downwards) the window moves by yOffset.
+        p.x += (f.xOffset * w) / (2 * right);
+        p.y -= (f.yOffset * h) / (2 * top);
+      }
+    }
+    const ray = viewer.camera.getPickRay(p);
+    // Rendered terrain only. No fallback to the ellipsoid: a tap on the haze above the last rendered tile
+    // would hit it tens of kilometres away, and the form does not show how far the target is.
+    return ray ? viewer.scene.globe.pick(ray, viewer.scene) : undefined;
+  }
+
+  function onGuided3dClick(pos: Cesium.Cartesian2) {
+    if (!viewer || cameraMode === 'fpv' || !guidedClickArmed()) return;
+    if (mapClickOwnedByEditor()) return;
+    // Toggle off if the form is already open (taps inside the form never reach the canvas).
+    if (guided3d) { closeGuided3d(); return; }
+    const ground = pickGround3d(pos);
+    if (!ground) return; // sky
+    const carto = Cesium.Cartographic.fromCartesian(ground);
+    if (!carto) return;
+    const lat = Cesium.Math.toDegrees(carto.latitude);
+    const lon = Cesium.Math.toDegrees(carto.longitude);
+    guided3dAnchor = ground;
+    guided3dMarker = viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(lon, lat),
+      billboard: {
+        image: GUIDED3D_RETICLE_IMG,
+        width: GUIDED3D_RETICLE_PX,
+        height: GUIDED3D_RETICLE_PX,
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    });
+    guided3dUnsubRender = viewer.scene.postRender.addEventListener(placeGuided3d);
+    guided3d = { lat, lon, multirotor: guidedTargetMultirotor() };
+    viewer.scene.requestRender();
+  }
+
+  function closeGuided3d() {
+    guided3dUnsubRender?.();
+    guided3dUnsubRender = undefined;
+    if (guided3dMarker && viewer && !viewer.isDestroyed()) {
+      viewer.entities.remove(guided3dMarker);
+      viewer.scene.requestRender();
+    }
+    guided3dMarker = undefined;
+    guided3dAnchor = undefined;
+    guided3dSize = { w: 0, h: 0 };
+    guided3d = null;
+  }
+
+  function onGuided3dFly(lat: number, lon: number, p: GuidedParams) {
+    sendGuidedTarget(lat, lon, p); // re-checks the arming at send time
+    setTimeout(closeGuided3d, 0);  // like 2D: let the originating click finish first
+  }
+
+  /** Re-anchor the popup on the clicked point (postRender, so it follows every camera move): above the
+   *  point, below it when there is no room above, clamped into the visible map area (the screen minus
+   *  the phone's widget column / bottom tiles). Hidden while the point itself is off that area or
+   *  behind the camera — like a 2D popup scrolled out of view. Writes the transform only (no layout). */
+  function placeGuided3d() {
+    const el = guided3dEl;
+    if (!el || !viewer || !guided3dAnchor || guided3dSize.w === 0) return; // not measured yet → stays hidden
+    const cam = viewer.camera;
+    const right = viewer.canvas.clientWidth - Math.max(0, centerInsetRight);
+    const bottom = viewer.canvas.clientHeight - Math.max(0, centerInsetBottom);
+    const toAnchor = Cesium.Cartesian3.subtract(guided3dAnchor, cam.positionWC, guided3dScratch);
+    const p = Cesium.Cartesian3.dot(toAnchor, cam.directionWC) > 0
+      ? Cesium.SceneTransforms.worldToWindowCoordinates(viewer.scene, guided3dAnchor, guided3dScratchWin)
+      : undefined;
+    if (!p || p.x < 0 || p.x > right || p.y < 0 || p.y > bottom) {
+      el.style.visibility = 'hidden';
+      return;
+    }
+    const { w, h } = guided3dSize;
+    let below = false;
+    let top = p.y - GUIDED3D_GAP_PX - h;
+    if (top < GUIDED3D_PAD_PX) { below = true; top = p.y + GUIDED3D_GAP_PX; }
+    const topC = Math.max(GUIDED3D_PAD_PX, Math.min(top, bottom - GUIDED3D_PAD_PX - h));
+    const left = Math.max(GUIDED3D_PAD_PX, Math.min(p.x - w / 2, right - GUIDED3D_PAD_PX - w));
+    el.style.transform = `translate(${Math.round(left)}px, ${Math.round(topC)}px)`;
+    el.style.visibility = 'visible';
+    const tip = guided3dTipEl;
+    if (tip) {
+      // The tip points at the reticle only while the box sits right above / below it.
+      const tipX = p.x - left;
+      tip.style.display = topC === top && tipX >= 12 && tipX <= w - 12 ? '' : 'none';
+      tip.style.left = `${Math.round(tipX)}px`;
+      tip.classList.toggle('below', below);
+    }
+  }
+
+  // Popup mounted / resized → measure once (not per frame) and place it.
+  $effect(() => {
+    const el = guided3dEl;
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      guided3dSize = { w: el.offsetWidth, h: el.offsetHeight };
+      placeGuided3d();
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  });
+  // Same closing rules as the 2D popup: Guided switched off in the panel, or another active vehicle.
+  $effect(() => { if (!$guidedActive) untrack(closeGuided3d); });
+  $effect(() => { void $activeVehicleId; untrack(closeGuided3d); });
+
+  /** Clicks, presses and the wheel inside the form stay in the form — the events the 2D popup stops
+   *  (Leaflet's disableClickPropagation + disableScrollPropagation). The canvas never sees them anyway:
+   *  the form is its sibling, and Cesium's handlers listen on the canvas. */
+  function stopGuided3dEvent(e: Event) {
+    e.stopPropagation();
+  }
+
   // ── Map search jump (stores/mapFocus, source 'search') ──
   let searchPin3d: Cesium.Entity | undefined;
   let searchPin3dTimer: ReturnType<typeof setTimeout> | undefined;
@@ -5394,6 +5664,29 @@
     />
   {/if}
 
+  {#if guided3d}
+    <!-- Guided "Fly Here" form (onGuided3dClick); positioned by placeGuided3d, hidden until placed. -->
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="guided3d-pop"
+      style="visibility: hidden"
+      bind:this={guided3dEl}
+      onclick={stopGuided3dEvent}
+      ondblclick={stopGuided3dEvent}
+      onmousedown={stopGuided3dEvent}
+      ontouchstart={stopGuided3dEvent}
+      oncontextmenu={stopGuided3dEvent}
+      onwheel={stopGuided3dEvent}
+    >
+      <button class="guided3d-close" onclick={closeGuided3d} title={$t('window.close')} aria-label={$t('window.close')}>×</button>
+      <div class="guided-popup">
+        <GuidedTargetForm lat={guided3d.lat} lon={guided3d.lon} multirotor={guided3d.multirotor} onfly={onGuided3dFly} />
+      </div>
+      <div class="guided3d-tip" bind:this={guided3dTipEl}></div>
+    </div>
+  {/if}
+
   <div class="map-controls-corner">
     <button
       class="map-control-btn map-mode-btn"
@@ -5478,6 +5771,61 @@
     right: auto !important;
     bottom: 8px;
     left: 8px;
+  }
+
+  /* ── Guided "Fly Here" form — the 2D popup's look (Map.svelte .guided-popup-wrap + Leaflet's popup
+     box), below the corner controls like a Leaflet popup below its controls. ── */
+  .guided3d-pop {
+    position: absolute;
+    left: 0;
+    top: 0;
+    z-index: 9000;
+    box-sizing: content-box;
+    max-width: 300px; /* content width, as the 2D popup's maxWidth: the fixed-wing pair needs ~274 px */
+    padding: 13px 24px 13px 20px;
+    background: rgba(46, 46, 46, 0.97);
+    color: #e0e0e0;
+    border: 1px solid #37a8db;
+    border-radius: 6px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+    font-family: 'Segoe UI', Tahoma, sans-serif;
+    font-size: 13px;
+    line-height: 1.3;
+    pointer-events: auto;
+    touch-action: manipulation;
+  }
+  .guided3d-close {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: none;
+    background: none;
+    color: #949494;
+    font: 18px/28px Tahoma, sans-serif;
+    cursor: pointer;
+  }
+  .guided3d-close:hover { color: #e0e0e0; }
+  /* Leaflet-style tip: a rotated square half-hidden behind the box edge, pointing at the reticle. */
+  .guided3d-tip {
+    position: absolute;
+    bottom: -7px;
+    width: 12px;
+    height: 12px;
+    background: rgba(46, 46, 46, 0.97);
+    border-right: 1px solid #37a8db;
+    border-bottom: 1px solid #37a8db;
+    transform: translateX(-50%) rotate(45deg);
+    pointer-events: none;
+  }
+  .guided3d-tip:global(.below) {
+    bottom: auto;
+    top: -7px;
+    border: none;
+    border-left: 1px solid #37a8db;
+    border-top: 1px solid #37a8db;
   }
 
   /* ── Controls corner — identical layout to Map.svelte ── */
