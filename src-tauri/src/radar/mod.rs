@@ -9,6 +9,7 @@
 // thread that does per-system merge (by id) + TTL expiry and emits one consolidated `radar-vehicles`
 // snapshot event. See docs/active/RADAR_TRACKING_CORE.md.
 
+pub mod link;
 pub mod source;
 pub mod sources;
 pub mod vehicle;
@@ -22,6 +23,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
+use link::LinkSpec;
 use source::{NodePos, RadarSource, SourceHandle, SourceUpdate};
 use vehicle::{TrackedVehicle, VehicleSource, VehicleSystem};
 
@@ -75,18 +77,27 @@ pub struct RadarConfig {
     pub formation_flight: FormationFlightConfig,
 }
 
-/// FormationFlight (INAV-Radar / ESP32) system config — a single serial module Kite speaks MSP to as an
-/// emulated FC. See docs/active/RADAR_FORMATION_FLIGHT.md.
+/// FormationFlight (INAV-Radar / ESP32) system config — a single module Kite speaks MSP to as an
+/// emulated FC, over serial or a TCP / UDP bridge. See docs/active/RADAR_FORMATION_FLIGHT.md.
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct FormationFlightConfig {
     pub enabled: bool,
+    /// `"serial"` (also when empty — configs stored before the field existed), `"tcp"` or `"udp"`.
+    #[serde(default)]
+    pub transport: String,
     /// Serial port the ESP32 module is on.
     #[serde(default)]
     pub port: String,
     /// Baud (0 ⇒ default 115200).
     #[serde(default)]
     pub baud: u32,
+    /// Host of a TCP / UDP link.
+    #[serde(default)]
+    pub host: String,
+    /// Port of a TCP / UDP link (0 ⇒ not started).
+    #[serde(default)]
+    pub net_port: u32,
     /// Name we advertise via MSP_NAME (our node's broadcast name). Empty ⇒ a default is used.
     #[serde(default)]
     pub node_name: String,
@@ -100,7 +111,7 @@ pub struct AdsbConfig {
     /// Online REST providers (polled in parallel; merged by ICAO).
     #[serde(default)]
     pub online: Vec<AdsbOnlineProvider>,
-    /// Local hardware receivers (MAVLink ADSB_VEHICLE over serial; TCP later).
+    /// Local hardware receivers (MAVLink ADSB_VEHICLE over serial, TCP or UDP).
     #[serde(default)]
     pub local: Vec<AdsbLocalSource>,
     /// Pull the ADS-B list from the connected UAV via MSP (INAV 8.0+). Bandwidth-heavy → opt-in.
@@ -131,8 +142,8 @@ pub struct AdsbOnlineProvider {
     pub enabled: bool,
 }
 
-/// A local hardware ADS-B receiver. Phase 2: `transport = "serial"` (MAVLink ADSB_VEHICLE);
-/// TCP/WiFi (same decode) follows once the device's TCP API is confirmed.
+/// A local hardware ADS-B receiver streaming MAVLink ADSB_VEHICLE. `transport` is `"serial"` (also when
+/// empty — configs stored before the field existed), `"tcp"` (Kite connects) or `"udp"` (Kite listens).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AdsbLocalSource {
@@ -143,8 +154,22 @@ pub struct AdsbLocalSource {
     pub port: String,
     #[serde(default)]
     pub baud: u32,
+    /// Host of a TCP / UDP link.
+    #[serde(default)]
+    pub host: String,
+    /// Port of a TCP / UDP link (0 ⇒ not started).
+    #[serde(default)]
+    pub net_port: u32,
     #[serde(default)]
     pub enabled: bool,
+}
+
+impl AdsbLocalSource {
+    /// The link this receiver reads from, or `None` when it cannot be started (see `LinkSpec::from_config`).
+    fn link(&self) -> Option<LinkSpec> {
+        let baud = if self.baud > 0 { self.baud } else { 57600 };
+        LinkSpec::from_config(&self.transport, &self.port, baud, &self.host, self.net_port)
+    }
 }
 
 /// The consolidated state delivered to the frontend (three separate, never-merged lists).
@@ -172,18 +197,17 @@ struct Running {
     agg: Option<JoinHandle<()>>,
     /// Data sources rebuilt on every reconfigure (ADS-B online/local). Cheap to recycle.
     sources: Vec<SourceHandle>,
-    /// FormationFlight source kept separate: it holds a serial port to a resettable ESP32, so we restart
-    /// it ONLY when its port/baud change (reopening the port resets the board).
+    /// FormationFlight source kept separate: it holds a link to a resettable ESP32, so we restart it ONLY
+    /// when its link changes (reopening a serial port resets the board).
     ff: Option<FfRunning>,
     snapshot: Arc<Mutex<RadarSnapshot>>,
 }
 
-/// The running FormationFlight source + the port/baud it was opened with (for the restart-on-change check).
+/// The running FormationFlight source + the link it was opened with (for the restart-on-change check).
 struct FfRunning {
     #[allow(dead_code)]
     handle: SourceHandle,
-    port: String,
-    baud: u32,
+    link: LinkSpec,
 }
 
 /// Owns the running radar pipeline. Idle (no threads) until enabled. Lives in `AppState`, behind a
@@ -286,8 +310,8 @@ impl RadarManager {
             }
         }
 
-        // Already running → swap the data workers, but reconcile the FF source by port/baud only (keep its
-        // serial port open across unrelated reconfigures so the ESP32 isn't reset).
+        // Already running → swap the data workers, but reconcile the FF source by its link only (keep it
+        // open across unrelated reconfigures so the ESP32 isn't reset).
         if let Some(r) = self.running.as_mut() {
             r.sources.clear(); // drop old workers (each SourceHandle's Drop stops its thread)
             r.sources = build_sources(config, &r.update_tx, app, &query_center, &query_radius, &adsb_last_fetch);
@@ -308,7 +332,7 @@ impl RadarManager {
         // Expose the ingest channel so scheduler-fed sources (ADS-B via MSP) push into this pipeline.
         *self.ingest.lock().unwrap() = Some(tx.clone());
         let sources = build_sources(config, &tx, app, &query_center, &query_radius, &adsb_last_fetch);
-        let ff = make_ff(config, &tx, app, &node_pos, &node_name);
+        let ff = ff_link(config).map(|link| make_ff(link, &tx, app, &node_pos, &node_name));
         eprintln!(
             "[radar] configured: enabled, {} source(s){}",
             sources.len(),
@@ -386,18 +410,18 @@ fn build_sources(
             sources.push(src.start(tx.clone()));
         }
 
-        // Local hardware receivers (Phase 2: serial MAVLink). Independent of online providers.
+        // Local hardware receivers (MAVLink over serial / TCP / UDP). Independent of online providers.
         for ls in config.adsb.local.iter().filter(|l| l.enabled) {
-            let transport = if ls.transport.is_empty() { "serial" } else { ls.transport.as_str() };
-            match transport {
-                "serial" if !ls.port.is_empty() => {
-                    let baud = if ls.baud > 0 { ls.baud } else { 57600 };
-                    let src = Box::new(sources::adsb_mavlink::AdsbMavlinkSource::new(
-                        ls.name.clone(), ls.port.clone(), baud, app.clone(),
-                    ));
+            match ls.link() {
+                Some(link) => {
+                    let src = Box::new(sources::adsb_mavlink::AdsbMavlinkSource::new(ls.name.clone(), link, app.clone()));
                     sources.push(src.start(tx.clone()));
                 }
-                other => eprintln!("[radar][adsb] local source '{}' transport '{}' not supported yet", ls.name, other),
+                None => log::info!(
+                    "[radar][adsb] local source '{}' ({}) has no usable link — not started",
+                    ls.name,
+                    if ls.transport.is_empty() { "serial" } else { ls.transport.as_str() }
+                ),
             }
         }
     }
@@ -405,39 +429,42 @@ fn build_sources(
     sources
 }
 
-/// Effective baud for the FormationFlight module (0 ⇒ 115200).
-fn ff_baud(config: &RadarConfig) -> u32 {
-    if config.formation_flight.baud > 0 { config.formation_flight.baud } else { 115200 }
+/// The link the FormationFlight module should run on, or `None` when FF is off or its link is incomplete.
+/// A serial link carries the effective baud (0 ⇒ 115200). This is the whole restart-on-change key: the
+/// fields of the transport NOT selected (a stale serial port behind a TCP link) and the node name are
+/// not part of it, so changing them never reopens the link.
+fn ff_link(config: &RadarConfig) -> Option<LinkSpec> {
+    let ff = &config.formation_flight;
+    if !ff.enabled {
+        return None;
+    }
+    let baud = if ff.baud > 0 { ff.baud } else { 115200 };
+    LinkSpec::from_config(&ff.transport, &ff.port, baud, &ff.host, ff.net_port)
 }
 
-/// Start the FormationFlight source (INAV-Radar / ESP32) if configured, returning its handle + port/baud.
+/// Start the FormationFlight source (INAV-Radar / ESP32) on `link`, returning its handle + the link.
 fn make_ff(
-    config: &RadarConfig,
+    link: LinkSpec,
     tx: &mpsc::Sender<SourceUpdate>,
     app: &AppHandle,
     node_pos: &NodePos,
     node_name: &Arc<Mutex<String>>,
-) -> Option<FfRunning> {
-    let ff = &config.formation_flight;
-    if !ff.enabled || ff.port.is_empty() {
-        return None;
-    }
-    let baud = ff_baud(config);
+) -> FfRunning {
     let src = Box::new(sources::formation_flight::FormationFlightSource::new(
         "FormationFlight".to_string(),
-        ff.port.clone(),
-        baud,
+        link.clone(),
         node_name.clone(),
         node_pos.clone(),
         app.clone(),
     ));
     let handle = src.start(tx.clone());
-    eprintln!("[radar][ff] started on {} @ {}", ff.port, baud);
-    Some(FfRunning { handle, port: ff.port.clone(), baud })
+    eprintln!("[radar][ff] started on {}", link.describe());
+    FfRunning { handle, link }
 }
 
-/// Reconcile the FormationFlight source against a new config WITHOUT reopening its serial port unless the
-/// port/baud actually change — so an unrelated reconfigure (or a name change) doesn't reset the ESP32.
+/// Reconcile the FormationFlight source against a new config WITHOUT reopening its link unless the link
+/// itself changes (transport, serial port/baud, host/port) — so an unrelated reconfigure (or a name
+/// change) doesn't reset the ESP32.
 fn reconcile_ff(
     cur: &mut Option<FfRunning>,
     config: &RadarConfig,
@@ -446,20 +473,18 @@ fn reconcile_ff(
     node_pos: &NodePos,
     node_name: &Arc<Mutex<String>>,
 ) {
-    let ff = &config.formation_flight;
-    if !ff.enabled || ff.port.is_empty() {
+    let Some(link) = ff_link(config) else {
         if cur.take().is_some() {
             eprintln!("[radar][ff] stopped");
         }
         return;
+    };
+    if cur.as_ref().is_some_and(|f| f.link == link) {
+        return; // keep the link open — no ESP reset
     }
-    let same = cur
-        .as_ref()
-        .is_some_and(|f| f.port == ff.port && f.baud == ff_baud(config));
-    if same {
-        return; // keep the port open — no ESP reset
-    }
-    *cur = make_ff(config, tx, app, node_pos, node_name); // port/baud changed → (re)open
+    // Link changed → drop the old source first (its Drop stops the worker), then open the new one.
+    *cur = None;
+    *cur = Some(make_ff(link, tx, app, node_pos, node_name));
 }
 
 /// Aggregator thread: drain source updates, per-system merge by id, TTL-prune, throttled emit.
@@ -585,5 +610,113 @@ fn build_snapshot(
         formation_flight: list(VehicleSystem::FormationFlight),
         radio: list(VehicleSystem::Radio),
         last_update: now,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config(json: serde_json::Value) -> RadarConfig {
+        serde_json::from_value(json).expect("radar config parses")
+    }
+
+    #[test]
+    fn stored_local_source_without_link_fields_is_serial() {
+        // Shape stored before TCP / UDP existed: no host / netPort, transport sometimes empty.
+        let c = config(serde_json::json!({
+            "enabled": true,
+            "adsb": { "enabled": true, "local": [
+                { "name": "A", "port": "COM3", "baud": 115200, "enabled": true },
+                { "name": "B", "transport": "", "port": "/dev/ttyUSB0", "baud": 0, "enabled": true },
+            ]},
+        }));
+        let l = &c.adsb.local;
+        assert_eq!(l[0].host, "");
+        assert_eq!(l[0].net_port, 0);
+        assert_eq!(l[0].link(), Some(LinkSpec::Serial { port: "COM3".into(), baud: 115200 }));
+        assert_eq!(l[1].link(), Some(LinkSpec::Serial { port: "/dev/ttyUSB0".into(), baud: 57600 }));
+    }
+
+    #[test]
+    fn tcp_and_udp_local_sources_parse() {
+        let c = config(serde_json::json!({
+            "enabled": true,
+            "adsb": { "enabled": true, "local": [
+                { "name": "T", "transport": "tcp", "port": "COM3", "baud": 57600, "host": "192.168.4.1", "netPort": 5760, "enabled": true },
+                { "name": "U", "transport": "udp", "port": "", "baud": 57600, "host": "0.0.0.0", "netPort": 14550, "enabled": true },
+                { "name": "X", "transport": "tcp", "port": "", "baud": 57600, "host": "", "netPort": 5760, "enabled": true },
+            ]},
+        }));
+        let l = &c.adsb.local;
+        assert_eq!(l[0].link(), Some(LinkSpec::Tcp { host: "192.168.4.1".into(), port: 5760 }));
+        assert_eq!(l[1].link(), Some(LinkSpec::Udp { host: "0.0.0.0".into(), port: 14550 }));
+        assert_eq!(l[2].link(), None, "an IP source without a host is not started");
+    }
+
+    #[test]
+    fn stored_formation_flight_without_link_fields_is_serial() {
+        let c = config(serde_json::json!({
+            "enabled": true,
+            "formationFlight": { "enabled": true, "port": "COM7", "baud": 0, "nodeName": "GCS" },
+        }));
+        assert_eq!(c.formation_flight.transport, "");
+        assert_eq!(ff_link(&c), Some(LinkSpec::Serial { port: "COM7".into(), baud: 115200 }));
+    }
+
+    #[test]
+    fn formation_flight_ip_links_parse() {
+        let tcp = config(serde_json::json!({
+            "enabled": true,
+            "formationFlight": { "enabled": true, "transport": "tcp", "port": "", "baud": 115200, "host": "10.0.0.5", "netPort": 5761, "nodeName": "" },
+        }));
+        assert_eq!(ff_link(&tcp), Some(LinkSpec::Tcp { host: "10.0.0.5".into(), port: 5761 }));
+        let udp = config(serde_json::json!({
+            "enabled": true,
+            "formationFlight": { "enabled": true, "transport": "udp", "host": "10.0.0.5", "netPort": 0 },
+        }));
+        assert_eq!(ff_link(&udp), None, "port 0 is not started");
+    }
+
+    #[test]
+    fn formation_flight_restart_key_is_the_link_only() {
+        let base = serde_json::json!({
+            "enabled": true,
+            "adsb": { "enabled": true },
+            "formationFlight": { "enabled": true, "transport": "serial", "port": "COM7", "baud": 115200, "host": "10.0.0.5", "netPort": 5761, "nodeName": "A" },
+        });
+        let with = |patch: serde_json::Value| {
+            let mut v = base.clone();
+            for (k, val) in patch.as_object().unwrap() {
+                v["formationFlight"][k] = val.clone();
+            }
+            ff_link(&config(v))
+        };
+        let cur = ff_link(&config(base.clone()));
+        assert!(cur.is_some());
+
+        // Unrelated changes keep the link (no reopen, no ESP32 reset).
+        assert_eq!(with(serde_json::json!({ "nodeName": "B" })), cur);
+        assert_eq!(with(serde_json::json!({ "host": "10.0.0.9", "netPort": 1 })), cur, "IP fields behind a serial link");
+        let mut adsb_off = base.clone();
+        adsb_off["adsb"]["enabled"] = serde_json::json!(false);
+        assert_eq!(ff_link(&config(adsb_off)), cur);
+        // 0 and the default baud are the same link.
+        assert_eq!(with(serde_json::json!({ "baud": 0 })), cur);
+
+        // Link changes restart it.
+        assert_ne!(with(serde_json::json!({ "port": "COM8" })), cur);
+        assert_ne!(with(serde_json::json!({ "baud": 57600 })), cur);
+        assert_ne!(with(serde_json::json!({ "transport": "tcp" })), cur);
+        assert_ne!(with(serde_json::json!({ "transport": "udp" })), cur);
+
+        // Behind a TCP link the serial fields are the unrelated ones.
+        let tcp = with(serde_json::json!({ "transport": "tcp" }));
+        assert_eq!(with(serde_json::json!({ "transport": "tcp", "port": "COM9", "baud": 9600 })), tcp);
+        assert_ne!(with(serde_json::json!({ "transport": "tcp", "host": "10.0.0.6" })), tcp);
+        assert_ne!(with(serde_json::json!({ "transport": "tcp", "netPort": 5762 })), tcp);
+
+        // Off → no link (the source is stopped).
+        assert_eq!(with(serde_json::json!({ "enabled": false })), None);
     }
 }

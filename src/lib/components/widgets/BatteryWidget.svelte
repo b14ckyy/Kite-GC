@@ -122,11 +122,15 @@
       ? (multi ? `${$t('widgetLabels.auto')} ${shownId + 1}` : '')
       : `${shownId + 1}`
   );
+  // The second battery widget instance reads "BAT 2", so two of them side by side can be told apart.
+  let title = $derived(
+    widgetId === 'battery2' ? `${$t('widgetLabels.bat')} 2` : $t('widgetLabels.bat')
+  );
 </script>
 
 <div class="widget-card" class:alert style="--ws: {size}px">
   <button class="w-label" class:clickable={multi} onclick={cycle} disabled={!multi} type="button">
-    {$t('widgetLabels.bat')}{#if multi}<span class="chip">{chip}</span>{/if}
+    {title}{#if multi}<span class="chip">{chip}</span>{/if}
   </button>
 
   <!-- Voltage bar — only shown when battery % is available from FC -->

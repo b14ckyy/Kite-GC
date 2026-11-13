@@ -30,9 +30,10 @@
     return types[telem.fixType] || `FIX ${telem.fixType}`;
   });
 
+  // Unified fix scale (backend `scheduler::telemetry::FIX_*`): 0 none · 1 2D · 2 3D · 3 DGPS/RTK.
   let fixColor = $derived(
-    !telem.lastUpdate || telem.fixType < 2 ? '#e74c3c'
-      : telem.fixType === 2 ? '#f39c12'
+    !telem.lastUpdate || telem.fixType < 1 ? '#e74c3c'
+      : telem.fixType === 1 ? '#f39c12'
       : '#27ae60'
   );
 

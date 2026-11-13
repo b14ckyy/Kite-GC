@@ -15,14 +15,17 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { seedFromFc } from './rcEngine';
 import { rcPlatform } from './rcPlatform';
+import { isActive } from './vehicles';
 
 /** FC's channel values (µs) from the last sync; index 0 = CH1. For the debug monitor only. */
 export const fcChannels = writable<number[]>([]);
 
 /** Last RC_CHANNELS broadcast from a MAVLink FC (µs, CH1..). Updated continuously; read at engage. */
 let liveMavChannels: number[] = [];
-void listen<number[]>('telemetry-rc-channels', (e) => {
-  liveMavChannels = e.payload;
+// Array payload → wrapped as { value } by the backend's VehicleEmitter; active vehicle only.
+void listen<{ value: number[] }>('telemetry-rc-channels', (e) => {
+  if (!isActive(e.payload)) return;
+  liveMavChannels = e.payload.value;
 });
 
 /** Read/seed the FC's current channel values once and seed our channel state from them. Returns true on

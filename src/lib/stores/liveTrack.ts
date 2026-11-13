@@ -7,6 +7,7 @@
 // flight-log DB (this exists regardless of the recording setting).
 
 import { get, writable } from 'svelte/store';
+import { activeVehicleId, vehicles } from '$lib/stores/vehicles';
 
 export interface LiveTrackPoint {
   lat: number;
@@ -17,6 +18,22 @@ export interface LiveTrackPoint {
 }
 
 export const liveTrack = writable<LiveTrackPoint[]>([]);
+
+// ── Multi-vehicle: `liveTrack` is the ACTIVE vehicle's track. Every vehicle's points are parked by id
+// so a switch shows the new vehicle's own track (never a line joining two aircraft) and switching back
+// restores the previous one. Points are appended by the page from the active telemetry, so a vehicle
+// only grows its track while active — the 3D fleet layer draws the inactive ones from allTelemetry.
+const tracks = new Map<string, LiveTrackPoint[]>();
+let trackOwner: string | null = null;
+activeVehicleId.subscribe((id) => {
+  if (id === trackOwner) return;
+  if (trackOwner) tracks.set(trackOwner, get(liveTrack));
+  trackOwner = id;
+  liveTrack.set(id ? (tracks.get(id) ?? []) : []);
+});
+vehicles.subscribe((known) => {
+  for (const id of [...tracks.keys()]) if (!known.has(id) && id !== trackOwner) tracks.delete(id);
+});
 
 /** Don't add a point unless the craft moved at least this far (matches map trail). */
 const MIN_DIST_M = 5;

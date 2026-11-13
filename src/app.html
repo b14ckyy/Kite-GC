@@ -55,6 +55,11 @@
          2026-09-12: the camera toggle disappeared on light terrain). Buttons inside panels keep
          their own subtler tints; those sit on a dark ground. */
       :root { --btn-active-bg: rgba(39, 78, 96, 0.92); }
+
+      /* The map's 38 px glass buttons (corner controls in Map / Map3D, the phone's video toggle, the
+         map search): an icon's drawing fills 75 % of the button (each SVG's viewBox is cropped to its
+         drawing), a text label ("2D" / "3D") about 75 % of its width. The buttons keep their size. */
+      :root { --map-btn-icon: 28.5px; --map-btn-text: 21px; }
       html.kite-low-power { --glass-blur: none; --panel-blur: none; }
     </style>
     <title>Tauri + SvelteKit + Typescript App</title>

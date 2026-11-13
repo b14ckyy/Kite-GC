@@ -31,11 +31,16 @@ The command centre. From left to right:
   mag, baro, GPS, and rangefinder/airspeed when fitted — green = OK, amber = warning, red = fault), and
   the **battery** readout. Tiles only appear for sensors your craft actually reports, so the row adapts
   to the airframe.
+- **Map search (magnifier)** — jump to a place or to coordinates, or to your own position; see
+  [Map search](../guides/telemetry-and-display.md#map-search).
 - **Connection controls (right)** — protocol, transport and port while disconnected; once connected
   they're replaced by the live link status and a **Disconnect** button. See the
   **[Connecting guide](../guides/connecting.md)**.
 - **⇅ Relay** — opens the telemetry **[relay/forwarding](../guides/relay-and-forwarding.md)** dropdown.
-- **Window controls** — minimise / maximise / close.
+- **≡ Raw** — appears while connected and opens a popup with every raw telemetry value — see
+  **[Raw telemetry](../guides/telemetry-and-display.md#raw-telemetry)**.
+- **Window controls** — minimise / maximise / close. On macOS they are the three traffic-light buttons
+  at the left end of the bar, in front of the logo; tablets and phones have none.
 
 ## 2 · Navigation rail & panels
 
@@ -90,7 +95,7 @@ Each tool, at a glance — expand for a quick description and the link to its fu
 
 ??? note "Logbook"
     Your flight history: automatic recordings with replay, plus import of INAV blackbox, ArduPilot
-    Dataflash, MAVLink `.tlog` and MWPTools raw-MSP logs. Add notes and weather, and reach the **Vehicle**
+    Dataflash, PX4 ULog, MAVLink `.tlog` and MWPTools raw-MSP logs. Add notes and weather, and reach the **Vehicle**
     and **Battery** managers from here.
 
     ![The Logbook panel](../assets/guides/logbook/logbook_detail.png)
@@ -135,8 +140,9 @@ Each tool, at a glance — expand for a quick description and the link to its fu
 Two docks hold your **flight widgets** (attitude, altitude, speed, compass, and more): the **right
 dock** (3) down the side, and the **bottom dock** (4) along the bottom.
 
-Click the **✎ (edit) button** by a dock to enter **edit mode**, then drag widgets to rearrange them or
-move them between docks. In edit mode every widget also shows a **resize button** in its corner: each tap
+**Long-press** a widget (mouse or finger) to enter **edit mode** — it is picked up right away, so drag it
+to rearrange the dock or move it into the other one; click outside the docks or press **Escape** to
+finish. In edit mode every widget also shows a **resize button** in its corner: each tap
 steps it to its next size — square widgets toggle between small and large, the wide ones (Live AGL,
 Video) go wide → large square → small square. The aspect ratio never changes, and a dock shrinks to its
 largest widget. Choose which widgets appear in **Settings → Interface**. Widgets scale to fit the dock,
@@ -240,14 +246,14 @@ Each widget, at a glance — expand for what it shows and how it works:
     independent ranges — the **fan distance** scales with speed, and a separate **clearance colour scale**
     (60 / 120 / 250 m, left button). A **REL / PRED** button (right) switches the reference between your
     current altitude and a sink-rate-predicted one. Both buttons appear only while the dock is in
-    **edit mode** (✎), so they don't clutter the display in flight.
+    **edit mode** (long-press a widget), so they don't clutter the display in flight.
 
     ![The Terrain Radar widget](../assets/getting-started/widgets/terrainradar.png)
 
 ??? note "Video"
     A live **video feed** embedded as a widget — an RTSP stream or a local capture device / camera (e.g. a
-    USB capture card), sized to the stream's aspect ratio. **Double-click** it to swap the feed with the
-    map. See **[Video](../guides/video.md)**.
+    USB capture card), always cropped to fill its tile. **Double-click** it to swap the feed with the
+    map. Not available on iPhone. See **[Video](../guides/video.md)**.
 
     <!-- SCREENSHOT: ../assets/getting-started/widgets/video.png -->
 
@@ -269,7 +275,8 @@ The 3D view has more of its own controls — see the **[3D map guide](../guides/
 The thin strip along the very **bottom**:
 
 - **Left** — a connection dot (green = connected, red = not) and, once connected, the firmware variant,
-  version and port (e.g. *INAV 8.0.0 on COM7*).
+  version and port (e.g. *INAV 8.0.0 on COM7*). When the aircraft stops sending while the link stays
+  open, the dot turns amber and blinks, and the text reads **Reconnecting…** until data arrives again.
 - **Right** — the **arming state** (ARMED / DISARMED) while connected.
 
 ## Kite on a phone
@@ -298,17 +305,17 @@ room for either the map or a widget, rarely both. Tablets keep the desktop layou
   no bar behind them — an empty middle slot takes no room, so two side widgets sit together in the
   middle. The widgets keep clear of the arming chip and the map buttons (they shrink a little when all
   three are in use on a small screen), and the map's follow centre moves up so the aircraft stays in
-  the free part of the map. The docked video window lies over the slots: park it with its button, or
+  the free part of the map. On an Android phone the docked video window lies over the slots: park it with its button, or
   use the Video widget in the column when you want both. The Video widget itself cannot go into a
   slot.
-- **Map controls**: pinch to zoom (no zoom buttons); the **2D / 3D** and **follow** buttons sit at the
-  bottom-right of the map, next to the widget column. The map credits follow the arming chip along the
+- **Map controls**: pinch to zoom (no zoom buttons); the **map search**, **2D / 3D** and **follow**
+  buttons sit at the bottom-right of the map, next to the widget column. The map credits follow the arming chip along the
   bottom edge.
 - **Panels and the replay player** get the room they need: the wider panels (logbook, missions and
   the like) may extend over the widget column to the right screen edge, and when the replay player's
   full controls are showing on a narrow phone, the widget column slides aside until playback runs and
   the player folds into its compact strip.
-- **Video** has no floating window on the phone. Once a source runs (Video panel → Start), a
+- **Video** has no floating window on an Android phone (iPhone has no video). Once a source runs (Video panel → Start), a
   **camera button** appears above the map buttons: it slides a **docked video window** into the
   bottom-right corner of the map, and slides it out again — behind the widget column and off the
   screen — so the picture is one tap away and never in the way. The corner marker in the window's

@@ -10,6 +10,7 @@
   // "Save to vehicle library" for links with an FC identity (MSP / MAVLink).
   import { t } from 'svelte-i18n';
   import { get } from 'svelte/store';
+  import { untrack } from 'svelte';
   import type { FcInfo } from '$lib/stores/connection';
   import { detectedPlatformType } from '$lib/stores/connection';
   import { setLivePlatformType } from '$lib/controllers/connectionController';
@@ -20,6 +21,8 @@
   import type { VehicleInput } from '$lib/stores/flightlogTypes';
   import PanelShell from './panel/PanelShell.svelte';
   import FcUidChip from './FcUidChip.svelte';
+  import ConfirmDialog from './ConfirmDialog.svelte';
+  import { offerLinkExistingFlights } from '$lib/controllers/vehicleLinkController';
 
   let {
     connStatus,
@@ -76,9 +79,15 @@
   let libState = $state<'idle' | 'exists' | 'saving' | 'saved' | 'error'>('idle');
   let libError = $state('');
   let existingId = $state<number | null>(null);
+  let confirmDialog: ReturnType<typeof ConfirmDialog>;
 
+  // Re-run when the library changes elsewhere (Vehicle Manager, End-Flight follow-ups) too, so the
+  // button never points at a deleted vehicle or misses one created meanwhile. A vehicle just saved
+  // here keeps its "saved" label while it still matches.
   $effect(() => {
     const key = libKey;
+    void $vehicleLibraryChanged;
+    const justSaved = untrack(() => (libState === 'saved' ? existingId : null));
     libState = 'idle';
     libError = '';
     existingId = null;
@@ -87,7 +96,7 @@
     const dbPath = get(settings).flightLogDbPath;
     const lookup = 'uid' in key ? vehicleDbFindByFcUid(key.uid, dbPath) : vehicleDbFindByCraftName(key.craft, dbPath);
     lookup
-      .then((v) => { if (alive && v) { existingId = v.id; libState = 'exists'; } })
+      .then((v) => { if (alive && v) { existingId = v.id; libState = v.id === justSaved ? 'saved' : 'exists'; } })
       .catch(() => {});
     return () => { alive = false; };
   });
@@ -111,19 +120,30 @@
   }
 
   async function saveToLibrary() {
-    if (!fcInfo) return;
+    // The FC info at the click: the prop may change (reconnect) while the lookups below await.
+    const info = fcInfo;
+    if (!info) return;
     libState = 'saving';
-    const craft = fcInfo.craft_name.trim();
+    // Never a second vehicle with this FC id: the lookup above may not have answered yet.
+    if (info.fc_uid) {
+      const existing = await vehicleDbFindByFcUid(info.fc_uid, get(settings).flightLogDbPath).catch(() => null);
+      if (existing) {
+        existingId = existing.id;
+        libState = 'exists';
+        return;
+      }
+    }
+    const craft = info.craft_name.trim();
     // MAVLink has no craft name and no board target (board_id = "MAVLink") → variant as the name.
-    const mavlink = fcInfo.board_id === 'MAVLink';
+    const mavlink = info.board_id === 'MAVLink';
     // Sensors as the FC reports them right now (MSP_SENSOR_STATUS / SYS_STATUS present bits): any
     // non-zero state — OK, unavailable, unhealthy — means the sensor is configured on this craft. RTK
     // is only visible through the fix type (RTK float / fixed), so it needs an RTK fix at click time.
     const tel = get(telemetry);
     const input: VehicleInput = {
-      name: craft || fcInfo.fc_variant,
+      name: craft || info.fc_variant,
       craft_name: craft || null,
-      vehicle_type: VEHICLE_TYPE_FOR[fcInfo.platform_type] ?? 'other',
+      vehicle_type: VEHICLE_TYPE_FOR[info.platform_type] ?? 'other',
       status: 'active',
       image: null,
       notes: null,
@@ -138,17 +158,22 @@
       sensor_gps: tel.sensorGps !== 0,
       sensor_rtk: tel.fixType >= 5,
       sensor_compass: tel.sensorMag !== 0,
-      fc_model: mavlink ? null : fcInfo.board_id || null,
+      fc_model: mavlink ? null : info.board_id || null,
       fc_manufacturer: null,
-      fc_firmware: firmwareFor(fcInfo.fc_variant),
-      fc_firmware_version: fcInfo.fc_version || null,
-      blackbox_available: fcInfo.blackbox ?? false,
-      fc_uid: fcInfo.fc_uid,
+      fc_firmware: firmwareFor(info.fc_variant),
+      fc_firmware_version: info.fc_version || null,
+      blackbox_available: info.blackbox ?? false,
+      fc_uid: info.fc_uid,
     };
     try {
-      existingId = await vehicleDbCreate(input, get(settings).flightLogDbPath);
-      vehicleLibraryChanged.update((n) => n + 1);
+      const dbPath = get(settings).flightLogDbPath;
+      const id = await vehicleDbCreate(input, dbPath);
+      existingId = id;
       libState = 'saved';
+      // Offer to link the logged flights of this craft name / FC id (the user's choice).
+      await offerLinkExistingFlights((o) => confirmDialog.show(o), id, input.craft_name, input.fc_uid, dbPath)
+        .catch((e) => console.warn('[uav-info] linking flights failed', e));
+      vehicleLibraryChanged.update((n) => n + 1);
     } catch (e) {
       libError = String(e);
       libState = 'error';
@@ -201,9 +226,12 @@
             <span class="feature-badge available">{$t('uavInfo.telemetry')}</span>
             <span class="feature-badge" class:available={fcInfo.features.autoland_config} class:unavailable={!fcInfo.features.autoland_config} title="INAV 7.1+">{$t('uavInfo.autoland')}</span>
             <span class="feature-badge" class:available={fcInfo.features.geozones} class:unavailable={!fcInfo.features.geozones} title="INAV 8.0+">{$t('uavInfo.geozones')}</span>
-            <span class="feature-badge" class:available={fcInfo.features.msp_rc} class:unavailable={!fcInfo.features.msp_rc} title="INAV 8.0+">{$t('uavInfo.mspRc')}</span>
-            <span class="feature-badge" class:available={fcInfo.features.aux_rc} class:unavailable={!fcInfo.features.aux_rc} title="INAV 9.1+">{$t('uavInfo.auxRc')}</span>
-            <span class="feature-badge" class:available={fcInfo.features.adsb_msp} class:unavailable={!fcInfo.features.adsb_msp} title="INAV 8.0+">{$t('uavInfo.adsb')}</span>
+            <!-- MSP over MAVLink: these are off for the LINK (no MSP RC stream / ADS-B poll through the
+                 tunnel), whatever the firmware version — say so instead of the version hint. -->
+            <span class="feature-badge" class:available={fcInfo.features.msp_rc} class:unavailable={!fcInfo.features.msp_rc} title={fcInfo.features.msp_tunnel ? $t('uavInfo.notOverMspMav') : 'INAV 8.0+'}>{$t('uavInfo.mspRc')}</span>
+            <span class="feature-badge" class:available={fcInfo.features.aux_rc} class:unavailable={!fcInfo.features.aux_rc} title={fcInfo.features.msp_tunnel ? $t('uavInfo.notOverMspMav') : 'INAV 9.1+'}>{$t('uavInfo.auxRc')}</span>
+            <span class="feature-badge" class:available={fcInfo.features.adsb_msp} class:unavailable={!fcInfo.features.adsb_msp} title={fcInfo.features.msp_tunnel ? $t('uavInfo.notOverMspMav') : 'INAV 8.0+'}>{$t('uavInfo.adsb')}</span>
+            <span class="feature-badge" class:available={fcInfo.features.msp_tunnel} class:unavailable={!fcInfo.features.msp_tunnel} title="INAV 10.0+">{$t('uavInfo.mspTunnel')}</span>
           </div>
         </section>
       {/if}
@@ -232,6 +260,8 @@
     {/if}
   {/snippet}
 </PanelShell>
+
+<ConfirmDialog bind:this={confirmDialog} />
 
 <style>
   .panel-section {

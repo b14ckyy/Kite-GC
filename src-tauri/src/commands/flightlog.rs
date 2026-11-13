@@ -10,7 +10,7 @@ use crate::flightlog::exchange;
 use crate::flightlog::types::{
     BatteryAggregate, BatteryFile, BatteryPack, BatteryPackInput, BlackboxImportProgress,
     BlackboxImportStatus, Flight, FlightSummary, Mission, MissionInput, TelemetryRecord, Vehicle,
-    VehicleAggregate, VehicleFile, VehicleInput,
+    VehicleAggregate, VehicleFile, VehicleInput, VehicleResolution,
 };
 
 /// Whether the app runs in portable mode (`.portable` marker next to the executable).
@@ -447,31 +447,97 @@ pub fn vehicle_db_find_by_fc_uid(
     db::find_vehicle_by_fc_uid(&conn, &fc_uid).map_err(|e| format!("Query error: {}", e))
 }
 
-/// Delete a vehicle (flights keep their craft name → "not in library").
+/// Delete a vehicle. Its flights are un-linked (→ "not in library"), never deleted.
 #[tauri::command]
 pub fn vehicle_db_delete(id: i64, db_path: Option<String>) -> Result<(), String> {
     let conn = open_db(&db_path.unwrap_or_default())?;
     db::delete_vehicle(&conn, id).map_err(|e| format!("Delete error: {}", e))
 }
 
-/// Aggregate the flights linked to a craft name (totals + records).
+/// Aggregate the flights linked to a vehicle (totals + records).
 #[tauri::command]
-pub fn vehicle_db_aggregate(
-    craft_name: String,
-    db_path: Option<String>,
-) -> Result<VehicleAggregate, String> {
+pub fn vehicle_db_aggregate(vehicle_id: i64, db_path: Option<String>) -> Result<VehicleAggregate, String> {
     let conn = open_db(&db_path.unwrap_or_default())?;
-    db::vehicle_aggregate(&conn, &craft_name).map_err(|e| format!("Query error: {}", e))
+    db::vehicle_aggregate(&conn, vehicle_id).map_err(|e| format!("Query error: {}", e))
 }
 
-/// List the flights linked to a craft name (Manager detail + delete warning).
+/// List the flights linked to a vehicle (Manager detail + the delete warning's count).
 #[tauri::command]
-pub fn vehicle_db_flights(
-    craft_name: String,
-    db_path: Option<String>,
-) -> Result<Vec<FlightSummary>, String> {
+pub fn vehicle_db_flights(vehicle_id: i64, db_path: Option<String>) -> Result<Vec<FlightSummary>, String> {
     let conn = open_db(&db_path.unwrap_or_default())?;
-    db::list_flights_for_craft(&conn, &craft_name).map_err(|e| format!("Query error: {}", e))
+    db::list_flights_for_vehicle(&conn, vehicle_id).map_err(|e| format!("Query error: {}", e))
+}
+
+/// Resolve a flight identity to its library vehicle (the End-Flight screen): the vehicle storing the
+/// FC hardware id, else the one carrying the craft name, with how it matched and whether a craft-name
+/// match conflicts with the vehicle's stored FC id.
+#[tauri::command]
+pub fn vehicle_db_resolve(
+    fc_uid: Option<String>,
+    craft_name: Option<String>,
+    db_path: Option<String>,
+) -> Result<VehicleResolution, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::resolve_vehicle(&conn, fc_uid.as_deref(), craft_name.as_deref().unwrap_or(""))
+        .map_err(|e| format!("Query error: {}", e))
+}
+
+/// Link every flight flown with `craft_name` and/or `fc_uid` to vehicle `vehicle_id` (back-filling old
+/// flights after the user agreed); `only_unlinked` leaves flights of other vehicles alone. Returns the
+/// number linked.
+#[tauri::command]
+pub fn vehicle_db_link_flights(
+    vehicle_id: i64,
+    craft_name: Option<String>,
+    fc_uid: Option<String>,
+    only_unlinked: bool,
+    db_path: Option<String>,
+) -> Result<usize, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::link_flights_to_vehicle(&conn, vehicle_id, craft_name.as_deref(), fc_uid.as_deref(), only_unlinked)
+        .map_err(|e| format!("Link error: {}", e))
+}
+
+/// Dry run of `vehicle_db_link_flights`: how many flights it would link ("link N flights?").
+#[tauri::command]
+pub fn vehicle_db_link_flights_count(
+    vehicle_id: i64,
+    craft_name: Option<String>,
+    fc_uid: Option<String>,
+    only_unlinked: bool,
+    db_path: Option<String>,
+) -> Result<usize, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::count_linkable_flights(&conn, vehicle_id, craft_name.as_deref(), fc_uid.as_deref(), only_unlinked)
+        .map_err(|e| format!("Query error: {}", e))
+}
+
+/// Give vehicle `vehicle_id` the FC hardware id `fc_uid` (null / empty clears it) and take it off every
+/// other vehicle that stores it — an FC id belongs to one vehicle. Returns how many other vehicles lost it.
+#[tauri::command]
+pub fn vehicle_db_set_fc_uid(vehicle_id: i64, fc_uid: Option<String>, db_path: Option<String>) -> Result<usize, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::set_vehicle_fc_uid(&conn, vehicle_id, fc_uid.as_deref()).map_err(|e| format!("Update error: {}", e))
+}
+
+/// Move all flights of vehicle `from_id` to vehicle `to_id` (before deleting a replaced aircraft).
+/// Returns the number moved.
+#[tauri::command]
+pub fn vehicle_db_transfer_flights(from_id: i64, to_id: i64, db_path: Option<String>) -> Result<usize, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::transfer_vehicle_flights(&conn, from_id, to_id).map_err(|e| format!("Transfer error: {}", e))
+}
+
+/// Link a flight to a library vehicle, or un-link it (`vehicle_id` null). Its craft name and FC id
+/// stay as flown.
+#[tauri::command]
+pub fn flight_set_vehicle(flight_id: i64, vehicle_id: Option<i64>, db_path: Option<String>) -> Result<(), String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    match db::set_flight_vehicle(&conn, flight_id, vehicle_id) {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(format!("Flight {} not found", flight_id)),
+        Err(e) => Err(format!("Link error: {}", e)),
+    }
 }
 
 /// Write a vehicle to a `.kvehicle` file (one vehicle per file; self-contained incl. image).
@@ -570,7 +636,7 @@ pub fn flightlog_update_notes(
     db::update_flight_notes(&conn, flight_id, &notes).map_err(|e| format!("Update error: {}", e))
 }
 
-/// Update craft name on a flight
+/// Update craft name on a flight (a correction; the vehicle link stays — see `flight_set_vehicle`).
 #[tauri::command]
 pub fn flightlog_update_craft_name(
     flight_id: i64,
@@ -773,11 +839,13 @@ pub async fn flightlog_import_blackbox(
             if flight.location_name.as_deref().unwrap_or("").trim().is_empty() {
                 if let (Some(lat), Some(lon)) = (flight.start_lat, flight.start_lon) {
                     if let Some(name) = crate::flightlog::geocode::reverse_geocode(lat, lon, lang.as_deref().unwrap_or("en")).await {
-                        conn.execute(
+                        // The flight is stored already: a failed location update must not fail the import.
+                        if let Err(e) = conn.execute(
                             "UPDATE flights SET location_name = ?1 WHERE id = ?2",
                             rusqlite::params![name, flight_id],
-                        )
-                        .map_err(|e| format!("Update error: {}", e))?;
+                        ) {
+                            log::warn!("[flightlog] location name of imported flight {flight_id} not stored: {e}");
+                        }
                     }
                 }
             }
@@ -798,8 +866,16 @@ pub async fn flightlog_import_blackbox(
     Ok(result)
 }
 
-/// True when `blackbox_decode` is available (PATH, exe dir, or our download dir). The frontend checks
-/// this before an INAV-blackbox import and offers an auto-download when it's missing.
+/// True when INAV Blackbox logs are decoded by the external `blackbox_decode` (`KITE_BLACKBOX_LEGACY=1`)
+/// instead of the built-in decoder. Only then does the frontend check for, offer or show the tool.
+#[tauri::command]
+pub fn blackbox_legacy_mode() -> Result<bool, String> {
+    Ok(crate::flightlog::blackbox::legacy_decoder_requested())
+}
+
+/// True when `blackbox_decode` is available (PATH, exe dir, or our download dir). In legacy mode
+/// (`blackbox_legacy_mode`) the frontend checks this before an INAV-blackbox import and offers an
+/// auto-download when it's missing.
 #[tauri::command]
 pub fn blackbox_decoder_available() -> bool {
     crate::flightlog::decoder::available()
@@ -930,20 +1006,43 @@ pub fn flightlog_delete_blackbox_file(
     db::delete_blackbox_file(&conn, flight_id).map_err(|e| format!("DB error: {}", e))
 }
 
+/// Error of a compact refused because a flight is being recorded. The `compact-recording:` prefix is a
+/// STABLE marker the frontend matches on (`compactDb` in +page.svelte) — change both together.
+const COMPACT_RECORDING_ERROR: &str =
+    "compact-recording: a flight is being recorded — compact the database after the flight";
+
 /// Compact (defragment) the flight-log database with a full VACUUM. Routine deletes already reclaim
-/// space incrementally; this is the explicit on-demand "Compact Database" maintenance action.
-/// Returns the resulting database size in bytes.
+/// space incrementally; this is the explicit on-demand "Compact Database" maintenance action. It runs
+/// off the main thread (minutes on a slow drive) and is single flight per database file
+/// (`db::compact_database`, `compact-running:` error). Refused while a flight is being recorded: the
+/// VACUUM holds the database for its whole duration and the recording's save would run into it.
+/// Returns the database size before and after, in bytes.
 #[tauri::command]
-pub fn flightlog_compact_db(db_path: Option<String>) -> Result<i64, String> {
-    let conn = open_db(&db_path.unwrap_or_default())?;
-    db::compact_database(&conn).map_err(|e| format!("Compact failed: {}", e))?;
-    let page_count: i64 = conn
-        .query_row("PRAGMA page_count", [], |r| r.get(0))
-        .map_err(|e| e.to_string())?;
-    let page_size: i64 = conn
-        .query_row("PRAGMA page_size", [], |r| r.get(0))
-        .map_err(|e| e.to_string())?;
-    Ok(page_count * page_size)
+pub async fn flightlog_compact_db(
+    db_path: Option<String>,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<db::CompactStats, String> {
+    // Not offered on mobile (the Settings row is hidden there): the VACUUM's working copy is held in
+    // memory on Android. Refused here too, so no other caller can start one.
+    if cfg!(mobile) {
+        return Err("Compact Database is not available on this platform".into());
+    }
+    compact_refusal(&state)?;
+    let db_path = db_path.unwrap_or_default();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = open_db(&db_path)?;
+        db::compact_database(&conn)
+    })
+    .await
+    .map_err(|e| format!("Compact task failed: {}", e))?
+}
+
+/// Why a compact must not start now, if it must not (testable without a Tauri runtime).
+fn compact_refusal(state: &crate::state::AppState) -> Result<(), String> {
+    if state.sessions.has_live_session() {
+        return Err(COMPACT_RECORDING_ERROR.to_string());
+    }
+    Ok(())
 }
 
 /// Export selected flights to a .kflight file
@@ -1255,30 +1354,40 @@ pub fn flightlog_find_linkable(
 
 /// Commit the pending live-recording session into the main DB (the End-Flight dialog's **Save**).
 /// Returns the new flight id so the frontend can link the flown mission + battery/notes.
+/// `vehicle_id` names the vehicle whose session it is (the `vehicleId` of its `flight-recording-*`
+/// event); without it the only pending session is taken (an error when there are several). A failed
+/// commit puts the session back into its vehicle's slot (Save can be retried) and keeps its temp file
+/// protected.
 #[tauri::command]
 pub fn flightlog_commit_pending_session(
+    vehicle_id: Option<String>,
     state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<i64, String> {
-    let session = state
-        .pending_session
-        .lock()
-        .map_err(|_| "Pending-session lock poisoned".to_string())?
-        .take()
+    commit_pending_in(&state, vehicle_id.as_deref())
+}
+
+/// `flightlog_commit_pending_session` on the plain app state (testable without a Tauri runtime).
+fn commit_pending_in(state: &crate::state::AppState, vehicle_id: Option<&str>) -> Result<i64, String> {
+    let (key, session) = state
+        .sessions
+        .take_pending_keyed(vehicle_id)?
         .ok_or_else(|| "No pending recording session to commit".to_string())?;
-    crate::flightlog::recorder::commit_pending_session(session)
+    let result = state.sessions.commit_protected(&session);
+    if let Err(e) = &result {
+        log::error!("Save failed — recording {} kept: {}", session.temp_path.display(), e);
+        state.sessions.restore_failed_pending(&key, session);
+    }
+    result
 }
 
 /// Discard the pending live-recording session (the End-Flight dialog's **Discard Recording**) —
-/// the temp file is deleted and nothing reaches the main DB.
+/// the temp file is deleted and nothing reaches the main DB. `vehicle_id` as for the commit.
 #[tauri::command]
 pub fn flightlog_discard_pending_session(
+    vehicle_id: Option<String>,
     state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<(), String> {
-    let session = state
-        .pending_session
-        .lock()
-        .map_err(|_| "Pending-session lock poisoned".to_string())?
-        .take();
+    let session = state.sessions.take_pending(vehicle_id.as_deref())?;
     if let Some(session) = session {
         let dir = session.temp_path.parent().map(|p| p.to_path_buf());
         crate::flightlog::recorder::discard_pending_session(session);
@@ -1294,23 +1403,20 @@ pub fn flightlog_discard_pending_session(
 }
 
 /// Continue-on-reconnect for a session interrupted by a disconnect while armed (ADR-042): move the
-/// pending session into the resume slot so the next connection's recorder resumes/finalizes it.
+/// pending session into the resume queue so the next connection's recorder resumes/finalizes it.
+/// `vehicle_id` as for the commit. Returns whether a session was queued (`false`: nothing pending).
 #[tauri::command]
 pub fn flightlog_continue_pending_session(
+    vehicle_id: Option<String>,
     state: tauri::State<'_, crate::state::AppState>,
-) -> Result<(), String> {
-    let session = state
-        .pending_session
-        .lock()
-        .map_err(|_| "Pending-session lock poisoned".to_string())?
-        .take();
-    if let Some(session) = session {
-        *state
-            .resume_pending
-            .lock()
-            .map_err(|_| "Resume-session lock poisoned".to_string())? = Some(session);
-    }
-    Ok(())
+) -> Result<bool, String> {
+    let key = vehicle_id.clone();
+    let Some(session) = state.sessions.take_pending(vehicle_id.as_deref())? else {
+        return Ok(false);
+    };
+    let key = key.unwrap_or_else(|| session.temp_path.to_string_lossy().to_string());
+    state.sessions.put_resume(key, session)?;
+    Ok(true)
 }
 
 // ── Recovery of an orphan temp session left by a crash/close (ADR-042) ──────────────────
@@ -1449,10 +1555,14 @@ pub fn flightlog_hires_cleanup(db_path: Option<String>) {
 // wiped before each open, on close, and at app start (crash leftovers) — nothing in it is precious.
 
 fn scratch_dir(custom: &str) -> std::path::PathBuf {
-    resolve_main_db_path(custom)
+    let dir = resolve_main_db_path(custom)
         .parent()
         .unwrap_or(std::path::Path::new("."))
-        .join("scratch")
+        .join("scratch");
+    // Every caller of the scratch store gets its directory from here, so this is where it is kept out
+    // of the free-page reclaim (throwaway data; on Windows the wipe fails while a reclaim holds the file).
+    db::exclude_from_reclaim(&dir);
+    dir
 }
 
 /// The scratch directory to pass as `db_path` for an opened (not imported) log.
@@ -1472,20 +1582,13 @@ pub fn flightlog_scratch_clear(db_path: Option<String>) {
     }
 }
 
-/// Temp sessions that belong to a live workflow in this process — the one the connected recorder is
-/// writing, the pending (awaiting Save/Discard) one and the continue-on-reconnect one. The orphan
-/// scan and the discard sweeps must never touch these.
+/// Temp sessions that belong to a live workflow in this process — every file a recorder (primary or
+/// secondary, any link) is writing, every pending (awaiting Save/Discard or the re-arm grace) one,
+/// every continue-on-reconnect one, every group-member one (finalized, awaiting its group's store
+/// prompt, or suspended while its link is gone), and every one whose commit failed in this run (kept
+/// for the next start). The orphan scan and the discard sweeps must never touch these.
 fn protected_temp_paths(state: &crate::state::AppState) -> Vec<std::path::PathBuf> {
-    let mut keep = Vec::new();
-    if let Ok(slot) = state.active_temp_path.lock() {
-        keep.extend(slot.clone());
-    }
-    for handle in [&state.pending_session, &state.resume_pending] {
-        if let Ok(slot) = handle.lock() {
-            keep.extend(slot.as_ref().map(|s| s.temp_path.clone()));
-        }
-    }
-    keep
+    state.sessions.protected_paths()
 }
 
 /// An empty temp session younger than this is not a leftover: a previous instance of the app may
@@ -1494,10 +1597,11 @@ fn protected_temp_paths(state: &crate::state::AppState) -> Vec<std::path::PathBu
 const EMPTY_TEMP_GRACE: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// Scan `<db_dir>/sessions/*.ktmp` for an orphan session left by a crash/close. Sessions that are
-/// live in this process (recording / pending / continue-on-reconnect) are skipped; stale empty temp
-/// files (no telemetry) are deleted in passing; the newest non-empty one is returned for the
-/// recovery prompt. The frontend scans again after Save / Continue, and Discard sweeps every
-/// leftover, so a pile of stragglers is settled in one launch instead of resurfacing one per start.
+/// live in this process (recording / pending / continue-on-reconnect / group-pending / suspended group
+/// member) are skipped; stale empty temp files (no telemetry) are deleted in passing; the newest
+/// non-empty one is returned for the recovery prompt. The frontend scans again after Save /
+/// Continue, and Discard sweeps every leftover, so a pile of stragglers is settled in one launch
+/// instead of resurfacing one per start.
 #[tauri::command]
 pub fn flightlog_scan_orphan_sessions(
     db_path: Option<String>,
@@ -1600,21 +1704,30 @@ pub fn flightlog_recover_discard(
 }
 
 /// Recovery prompt → **Save Incomplete**: reconstruct the flight from the orphan and commit it to
-/// the main DB (finalized with `end_time` = last sample). Returns the new flight id.
+/// the main DB (finalized with `end_time` = last sample). Returns the new flight id. On failure the
+/// temp file is kept (no sweep of this run deletes it; the orphan scan skips it until the next start).
 #[tauri::command]
 pub fn flightlog_recover_save_incomplete(
     temp_path: String,
     db_path: Option<String>,
+    state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<i64, String> {
+    let path = std::path::PathBuf::from(&temp_path);
     let main_db = resolve_main_db_path(&db_path.unwrap_or_default());
-    let (session, _count) = crate::flightlog::recorder::summarize_temp_session(
-        std::path::PathBuf::from(&temp_path),
+    let result = crate::flightlog::recorder::summarize_temp_session(
+        path.clone(),
         main_db,
-    )?;
-    crate::flightlog::recorder::commit_pending_session(session)
+        &crate::flightlog::recorder::SystemClock,
+    )
+    .and_then(|(session, _count)| crate::flightlog::recorder::commit_pending_session(&session));
+    if let Err(e) = &result {
+        log::error!("Recovery: saving {} failed — kept for the next start: {}", path.display(), e);
+        state.sessions.keep_path(&path);
+    }
+    result
 }
 
-/// Recovery prompt → **Continue on Reconnect**: load the orphan into the shared resume slot; the
+/// Recovery prompt → **Continue on Reconnect**: load the orphan into the resume queue; the
 /// next connection's recorder resumes it (armed) or finalizes it (disarmed) on its first poll.
 #[tauri::command]
 pub fn flightlog_recover_continue(
@@ -1626,10 +1739,103 @@ pub fn flightlog_recover_continue(
     let (session, _count) = crate::flightlog::recorder::summarize_temp_session(
         std::path::PathBuf::from(&temp_path),
         main_db,
+        &crate::flightlog::recorder::SystemClock,
     )?;
-    *state
-        .resume_pending
-        .lock()
-        .map_err(|_| "Resume-session lock poisoned".to_string())? = Some(session);
-    Ok(())
+    // A recovered orphan belongs to no connected vehicle yet — queued under its own path.
+    state.sessions.put_resume(temp_path, session)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Without a recording a compact may start, and the refusal text carries the marker the frontend
+    /// matches. (The refusing side — `has_live_session` true while a recorder writes — is covered in
+    /// `recorder::tests::has_live_session_follows_every_recorder`; a live session cannot be registered
+    /// from here without a recorder.)
+    #[test]
+    fn compact_allowed_without_recording_and_refusal_has_marker() {
+        let state = crate::state::AppState::new();
+        assert!(compact_refusal(&state).is_ok());
+        assert!(COMPACT_RECORDING_ERROR.starts_with("compact-recording:"));
+    }
+
+    /// A temp session whose commit failed in this run is protected: the discard sweep keeps it.
+    #[test]
+    fn discard_sweep_keeps_a_session_whose_commit_failed() {
+        let dir = std::env::temp_dir().join(format!("kite-kept-sweep-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (kept, straggler) = (dir.join("active_kept.ktmp"), dir.join("active_old.ktmp"));
+        for p in [&kept, &straggler] {
+            drop(db::open_temp_session(p).unwrap());
+        }
+        let state = crate::state::AppState::new();
+        state.sessions.keep_path(&kept);
+
+        assert_eq!(db::sweep_temp_sessions(&dir, &protected_temp_paths(&state)), 1);
+        assert!(kept.exists(), "the unsaved recording must survive the sweep");
+        assert!(!straggler.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A failed Save puts the session back into its vehicle's slot (another vehicle's pending session
+    /// is untouched) and keeps its path protected; a retry against a reachable database commits it and
+    /// empties the slot.
+    #[test]
+    fn failed_save_goes_back_into_the_vehicle_slot_and_a_retry_commits_it() {
+        let dir = std::env::temp_dir().join(format!("kite-commit-retry-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let temp_path = dir.join("sessions").join("active_test.ktmp");
+        {
+            let conn = db::open_temp_session(&temp_path).unwrap();
+            db::write_session_meta(
+                &conn, &chrono::Utc::now(), "TestCraft", "INAV", "8.0.0", "TEST", 1, None, "MSP", None, None,
+            )
+            .unwrap();
+            conn.execute_batch(
+                "INSERT INTO telemetry_records (flight_id, timestamp_ms) VALUES (0, 0), (0, 100);",
+            )
+            .unwrap();
+        }
+        // The main DB's folder is a plain file: opening it fails on every OS.
+        let blocker = dir.join("not-a-folder");
+        std::fs::write(&blocker, b"x").unwrap();
+        let summarize = |db: std::path::PathBuf| {
+            crate::flightlog::recorder::summarize_temp_session(
+                temp_path.clone(),
+                db,
+                &crate::flightlog::recorder::SystemClock,
+            )
+            .unwrap()
+            .0
+        };
+        let state = crate::state::AppState::new();
+        state.sessions.park_pending("L1:S1", summarize(blocker.join("flights.db")));
+        // A second vehicle's pending session (never committed here: its file is not touched).
+        let mut other = summarize(blocker.join("flights.db"));
+        other.temp_path = dir.join("sessions").join("other.ktmp");
+        state.sessions.park_pending("L2:S1", other);
+
+        assert!(commit_pending_in(&state, Some("L1:S1")).is_err());
+        assert!(temp_path.exists());
+        assert!(protected_temp_paths(&state).contains(&temp_path));
+        let back = state.sessions.take_pending_for("L1:S1").expect("the session is back in its vehicle's slot");
+        assert_eq!(back.temp_path, temp_path);
+        assert!(state.sessions.has_pending_for("L2:S1"), "the other vehicle's session is untouched");
+
+        let mut back = back;
+        back.db_path = dir.join("main").join("flights.db");
+        state.sessions.park_pending("L1:S1", back);
+        assert!(commit_pending_in(&state, Some("L1:S1")).is_ok());
+        assert!(!state.sessions.has_pending_for("L1:S1"), "the slot is empty after the commit");
+        assert!(!temp_path.exists());
+        assert!(!protected_temp_paths(&state).contains(&temp_path), "released after the commit");
+        assert!(
+            commit_pending_in(&state, Some("L1:S1")).unwrap_err().contains("No pending recording session to commit"),
+            "the frontend's nothing-to-save text is unchanged",
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

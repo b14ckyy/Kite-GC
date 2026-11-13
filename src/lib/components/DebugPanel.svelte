@@ -11,6 +11,7 @@
   import { radarAlertDebug, type AlertLevel } from "$lib/controllers/radarAlerts";
   import { gpsInject } from "$lib/stores/telemetry";
   import { settings } from "$lib/stores/settings";
+  import { fleetEnabled, fleetGroupRecording, setFleetMode } from "$lib/stores/fleetMode";
   import { invoke } from "@tauri-apps/api/core";
   import { hidSnapshot } from "$lib/stores/hid";
   import { currentChannels } from "$lib/stores/rcProfiles";
@@ -23,11 +24,52 @@
   import { isLinux } from "$lib/platform";
   import NumberStepper from "$lib/components/NumberStepper.svelte";
   import { mjpegStats, uiJankMs, startJankProbe, stopJankProbe } from "$lib/controllers/mjpegSink";
+  import { activeVehicleId } from "$lib/stores/vehicles";
+  import { activeFcModes } from "$lib/stores/fcModes";
+  import { autopilotSystem } from "$lib/stores/autopilotContext";
+  import { arduVehicleClass } from "$lib/stores/missionArdupilot";
+  import { activeFcModesChecked, modeTableMatchesVehicle } from "$lib/controllers/vehicleControl";
+  import { offeredModes, tableFor, type MavMode, type FcMode } from "$lib/helpers/mavModes";
+  import { customMaps, customMapCoverage, customMapName, customTileDebug, type CustomTileDebugEntry } from "$lib/stores/customMaps";
+  import { normalizeTileSize } from "$lib/config/mapProviders";
+  import { customLayerZoom } from "$lib/helpers/tileTemplate";
 
   let { onclose }: { onclose: () => void } = $props();
 
-  type Tab = 'msp' | 'mavlink' | 'alerts' | 'telemetry' | 'rc' | 'performance' | 'video';
+  type Tab = 'msp' | 'mavlink' | 'modes' | 'tunnel' | 'alerts' | 'telemetry' | 'rc' | 'performance' | 'video' | 'fleet' | 'customMaps';
   let tab = $state<Tab>('msp');
+
+  // ── Custom maps: the active map's coverage index + the last resolved tiles ──
+  const cmName = $derived.by(() => {
+    void $customMaps; // re-resolve after every listing
+    return customMapName($settings.mapProvider);
+  });
+  const cmInfo = $derived($customMaps.maps.find((mp) => mp.name === cmName) ?? null);
+  const cmCov = $derived(cmName ? ($customMapCoverage[cmName] ?? null) : null);
+  /** Detected tile size, with the sample tile's real pixels behind it. */
+  const cmTileSize = $derived.by(() => {
+    if (!cmInfo) return '—';
+    const px = cmInfo.tilePx ? `${cmInfo.tilePx[0]}×${cmInfo.tilePx[1]}` : $t('debug.customMaps.tileSizeUnread');
+    return `${cmInfo.tileSize} px (${px})`;
+  });
+  /** The map zooms that show the file levels natively (file level − the layer's zoomOffset). */
+  const cmNative = $derived.by(() => {
+    if (!cmInfo) return '—';
+    const off = customLayerZoom(cmInfo.maxZoom, normalizeTileSize(cmInfo.tileSize)).zoomOffset;
+    return `${Math.max(0, cmInfo.minZoom - off)}–${cmInfo.maxZoom - off}`;
+  });
+  function cmPlan(e: CustomTileDebugEntry): string {
+    switch (e.kind) {
+      case 'exact': return $t('debug.customMaps.planExact');
+      case 'ancestor': return $t('debug.customMaps.planAncestor', { values: { z: e.srcZ ?? '?' } });
+      case 'children': return $t('debug.customMaps.planChildren', { values: { z: e.srcZ ?? '?' } });
+      case 'none': return $t('debug.customMaps.planNone');
+      case 'below': return $t('debug.customMaps.planBelow');
+    }
+  }
+  function cmBox(b: [number, number, number, number]): string {
+    return `${b[1].toFixed(4)}, ${b[0].toFixed(4)} … ${b[3].toFixed(4)}, ${b[2].toFixed(4)}`;
+  }
 
   // Linux hole-punch spike (dev, MOBILE_RTSP.md P2.3 stage A) — coloured stand-in below the DOM hole.
   let spikeOn = $state(false);
@@ -337,6 +379,141 @@
     return m ? `0x${m[1].toUpperCase()}` : uuid;
   }
 
+  // MSP over MAVLink tunnel (INAV 10.0+): counters from the backend tracker + a dev request form.
+  interface TunnelSnapshot {
+    active: boolean;
+    chunks_tx: number;
+    chunks_rx: number;
+    bytes_tx: number;
+    bytes_rx: number;
+    requests: number;
+    replies: number;
+    timeouts: number;
+    retries: number;
+    stale_replies: number;
+    expired: number;
+    checksum_failures: number;
+    largest_reply_bytes: number;
+    largest_reply_chunks: number;
+    last_request_chunks: number;
+    in_flight: number | null;
+    probe_result: string;
+    probe_rtt_ms: number | null;
+    probe_detail: string;
+  }
+
+  interface TunnelMspReply {
+    reply_hex: string;
+    bytes: number;
+    chunks: number;
+    rtt_ms: number;
+  }
+
+  let tunSnapshot = $state<TunnelSnapshot | null>(null);
+  let tunCode = $state('0x2048');
+  let tunPayload = $state('');
+  let tunBusy = $state(false);
+  let tunReply = $state<TunnelMspReply | null>(null);
+  let tunErr = $state('');
+
+  /** MSP code from hex ("0x2048") or plain decimal ("1"); null when unparsable or out of range. */
+  function parseMspCode(text: string): number | null {
+    const v = text.trim();
+    const n = /^0x[0-9a-f]+$/i.test(v) ? parseInt(v.slice(2), 16) : /^[0-9]+$/.test(v) ? parseInt(v, 10) : NaN;
+    return Number.isInteger(n) && n >= 0 && n <= 0xffff ? n : null;
+  }
+
+  async function sendTunnelRequest(): Promise<void> {
+    tunErr = '';
+    tunReply = null;
+    const code = parseMspCode(tunCode);
+    if (code === null) {
+      tunErr = $t('debug.tunBadCode');
+      return;
+    }
+    tunBusy = true;
+    try {
+      tunReply = await invoke<TunnelMspReply>('debug_tunnel_msp_request', { code, payloadHex: tunPayload });
+    } catch (e) {
+      tunErr = String(e);
+    } finally {
+      tunBusy = false;
+    }
+  }
+
+  // The probe runs at connect — long before this tab may be opened — and a plain MAVLink link emits no
+  // further stats events, so fetch the current snapshot whenever the tab is shown.
+  $effect(() => {
+    if (tab !== 'tunnel') return;
+    invoke<TunnelSnapshot>('debug_tunnel_stats_snapshot')
+      .then((snap) => { tunSnapshot = snap; })
+      .catch((e) => console.warn('[debug] tunnel stats snapshot failed', e));
+  });
+
+  // Group-flight coordinator (Fleet tab): its state changes with every status and timer, and no event
+  // carries it — poll the read-only snapshot once a second while the tab is open.
+  interface GroupDebugState {
+    enabled: boolean;
+    recorders: { key: string; firstStatusSeen: boolean; armed: boolean; lastSeenMs: number }[];
+    group: {
+      id: string;
+      phase: 'running' | 'ending';
+      startTime: string;
+      endInMs: number | null;
+      members: { key: string; armed: boolean; gone: boolean; lostArmed: boolean; stalled: boolean; file: string | null }[];
+    } | null;
+    pending: string[];
+  }
+  let groupState = $state<GroupDebugState | null>(null);
+  $effect(() => {
+    if (tab !== 'fleet') return;
+    const poll = () => {
+      invoke<GroupDebugState>('debug_group_state')
+        .then((s) => { groupState = s; })
+        .catch((e) => console.warn('[debug] group state failed', e));
+    };
+    poll();
+    const timer = setInterval(poll, 1000);
+    return () => clearInterval(timer);
+  });
+  const yesNo = (v: boolean): string => (v ? '✓' : '—');
+
+  // FC modes tab: the active vehicle's FC list (AVAILABLE_MODES) next to what the control panel offers.
+  const FC_NOT_USER_SELECTABLE = 2;
+  const fcModesOffered = $derived(offeredModes($autopilotSystem, $arduVehicleClass, $activeFcModesChecked));
+  /** Every row of Kite's table plus the FC's unknown modes, with why it is (not) offered. */
+  const fcModeRows = $derived.by(() => {
+    const fc: readonly FcMode[] | null = $activeFcModesChecked;
+    const offered = new Set(fcModesOffered.map((m) => m.main));
+    const byNumber = new Map((fc ?? []).map((m) => [m.customMode >>> 0, m]));
+    const status = (m: MavMode): string => {
+      if (m.neverOffer) return 'neverOffered';
+      if (offered.has(m.main)) return 'offered';
+      if (!fc) return 'staticHidden';
+      const f = byNumber.get(m.main);
+      if (!f) return 'notListed';
+      return (f.properties & FC_NOT_USER_SELECTABLE) ? 'notSelectable' : 'staticHidden';
+    };
+    const table = tableFor($autopilotSystem, $arduVehicleClass);
+    const rows = table.map((m) => ({ main: m.main, sub: m.sub, name: m.name, stick: m.stick, confirm: !!m.confirm, status: status(m) }));
+    const known = new Set(table.map((m) => m.main));
+    for (const m of fcModesOffered) {
+      if (!known.has(m.main)) rows.push({ main: m.main, sub: m.sub, name: m.name, stick: m.stick, confirm: false, status: 'unknown' });
+    }
+    return rows;
+  });
+  const kiteNameFor = (n: number): string =>
+    tableFor($autopilotSystem, $arduVehicleClass).find((m) => m.main === n)?.name ?? '—';
+
+  function probeLabel(result: string): string {
+    switch (result) {
+      case 'ok': return $t('debug.tunProbeOk');
+      case 'no_reply': return $t('debug.tunProbeNoReply');
+      case 'rejected': return $t('debug.tunProbeRejected');
+      default: return $t('debug.tunProbeNone');
+    }
+  }
+
   // Alerts tab reads the controller's live debug snapshot directly (frontend store).
   const alerts = $derived($radarAlertDebug);
 
@@ -345,6 +522,7 @@
   let unlistenTelem: (() => void) | null = null;
   let unlistenGatt: (() => void) | null = null;
   let unlistenGattData: (() => void) | null = null;
+  let unlistenTunnel: (() => void) | null = null;
 
   onMount(async () => {
     unlisten = await listen<DebugSnapshot>("debug-msp-stats", (event) => {
@@ -355,6 +533,9 @@
     });
     unlistenTelem = await listen<TelemSnapshot>("debug-telemetry-stats", (event) => {
       telemSnapshot = event.payload;
+    });
+    unlistenTunnel = await listen<TunnelSnapshot>("debug-tunnel-stats", (event) => {
+      tunSnapshot = event.payload;
     });
     unlistenGatt = await listen<GattTable>("ble-gatt-services", (event) => {
       gattTable = event.payload;
@@ -373,6 +554,7 @@
     if (unlistenTelem) unlistenTelem();
     if (unlistenGatt) unlistenGatt();
     if (unlistenGattData) unlistenGattData();
+    if (unlistenTunnel) unlistenTunnel();
     restorePerfRenderState();
   });
 
@@ -434,11 +616,15 @@
   <div class="debug-tabs">
     <button class="tab" class:active={tab === 'msp'} onclick={() => tab = 'msp'}>{$t('debug.tabMsp')}</button>
     <button class="tab" class:active={tab === 'mavlink'} onclick={() => tab = 'mavlink'}>{$t('debug.tabMavlink')}</button>
+    <button class="tab" class:active={tab === 'modes'} onclick={() => tab = 'modes'}>{$t('debug.tabModes')}</button>
+    <button class="tab" class:active={tab === 'tunnel'} onclick={() => tab = 'tunnel'}>{$t('debug.tabTunnel')}</button>
     <button class="tab" class:active={tab === 'telemetry'} onclick={() => tab = 'telemetry'}>{$t('debug.tabTelemetry')}</button>
     <button class="tab" class:active={tab === 'alerts'} onclick={() => tab = 'alerts'}>{$t('debug.tabAlerts')}</button>
     <button class="tab" class:active={tab === 'rc'} onclick={() => tab = 'rc'}>{$t('debug.tabRc')}</button>
     <button class="tab" class:active={tab === 'performance'} onclick={() => tab = 'performance'}>{$t('debug.tabPerformance')}</button>
     <button class="tab" class:active={tab === 'video'} onclick={() => tab = 'video'}>{$t('debug.tabVideo')}</button>
+    <button class="tab" class:active={tab === 'fleet'} onclick={() => tab = 'fleet'}>{$t('debug.tabFleet')}</button>
+    <button class="tab" class:active={tab === 'customMaps'} onclick={() => tab = 'customMaps'}>{$t('debug.tabCustomMaps')}</button>
   </div>
 
   <div class="inject-row" class:on={inj.active}>
@@ -572,6 +758,165 @@
         </tbody>
       </table>
     </div>
+  {:else if tab === 'modes'}
+    <!-- The reader's own state (phase, unanswered count) is not exported — its log lines ("AVAILABLE_MODES:
+         sysid=…") carry it. -->
+    <div class="perf-tab">
+      <div class="stat-group">
+        <span class="stat-label">{$t('debug.modes.vehicle')}</span>
+        <span class="stat-value">{$activeVehicleId ?? '—'} · {$autopilotSystem} / {$arduVehicleClass}</span>
+      </div>
+      <div class="stat-group">
+        <span class="stat-label">{$t('debug.modes.source')}</span>
+        <span class="stat-value">
+          {$activeFcModesChecked ? $t('debug.modes.sourceFc', { values: { n: $activeFcModesChecked.length } }) : $t('debug.modes.sourceStatic')}
+        </span>
+      </div>
+      {#if $activeFcModes && !$modeTableMatchesVehicle}
+        <div class="perf-hint">{$t('debug.modes.mismatch')}</div>
+      {/if}
+
+      <div class="perf-section">{$t('debug.modes.fcList')}</div>
+      <table class="debug-table">
+        <thead>
+          <tr>
+            <th class="col-num">#</th>
+            <th class="col-code">{$t('debug.modes.colNumber')}</th>
+            <th class="col-name">{$t('debug.modes.colFcName')}</th>
+            <th class="col-num">{$t('debug.modes.colNotSelectable')}</th>
+            <th class="col-name">{$t('debug.modes.colKiteName')}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {#each $activeFcModes ?? [] as m, i (i)}
+            <tr>
+              <td class="col-num">{i + 1}</td>
+              <td class="col-code">{m.customMode}</td>
+              <td class="col-name">{m.name}</td>
+              <td class="col-num">{yesNo((m.properties & FC_NOT_USER_SELECTABLE) !== 0)}</td>
+              <td class="col-name">{kiteNameFor(m.customMode)}</td>
+            </tr>
+          {:else}
+            <tr><td class="empty-cell" colspan="5">{$t('debug.modes.noFcList')}</td></tr>
+          {/each}
+        </tbody>
+      </table>
+
+      <div class="perf-section">{$t('debug.modes.panel')}</div>
+      <table class="debug-table">
+        <thead>
+          <tr>
+            <th class="col-code">{$t('debug.modes.colNumber')}</th>
+            <th class="col-name">{$t('debug.modes.colKiteName')}</th>
+            <th class="col-num">{$t('debug.modes.colStick')}</th>
+            <th class="col-num">{$t('debug.modes.colConfirm')}</th>
+            <th class="col-name">{$t('debug.modes.colStatus')}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {#each fcModeRows as r (`${r.main}/${r.sub}/${r.status}`)}
+            <tr class:inactive={r.status !== 'offered' && r.status !== 'unknown'}>
+              <td class="col-code">{r.sub ? `${r.main}/${r.sub}` : r.main}</td>
+              <td class="col-name">{r.name}</td>
+              <td class="col-num">{yesNo(r.stick)}</td>
+              <td class="col-num">{yesNo(r.confirm)}</td>
+              <td class="col-name">{$t(`debug.modes.status.${r.status}`)}</td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
+  {:else if tab === 'tunnel'}
+    {@const ts = tunSnapshot}
+    <div class="debug-stats stats-rows">
+      <div class="stat-group">
+        <span class="gate-badge" class:stable={ts?.active} class:unstable={!ts?.active}>
+          {ts?.active ? $t('debug.tunActive') : $t('debug.tunInactive')}
+        </span>
+        <span class="stat-sep">|</span>
+        <span class="stat-label">{$t('debug.tunProbe')}</span>
+        <span class="stat-value">{probeLabel(ts?.probe_result ?? '')}</span>
+        {#if ts?.probe_rtt_ms != null}
+          <span class="stat-sep">|</span>
+          <span class="stat-label">{$t('debug.tunRtt')}</span>
+          <span class="stat-value">{ts.probe_rtt_ms} ms</span>
+        {/if}
+      </div>
+      {#if ts?.probe_detail}
+        <div class="stat-group">
+          <span class="stat-value">{ts.probe_detail}</span>
+        </div>
+      {/if}
+      <div class="stat-group">
+        <span class="stat-label">{$t('debug.tunChunks')}</span>
+        <span class="stat-value">TX {ts?.chunks_tx ?? 0}</span>
+        <span class="stat-sep">|</span>
+        <span class="stat-value">RX {ts?.chunks_rx ?? 0}</span>
+        <span class="stat-sep">|</span>
+        <span class="stat-label">{$t('debug.tunBytes')}</span>
+        <span class="stat-value">TX {ts?.bytes_tx ?? 0}</span>
+        <span class="stat-sep">|</span>
+        <span class="stat-value">RX {ts?.bytes_rx ?? 0}</span>
+      </div>
+      <div class="stat-group">
+        <span class="stat-label">{$t('debug.tunRequests')}</span>
+        <span class="stat-value">{ts?.requests ?? 0}</span>
+        <span class="stat-sep">|</span>
+        <span class="stat-label">{$t('debug.tunReplies')}</span>
+        <span class="stat-value">{ts?.replies ?? 0}</span>
+        <span class="stat-sep">|</span>
+        <span class="stat-label">{$t('debug.tunTimeouts')}</span>
+        <span class="stat-value" class:has-timeouts={(ts?.timeouts ?? 0) > 0}>{ts?.timeouts ?? 0}</span>
+        <span class="stat-sep">|</span>
+        <span class="stat-label">{$t('debug.tunRetries')}</span>
+        <span class="stat-value">{ts?.retries ?? 0}</span>
+      </div>
+      <div class="stat-group">
+        <span class="stat-label">{$t('debug.tunStale')}</span>
+        <span class="stat-value" class:has-timeouts={(ts?.stale_replies ?? 0) > 0}>{ts?.stale_replies ?? 0}</span>
+        <span class="stat-sep">|</span>
+        <span class="stat-label">{$t('debug.tunExpired')}</span>
+        <span class="stat-value" class:has-timeouts={(ts?.expired ?? 0) > 0}>{ts?.expired ?? 0}</span>
+      </div>
+      <div class="stat-group">
+        <span class="stat-label">{$t('debug.tunChecksum')}</span>
+        <span class="stat-value" class:has-timeouts={(ts?.checksum_failures ?? 0) > 0}>{ts?.checksum_failures ?? 0}</span>
+        <span class="stat-sep">|</span>
+        <span class="stat-label">{$t('debug.tunInFlight')}</span>
+        <span class="stat-value">{ts?.in_flight != null ? formatCode(ts.in_flight) : $t('debug.tunIdle')}</span>
+      </div>
+      <div class="stat-group">
+        <span class="stat-label">{$t('debug.tunLargest')}</span>
+        <span class="stat-value">{ts?.largest_reply_bytes ?? 0} B / {ts?.largest_reply_chunks ?? 0}</span>
+        <span class="stat-sep">|</span>
+        <span class="stat-label">{$t('debug.tunLastChunks')}</span>
+        <span class="stat-value">{ts?.last_request_chunks ?? 0}</span>
+      </div>
+    </div>
+
+    <div class="tun-form">
+      <div class="hex-label">{$t('debug.tunSendTitle')}</div>
+      <div class="tun-row">
+        <input class="tun-input tun-code" type="text" spellcheck="false" aria-label={$t('debug.tunCode')}
+          placeholder={$t('debug.tunCode')} title={$t('debug.tunCode')} bind:value={tunCode} />
+        <input class="tun-input" type="text" spellcheck="false" aria-label={$t('debug.tunPayload')}
+          placeholder={$t('debug.tunPayload')} title={$t('debug.tunPayload')} bind:value={tunPayload} />
+        <button class="dbg-btn" onclick={sendTunnelRequest} disabled={tunBusy}>
+          {tunBusy ? $t('debug.tunSending') : $t('debug.tunSend')}
+        </button>
+      </div>
+      {#if tunErr}
+        <div class="stat-warn">{tunErr}</div>
+      {/if}
+    </div>
+    {#if tunReply}
+      <div class="hex-tail">
+        <div class="hex-label">
+          {$t('debug.tunReply')}: {$t('debug.tunReplyMeta', { values: { bytes: tunReply.bytes, chunks: tunReply.chunks, rtt: tunReply.rtt_ms } })}
+        </div>
+        <div class="hex-bytes">{tunReply.reply_hex || $t('debug.tunEmptyReply')}</div>
+      </div>
+    {/if}
   {:else if tab === 'telemetry'}
     <div class="debug-stats">
       <div class="stat-group">
@@ -887,6 +1232,219 @@
         <label class="perf-check"><input type="checkbox" bind:checked={pHdr} onchange={applyPerf} /> {$t('debug.perf.hdr')}</label>
 
         <div class="perf-hint">{$t('debug.perf.hint')}</div>
+      {/if}
+    </div>
+  {:else if tab === 'customMaps'}
+    <!-- Custom (local tile folder) maps: the active map's listing + coverage index (what the outline
+         frames and "Show map area" are built from) and how the last tiles were resolved. -->
+    <div class="perf-tab">
+      <div class="stat-group">
+        <span class="stat-label">{$t('debug.customMaps.folder')}</span>
+        <span class="stat-value">{$customMaps.root || '—'}</span>
+      </div>
+      {#if !cmName}
+        <div class="perf-hint">{$t('debug.customMaps.noActive')}</div>
+      {:else}
+        <div class="stat-group">
+          <span class="stat-label">{$t('debug.customMaps.map')}</span>
+          <span class="stat-value">{cmName}</span>
+          <span class="stat-sep">|</span>
+          <span class="stat-label">{$t('debug.customMaps.ext')}</span>
+          <span class="stat-value">{cmInfo?.ext ?? '—'}</span>
+          <span class="stat-sep">|</span>
+          <span class="stat-label">{$t('debug.customMaps.levels')}</span>
+          <span class="stat-value">{cmInfo ? `${cmInfo.minZoom}–${cmInfo.maxZoom}` : '—'}</span>
+        </div>
+        <div class="stat-group">
+          <span class="stat-label">{$t('debug.customMaps.tileSize')}</span>
+          <span class="stat-value">{cmTileSize}</span>
+          <span class="stat-sep">|</span>
+          <span class="stat-label">{$t('debug.customMaps.nativeZoom')}</span>
+          <span class="stat-value">{cmNative}</span>
+        </div>
+        {#if cmCov}
+          {@const cov = cmCov}
+          <div class="stat-group">
+            <span class="stat-label">{$t('debug.customMaps.tiles')}</span>
+            <span class="stat-value">{cov.tileCount}</span>
+            <span class="stat-sep">|</span>
+            <span class="stat-label">{$t('debug.customMaps.scan')}</span>
+            <span class="stat-value">{cov.scanMs} ms</span>
+            <span class="stat-sep">|</span>
+            <span class="stat-label">{$t('debug.customMaps.index')}</span>
+            <span class="stat-value">
+              {cov.indexPath == null
+                ? $t('debug.customMaps.indexNone')
+                : cov.indexHit ? $t('debug.customMaps.indexHit') : $t('debug.customMaps.indexMiss')}
+            </span>
+          </div>
+          {#if cov.indexPath}<div class="perf-hint">{cov.indexPath}</div>{/if}
+          <table class="debug-table">
+            <thead>
+              <tr>
+                <th class="col-num">{$t('debug.customMaps.colLevel')}</th>
+                <th class="col-num">{$t('debug.customMaps.colTiles')}</th>
+                <th class="col-num">{$t('debug.customMaps.colGrid')}</th>
+                <th class="col-num">{$t('debug.customMaps.colRects')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each cov.levels as lv (lv.z)}
+                <tr>
+                  <td class="col-num">{lv.z}</td>
+                  <td class="col-num">{lv.tiles}</td>
+                  <td class="col-num">{lv.grid}</td>
+                  <td class="col-num">{lv.rects}</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+          <div class="perf-section">{$t('debug.customMaps.areas')} ({cov.areas.length}{cov.areasTruncated ? '+' : ''})</div>
+          <table class="debug-table">
+            <thead>
+              <tr>
+                <th class="col-num">{$t('debug.customMaps.colTop')}</th>
+                <th class="col-num">{$t('debug.customMaps.colSegments')}</th>
+                <th class="col-name">{$t('debug.customMaps.colBox')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each cov.areas as a}
+                <tr>
+                  <td class="col-num">{a.top}</td>
+                  <td class="col-num">{a.segments.length}</td>
+                  <td class="col-name">{cmBox(a.bounds)}</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+          <div class="perf-hint">{$t('debug.customMaps.frameRule')}</div>
+        {:else}
+          <div class="perf-hint">{$t('debug.customMaps.noCoverage')}</div>
+        {/if}
+      {/if}
+      <div class="perf-section">{$t('debug.customMaps.recent')}</div>
+      <table class="debug-table">
+        <thead>
+          <tr>
+            <th class="col-name">{$t('debug.customMaps.colTile')}</th>
+            <th class="col-name">{$t('debug.customMaps.colPlan')}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {#each $customTileDebug as e}
+            <tr>
+              <td class="col-name">{e.z}/{e.x}/{e.y}</td>
+              <td class="col-name">{cmPlan(e)}</td>
+            </tr>
+          {:else}
+            <tr><td class="empty-cell" colspan="2">{$t('debug.customMaps.noTiles')}</td></tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
+  {:else if tab === 'fleet'}
+    <!-- The multi-vehicle feature gate (stores/fleetMode): on by default in a debug build, else the
+         `--fleet` launch flag. Switchable here for the running session in a debug build only — a release
+         build (also with --debug) refuses it. Group recording is shown read-only (an env opt-in). -->
+    <div class="perf-tab">
+      <label class="perf-check">
+        <input
+          type="checkbox"
+          disabled={!import.meta.env.DEV}
+          checked={$fleetEnabled}
+          onchange={(e) => {
+            const box = e.currentTarget as HTMLInputElement;
+            void setFleetMode(box.checked).catch((err) => {
+              console.warn('[fleet] set_fleet_enabled failed:', err);
+              box.checked = get(fleetEnabled);
+            });
+          }}
+        />
+        {$t('debug.fleet.enabled')}
+      </label>
+      <div class="stat-group">
+        <span class="stat-label">{$t('debug.fleet.groupRecording')}</span>
+        <span class="stat-value">{$fleetGroupRecording ? $t('debug.fleet.on') : $t('debug.fleet.off')}</span>
+      </div>
+      <div class="perf-hint">{$t('debug.fleet.hint')}</div>
+
+      {#if groupState}
+        {@const gs = groupState}
+        <div class="perf-section">{$t('debug.fleet.coordinator')}</div>
+        <div class="stat-group">
+          <span class="stat-label">{$t('debug.fleet.backendFlag')}</span>
+          <span class="stat-value">{gs.enabled ? $t('debug.fleet.on') : $t('debug.fleet.off')}</span>
+          <span class="stat-sep">|</span>
+          <span class="stat-label">{$t('debug.fleet.pending')}</span>
+          <span class="stat-value">{gs.pending.length ? gs.pending.join(', ') : '—'}</span>
+        </div>
+
+        <div class="perf-section">{$t('debug.fleet.recorders')}</div>
+        <table class="debug-table">
+          <thead>
+            <tr>
+              <th class="col-name">{$t('debug.fleet.colKey')}</th>
+              <th class="col-num">{$t('debug.fleet.colFirstStatus')}</th>
+              <th class="col-num">{$t('debug.fleet.colArmed')}</th>
+              <th class="col-rate">{$t('debug.fleet.colLastSeen')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each gs.recorders as r (r.key)}
+              <tr>
+                <td class="col-name">{r.key}</td>
+                <td class="col-num">{yesNo(r.firstStatusSeen)}</td>
+                <td class="col-num">{yesNo(r.armed)}</td>
+                <td class="col-rate">{r.lastSeenMs} ms</td>
+              </tr>
+            {:else}
+              <tr><td class="empty-cell" colspan="4">{$t('debug.fleet.noRecorders')}</td></tr>
+            {/each}
+          </tbody>
+        </table>
+
+        <div class="perf-section">{$t('debug.fleet.group')}</div>
+        {#if gs.group}
+          {@const g = gs.group}
+          <div class="stat-group">
+            <span class="stat-value">{g.id}</span>
+            <span class="stat-sep">|</span>
+            <span class="stat-value">{g.phase === 'running' ? $t('debug.fleet.phaseRunning') : $t('debug.fleet.phaseEnding')}</span>
+            <span class="stat-sep">|</span>
+            <span class="stat-label">{$t('debug.fleet.start')}</span>
+            <span class="stat-value">{g.startTime}</span>
+            <span class="stat-sep">|</span>
+            <span class="stat-label">{$t('debug.fleet.endsIn')}</span>
+            <span class="stat-value">{g.endInMs != null ? `${g.endInMs} ms` : '—'}</span>
+          </div>
+          <table class="debug-table">
+            <thead>
+              <tr>
+                <th class="col-code">{$t('debug.fleet.colKey')}</th>
+                <th class="col-num">{$t('debug.fleet.colArmed')}</th>
+                <th class="col-num">{$t('debug.fleet.colGone')}</th>
+                <th class="col-num">{$t('debug.fleet.colLostArmed')}</th>
+                <th class="col-num">{$t('debug.fleet.colStalled')}</th>
+                <th class="col-name">{$t('debug.fleet.colFile')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each g.members as m}
+                <tr class:inactive={m.gone}>
+                  <td class="col-code">{m.key}</td>
+                  <td class="col-num">{yesNo(m.armed)}</td>
+                  <td class="col-num">{yesNo(m.gone)}</td>
+                  <td class="col-num" class:has-timeouts={m.lostArmed}>{yesNo(m.lostArmed)}</td>
+                  <td class="col-num" class:has-timeouts={m.stalled}>{yesNo(m.stalled)}</td>
+                  <td class="col-name" title={m.file ?? ''}>{m.file ?? '—'}</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        {:else}
+          <div class="perf-hint">{$t('debug.fleet.noGroup')}</div>
+        {/if}
       {/if}
     </div>
   {:else if tab === 'video'}
@@ -1616,5 +2174,45 @@
   .gatt-act {
     color: #f5a623;
     font-variant-numeric: tabular-nums;
+  }
+
+  .tun-form {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  .tun-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .tun-input {
+    flex: 1;
+    min-width: 0;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 3px;
+    color: #e0e0e0;
+    font-family: inherit;
+    font-size: 11px;
+    padding: 4px 6px;
+  }
+
+  .tun-input.tun-code {
+    flex: 0 0 110px;
+  }
+
+  .tun-input:focus {
+    outline: none;
+    border-color: #37a8db;
+  }
+
+  .dbg-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
 </style>

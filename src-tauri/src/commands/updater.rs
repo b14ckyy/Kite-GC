@@ -102,6 +102,10 @@ async fn install_bundle(app: &AppHandle, tag: &str) -> Result<(), String> {
         .updater_builder()
         .endpoints(vec![manifest])
         .map_err(|e| format!("Updater setup failed: {e}"))?
+        // The plugin's clients default to `tauri-plugin-updater/<ver>`; a request header wins over
+        // that default, for the manifest check and the package download alike.
+        .header("User-Agent", crate::user_agent::user_agent("update"))
+        .map_err(|e| format!("Updater setup failed: {e}"))?
         .build()
         .map_err(|e| format!("Updater setup failed: {e}"))?;
     let update = updater
@@ -154,7 +158,7 @@ async fn install_portable(app: &AppHandle, tag: &str, version: &str) -> Result<(
     let asset = format!("KiteGC_{os}_{arch}_{version}_portable.zip");
     let url = crate::github_release::asset_url(REPO, tag, &asset);
     let client = reqwest::Client::builder()
-        .user_agent(format!("Kite-GC/{} update", app.package_info().version))
+        .user_agent(crate::user_agent::user_agent("update"))
         .build()
         .map_err(|e| format!("HTTP client error: {e}"))?;
     let mut resp = client

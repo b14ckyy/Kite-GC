@@ -14,7 +14,7 @@
   import { fade } from 'svelte/transition';
   import { statusTexts, type StatusTextLevel } from '$lib/stores/statusText';
 
-  const ICON: Record<StatusTextLevel, string> = { error: '⚠', warning: '▲', info: 'ⓘ' };
+  const ICON: Record<StatusTextLevel, string> = { error: '⚠', warning: '▲', info: 'ⓘ', debug: '⋯' };
 
   let scroller = $state<HTMLDivElement | undefined>(undefined);
   // Keep the newest line in view as messages arrive.
@@ -30,6 +30,11 @@
       {#each $statusTexts as msg (msg.id)}
         <div class="msg-line {msg.level}">
           <span class="m-icon">{ICON[msg.level]}</span>
+          {#if msg.vehicle}
+            <span class="m-vehicle" style:--vc={msg.vehicle.color} title={msg.vehicle.name}>
+              <span class="m-vdot"></span>{msg.vehicle.name}
+            </span>
+          {/if}
           <span class="m-text">{msg.text}</span>
           {#if msg.repeats > 1}<span class="m-count">×{msg.repeats}</span>{/if}
         </div>
@@ -104,11 +109,37 @@
   }
   .m-icon { font-size: 11px; line-height: 1; flex: 0 0 auto; }
   .m-text { overflow: hidden; text-overflow: ellipsis; }
+  /* Fleet: which vehicle spoke — a dot in its map colour + its name, so a failing craft is obvious. */
+  .m-vehicle {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    flex: 0 0 auto;
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding: 0 6px 0 4px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.08);
+    font-size: 11px;
+    font-weight: 600;
+    color: #e0e0e0;
+  }
+  .m-vdot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--vc, #888);
+    box-shadow: 0 0 3px var(--vc, #888);
+    flex: 0 0 auto;
+  }
   /* Repeat tally for a message the FC keeps re-sending. Dimmed so it reads as metadata, not content. */
   .m-count { flex: 0 0 auto; margin-left: auto; padding-left: 8px; font-size: 11px; opacity: 0.55; font-variant-numeric: tabular-nums; }
 
   .msg-line.info    { color: #cfe7f3; }
   .msg-line.info .m-icon { color: #37a8db; }
+  .msg-line.debug   { color: #b4b4b4; }
+  .msg-line.debug .m-icon { color: #949494; }
   .msg-line.warning { color: #f6e3b0; }
   .msg-line.warning .m-icon { color: #f4c020; }
   .msg-line.error   { color: #f6c9c9; background: rgba(120, 30, 30, 0.45); }

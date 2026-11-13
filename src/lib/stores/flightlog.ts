@@ -34,7 +34,7 @@ export {
 
 // ── Tauri command wrappers ───────────────────────────────────────────
 
-import type { FlightSummary, Flight, TelemetryRecord, BatteryRecord, BlackboxImportStatus, KflightImportResult, LibraryMission, LibraryMissionInput, BatteryPack, BatteryPackInput, BatteryAggregate, BatteryFile, Vehicle, VehicleInput, VehicleAggregate, VehicleFile } from './flightlogTypes';
+import type { FlightSummary, Flight, TelemetryRecord, BatteryRecord, BlackboxImportStatus, KflightImportResult, LibraryMission, LibraryMissionInput, BatteryPack, BatteryPackInput, BatteryAggregate, BatteryFile, Vehicle, VehicleInput, VehicleAggregate, VehicleFile, VehicleResolution } from './flightlogTypes';
 import type { BatteryInstance } from './telemetry';
 
 /** Save a mission to the library (dedup by content hash). Returns the mission id. */
@@ -270,19 +270,62 @@ export async function vehicleDbFindByFcUid(fcUid: string, dbPath: string): Promi
   return invoke<Vehicle | null>('vehicle_db_find_by_fc_uid', { fcUid, dbPath: dbPath || undefined });
 }
 
-/** Delete a vehicle (flights keep their craft name → "not in library"). */
+/** Delete a vehicle (its flights are un-linked → "not in library", never deleted). */
 export async function vehicleDbDelete(id: number, dbPath: string): Promise<void> {
   return invoke<void>('vehicle_db_delete', { id, dbPath: dbPath || undefined });
 }
 
-/** Aggregate the flights linked to a craft name (totals + records). */
-export async function vehicleDbAggregate(craftName: string, dbPath: string): Promise<VehicleAggregate> {
-  return invoke<VehicleAggregate>('vehicle_db_aggregate', { craftName, dbPath: dbPath || undefined });
+/** Aggregate the flights linked to a vehicle (totals + records). */
+export async function vehicleDbAggregate(vehicleId: number, dbPath: string): Promise<VehicleAggregate> {
+  return invoke<VehicleAggregate>('vehicle_db_aggregate', { vehicleId, dbPath: dbPath || undefined });
 }
 
-/** List the flights linked to a craft name. */
-export async function vehicleDbFlights(craftName: string, dbPath: string): Promise<FlightSummary[]> {
-  return invoke<FlightSummary[]>('vehicle_db_flights', { craftName, dbPath: dbPath || undefined });
+/** List the flights linked to a vehicle. */
+export async function vehicleDbFlights(vehicleId: number, dbPath: string): Promise<FlightSummary[]> {
+  return invoke<FlightSummary[]>('vehicle_db_flights', { vehicleId, dbPath: dbPath || undefined });
+}
+
+/** Resolve a flight identity to its library vehicle: FC id first, craft name as fallback. */
+export async function vehicleDbResolve(fcUid: string | null, craftName: string | null, dbPath: string): Promise<VehicleResolution> {
+  return invoke<VehicleResolution>('vehicle_db_resolve', { fcUid, craftName, dbPath: dbPath || undefined });
+}
+
+/** Link every flight flown with this craft name and/or FC id to the vehicle. Returns the number linked. */
+export async function vehicleDbLinkFlights(
+  vehicleId: number,
+  craftName: string | null,
+  fcUid: string | null,
+  onlyUnlinked: boolean,
+  dbPath: string,
+): Promise<number> {
+  return invoke<number>('vehicle_db_link_flights', { vehicleId, craftName, fcUid, onlyUnlinked, dbPath: dbPath || undefined });
+}
+
+/** Dry run of `vehicleDbLinkFlights`: how many flights it would link. */
+export async function vehicleDbLinkFlightsCount(
+  vehicleId: number,
+  craftName: string | null,
+  fcUid: string | null,
+  onlyUnlinked: boolean,
+  dbPath: string,
+): Promise<number> {
+  return invoke<number>('vehicle_db_link_flights_count', { vehicleId, craftName, fcUid, onlyUnlinked, dbPath: dbPath || undefined });
+}
+
+/** Give a vehicle an FC hardware id (null clears it) and take it off every other vehicle that stores it.
+ *  Returns how many other vehicles lost it. */
+export async function vehicleDbSetFcUid(vehicleId: number, fcUid: string | null, dbPath: string): Promise<number> {
+  return invoke<number>('vehicle_db_set_fc_uid', { vehicleId, fcUid, dbPath: dbPath || undefined });
+}
+
+/** Move all flights of one vehicle to another. Returns the number moved. */
+export async function vehicleDbTransferFlights(fromId: number, toId: number, dbPath: string): Promise<number> {
+  return invoke<number>('vehicle_db_transfer_flights', { fromId, toId, dbPath: dbPath || undefined });
+}
+
+/** Link a flight to a library vehicle, or un-link it (`null`). */
+export async function flightSetVehicle(flightId: number, vehicleId: number | null, dbPath: string): Promise<void> {
+  return invoke<void>('flight_set_vehicle', { flightId, vehicleId, dbPath: dbPath || undefined });
 }
 
 /** Set a vehicle's lifetime baseline to absolute values (adopt FC stats / `.kvehicle` import). */
@@ -365,20 +408,22 @@ export async function deleteFlight(id: number, dbPath: string): Promise<boolean>
 }
 
 /** Commit the pending live-recording session into the main DB (End-Flight dialog Save).
- *  Returns the new flight id. Deferred commit — see ADR-041. */
-export async function flightlogCommitPending(): Promise<number> {
-  return invoke<number>('flightlog_commit_pending_session');
+ *  Returns the new flight id. Deferred commit — see ADR-041. `vehicleId` = the `vehicleId` of the
+ *  session's `flight-recording-*` event; omitted → the only pending session (error if several). */
+export async function flightlogCommitPending(vehicleId?: string | null): Promise<number> {
+  return invoke<number>('flightlog_commit_pending_session', { vehicleId: vehicleId ?? undefined });
 }
 
 /** Discard the pending live-recording session (End-Flight dialog Discard) — drops the temp file. */
-export async function flightlogDiscardPending(): Promise<void> {
-  await invoke('flightlog_discard_pending_session');
+export async function flightlogDiscardPending(vehicleId?: string | null): Promise<void> {
+  await invoke('flightlog_discard_pending_session', { vehicleId: vehicleId ?? undefined });
 }
 
 /** Continue-on-reconnect for a session interrupted by a disconnect while armed: move the pending
- *  session into the resume slot so the next connection resumes/finalizes it (ADR-042). */
-export async function flightlogContinuePending(): Promise<void> {
-  await invoke('flightlog_continue_pending_session');
+ *  session into the resume queue so the next connection resumes/finalizes it (ADR-042). Resolves
+ *  to whether a session was queued (`false`: nothing was pending). */
+export async function flightlogContinuePending(vehicleId?: string | null): Promise<boolean> {
+  return invoke<boolean>('flightlog_continue_pending_session', { vehicleId: vehicleId ?? undefined });
 }
 
 /** An orphan temp recording session found at startup (crash/close recovery, ADR-042). */
@@ -561,6 +606,12 @@ export async function blackboxLogCount(filePath: string): Promise<number> {
   return invoke<number>('flightlog_blackbox_log_count', { filePath });
 }
 
+/** True when INAV Blackbox logs go through the external blackbox_decode (`KITE_BLACKBOX_LEGACY=1`)
+ *  instead of the built-in decoder — the only case in which the tool is checked for, offered or shown. */
+export async function blackboxLegacyMode(): Promise<boolean> {
+  return invoke<boolean>('blackbox_legacy_mode');
+}
+
 /** True when blackbox_decode is available (PATH, exe dir, or the auto-download dir). */
 export async function blackboxDecoderAvailable(): Promise<boolean> {
   return invoke<boolean>('blackbox_decoder_available');
@@ -698,9 +749,15 @@ export async function deleteBlackboxFile(flightId: number, dbPath: string): Prom
   });
 }
 
-/** Compact (full VACUUM / defragment) the flight-log database. Returns the resulting size in bytes. */
-export async function compactDatabase(dbPath: string): Promise<number> {
-  return invoke<number>('flightlog_compact_db', { dbPath: dbPath || undefined });
+/** The database's size in bytes before and after a compact. */
+export interface CompactStats {
+  size_before: number;
+  size_after: number;
+}
+
+/** Compact (full VACUUM / defragment) the flight-log database. Returns its size before and after. */
+export async function compactDatabase(dbPath: string): Promise<CompactStats> {
+  return invoke<CompactStats>('flightlog_compact_db', { dbPath: dbPath || undefined });
 }
 
 export async function exportTrackFile(

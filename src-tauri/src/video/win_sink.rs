@@ -1540,7 +1540,7 @@ mod tests {
     }
 
     /// Full Windows decode chain against a real RTSP source (start
-    /// tools/rtsp_test_server.py --codec h264 --file <annex-B> first):
+    /// tools/simulators/rtsp_test_server.py --codec h264 --file <annex-B> first):
     /// `KITE_RTSP_URL=rtsp://... [KITE_RTSP_CODEC=h265] cargo test decodes_and_presents -- --ignored --nocapture`
     /// Opens a real window on the desktop; the decoded picture is verifiable by screenshot.
     #[test]

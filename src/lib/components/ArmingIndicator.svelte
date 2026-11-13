@@ -12,10 +12,15 @@
   import { prearmReason } from '$lib/stores/statusText';
   import { armingStatus } from '$lib/helpers/arming';
   import { autopilotSystem } from '$lib/stores/autopilotContext';
+  import { connection } from '$lib/stores/connection';
 
   let { telem }: { telem: TelemetryData } = $props();
 
-  const status = $derived(armingStatus(telem, $prearmReason, $autopilotSystem === 'inav'));
+  // INAV interpretation only where INAV's armingFlags bitfield actually arrives: direct MSP and the INAV
+  // passive decoders. A MAVLink link — also MSP over MAVLink, whose planner is INAV — only carries the
+  // HEARTBEAT armed bit (telemetry is not polled through the tunnel), so it gets the MAVLink reading.
+  const mavlinkLink = $derived($connection.status === 'connected' && $connection.protocolType === 'mavlink');
+  const status = $derived(armingStatus(telem, $prearmReason, $autopilotSystem === 'inav' && !mavlinkLink));
 
   const label = $derived(
     !status ? ''

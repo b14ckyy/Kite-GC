@@ -27,11 +27,39 @@ adapter, and so on.
 | Protocol | Use it for | Direction |
 |---|---|---|
 | **MSP** | INAV flight controllers (7.0+) | Two-way (Kite polls the FC) |
-| **MAVLink** | ArduPilot and PX4 | Two-way |
+| **MAVLink** | ArduPilot (4.1+) and PX4 — and **INAV 10.0+** on a MAVLink-only link (see below) | Two-way |
 | **Telemetry** | A passive, listen-only downlink (SmartPort, CRSF, LTM, MAVLink) | **Receive only** — Kite never transmits |
 
 The first two are normal bidirectional control links. **Telemetry** is special — see
 [Passive telemetry](#passive-telemetry-listen-only) below.
+
+### INAV over MAVLink (MSP/MAV)
+
+Some radio links only carry MAVLink — ELRS or mLRS in MAVLink mode, SiK radios, a MAVLink Wi-Fi bridge.
+Until now an INAV flight controller on such a link gave you only what its MAVLink emulation offers. From
+**INAV 10.0** the flight controller can carry MSP inside the MAVLink stream, and Kite uses that
+automatically:
+
+1. Connect with the **MAVLink** protocol as you would for ArduPilot.
+2. Kite recognises an INAV flight controller during the handshake and checks for the MSP tunnel (this
+   takes up to two seconds). If it answers, the connection status shows **MSP/MAV** and UAV Info lists
+   the real INAV version, board and craft name plus the feature badge **MSP over MAVLink**.
+3. From there the INAV features work as over a direct MSP link: mission upload and download (including
+   EEPROM and multi-mission), safe homes, geozones, craft name, flight statistics. Telemetry itself
+   still comes over MAVLink — nothing is polled through the tunnel.
+
+What you need on the INAV side: firmware **10.0 or newer**, a serial port with the **MAVLink telemetry**
+function, `mavlink_version` left at 2 (the default) and a board with more than 512 KB of flash (F722 and
+F411 boards have no MAVLink). Nothing needs to be enabled in the CLI.
+
+Not available on such a link: RC control from Kite, ADS-B from the flight controller's own receiver,
+and the INAV-only telemetry details that need MSP polling (mode boxes, arming-blocked reasons, sensor
+status) — those badges in UAV Info show *Not available over MSP/MAV*.
+
+!!! note "Large replies on INAV 10.0.0-RC1"
+    RC1 has a firmware bug that drops parts of long tunnel replies on a hardware UART (small ones such as
+    mission waypoints are fine). It is fixed in the INAV `maintenance-10.x` branch; on RC1 an affected
+    request simply times out after a few seconds.
 
 ### Transport
 
@@ -48,6 +76,12 @@ BLE    → device list (live scan)
 
 Serial is the default and covers both **USB cables** and **Bluetooth SPP** (classic Bluetooth serial)
 COM ports — Windows and Linux present both as serial ports.
+
+!!! note "Android, iPhone and iPad"
+    A fresh install on a phone or tablet starts on **MAVLink** over **UDP** port `14550` instead, the
+    usual Wi-Fi telemetry setup. **Android** offers Serial for a USB cable on an OTG adapter (Android
+    asks per device — pick Kite in the dialog when you plug the cable in). **iPhone and iPad have no Serial transport** — use
+    **BLE**, **TCP** or **UDP** there.
 
 1. **Transport** → **Serial**.
 2. **Port** — pick it from the list. The list refreshes by itself; a freshly plugged-in board is
@@ -89,8 +123,9 @@ For network links — a SITL simulator, a companion computer, a Wi-Fi/serial bri
 forwarding to your PC.
 
 1. **Transport** → **TCP** or **UDP**.
-2. **Host** — the IP address or hostname to reach (e.g. `127.0.0.1` for a local simulator, or the
-   bridge's LAN address).
+2. **Host** — the IP address to reach (e.g. the bridge's LAN address). Left empty, the field shows a
+   faded `localhost` and Kite connects to **this device** itself (`127.0.0.1`), which is what a local
+   simulator needs.
 3. **Port** — the network port.
 
 Kite fills in the usual default and swaps it when you change either the protocol or the transport:
@@ -109,8 +144,21 @@ selectors, and stays yours across restarts: Kite remembers that you typed it rat
 number. Type the standard port for the current selection and it goes back to following the
 selectors, so there is always a way back.
 
-If **Settings → Connection → Default Protocol** is pinned, the port follows it at startup, the same
+If **Settings → Interface → UI → Default Protocol** is pinned, the port follows it at startup, the same
 way it follows the selectors.
+
+On **UDP**, Kite listens on the port it targets, so a vehicle or bridge that pushes its telemetry to
+that port reaches it. If **another program already listens there** — Mission Planner on `14550`, say —
+Kite listens on the same port **plus 10000** instead (`14550` → `24550`), and on a random free port
+only if that one is taken too. The alternate port stays the same on every reconnect, so a relay that
+streams to Kite's address finds it again. Telemetry pushed to the original port still lands in the
+other program, though: if the handshake then fails, the error names the busy port — close the other
+program's UDP connection, or point the vehicle (or the other program's MAVLink forward) at a port Kite
+can own.
+
+Kite answers **every** sender it has heard on a UDP link in the last ten seconds, not only the last
+one — so several SITL instances or bridges that share one port, each from its own socket, all receive
+Kite's messages.
 
 !!! note "Protocol still applies"
     Choose the matching **protocol** for a network link too — **MAVLink** for an ArduPilot/PX4
@@ -198,16 +246,24 @@ the app holds — see **[Raw telemetry](telemetry-and-display.md#raw-telemetry)*
 
 - The button becomes **Disconnect**; the top bar shows arming readiness, per-sensor health, battery and
   link quality; widgets start updating; your aircraft appears on the map once it has a GPS fix.
-- **INAV/MSP** links additionally download the safe-home/autoland config and (on INAV 8.0+) geozones for
-  the map overlay. **MAVLink** links download the geofence and rally points.
+- **INAV/MSP** links — including INAV over MAVLink (**MSP/MAV**) — additionally download the
+  safe-home/autoland config and (on INAV 8.0+) geozones for the map overlay. **ArduPilot/PX4 MAVLink**
+  links download the geofence and rally points.
 
 ## Reconnecting
 
 Kite remembers your last **protocol, transport, port/host, baud, and BLE device**, so reconnecting is
 usually a single click on **Connect**. To drop the link, click **Disconnect**.
 
+A link that **goes quiet** is not dropped: when the aircraft has sent nothing for three seconds on an
+MSP or MAVLink link, the status bar switches to **Reconnecting…** (amber dot), Kite keeps the link
+open, and the display returns to normal as soon as data arrives again — a radio dropout heals on its
+own. Only a **lost transport** — a USB cable unplugged, a Bluetooth link gone, a TCP socket closed —
+ends the connection; if a flight was being recorded, Kite then asks what to do with it (**Device
+connection lost**: **Discard**, **Save Incomplete** or **Continue on Reconnect**).
+
 If you always fly the same link and would rather not have a stray session decide, set
-**Settings → Connection → Default Protocol** to that protocol: it then wins on every launch. Leave it
+**Settings → Interface → UI → Default Protocol** to that protocol: it then wins on every launch. Leave it
 on **Last used** for the behaviour described above.
 
 ## Trouble connecting?

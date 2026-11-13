@@ -16,7 +16,13 @@
   import L from "leaflet";
   import "leaflet/dist/leaflet.css";
   import { settings } from "$lib/stores/settings";
-  import { telemetry } from "$lib/stores/telemetry";
+  import { telemetry, allTelemetry, type TelemetryData } from "$lib/stores/telemetry";
+  import { vehicles, activeVehicleId, type VehicleSummary } from "$lib/stores/vehicles";
+  import { selectedVehicleIds, toggleSelected, setSelected } from "$lib/stores/fleetSelection";
+  import { fleetEnabled } from "$lib/stores/fleetMode";
+  import { switchVehicle } from "$lib/controllers/connectionController";
+  import { matchActiveMode } from "$lib/helpers/mavModes";
+  import { vehicleColor } from "$lib/helpers/vehicleColors";
   import { safehomeWorking, isSafehomeEmpty, setSafehomePosition } from "$lib/stores/safehome";
   import {
     geozoneWorking, geozoneEditing, geozoneMissionResult, GEOZONE_SHAPE_CIRCULAR,
@@ -33,20 +39,28 @@
   } from "$lib/stores/rally";
   import { MIN_FIX_SATELLITES } from "$lib/helpers/telemetry";
   import { get } from "svelte/store";
-  import { MAP_PROVIDERS, getProviderById, type MapProvider } from "$lib/config/mapProviders";
-  import { cachedTileLayer } from "$lib/cache/CachedTileLayer";
+  import { MAP_PROVIDERS, type MapProvider } from "$lib/config/mapProviders";
+  import { cachedTileLayer, providerLayerOptions } from "$lib/cache/CachedTileLayer";
   import { initTileCache } from "$lib/cache/tileCache";
-  import { isWebKitGtk, isAndroid } from "$lib/platform";
-  import { homePosition, homeMarkerShown } from "$lib/stores/home";
+  import { isWebKitGtk, isAndroid, hasCustomMaps } from "$lib/platform";
+  import { watchMapProvider } from "$lib/stores/customMaps";
+  import { onMapFocus, type MapFocusRequest } from "$lib/stores/mapFocus";
+  import {
+    SEARCH_POINT_ZOOM_2D, SEARCH_MAX_ZOOM_2D, SEARCH_FIT_PAD_PX,
+    SEARCH_PIN_SHOW_MS, SEARCH_PIN_FADE_MS, SEARCH_PIN_SVG,
+  } from "$lib/config/mapSearch";
+  import CustomMapCoverageLayer from "./CustomMapCoverageLayer.svelte";
+  import { homePosition, homeMarkerShown, vehicleHomes, type VehicleHome } from "$lib/stores/home";
   import { editMode, geoWaypoints, launchPoint, replayActive, toDeg } from "$lib/stores/mission";
   import { autopilotSystem } from "$lib/stores/autopilotContext";
-  import { arduMission, arduVehicleClass, arduEditMode } from "$lib/stores/missionArdupilot";
+  import { arduMission, arduVehicleClass, arduEditMode, detectVehicleClass, arduMissionsByVehicle, arduSetWpSelection, type ArduWaypoint } from "$lib/stores/missionArdupilot";
   import { activeSurveyPattern } from "$lib/stores/surveyPattern.svelte";
-  import { guidedActive, guidedTarget, repositionTo, activeMode, guidedParams, fcLoiterRadius, type GuidedParams } from "$lib/controllers/vehicleControl";
+  import { guidedActive, guidedTarget, guidedTargets, activeMode, guidedParams, fcLoiterRadius, type GuidedParams } from "$lib/controllers/vehicleControl";
+  import { guidedClickArmed, mapClickOwnedByEditor, guidedTargetMultirotor, sendGuidedTarget } from "$lib/controllers/guidedClick";
   import GuidedTargetForm from "$lib/components/control/GuidedTargetForm.svelte";
   import { cmdHasLocation } from "$lib/helpers/arduCommandCatalog";
-  import { connection } from "$lib/stores/connection";
-  import { frameMissionSignal } from "$lib/stores/mapCamera";
+  import { connection, linkHasMsp } from "$lib/stores/connection";
+  import { frameMissionSignal, frameFleetSignal } from "$lib/stores/mapCamera";
   import { destinationPoint, haversineDistance } from "$lib/utils/geo";
   import { buildApproachGeometry } from "$lib/helpers/autolandGeometry";
   import MissionLayer from "./mission/MissionLayer.svelte";
@@ -100,7 +114,7 @@
     mapViewMode = '2d' as '2d' | '3d',
     onToggleMapView,
     miniControls = false,
-    viewMode = $bindable<'free' | 'follow' | 'heading-follow'>('free'),
+    viewMode = $bindable<'free' | 'follow' | 'heading-follow' | 'fleet'>('free'),
     centerInsetRight = 0,
     centerInsetBottom = 0,
     radarActive = false,
@@ -122,7 +136,7 @@
     /** Mini-map mode (in the video frame): hide the 2D/3D + view-mode buttons, keep zoom only. */
     miniControls?: boolean;
     /** 2D follow state, lifted so it persists across 2D↔3D remounts (bound by the parent). */
-    viewMode?: 'free' | 'follow' | 'heading-follow';
+    viewMode?: 'free' | 'follow' | 'heading-follow' | 'fleet';
     /** Width (css px) of an overlay covering the map's RIGHT edge (the phone's widget column,
      *  Dev-Docs active/PHONE_UI.md): the map keeps running underneath it (visible through the glass),
      *  but every "centre" — follow, heading-up pivot, explicit centring — refers to the middle of the
@@ -200,6 +214,7 @@
     for (const mk of [uavMarker, playbackMarker]) mk?.setIcon(makeModelIcon(modelSizePx(lat)));
     modelDrawnKey = ''; // new canvas → the cached "already drawn" state is stale
     applyFollowFrame();
+    updateFleet(); // fleet model markers are zoom-sized too
   }
 
   // The model is rasterised in software (uavTopDown.ts) — the one expensive step of a follow frame.
@@ -255,6 +270,48 @@
   // (monitoring only). Cleared on arm; the colored flight trail takes over.
   let preArmTrailLine: L.Polyline | undefined;
   let preArmPositions: L.LatLng[] = [];
+
+  // ── Per-vehicle trail ownership (multi-vehicle) ──────────────────────────────────────────
+  // The live trail variables above always belong to ONE vehicle (`trailOwner`, = the active one). On
+  // a switch the in-progress segment is finalised and every layer is parked in `trailStash` under the
+  // old owner — it stays on the map as that vehicle's history and never gets a point from another
+  // vehicle. The new owner starts a fresh segment at its own position (its parked layers, if any,
+  // come back under the live variables so the arm-edge "new flight" clear still removes them). The
+  // follow smoother is reset too, so the marker snaps to the new vehicle instead of gliding across.
+  interface TrailState { segments: L.Polyline[]; preArms: L.Polyline[]; wasArmed: boolean }
+  const trailStash = new Map<string, TrailState>();
+  let trailOwner: string | null = null;
+  function switchTrailOwner(next: string | null) {
+    if (next === trailOwner) return;
+    if (trailOwner) {
+      if (activeTrailLine) { trailSegments.push(activeTrailLine); activeTrailLine = undefined; }
+      const prev = trailStash.get(trailOwner);
+      trailStash.set(trailOwner, {
+        segments: [...(prev?.segments ?? []), ...trailSegments],
+        preArms: [...(prev?.preArms ?? []), ...(preArmTrailLine ? [preArmTrailLine] : [])],
+        wasArmed,
+      });
+    }
+    trailOwner = next;
+    const st = next ? trailStash.get(next) : undefined;
+    trailSegments = st ? [...st.segments] : [];
+    if (next && st) trailStash.set(next, { ...st, segments: [] }); // segments now live in the variables again
+    activeTrailLine = undefined;
+    trailCurrentPositions = [];
+    trailCurrentColor = '';
+    preArmTrailLine = undefined; // the old pre-arm line stays parked; a new one starts here
+    preArmPositions = [];
+    wasArmed = st?.wasArmed ?? false;
+    followTarget = null; followCurrent = null;
+    turnRateDegS = 0; prevCog = null; turnArcShown = false;
+  }
+  /** Drop every parked layer of `id` (vehicle lost / new session). */
+  function dropStashedTrail(id: string) {
+    const st = trailStash.get(id);
+    if (!st) return;
+    for (const l of [...st.segments, ...st.preArms]) { try { map?.removeLayer(l); } catch { /* gone */ } }
+    trailStash.delete(id);
+  }
   let playbackLayerGroup: L.LayerGroup | undefined;
   let playbackMarker: L.Marker | undefined;
 
@@ -438,6 +495,372 @@
     if (map) updateRadar();
   });
 
+  // ── Fleet: the OTHER connected vehicles (multi-vehicle) ──────────────────────────────────────
+  // The active vehicle keeps the full model marker / trail / follow above. Every other vehicle the
+  // backend knows is drawn here as a coloured heading arrow with its name (click = make it active),
+  // plus — while it is in its guided mode — its FC-confirmed target and a dashed line vehicle → target,
+  // so it is obvious who is flying where. Same add/update/remove-by-id shape as the radar layer.
+  let fleetLayer: L.LayerGroup | undefined;
+  const fleetMarkers = new Map<string, L.Marker>();
+  const fleetTargetMarkers = new Map<string, L.Marker>();
+  const fleetTargetLines = new Map<string, L.Polyline>();
+  let fleetTelem: ReadonlyMap<string, TelemetryData> = new Map();
+  let fleetKnown: Map<string, VehicleSummary> = new Map();
+  let fleetActive: string | null = null;
+  // Group-command selection (stores/fleetSelection): selected markers get a ring in their colour, and
+  // the fleet camera mode frames the selection (2+) instead of the whole fleet.
+  let fleetSelected: ReadonlySet<string> = new Set();
+  let fleetCount = $state(0); // reactive mirror of the registry size (drives the fleet camera button)
+  let fleetOn = false; // the `--fleet` launch flag (stores/fleetMode)
+  let fleetTargets: ReadonlyMap<string, { lat: number; lon: number; ts: number }> = new Map();
+  const FLEET_TARGET_STALE_MS = 10_000;
+  const FLEET_BASE_PX = 26;
+
+  function escapeHtml(str: string): string {
+    return str.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
+  }
+  function fleetIconHtml(color: string, heading: number, label: string, size: number, armed: boolean, selected: boolean): string {
+    const svg = `<svg viewBox="0 0 24 24" width="${size}" height="${size}" style="transform:rotate(${heading}deg)"><path d="M12 2 L20 20 L12 16 L4 20 Z" fill="${color}" stroke="#000" stroke-width="1.2" stroke-linejoin="round"/></svg>`;
+    return `<div class="fleet-icon${armed ? ' armed' : ''}${selected ? ' selected' : ''}" style="width:${size}px;height:${size}px;--vc:${color}">${svg}<span class="fleet-label">${escapeHtml(label)}</span></div>`;
+  }
+  /** Model style: a persistent canvas (drawn by `drawFleetModel`) + the name label. */
+  function fleetModelIconHtml(label: string, size: number, armed: boolean, selected: boolean, color: string): string {
+    return `<div class="fleet-icon fleet-model${armed ? ' armed' : ''}${selected ? ' selected' : ''}" style="width:${size}px;height:${size}px;--vc:${color}"><canvas width="${size}" height="${size}" style="display:block"></canvas><span class="fleet-label">${escapeHtml(label)}</span></div>`;
+  }
+  // Meshes by model URI, shared across vehicles of the same kind (quad / plane / vtol …). Loading is
+  // kicked off on first use; until it lands the marker shows a coloured dot, then the next fleet
+  // update draws the model.
+  const fleetMeshes = new Map<string, UavMesh>();
+  const fleetMeshLoading = new Set<string>();
+  function fleetMesh(platformType: number): UavMesh | null {
+    const uri = modelUri(resolveModelKind(platformType as PlatformType, modelOverride));
+    const m = fleetMeshes.get(uri);
+    if (m) return m;
+    if (!fleetMeshLoading.has(uri)) {
+      fleetMeshLoading.add(uri);
+      loadUavMesh(uri)
+        .then((mesh) => { fleetMeshes.set(uri, mesh); if (map) updateFleet(); })
+        .catch(() => { /* keep the dot */ });
+    }
+    return null;
+  }
+  /** How strongly the vehicle colour tints the model — enough to tell four identical quads apart. */
+  const FLEET_MODEL_TINT = 0.55;
+  function drawFleetModel(marker: L.Marker, platformType: number, heading: number, pitch: number, roll: number, color: string) {
+    const cv = marker.getElement()?.querySelector('canvas') as HTMLCanvasElement | null;
+    const ctx = cv?.getContext('2d');
+    if (!cv || !ctx) return;
+    const mesh = fleetMesh(platformType);
+    if (!mesh) {
+      ctx.clearRect(0, 0, cv.width, cv.height);
+      ctx.fillStyle = color; ctx.beginPath(); ctx.arc(cv.width / 2, cv.height / 2, 6, 0, 2 * Math.PI); ctx.fill();
+      return;
+    }
+    renderUavTopDown(ctx, mesh, cv.width, heading, pitch, roll, hexToRgb01(color), FLEET_MODEL_TINT);
+  }
+  /** Per-marker icon signature — the DivIcon is only rebuilt when this changes (a `setIcon` replaces
+   *  the canvas, so the model path avoids it on every frame and just redraws the canvas). */
+  const fleetIconKeys = new Map<string, string>();
+
+  // Fleet trails: while a vehicle is NOT active its path is still recorded — a plain line in its colour
+  // (thin while disarmed, 2 px while armed; an arm edge starts a new flight and drops the old lines).
+  // When it becomes active the detailed mode-coloured trail takes over; its fleet line stays as history.
+  interface FleetTrail { pts: L.LatLng[]; line?: L.Polyline; armed: boolean }
+  const fleetTrails = new Map<string, FleetTrail>();
+  const fleetTrailHistory = new Map<string, L.Polyline[]>();
+  const fleetHomeMarkers = new Map<string, L.Marker>();
+  let fleetHomes: ReadonlyMap<string, VehicleHome> = new Map();
+  // Other vehicles' planned missions: a thin route line + small numbered dots in the vehicle colour,
+  // read-only (the active vehicle's mission is the editable MissionLayer).
+  const fleetMissionLayers = new Map<string, L.LayerGroup>();
+  const fleetMissionKeys = new Map<string, string>();
+  let fleetMissions: ReadonlyMap<string, ArduWaypoint[]> = new Map();
+  function updateFleetMission(v: VehicleSummary, color: string, layer: L.LayerGroup) {
+    const wps = fleetMissions.get(v.vehicleId) ?? [];
+    const pts: { n: number; ll: L.LatLng }[] = [];
+    let n = 0;
+    for (const wp of wps) {
+      if (!cmdHasLocation(wp.command)) continue;
+      n++;
+      if (wp.lat === 0 && wp.lon === 0) continue;
+      pts.push({ n, ll: L.latLng(wp.lat / 1e7, wp.lon / 1e7) });
+    }
+    const key = `${color}|${pts.map((p) => `${p.n}:${p.ll.lat.toFixed(6)},${p.ll.lng.toFixed(6)}`).join(';')}`;
+    if (fleetMissionKeys.get(v.vehicleId) === key) return;
+    fleetMissionKeys.set(v.vehicleId, key);
+    const old = fleetMissionLayers.get(v.vehicleId);
+    if (old) { layer.removeLayer(old); fleetMissionLayers.delete(v.vehicleId); }
+    if (pts.length === 0) return;
+    const g = L.layerGroup();
+    if (pts.length >= 2) {
+      // Interactive only for the hover tooltip (which vehicle's plan this is) — no click behaviour.
+      L.polyline(pts.map((p) => p.ll), { color, weight: 2, opacity: 0.55, dashArray: '2 6', interactive: true, bubblingMouseEvents: false })
+        .bindTooltip(`${escapeHtml(v.name)} · ${pts.length} WP`, { sticky: true, opacity: 0.9, className: 'fleet-mission-tip' })
+        .addTo(g);
+    }
+    for (const p of pts) {
+      L.marker(p.ll, {
+        interactive: false,
+        zIndexOffset: 300,
+        icon: L.divIcon({
+          className: 'fleet-wp-divicon',
+          html: `<div class="fleet-wp" style="border-color:${color};color:${color}">${p.n}</div>`,
+          iconSize: [18, 18], iconAnchor: [9, 9],
+        }),
+      }).addTo(g);
+    }
+    g.addTo(layer);
+    fleetMissionLayers.set(v.vehicleId, g);
+  }
+  function removeFleetMission(id: string, layer: L.LayerGroup) {
+    const g = fleetMissionLayers.get(id);
+    if (g) { layer.removeLayer(g); fleetMissionLayers.delete(id); fleetMissionKeys.delete(id); }
+  }
+
+  function pushFleetHistory(id: string, line: L.Polyline) {
+    const h = fleetTrailHistory.get(id) ?? [];
+    h.push(line);
+    fleetTrailHistory.set(id, h);
+  }
+  function updateFleetTrail(id: string, tv: TelemetryData, color: string, layer: L.LayerGroup) {
+    const armed = (tv.armingFlags & (1 << ARMING_FLAG_ARMED)) !== 0;
+    const ft = fleetTrails.get(id) ?? { pts: [], armed };
+    if (armed !== ft.armed) {
+      // Arm-state edge = segment boundary (style change); arming also means a NEW flight → old lines go.
+      if (ft.line) { pushFleetHistory(id, ft.line); ft.line = undefined; }
+      if (armed) {
+        for (const l of fleetTrailHistory.get(id) ?? []) layer.removeLayer(l);
+        fleetTrailHistory.delete(id);
+        ft.pts = [];
+      } else {
+        ft.pts = ft.pts.length ? [ft.pts[ft.pts.length - 1]] : [];
+      }
+      ft.armed = armed;
+    }
+    const pos = L.latLng(tv.lat, tv.lon);
+    // The track only from positions with at least a 2D fix (§5e M1 — no lines across the map while the
+    // GPS acquires); the caller already skipped invalid coordinates.
+    if (tv.fixType >= 1 && (!ft.pts.length || pos.distanceTo(ft.pts[ft.pts.length - 1]) >= MIN_TRAIL_DIST)) {
+      ft.pts.push(pos);
+      if (ft.pts.length >= 2) {
+        if (ft.line) ft.line.setLatLngs(ft.pts);
+        else ft.line = L.polyline(ft.pts, { color, weight: armed ? 2 : 1, opacity: armed ? 0.7 : 0.6, interactive: false }).addTo(layer);
+      }
+    }
+    fleetTrails.set(id, ft);
+  }
+  /** The vehicle became active: its fleet line becomes history; the detailed trail continues from here. */
+  function retireFleetTrail(id: string) {
+    const ft = fleetTrails.get(id);
+    if (!ft) return;
+    if (ft.line) pushFleetHistory(id, ft.line);
+    fleetTrails.delete(id);
+  }
+  function createFleetHomeIcon(color: string): L.DivIcon {
+    const html = `<div style="width:18px;height:18px;display:flex;align-items:center;justify-content:center;background:${color};border:2px solid #fff;border-radius:50%;font:bold 10px 'Segoe UI',Tahoma,sans-serif;color:#000;box-shadow:0 0 5px rgba(0,0,0,.5)">H</div>`;
+    return L.divIcon({ className: 'fleet-home-divicon', html, iconSize: [18, 18], iconAnchor: [9, 9] });
+  }
+  function updateFleetHome(v: VehicleSummary, color: string, layer: L.LayerGroup) {
+    const h = fleetHomes.get(v.vehicleId);
+    const m = fleetHomeMarkers.get(v.vehicleId);
+    if (!h) { if (m) { layer.removeLayer(m); fleetHomeMarkers.delete(v.vehicleId); } return; }
+    if (m) { m.setLatLng([h.lat, h.lon]); return; }
+    const mk = L.marker([h.lat, h.lon], { icon: createFleetHomeIcon(color), interactive: true, zIndexOffset: 450 });
+    mk.bindTooltip(`${v.name} · ${get(t)('connection.vehicleHome')}`, { direction: 'top', offset: [0, -10], opacity: 0.9 });
+    mk.addTo(layer);
+    fleetHomeMarkers.set(v.vehicleId, mk);
+  }
+  function removeFleetHome(id: string, layer: L.LayerGroup) {
+    const m = fleetHomeMarkers.get(id);
+    if (m) { layer.removeLayer(m); fleetHomeMarkers.delete(id); }
+  }
+  /** Vehicles the backend dropped (while others remain) take their lines, homes and parked trails along. */
+  function pruneFleetState(layer: L.LayerGroup) {
+    if (fleetKnown.size === 0) return; // disconnect-all keeps the last picture, like the single-vehicle trail did
+    const gone = (id: string) => !fleetKnown.has(id);
+    for (const [id, ft] of fleetTrails) if (gone(id)) { if (ft.line) layer.removeLayer(ft.line); fleetTrails.delete(id); }
+    for (const [id, hs] of fleetTrailHistory) if (gone(id)) { for (const l of hs) layer.removeLayer(l); fleetTrailHistory.delete(id); }
+    for (const [id, m] of fleetHomeMarkers) if (gone(id)) { layer.removeLayer(m); fleetHomeMarkers.delete(id); }
+    for (const id of [...fleetMissionLayers.keys()]) if (gone(id)) removeFleetMission(id, layer);
+    for (const id of [...trailStash.keys()]) if (gone(id) && id !== trailOwner) dropStashedTrail(id);
+  }
+  /** The fleet gate is off: every other vehicle's trail, home and plan goes (markers and target lines
+   *  are removed by `updateFleet` itself). The active vehicle's parked trails are not fleet drawings. */
+  function dropFleetDrawings(layer: L.LayerGroup) {
+    for (const ft of fleetTrails.values()) if (ft.line) layer.removeLayer(ft.line);
+    fleetTrails.clear();
+    for (const hs of fleetTrailHistory.values()) for (const l of hs) layer.removeLayer(l);
+    fleetTrailHistory.clear();
+    for (const m of fleetHomeMarkers.values()) layer.removeLayer(m);
+    fleetHomeMarkers.clear();
+    for (const g of fleetMissionLayers.values()) layer.removeLayer(g);
+    fleetMissionLayers.clear();
+    fleetMissionKeys.clear();
+  }
+  /** A new session after a disconnect-all: the previous fleet's picture goes. */
+  function clearFleetHistory() {
+    if (!fleetLayer) return;
+    dropFleetDrawings(fleetLayer);
+    for (const id of [...trailStash.keys()]) if (id !== trailOwner) dropStashedTrail(id);
+  }
+  function createFleetTargetIcon(color: string): L.DivIcon {
+    const html = `<div style="box-sizing:border-box;width:16px;height:16px;border:2px solid #000;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:${color};box-shadow:0 0 3px rgba(0,0,0,.6)"></div>`;
+    return L.divIcon({ className: 'fleet-target-divicon', html, iconSize: [16, 16], iconAnchor: [8, 19] });
+  }
+  /** Whether a (non-active) vehicle is in its guided mode — decided from its own HEARTBEAT identity. */
+  function fleetInGuided(v: VehicleSummary, tv: TelemetryData): boolean {
+    const variant = v.fcVariant.toLowerCase();
+    const sys = variant === 'px4' ? 'px4' : variant.startsWith('ardu') ? 'ardupilot' : null;
+    if (!sys) return false;
+    const cls = detectVehicleClass(v.fcVariant, v.mavType) ?? 'copter';
+    return matchActiveMode(sys, cls, tv.flightModeFlags)?.guided === true;
+  }
+
+  function updateFleet() {
+    if (!map) return;
+    if (!fleetLayer) fleetLayer = L.layerGroup().addTo(map);
+    // GATE(fleet): without the `--fleet` launch flag no vehicle is drawn here (no other vehicle, no guided
+    // target line for the active one); the clean-up below removes what a session with the flag left.
+    if (!fleetOn) dropFleetDrawings(fleetLayer);
+    const ordered = fleetOn ? [...fleetKnown.values()].sort((a, b) => a.linkId - b.linkId || a.sysid - b.sysid) : [];
+    const size = Math.round(FLEET_BASE_PX * (uiScale || 1));
+    const style = get(settings).fleetMarkerStyle;
+    const now = Date.now();
+    const seen = new Set<string>();
+    const seenTargets = new Set<string>();
+    ordered.forEach((v, idx) => {
+      const tv = fleetTelem.get(v.vehicleId);
+      const color = vehicleColor(idx);
+      const isActiveVehicle = v.vehicleId === fleetActive;
+      if (!tv || !tv.lastUpdate || !isValidGpsCoordinate(tv.lat, tv.lon)) {
+        // No position yet (or link gone): its parked PLAN is still worth seeing on the map.
+        if (!isActiveVehicle) updateFleetMission(v, color, fleetLayer!);
+        return;
+      }
+
+      if (!isActiveVehicle) {
+        seen.add(v.vehicleId);
+        const armed = (tv.armingFlags & (1 << ARMING_FLAG_ARMED)) !== 0;
+        const selected = fleetSelected.has(v.vehicleId);
+        const modelStyle = style === 'model';
+        const mSize = modelStyle ? modelSizePx(tv.lat) : size;
+        // Symbol: the heading is baked into the SVG, so its key includes it; model: drawn on canvas.
+        const key = modelStyle
+          ? `m|${mSize}|${v.name}|${armed}|${selected}|${color}`
+          : `s|${mSize}|${v.name}|${armed}|${selected}|${color}|${Math.round(tv.yaw)}`;
+        const tip = `${v.name} · ${tv.flightMode.primary || '—'} · ${Math.round(tv.altitude)} m · ${(tv.groundSpeed).toFixed(1)} m/s`;
+        let marker = fleetMarkers.get(v.vehicleId);
+        if (marker) {
+          marker.setLatLng([tv.lat, tv.lon]);
+          marker.setTooltipContent(tip);
+        } else {
+          const id = v.vehicleId;
+          marker = L.marker([tv.lat, tv.lon], { zIndexOffset: 900 });
+          marker.bindTooltip(tip, { direction: 'top', offset: [0, -mSize / 2], opacity: 0.95 });
+          // Plain click = make it the active vehicle; Ctrl/⌘+click = toggle it in the group selection.
+          marker.on('click', (e: L.LeafletMouseEvent) => {
+            const oe = e.originalEvent;
+            if (oe && (oe.ctrlKey || oe.metaKey)) { toggleSelected(id); return; }
+            void switchVehicle(id);
+          });
+          marker.addTo(fleetLayer!);
+          fleetMarkers.set(id, marker);
+        }
+        if (fleetIconKeys.get(v.vehicleId) !== key) {
+          marker.setIcon(L.divIcon({
+            className: 'fleet-divicon',
+            html: modelStyle ? fleetModelIconHtml(v.name, mSize, armed, selected, color) : fleetIconHtml(color, tv.yaw, v.name, mSize, armed, selected),
+            iconSize: [mSize, mSize], iconAnchor: [mSize / 2, mSize / 2],
+          }));
+          fleetIconKeys.set(v.vehicleId, key);
+        }
+        if (modelStyle) drawFleetModel(marker, v.platformType, tv.yaw, tv.pitch, tv.roll, color);
+        updateFleetTrail(v.vehicleId, tv, color, fleetLayer!);
+        updateFleetHome(v, color, fleetLayer!);
+        updateFleetMission(v, color, fleetLayer!);
+      } else {
+        retireFleetTrail(v.vehicleId);
+        removeFleetHome(v.vehicleId, fleetLayer!);
+        removeFleetMission(v.vehicleId, fleetLayer!);
+      }
+
+      // Guided target + heading line. Active vehicle: the Guided UI already draws the "G" target marker,
+      // so only the line is added here (same green); others get a small target pin in their colour.
+      const tgt = fleetTargets.get(v.vehicleId);
+      const inGuided = isActiveVehicle
+        ? (get(activeMode)?.guided === true || get(guidedActive))
+        : fleetInGuided(v, tv);
+      if (tgt && inGuided && now - tgt.ts < FLEET_TARGET_STALE_MS && isValidGpsCoordinate(tgt.lat, tgt.lon)) {
+        seenTargets.add(v.vehicleId);
+        const lineColor = isActiveVehicle ? '#59aa29' : color;
+        const pts: L.LatLngExpression[] = [[tv.lat, tv.lon], [tgt.lat, tgt.lon]];
+        const line = fleetTargetLines.get(v.vehicleId);
+        if (line) {
+          line.setLatLngs(pts);
+          line.setStyle({ color: lineColor });
+        } else {
+          const l = L.polyline(pts, { color: lineColor, weight: 2, dashArray: '6 6', opacity: 0.9, interactive: false });
+          l.addTo(fleetLayer!);
+          fleetTargetLines.set(v.vehicleId, l);
+        }
+        if (!isActiveVehicle) {
+          const tm = fleetTargetMarkers.get(v.vehicleId);
+          const tipT = `${v.name} → ${get(t)('control.guidedTarget')}`;
+          if (tm) {
+            tm.setLatLng([tgt.lat, tgt.lon]);
+            tm.setTooltipContent(tipT);
+          } else {
+            const m = L.marker([tgt.lat, tgt.lon], { icon: createFleetTargetIcon(color), interactive: true, zIndexOffset: 460 });
+            m.bindTooltip(tipT, { direction: 'top', offset: [0, -16], opacity: 0.9, permanent: true, className: 'fleet-target-tip' });
+            m.addTo(fleetLayer!);
+            fleetTargetMarkers.set(v.vehicleId, m);
+          }
+        } else {
+          const tm = fleetTargetMarkers.get(v.vehicleId);
+          if (tm) { fleetLayer!.removeLayer(tm); fleetTargetMarkers.delete(v.vehicleId); }
+        }
+      }
+    });
+    for (const [id, m] of fleetMarkers) {
+      if (!seen.has(id)) { fleetLayer.removeLayer(m); fleetMarkers.delete(id); fleetIconKeys.delete(id); }
+    }
+    if (viewMode === 'fleet') fitFleet(false); // keep every (selected) vehicle in view
+    pruneFleetState(fleetLayer);
+    for (const [id, l] of fleetTargetLines) {
+      if (!seenTargets.has(id)) { fleetLayer.removeLayer(l); fleetTargetLines.delete(id); }
+    }
+    for (const [id, m] of fleetTargetMarkers) {
+      if (!seenTargets.has(id)) { fleetLayer.removeLayer(m); fleetTargetMarkers.delete(id); }
+    }
+  }
+  const unsubFleet: (() => void)[] = [
+    fleetEnabled.subscribe((on) => {
+      fleetOn = on;
+      if (!on && viewMode === 'fleet') viewMode = 'free';
+      if (map) updateFleet();
+    }),
+    allTelemetry.subscribe((v) => { fleetTelem = v; if (map) updateFleet(); }),
+    vehicles.subscribe((v) => {
+      const wasEmpty = fleetKnown.size === 0;
+      fleetKnown = v;
+      fleetCount = v.size;
+      if (wasEmpty && v.size > 0) clearFleetHistory(); // new session → previous fleet's picture goes
+      // The fleet camera needs 2+ vehicles; fall back to free when the fleet shrinks under it.
+      if (v.size < 2 && viewMode === 'fleet') viewMode = 'free';
+      if (map) updateFleet();
+    }),
+    activeVehicleId.subscribe((v) => { switchTrailOwner(v); fleetActive = v; if (map) updateFleet(); }),
+    selectedVehicleIds.subscribe((s) => { fleetSelected = s; if (map) updateFleet(); }),
+    frameFleetSignal.subscribe((n) => {
+      if (n > 0 && map && (viewMode === 'free' || viewMode === 'fleet')) fitFleet(true);
+    }),
+    vehicleHomes.subscribe((v) => { fleetHomes = v; if (map) updateFleet(); }),
+    arduMissionsByVehicle.subscribe((v) => { fleetMissions = v; if (map) updateFleet(); }),
+    guidedTargets.subscribe((v) => { fleetTargets = v; if (map) updateFleet(); }),
+    guidedActive.subscribe(() => { if (map) updateFleet(); }),
+  ];
+  $effect(() => { uiScale; $settings.fleetMarkerStyle; if (map) updateFleet(); });
+
   // Home position
   let homeMarker: L.Marker | undefined;
   let wasArmed = false;
@@ -537,6 +960,7 @@
   let airspaceLayer: L.LayerGroup | undefined;
   let unsubAero: (() => void) | undefined;
   let unsubAeroFocus: (() => void) | undefined;
+  let unsubCustomFocus: (() => void) | undefined;
   // Safehome + autoland overlay (INAV).
   let safehomeLayer: L.LayerGroup | undefined;
   let unsubSafehome: (() => void) | undefined;
@@ -700,7 +1124,7 @@
     if (!cfg) return;
     const armed = (get(telemetry).armingFlags & (1 << ARMING_FLAG_ARMED)) !== 0;
     const conn = get(connection);
-    const canEdit = conn.status === 'connected' && conn.protocolType === 'msp' && !!conn.fcInfo?.features?.autoland_config;
+    const canEdit = linkHasMsp(conn) && !!conn.fcInfo?.features?.autoland_config;
     const maxDistM = cfg.safehome_max_distance_cm != null ? cfg.safehome_max_distance_cm / 100 : null;
     const loiterM = cfg.loiter_radius_cm != null ? cfg.loiter_radius_cm / 100 : null;
     const approachLenM = cfg.autoland.approach_length_cm != null ? cfg.autoland.approach_length_cm / 100 : 0;
@@ -1165,15 +1589,10 @@
   // target coordinates + vehicle-aware params (Copter/VTOL: alt + heading · Plane: alt + loiter
   // radius) and a "Fly Here" button that sends MAV_CMD_DO_REPOSITION. Last values persist for the
   // next click. See docs/active/VEHICLE_CONTROL.md.
+  // The arming rule, the editor guard, the form variant and the send re-check are shared with the 3D
+  // map (controllers/guidedClick).
   let guidedPopup: L.Popup | undefined;
   let guidedForm: ReturnType<typeof mount> | undefined;
-
-  /** Fly-Here click is armed when the Guided toggle is on OR the FC is already in its guided mode —
-   *  a mid-flight connect to a vehicle sitting in GUIDED must be commandable without first toggling
-   *  the panel button (which would re-send the mode change). */
-  function guidedClickArmed(): boolean {
-    return get(guidedActive) || get(activeMode)?.guided === true;
-  }
 
   function closeGuidedPopup() {
     if (guidedForm) { void unmount(guidedForm); guidedForm = undefined; }
@@ -1182,11 +1601,7 @@
 
   function onGuidedClick(e: L.LeafletMouseEvent) {
     if (!map || !guidedClickArmed()) return;
-    // The mission editors and the survey generator own map clicks while active — before, arming
-    // Guided was always an explicit button press, now it can be implicit (FC already in guided),
-    // so these guards must be explicit here too.
-    if (get(editMode) || get(arduEditMode)) return;
-    if (activeSurveyPattern.isActive) return;
+    if (mapClickOwnedByEditor()) return;
     // Ignore clicks that originate inside an open popup (e.g. the "Fly Here" button) — they must not
     // open a second target popup at the cursor.
     const tgt = e.originalEvent?.target as HTMLElement | undefined;
@@ -1197,9 +1612,7 @@
       return;
     }
     const { lat, lng } = e.latlng;
-    const sys = get(autopilotSystem);
-    const cls = get(arduVehicleClass);
-    const multirotor = sys === "px4" ? true : (cls === "copter" || cls === "quadplane");
+    const multirotor = guidedTargetMultirotor();
 
     // Mount the Svelte form (NumberStepper fields) into the popup container.
     const el = document.createElement("div");
@@ -1209,7 +1622,7 @@
       props: {
         lat, lon: lng, multirotor,
         onfly: (flat: number, flon: number, p: GuidedParams) => {
-          void repositionTo(flat, flon, p);
+          sendGuidedTarget(flat, flon, p); // re-checks the arming at send time
           // Defer the close so the originating click finishes bubbling first (the popup is still in
           // the DOM, so the in-popup guard above suppresses a stray second popup).
           setTimeout(closeGuidedPopup, 0);
@@ -1238,6 +1651,9 @@
   // Close the Guided target popup as soon as the Guided toggle is switched off in the panel — so a
   // reposition can't be sent while Guided is disabled in the UI.
   $effect(() => { if (!$guidedActive) closeGuidedPopup(); });
+  // …and when the active vehicle changes: a popup opened for one vehicle (e.g. already in GUIDED, toggle
+  // never pressed) must not send its target and params to the next one.
+  $effect(() => { void $activeVehicleId; closeGuidedPopup(); });
 
   // Guided loiter-target marker follows the guided state + the set target (and hides on disconnect).
   $effect(() => { void $guidedActive; void $guidedTarget; void $connection; void $activeMode; void $guidedParams; void $fcLoiterRadius; if (map) updateGuidedTarget(); });
@@ -1439,7 +1855,8 @@
     }
     // Don't fight an in-progress zoom animation (would snap mid-zoom; the animation itself heads for
     // the aircraft, see the zoomanim hook in onMount). A pinch in flight is anchored instead of panned.
-    if (viewMode !== 'free' && !(map as unknown as { _animatingZoom?: boolean })._animatingZoom) {
+    // Fleet view modes never recentre on the active vehicle.
+    if ((viewMode === 'follow' || viewMode === 'heading-follow') && !(map as unknown as { _animatingZoom?: boolean })._animatingZoom) {
       followDrivingView = true;
       if (pinching()) anchorPinch(ll);
       else panToVisualCentre(ll); // fires moveend synchronously → saveMapState (guarded)
@@ -1622,6 +2039,7 @@
   let followTitle = $derived.by(() => {
     if (viewMode === 'free') return 'Follow mode: Free';
     if (viewMode === 'follow') return 'Follow mode: Follow';
+    if (viewMode === 'fleet') return 'Follow mode: Fleet (frame all vehicles)';
     return 'Follow mode: Heading Follow';
   });
 
@@ -1632,6 +2050,11 @@
     const color = getNavStateColor(navState); // marker = nav state (the track shows flight mode) — see COLORED_TRACK_PLAN
     if (!uavMarker) {
       uavMarker = L.marker([lat, lon], { icon: makeModelIcon(modelSizePx(lat)), zIndexOffset: 1000 }).addTo(map);
+      // Ctrl/⌘+click on the active vehicle toggles it in the group selection (same gesture as the fleet markers).
+      uavMarker.on('click', (e: L.LeafletMouseEvent) => {
+        const oe = e.originalEvent;
+        if (oe && (oe.ctrlKey || oe.metaKey) && fleetActive) toggleSelected(fleetActive);
+      });
     }
     setFollowTarget(lat, lon, heading, pitch, roll, color, uavMarker, course, speed, timeMs); // eases + redraws the model
   }
@@ -1819,7 +2242,55 @@
     if (!map || viewMode !== 'free' || get(replayActive)) return;
     const pts = collectMissionLatLngs();
     if (pts.length === 0) return;
+    pendingUavJump = false; // a mission load is the latest positioning intent (same as the 3D map)
     map.fitBounds(L.latLngBounds(pts), { padding: [40, 40], maxZoom: 16 });
+  }
+
+  // ── Map search jump (stores/mapFocus, source 'search') ──
+  let searchPin: L.Marker | undefined;
+  let searchPinTimers: ReturnType<typeof setTimeout>[] = [];
+
+  function clearSearchPin() {
+    for (const tm of searchPinTimers) clearTimeout(tm);
+    searchPinTimers = [];
+    if (searchPin && map) map.removeLayer(searchPin);
+    searchPin = undefined;
+  }
+
+  /** Fit the hit's box (a city wide, a street close — capped at SEARCH_MAX_ZOOM_2D) or centre a bare
+   *  point at a fixed zoom, both in the uncovered map area (phone: left of the widget column, above
+   *  the bottom tiles), and drop a pin that fades out by itself. */
+  function jumpToSearchTarget(f: MapFocusRequest) {
+    if (!map) return;
+    if (f.bounds) {
+      const [w, s, e, n] = f.bounds;
+      const bounds = L.latLngBounds([s, w], [n, e < w ? e + 360 : e]); // west > east: crosses 180°
+      map.fitBounds(bounds, {
+        paddingTopLeft: [SEARCH_FIT_PAD_PX, SEARCH_FIT_PAD_PX],
+        paddingBottomRight: [SEARCH_FIT_PAD_PX + centerInsetRight, SEARCH_FIT_PAD_PX + centerInsetBottom],
+        maxZoom: SEARCH_MAX_ZOOM_2D,
+      });
+    } else {
+      centerOn([f.lat, f.lon], Math.min(SEARCH_POINT_ZOOM_2D, map.getMaxZoom()));
+    }
+
+    clearSearchPin();
+    searchPin = L.marker([f.lat, f.lon], {
+      icon: L.divIcon({
+        className: 'search-pin',
+        html: `<div class="search-pin-body" style="transition: opacity ${SEARCH_PIN_FADE_MS}ms ease">${SEARCH_PIN_SVG}</div>`,
+        iconSize: [26, 36],
+        iconAnchor: [13, 35],
+      }),
+      interactive: false,
+      keyboard: false,
+      zIndexOffset: 1000,
+    }).addTo(map);
+    const pin = searchPin;
+    searchPinTimers = [
+      setTimeout(() => pin.getElement()?.querySelector('.search-pin-body')?.classList.add('fading'), SEARCH_PIN_SHOW_MS),
+      setTimeout(() => { if (searchPin === pin) clearSearchPin(); }, SEARCH_PIN_SHOW_MS + SEARCH_PIN_FADE_MS),
+    ];
   }
 
   function updatePlaybackMarker(point: TelemetryRecord | null) {
@@ -1865,8 +2336,11 @@
       attribution: provider.attribution,
       maxZoom: provider.maxZoom,
       updateWhenIdle: false,
+      maxNativeZoom: provider.maxNativeZoom,
       // Enable over-zoom placeholder detection on flagged base layers (ESRI sat).
       providerId: provider.detectPlaceholders ? provider.id : undefined,
+      // Custom (local tile folder) map: local tile path + over-zoom above its highest level.
+      ...providerLayerOptions(provider),
     }).addTo(map);
 
     // Add overlay layers (e.g. labels for hybrid)
@@ -1876,6 +2350,7 @@
           attribution: ol.attribution,
           maxZoom: ol.maxZoom,
           updateWhenIdle: false,
+          maxNativeZoom: ol.maxNativeZoom,
           pane: "overlayPane",
         }).addTo(map);
         currentOverlays.push(layer);
@@ -1914,7 +2389,7 @@
       factor = 0.3;
     } else if (nightMode2D === 'auto') {
       // Auto = user system-time + PHYSICAL location (sunset based), smooth — NOT log/camera.
-      const u = resolveUserLocation(); // OS geo → UAV GPS → home → persisted map centre
+      const u = resolveUserLocation(); // OS geo → home → persisted map centre
       factor = cesiumLikeBrightness(sunAltitudeDeg(new Date(), u.lat, u.lon));
     }
     applyNightDim(factor);
@@ -1947,12 +2422,10 @@
     // a flag since 1.9 — is a courtesy the BSD licence does not require; a GCS carries no third-party
     // statements (Marc, PHONE_VIDEO.md D8).
     map.attributionControl.setPrefix(false);
+    installBoxSelect();
 
     // Initialize tile cache with persisted size limit
     initTileCache(s.mapCacheMaxMB);
-
-    // Apply the persisted (or default) map provider
-    applyProvider(getProviderById(s.mapProvider));
 
     // Every zoom ANIMATION in a follow mode heads for the aircraft: the fingers lifting off a pinch,
     // the mini map's slide, a wheel step — Leaflet animates them around the container centre, which
@@ -1967,6 +2440,11 @@
       e.center = c;
       (map as unknown as MapInternals)._animateToCenter = c;
     });
+
+    // Apply the persisted (or default) map provider, and again whenever the selection (or a custom
+    // map's listing) changes. A persisted custom map is applied once the custom-map folder is listed.
+    // After the zoomanim hook above: the tile layers' own zoomanim listeners must run after it.
+    unsubSettings = watchMapProvider(applyProvider);
 
     map.on("moveend", saveMapState);
     map.on("zoomend", saveMapState);
@@ -2057,6 +2535,8 @@
     applyViewModeEffects(viewMode);
     appliedViewMode = viewMode;
 
+    updateFleet();
+
     // Subscribe to telemetry for UAV position, flight trail, and home detection
     unsubTelemetry = telemetry.subscribe((t) => {
       if (t.lastUpdate > 0) {
@@ -2064,7 +2544,7 @@
 
         // Go-to-UAV on connect: jump once to the craft at a sensible zoom, deferred to the first 3D fix
         // (no fix ⇒ no UAV rendered). Free pan only; following already centres on the UAV.
-        if (pendingUavJump && viewMode === 'free' && !get(replayActive) && t.fixType >= 3 && t.numSat >= MIN_FIX_SATELLITES && isValidGpsCoordinate(t.lat, t.lon)) {
+        if (pendingUavJump && viewMode === 'free' && !get(replayActive) && t.fixType >= 2 && t.numSat >= MIN_FIX_SATELLITES && isValidGpsCoordinate(t.lat, t.lon)) {
           centerOn([t.lat, t.lon], 16);
           pendingUavJump = false;
         }
@@ -2110,13 +2590,24 @@
       prevConnStatus = c.status;
     });
 
-    // React to provider changes from settings
-    let currentProviderId = s.mapProvider;
-    unsubSettings = settings.subscribe((next) => {
-      if (next.mapProvider !== currentProviderId) {
-        currentProviderId = next.mapProvider;
-        applyProvider(getProviderById(currentProviderId));
+    // Jump requests (stores/mapFocus) — the custom map's "Show map area" and the map search. An
+    // explicit request, so a follow / fleet camera hands over to free pan first (else its next frame
+    // undoes the jump), and a pending go-to-UAV jump is dropped, like frameMission does. Not in the
+    // swapped-in mini map: its view mode belongs to the parent.
+    unsubCustomFocus = onMapFocus((f) => {
+      if (!map || miniControls) return;
+      pendingUavJump = false;
+      if (viewMode !== 'free') {
+        viewMode = 'free';
+        appliedViewMode = 'free'; // the $effect would apply it a tick later — after the fit
+        applyViewModeEffects('free');
       }
+      if (f.source === 'customMap' && f.bounds) {
+        const b = f.bounds;
+        map.fitBounds(L.latLngBounds([b[1], b[0]], [b[3], b[2]]), { padding: [40, 40] });
+        return;
+      }
+      jumpToSearchTarget(f);
     });
 
     // Foreign-vehicle contacts: rebuild the radar layer on every snapshot / selection change.
@@ -2270,7 +2761,7 @@
   // (the parent forces heading-follow for the widget mini-map), not just the toolbar button — so the
   // $effect below drives this on every change. free: drag, cursor-zoom; follow/heading: locked +
   // centre-zoom (+ rotation for heading).
-  function applyViewModeEffects(mode: 'free' | 'follow' | 'heading-follow') {
+  function applyViewModeEffects(mode: 'free' | 'follow' | 'heading-follow' | 'fleet') {
     if (!map) return;
     if (mode === 'heading-follow') {
       applyHeadingUpSize(true);
@@ -2284,6 +2775,15 @@
       map.dragging.disable();
       setZoomAnchor('center');
       applyFollowFrame();
+    } else if (mode === 'fleet') {
+      // Fleet: north-up, pan/zoom allowed (a drag hands the camera back to free), auto-fit the fleet.
+      mapHeading = 0;
+      mapContainer?.style.setProperty('--map-rotation', '0deg');
+      applyHeadingUpSize(false);
+      map.dragging.enable();
+      setZoomAnchor('cursor');
+      map.on('dragstart', exitFleetOnDrag);
+      fitFleet(true);
     } else {
       mapHeading = 0;
       mapContainer?.style.setProperty('--map-rotation', '0deg');
@@ -2292,15 +2792,148 @@
       setZoomAnchor('cursor');
       followMoveEnd(); // a run of follow pans may still be open — its listeners get their moveend
     }
+    if (mode !== 'fleet') map.off('dragstart', exitFleetOnDrag);
+  }
+
+  function exitFleetOnDrag() {
+    if (viewMode === 'fleet') viewMode = 'free';
+  }
+
+  // ── Ctrl+drag box select ─────────────────────────────────────────────────────────────────────
+  // Ctrl/⌘ + drag on empty map draws a rectangle: in the ArduPilot/PX4 mission editor it selects the
+  // waypoints inside, otherwise the vehicles inside (→ group commands). Shift+drag stays Leaflet's zoom
+  // box. Leaflet's own drag handler already started on this mousedown (it fires first), so it is
+  // switched off for the gesture and restored on mouseup; a plain Ctrl+click (no movement) is left to
+  // the marker click handlers.
+  const BOX_MIN_PX = 4;
+  let boxStart: L.Point | null = null;
+  let boxEl: HTMLDivElement | null = null;
+  let boxDragWasEnabled = false;
+  function installBoxSelect() {
+    if (!map) return;
+    L.DomEvent.on(map.getContainer(), 'mousedown', onBoxDown as (e: Event) => void);
+  }
+  function onBoxDown(ev: MouseEvent) {
+    if (!map || ev.button !== 0 || !(ev.ctrlKey || ev.metaKey)) return;
+    // Selecting vehicles is a fleet feature (the `--fleet` gate); waypoints can always be box-selected.
+    if (!fleetOn && !(get(arduEditMode) && get(autopilotSystem) !== 'inav')) return;
+    const tgt = ev.target as HTMLElement | null;
+    if (tgt?.closest('.leaflet-marker-icon, .leaflet-interactive, .leaflet-popup, .leaflet-control, .map-controls, button')) return;
+    boxStart = map.mouseEventToContainerPoint(ev);
+    boxDragWasEnabled = map.dragging.enabled();
+    if (boxDragWasEnabled) map.dragging.disable();
+    document.addEventListener('mousemove', onBoxMove);
+    document.addEventListener('mouseup', onBoxUp);
+  }
+  function onBoxMove(ev: MouseEvent) {
+    if (!map || !boxStart) return;
+    const p = map.mouseEventToContainerPoint(ev);
+    if (!boxEl) {
+      if (p.distanceTo(boxStart) < BOX_MIN_PX) return;
+      boxEl = document.createElement('div');
+      boxEl.className = 'fleet-box-select';
+      map.getContainer().appendChild(boxEl);
+    }
+    const x = Math.min(boxStart.x, p.x);
+    const y = Math.min(boxStart.y, p.y);
+    boxEl.style.left = `${x}px`;
+    boxEl.style.top = `${y}px`;
+    boxEl.style.width = `${Math.abs(p.x - boxStart.x)}px`;
+    boxEl.style.height = `${Math.abs(p.y - boxStart.y)}px`;
+  }
+  function onBoxUp(ev: MouseEvent) {
+    document.removeEventListener('mousemove', onBoxMove);
+    document.removeEventListener('mouseup', onBoxUp);
+    const start = boxStart;
+    const drawn = boxEl != null;
+    boxStart = null;
+    boxEl?.remove();
+    boxEl = null;
+    if (map && boxDragWasEnabled) map.dragging.enable();
+    if (!map || !start || !drawn) return;
+    const end = map.mouseEventToContainerPoint(ev);
+    const bounds = L.latLngBounds(map.containerPointToLatLng(start), map.containerPointToLatLng(end));
+    // Swallow the DOM click that follows this mouseup (capture phase, before Leaflet's own container
+    // listener sees it) so it can't add a waypoint or clear the selection we just made.
+    const c = map.getContainer();
+    const swallow = (e: Event) => { e.stopPropagation(); e.preventDefault(); c.removeEventListener('click', swallow, true); };
+    c.addEventListener('click', swallow, true);
+    setTimeout(() => c.removeEventListener('click', swallow, true), 300);
+    applyBoxSelection(bounds);
+  }
+  function applyBoxSelection(b: L.LatLngBounds) {
+    if (get(arduEditMode) && get(autopilotSystem) !== 'inav') {
+      const idx: number[] = [];
+      get(arduMission).forEach((wp, i) => {
+        if (!cmdHasLocation(wp.command) || (wp.lat === 0 && wp.lon === 0)) return;
+        if (b.contains([wp.lat / 1e7, wp.lon / 1e7])) idx.push(i);
+      });
+      arduSetWpSelection(idx);
+      return;
+    }
+    const ids: string[] = [];
+    for (const v of fleetKnown.values()) {
+      const tv = fleetTelem.get(v.vehicleId);
+      if (!tv || !tv.lastUpdate || !isValidGpsCoordinate(tv.lat, tv.lon)) continue;
+      if (b.contains([tv.lat, tv.lon])) ids.push(v.vehicleId);
+    }
+    setSelected(ids);
+  }
+
+  // ── Fleet camera: keep every connected vehicle (or the 2+ selected ones) in view ──────────────
+  // Re-fits only when needed — a vehicle drifts out of the inner 85 % of the viewport, or the fleet has
+  // converged enough that a tight fit would be a full zoom level closer — so the map doesn't twitch on
+  // every 10 Hz telemetry flush. Padding keeps markers off the corner controls and the phone inset.
+  const FLEET_FIT_PAD_PX = 60;
+  const FLEET_FIT_MAX_ZOOM = 18;
+  function fleetFitTargets(): L.LatLng[] {
+    const useSelection = fleetSelected.size >= 2;
+    const pts: L.LatLng[] = [];
+    for (const v of fleetKnown.values()) {
+      if (useSelection && !fleetSelected.has(v.vehicleId)) continue;
+      const tv = fleetTelem.get(v.vehicleId);
+      if (!tv || !tv.lastUpdate || !isValidGpsCoordinate(tv.lat, tv.lon)) continue;
+      pts.push(L.latLng(tv.lat, tv.lon));
+    }
+    return pts;
+  }
+  function fitFleet(force: boolean) {
+    if (!map) return;
+    const pts = fleetFitTargets();
+    if (pts.length === 0) return;
+    const padTL: L.PointExpression = [FLEET_FIT_PAD_PX, FLEET_FIT_PAD_PX];
+    const padBR: L.PointExpression = [FLEET_FIT_PAD_PX + centerInsetRight, FLEET_FIT_PAD_PX];
+    if (pts.length === 1) {
+      if (force || !map.getBounds().pad(-0.15).contains(pts[0])) {
+        followDrivingView = true;
+        centerOn(pts[0], map.getZoom(), { animate: true });
+        followDrivingView = false;
+      }
+      return;
+    }
+    const bounds = L.latLngBounds(pts);
+    if (!force) {
+      const inner = map.getBounds().pad(-0.15);
+      const outside = !inner.contains(bounds);
+      const tightZoom = Math.min(FLEET_FIT_MAX_ZOOM, map.getBoundsZoom(bounds, false, L.point(FLEET_FIT_PAD_PX * 2 + centerInsetRight, FLEET_FIT_PAD_PX * 2)));
+      const converged = tightZoom >= map.getZoom() + 1;
+      if (!outside && !converged) return;
+    }
+    followDrivingView = true;
+    map.fitBounds(bounds, { paddingTopLeft: padTL, paddingBottomRight: padBR, maxZoom: FLEET_FIT_MAX_ZOOM, animate: true });
+    followDrivingView = false;
   }
 
   // The toolbar button just cycles the mode; the $effect applies the side-effects (same path as an
-  // external change), so the two can never desync.
+  // external change), so the two can never desync. The fleet step only exists with 2+ vehicles.
   function toggleViewMode() {
-    viewMode = viewMode === 'free' ? 'follow' : viewMode === 'follow' ? 'heading-follow' : 'free';
+    if (viewMode === 'free') viewMode = 'follow';
+    else if (viewMode === 'follow') viewMode = 'heading-follow';
+    else if (viewMode === 'heading-follow') viewMode = fleetOn && fleetCount >= 2 ? 'fleet' : 'free';
+    else viewMode = 'free';
   }
 
-  let appliedViewMode: 'free' | 'follow' | 'heading-follow' = 'free';
+  let appliedViewMode: 'free' | 'follow' | 'heading-follow' | 'fleet' = 'free';
   $effect(() => {
     const m = viewMode;
     untrack(() => {
@@ -2358,10 +2991,13 @@
     unsubAeroFocus?.();
     if (unsubTelemetry) unsubTelemetry();
     if (unsubSettings) unsubSettings();
+    unsubCustomFocus?.();
+    clearSearchPin();
     unsubFrameMission?.();
     unsubConnForJump?.();
     unsubSafehome?.();
     guidedTargetMarker?.remove();
+    for (const u of unsubFleet) u();
     unsubGeozone?.();
     unsubGeozoneViol?.();
     unsubFence?.();
@@ -2385,6 +3021,7 @@
       if (fenceLayer) map.removeLayer(fenceLayer);
       if (rallyLayer) map.removeLayer(rallyLayer);
       if (radarLayer) map.removeLayer(radarLayer);
+      if (fleetLayer) map.removeLayer(fleetLayer);
       map.remove();
     }
   });
@@ -2406,15 +3043,24 @@
               class:mode-free={viewMode === 'free'}
               class:mode-follow={viewMode === 'follow'}
               class:mode-heading={viewMode === 'heading-follow'}
+              class:mode-fleet={viewMode === 'fleet'}
               onclick={toggleViewMode}
               title={followTitle}
               aria-label={followTitle}>
-        {#if viewMode === 'heading-follow'}
-          <svg class="heading-icon heading-icon-up" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+        {#if viewMode === 'fleet'}
+          <!-- Fleet: three small craft inside a frame -->
+          <svg class="heading-icon heading-icon-fleet" viewBox="2.2 2.2 19.6 19.6" width="20" height="20" aria-hidden="true">
+            <path d="M3 8V4h4M17 4h4v4M21 16v4h-4M7 20H3v-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+            <polygon class="uav-arrow" points="12,7 9.6,13 12,11.8 14.4,13" />
+            <polygon class="uav-arrow" points="7.5,12 5.1,18 7.5,16.8 9.9,18" />
+            <polygon class="uav-arrow" points="16.5,12 14.1,18 16.5,16.8 18.9,18" />
+          </svg>
+        {:else if viewMode === 'heading-follow'}
+          <svg class="heading-icon heading-icon-up" viewBox="6.25 6 11.5 11.5" width="20" height="20" aria-hidden="true">
             <polygon class="uav-arrow" points="12,6 7.5,17.5 12,15.2 16.5,17.5" />
           </svg>
         {:else}
-          <svg class="heading-icon heading-icon-diag" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <svg class="heading-icon heading-icon-diag" viewBox="4.63 4.6 14.51 14.51" width="20" height="20" aria-hidden="true">
             <polygon class="north-triangle" points="12,4.6 9.9,8.6 14.1,8.6" />
             <g transform="translate(0 -1.5) rotate(-70 12 15)">
               <polygon class="uav-arrow" points="12,8.6 7.7,19.6 12,17.4 16.3,19.6" />
@@ -2433,6 +3079,7 @@
     <SurveyPatternLayer {map} />
     <TerrainCursorLayer {map} />
     <RfRayLayer {map} />
+    {#if hasCustomMaps}<CustomMapCoverageLayer {map} />{/if}
   {/if}
 </div>
 
@@ -2457,6 +3104,12 @@
     pointer-events: none;
   }
   :global(.leaflet-tooltip.geozone-label::before) { display: none; }
+
+  /* Map search pin: the fade runs on the inner element — the icon root carries Leaflet's own
+     zoom-animation transition, which an opacity transition there would replace. */
+  :global(.search-pin-body) { width: 26px; height: 36px; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.5)); }
+  :global(.search-pin-body svg) { display: block; }
+  :global(.search-pin-body.fading) { opacity: 0; }
 
   /* Geozone edit handles: strip Leaflet's default div-icon white box (the handle is the inner div). */
   :global(.leaflet-div-icon.gz-handle) { background: transparent; border: none; }
@@ -2495,9 +3148,30 @@
   /* WebKitGTK only: stretch every 256px tile by half a px so neighbors overlap — OS-level
      fractional display scaling still puts tile edges on subpixel boundaries after the #52
      rounding, and WebKitGTK antialiases the gap. !important beats Leaflet's inline size. */
-  :global(.map.tile-overlap img.leaflet-tile) {
+  :global(.map.tile-overlap img.leaflet-tile),
+  :global(.map.tile-overlap canvas.leaflet-tile) {
     width: 256.5px !important;
     height: 256.5px !important;
+  }
+  /* A custom online provider or offline map with 512 / 128 px tiles (layer class from userLayerZoom /
+     customLayerZoom; offline-map tiles are canvases): the same
+     half-pixel stretch at its own size — the 256.5 above would crop / gap its tiles. Higher
+     specificity (one class more) wins over the 256 rule, both being !important. */
+  :global(.map.tile-overlap .kite-tiles-512 img.leaflet-tile),
+  :global(.map.tile-overlap .kite-tiles-512 canvas.leaflet-tile) {
+    width: 512.5px !important;
+    height: 512.5px !important;
+  }
+  :global(.map.tile-overlap .kite-tiles-128 img.leaflet-tile),
+  :global(.map.tile-overlap .kite-tiles-128 canvas.leaflet-tile) {
+    width: 128.5px !important;
+    height: 128.5px !important;
+  }
+
+  /* Custom-map tiles are <canvas> elements (CachedTileLayer._createCustomTile): give them the same
+     Chromium seam remedy Leaflet's own CSS applies to `img.leaflet-tile` (plus-lighter). */
+  :global(.leaflet-container canvas.leaflet-tile) {
+    mix-blend-mode: plus-lighter;
   }
 
   /* Android (Chromium WebView): every tile is its own composited layer and cc snaps each layer's
@@ -2515,6 +3189,16 @@
     mix-blend-mode: normal;
     width: 257px !important;
     height: 257px !important;
+  }
+  /* The same full-pixel stretch for a custom online provider or offline map with 512 / 128 px tiles
+     (see the tile-overlap counterparts above). */
+  :global(.map.tile-snap .kite-tiles-512 .leaflet-tile) {
+    width: 513px !important;
+    height: 513px !important;
+  }
+  :global(.map.tile-snap .kite-tiles-128 .leaflet-tile) {
+    width: 129px !important;
+    height: 129px !important;
   }
 
   /* Heading-up: container size set via inline styles (JS), CSS handles only rotation.
@@ -2590,11 +3274,12 @@
     gap: 8px;
   }
 
-  /* On mobile the zoom/compass buttons sit on top of the Leaflet attribution label at the very bottom.
-     Lift the button cluster above the label (and clear of the iPad home indicator), and push the
-     attribution to the bottom-left so the two no longer collide. */
+  /* On mobile the provider credit moves to the bottom-left (below), so the button cluster can sit in
+     the corner like on the desktop and like the 3D map's cluster — clear of the iPad home indicator.
+     It used to be lifted 34 px above the credit as well; on a tablet that pushed the top button under
+     the right dock's lowest widget and left a gap below. */
   :global(html.is-mobile) .map-controls-corner {
-    bottom: calc(34px + var(--safe-bottom, 0px));
+    bottom: calc(8px + var(--safe-bottom, 0px));
   }
   :global(html.is-mobile) :global(.leaflet-control-attribution) {
     margin-bottom: var(--safe-bottom, 0px);
@@ -2679,7 +3364,7 @@
   }
 
   .map-mode-btn {
-    font-size: 13px;
+    font-size: var(--map-btn-text, 21px); /* "2D" / "3D" ≈ 75 % of the button width (app.html) */
     font-weight: 700;
     letter-spacing: 0.03em;
   }
@@ -2704,9 +3389,10 @@
     border-color: rgba(55, 168, 219, 0.75);
   }
 
+  /* The drawing fills 75 % of the button: the viewBoxes are cropped to it (app.html). */
   .heading-icon {
-    width: 45px;
-    height: 45px;
+    width: var(--map-btn-icon, 28.5px);
+    height: var(--map-btn-icon, 28.5px);
     overflow: visible;
   }
 
@@ -2746,6 +3432,82 @@
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
   }
   :global(.guided-popup-wrap .leaflet-popup-tip) { background: rgba(46, 46, 46, 0.97); }
+
+  /* Fleet (other connected vehicles) markers — heading arrow + name; armed vehicles get a halo. */
+  :global(.fleet-divicon),
+  :global(.fleet-home-divicon),
+  :global(.fleet-wp-divicon),
+  :global(.fleet-target-divicon) {
+    background: none;
+    border: none;
+  }
+  :global(.fleet-wp-divicon .fleet-wp) {
+    width: 18px;
+    height: 18px;
+    box-sizing: border-box;
+    border: 2px solid;
+    border-radius: 50%;
+    background: rgba(30, 30, 30, 0.75);
+    font: 700 9px 'Segoe UI', Tahoma, sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.85;
+  }
+  /* Fleet camera mode: same active look as follow/heading-follow. */
+  .map-heading-btn.mode-fleet {
+    background: rgba(55, 168, 219, 0.35);
+    border-color: #37a8db;
+    color: #fff;
+  }
+  .map-heading-btn.mode-fleet .heading-icon .uav-arrow { fill: currentColor; }
+
+  :global(.fleet-divicon .fleet-icon) {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.8));
+  }
+  /* Ctrl+drag selection rectangle (created imperatively → global). */
+  :global(.fleet-box-select) {
+    position: absolute;
+    z-index: 800;
+    border: 1px dashed #37a8db;
+    background: rgba(55, 168, 219, 0.15);
+    pointer-events: none;
+  }
+  /* Group-selected vehicle: a ring in the vehicle's own colour (--vc set inline by the icon html). */
+  :global(.fleet-divicon .fleet-icon.selected) {
+    border-radius: 50%;
+    box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--vc, #37a8db);
+  }
+  :global(.fleet-divicon .fleet-icon.armed) {
+    filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.9));
+  }
+  :global(.fleet-divicon .fleet-icon.fleet-model canvas) {
+    display: block;
+  }
+  :global(.fleet-divicon .fleet-label) {
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translate(-50%, 1px);
+    font: 600 10px 'Segoe UI', Tahoma, sans-serif;
+    color: #fff;
+    text-shadow: 0 0 2px #000, 0 0 2px #000, 0 1px 1px #000;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+  :global(.fleet-target-tip) {
+    background: rgba(46, 46, 46, 0.92);
+    color: #fff;
+    border: 1px solid #555;
+    font-size: 11px;
+    padding: 2px 6px;
+  }
+  :global(.fleet-target-tip::before) { border-top-color: #555; }
 
   /* Foreign-vehicle (radar) contact icons */
   :global(.radar-divicon) {

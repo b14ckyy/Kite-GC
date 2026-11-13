@@ -6,19 +6,21 @@
 <script lang="ts">
   import { t } from 'svelte-i18n';
   import { convertAltitude, convertDistance, convertSpeed, convertTemperature, formatConverted } from '$lib/utils/units';
-  import { formatDurationSec, formatFlightDateTime, flightTzLabel, missionDbForFlight, flightLoggedWpCount, flightLinkMission, flightUnlinkMission, missionDbSave, missionDbFindByHash, missionDbGeocode, flightSetBatterySerial, batteryDbFindBySerial, batteryDbList, vehicleDbList } from '$lib/stores/flightlog';
+  import { formatDurationSec, formatFlightDateTime, flightTzLabel, missionDbForFlight, flightLoggedWpCount, flightLinkMission, flightUnlinkMission, missionDbSave, missionDbFindByHash, missionDbGeocode, flightSetBatterySerial, batteryDbFindBySerial, batteryDbList, vehicleDbList, flightSetVehicle, getFlight } from '$lib/stores/flightlog';
   import type { Flight, LibraryMission, BatteryPack, Vehicle } from '$lib/stores/flightlogTypes';
   import type { InterfaceSettings } from '$lib/stores/settings';
   import { mission, missionFlags, loadedMissionId, markMissionSynced } from '$lib/stores/mission';
   import { arduMission, arduLoadedMissionId } from '$lib/stores/missionArdupilot';
   import { autopilotSystem } from '$lib/stores/autopilotContext';
   import { batteryManagerOpen, batteryManagerSelectedId, normalizeSerial, normalizeSerialInput, normalizeSerialList, serialTokens } from '$lib/stores/batteryManager';
-  import { vehicleManagerOpen, vehicleManagerSelectedId, vehicleManagerCreateCraft, normalizeCraftName } from '$lib/stores/vehicleManager';
+  import { vehicleManagerOpen, vehicleManagerSelectedId, vehicleManagerCreatePrefill, normalizeCraftName, vehicleLibraryChanged } from '$lib/stores/vehicleManager';
   import FcUidChip from '../FcUidChip.svelte';
+  import { vehiclePickLabel } from '$lib/controllers/vehicleLinkController';
   import { requestOpenMissionId } from '$lib/stores/missionManager';
   import { replayWpTotal } from '$lib/stores/navStatus';
   import { buildMissionInput } from '$lib/helpers/missionLibrary';
   import { buildArduMissionInput } from '$lib/helpers/missionLibraryArdu';
+  import { compassPointKey } from '$lib/helpers/compassPoint';
   import { get } from 'svelte/store';
   import { locale } from 'svelte-i18n';
   import WeatherEditor from './WeatherEditor.svelte';
@@ -93,11 +95,13 @@
   let craftNameEditing = $state(false);
   let craftNameDraft = $state('');
 
-  // ── Linked vehicle (soft link by craft name) ───────────────────────
-  let vehicles = $state<Vehicle[]>([]);            // library, for the match + the combobox dropdown
-  let vehicleMatch = $state<Vehicle | null>(null); // the vehicle whose craft name == this flight's, or null
-  let craftListOpen = $state(false);
-  let didLoadVehicles = false;
+  // ── Linked vehicle (the flight's stored `vehicle_id`) ──────────────
+  let vehicles = $state<Vehicle[]>([]);              // library, for the name + the picker
+  let linkedVehicleId = $state<number | null>(null); // local copy of flight.vehicle_id (survives a change)
+  let vehicleEditing = $state(false);
+  let vehicleBusy = $state(false);
+  const linkedVehicle = $derived(vehicles.find((v) => v.id === linkedVehicleId) ?? null);
+  const vehicleOptions = $derived([...vehicles].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })));
 
   let pilotEditing = $state(false);
   let pilotNameDraft = $state('');
@@ -316,7 +320,7 @@
     }
   }
 
-  // Load the vehicle library (once) + resolve the match for the current flight's craft name.
+  // The vehicle library (names + picker).
   async function loadVehicles() {
     try {
       vehicles = await vehicleDbList(dbPath);
@@ -324,76 +328,85 @@
       vehicles = [];
     }
   }
-  function resolveVehicleMatch(name: string) {
-    const q = normalizeCraftName(name).toLowerCase();
-    vehicleMatch = q
-      ? (vehicles.find((v) => (v.craft_name ?? '').trim().toLowerCase() === q) ?? null)
-      : null;
-  }
 
-  // On flight change: resolve the craft-name → vehicle link (loads the library lazily once).
+  // On flight change: take its vehicle link and refresh the library.
   $effect(() => {
-    const name = flight.craft_name ?? '';
+    linkedVehicleId = flight.vehicle_id ?? null;
     craftNameEditing = false;
-    craftListOpen = false;
-    void (async () => {
-      if (!didLoadVehicles) { didLoadVehicles = true; await loadVehicles(); }
-      resolveVehicleMatch(name);
-    })();
+    vehicleEditing = false;
+    void loadVehicles();
   });
 
-  // Dropdown of existing vehicle craft names matching the draft (deduped, like the End-Flight picker).
-  let craftDropdown = $derived.by<Vehicle[]>(() => {
-    if (!craftListOpen) return [];
-    const q = craftNameDraft.trim().toLowerCase();
-    const withCraft = vehicles.filter((v) => v.craft_name && v.craft_name.trim());
-    const matches = q
-      ? withCraft.filter((v) => v.craft_name!.toLowerCase().includes(q) || v.name.toLowerCase().includes(q))
-      : withCraft;
-    const seen = new Set<string>();
-    const out: Vehicle[] = [];
-    for (const v of matches) {
-      const key = v.craft_name!.trim().toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push(v);
-    }
-    return out.slice(0, 8);
+  // The library changed elsewhere (Vehicle Manager save / delete, UAV Info save): refresh the names and
+  // re-read this flight's link (a vehicle created from this flight links it; a delete un-links it). The
+  // run on mount reads it too: the `flight` prop is only reloaded when a flight is selected, so after a
+  // remount (Vehicle Manager and back, tab switch) it may predate a link change made since.
+  let seenLibraryChange = -1;
+  $effect(() => {
+    const n = $vehicleLibraryChanged;
+    if (n === seenLibraryChange) return;
+    seenLibraryChange = n;
+    const id = flight.id;
+    void (async () => {
+      await loadVehicles();
+      try {
+        const f = await getFlight(id, dbPath);
+        if (f && f.id === flight.id) linkedVehicleId = f.vehicle_id ?? null;
+      } catch {
+        // keep the local link
+      }
+    })();
   });
 
   function startCraftNameEdit() {
     craftNameDraft = flight.craft_name ?? '';
     craftNameEditing = true;
-    craftListOpen = true;
   }
 
+  // A correction of the recorded name only — the vehicle link is set separately below.
   function saveCraftName() {
     craftNameEditing = false;
-    craftListOpen = false;
     onSaveCraftName(normalizeCraftName(craftNameDraft));
-  }
-
-  function pickCraft(name: string) {
-    craftNameDraft = name;
-    saveCraftName();
   }
 
   function cancelCraftNameEdit() {
     craftNameEditing = false;
-    craftListOpen = false;
   }
 
-  // Jump to the matched vehicle in the Vehicle Manager (reverse of the vehicle's linked-flights jump).
+  // Link the flight to another vehicle, or to none.
+  async function changeVehicle(e: Event) {
+    const raw = (e.currentTarget as HTMLSelectElement).value;
+    const next = raw === '' ? null : Number(raw);
+    vehicleEditing = false;
+    if (next === linkedVehicleId) return;
+    vehicleBusy = true;
+    const id = flight.id;
+    try {
+      await flightSetVehicle(id, next, dbPath);
+      if (flight.id === id) linkedVehicleId = next;
+    } catch (err) {
+      console.warn('[flight-detail] vehicle link failed', err);
+    } finally {
+      vehicleBusy = false;
+    }
+  }
+
+  function startVehicleEdit() {
+    vehicleEditing = true;
+    void loadVehicles();
+  }
+
+  // Jump to the linked vehicle in the Vehicle Manager (reverse of the vehicle's linked-flights jump).
   function openVehicle() {
-    if (!vehicleMatch) return;
-    vehicleManagerSelectedId.set(vehicleMatch.id);
+    if (!linkedVehicle) return;
+    vehicleManagerSelectedId.set(linkedVehicle.id);
     vehicleManagerOpen.set(true);
   }
 
-  // Open the Vehicle Manager's create form pre-filled with this flight's craft name (unmatched craft).
-  function createVehicleFromCraft() {
-    if (!flight.craft_name) return;
-    vehicleManagerCreateCraft.set(flight.craft_name);
+  // Open the Vehicle Manager's create form pre-filled from this flight (craft name, FC id); the flight
+  // is linked to the new vehicle when it is saved.
+  function createVehicleFromFlight() {
+    vehicleManagerCreatePrefill.set({ craftName: flight.craft_name ?? '', fcUid: flight.fc_uid, flightId: flight.id });
     vehicleManagerOpen.set(true);
   }
 
@@ -464,8 +477,7 @@
   }
 
   function windDegToLabel(deg: number): string {
-    const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
-    return dirs[Math.round(deg / 45) % 8];
+    return $t(compassPointKey(deg));
   }
 
   function formatFlightSource(source: string): string {
@@ -495,39 +507,35 @@
     <span class="fc-label">{$t('logbook.craft')}</span>
     <span class="fc-value craft-value-row">
       {#if craftNameEditing}
-        <span class="craft-combo">
-          <input
-            class="craft-name-input"
-            type="text"
-            bind:value={craftNameDraft}
-            onfocus={() => (craftListOpen = true)}
-            oninput={() => (craftListOpen = true)}
-            onkeydown={(e: KeyboardEvent) => { if (e.key === 'Enter') saveCraftName(); if (e.key === 'Escape') cancelCraftNameEdit(); }}
-            onblur={() => setTimeout(() => { if (craftNameEditing) saveCraftName(); }, 150)}
-            use:focusOnMount
-          />
-          {#if craftListOpen && craftDropdown.length > 0}
-            <ul class="craft-dropdown">
-              {#each craftDropdown as v (v.id)}
-                <li>
-                  <button type="button" class="craft-opt" onmousedown={(e) => { e.preventDefault(); pickCraft(v.craft_name ?? ''); }}>
-                    <span class="co-craft">{v.craft_name}</span>
-                    <span class="co-meta">{v.name}</span>
-                  </button>
-                </li>
-              {/each}
-            </ul>
-          {/if}
-        </span>
-      {:else if flight.craft_name && vehicleMatch}
-        <Button variant="compact" icon="drone" onclick={openVehicle} title={$t('logbook.openVehicle')}>{vehicleMatch.name}</Button>
-        {#if editable}<button class="weather-edit-btn" onclick={startCraftNameEdit} title={$t('logbook.editCraftName')}>✎</button>{/if}
+        <input
+          class="craft-name-input"
+          type="text"
+          bind:value={craftNameDraft}
+          onkeydown={(e: KeyboardEvent) => { if (e.key === 'Enter') saveCraftName(); if (e.key === 'Escape') cancelCraftNameEdit(); }}
+          onblur={() => { if (craftNameEditing) saveCraftName(); }}
+          use:focusOnMount
+        />
       {:else}
         <span>{flight.craft_name || $t('logbook.unnamedCraft')}</span>
-        {#if flight.craft_name && editable}
-          <Button variant="compact" icon="add" onclick={createVehicleFromCraft} title={$t('logbook.createVehicleTip')}>{$t('logbook.createVehicle')}</Button>
-        {/if}
         {#if editable}<button class="weather-edit-btn" onclick={startCraftNameEdit} title={$t('logbook.editCraftName')}>✎</button>{/if}
+      {/if}
+    </span>
+    <span class="fc-label">{$t('logbook.vehicle')}</span>
+    <span class="fc-value craft-value-row">
+      {#if vehicleEditing}
+        <select class="platform-select" value={linkedVehicleId ?? ''} onchange={changeVehicle} onblur={() => (vehicleEditing = false)} disabled={vehicleBusy} use:focusOnMount>
+          <option value="">{$t('logbook.vehicleNone')}</option>
+          {#each vehicleOptions as v (v.id)}<option value={v.id}>{vehiclePickLabel(v)}</option>{/each}
+        </select>
+      {:else if linkedVehicle}
+        <Button variant="compact" icon="drone" onclick={openVehicle} title={$t('logbook.openVehicle')}>{linkedVehicle.name}</Button>
+        {#if editable}<button class="weather-edit-btn" onclick={startVehicleEdit} title={$t('logbook.editVehicle')}>✎</button>{/if}
+      {:else}
+        <span class="vehicle-none">{$t('logbook.notInLibrary')}</span>
+        {#if editable}
+          <Button variant="compact" icon="add" onclick={createVehicleFromFlight} title={$t('logbook.createVehicleTip')}>{$t('logbook.createVehicle')}</Button>
+          <button class="weather-edit-btn" onclick={startVehicleEdit} title={$t('logbook.editVehicle')}>✎</button>
+        {/if}
       {/if}
     </span>
     <span class="fc-label">{$t('logbook.type')}</span>
@@ -807,23 +815,7 @@
     border-color: #37a8db;
   }
 
-  /* Craft-name combobox: filter input + dropdown of existing vehicle craft names. */
-  .craft-combo { position: relative; flex: 1; min-width: 0; }
-  .craft-dropdown {
-    position: absolute; top: 100%; left: 0; right: 0; z-index: 10;
-    margin: 2px 0 0; padding: 4px; list-style: none;
-    max-height: 180px; overflow-y: auto;
-    background: #262626; border: 1px solid #444; border-radius: 4px;
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
-  }
-  .craft-opt {
-    display: flex; align-items: baseline; gap: 8px; width: 100%;
-    padding: 5px 8px; border: none; border-radius: 3px; background: transparent;
-    color: #e0e0e0; font-size: 12px; text-align: left; cursor: pointer;
-  }
-  .craft-opt:hover { background: rgba(55, 168, 219, 0.18); }
-  .co-craft { font-weight: 600; }
-  .co-meta { color: #949494; font-size: 11px; }
+  .vehicle-none { color: #949494; font-weight: 400; }
 
   /* Matches the app's dark form-control convention; color-scheme:dark keeps the native
      option popup dark too (it's rendered by the WebView outside the DOM). */

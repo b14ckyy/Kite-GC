@@ -745,9 +745,12 @@ function splitMultiMission(wps: Waypoint[]): Waypoint[][] {
  *  (split on the end-of-mission flags); we rebuild the slot model from it and select the active mission
  *  from `nav_wp_multi_mission_index`. A single-mission FC reads back as one slot. */
 export async function missionDownload(fromEeprom = false): Promise<Mission> {
+  // The active index first, and without a fallback: a failed read (lossy link) must fail the download
+  // visibly rather than select mission 1 while the FC flies another — and before anything is loaded.
+  // (The backend already returns 1 when the setting simply doesn't exist.)
+  const activeIdx = await invoke<number>('mission_get_active_index');
   const full = await invoke<Mission>('mission_download', { fromEeprom });
   const segments = splitMultiMission(full.waypoints);
-  const activeIdx = await invoke<number>('mission_get_active_index').catch(() => 1);
 
   // Rebuild the multi-mission slot model from the FC's combined list.
   missionSlots.clear();

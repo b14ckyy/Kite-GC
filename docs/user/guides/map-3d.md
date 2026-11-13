@@ -20,15 +20,22 @@ mission overlay.
 ## Real-world terrain & imagery
 
 3D terrain comes from **Cesium World Terrain**, which needs a **free Cesium Ion token**. Kite prompts you
-for one the first time you open 3D; paste it once (or add it later in **Settings → Data**) and the globe
+for one the first time you open 3D; paste it once (or add it later in **Settings → Map → Providers**) and the globe
 shows true elevation. Without a token the 3D view still works — you just don't get real-world terrain
 relief. The surface **imagery** is whatever map/tile provider you've chosen for the 2D map, draped over
-the terrain.
+the terrain — that can also be one of your **[custom online providers](custom-maps.md#custom-online-providers)** or, on
+the desktop, a **[custom map](custom-maps.md#custom-maps-from-a-folder)** read from disk.
+
+With a token you can also switch on **3D Buildings (OSM)** in **Settings → Map → 3D View**: the
+OpenStreetMap buildings, streamed from Cesium Ion, stand on the globe as extruded blocks. The option
+is off by default and stays greyed out without a token.
 
 !!! warning "3D needs an internet connection"
     The terrain mesh is streamed live from Cesium and is **not** cached for offline use — this is a
     design limitation. In the field without a connection, the 2D map (whose tiles *are* cached) is the
-    offline-capable view. See the [offline notes](../troubleshooting/connection.md).
+    offline-capable view. See the [offline notes](../troubleshooting/connection.md). A
+    [custom map](custom-maps.md#custom-maps-from-a-folder) supplies the 3D imagery from disk, but the terrain still needs the
+    connection.
 
 ## The flight track in 3D
 
@@ -42,10 +49,11 @@ depends on whether you're flying or reviewing:
 
 To make height legible the track gets:
 
-- a clean line with a dark **outline**,
-- a translucent **ground shadow** draped on the terrain directly below it, and
-- an **altitude curtain** — a vertical wall from the track down to the ground (toggle it in **Settings →
-  Interface → Map → Altitude Curtain (3D)**).
+- a clean line with a dark **outline**, and
+- a translucent **ground shadow** draped on the terrain directly below it.
+
+On top of that you can switch on an **altitude curtain** — a vertical wall from the track down to the
+ground — in **Settings → Map → 3D View → Altitude Curtain (3D)**. It is off by default.
 
 The track uses the aircraft's smooth fused-altitude source, so it doesn't stair-step. The live trail
 grows behind the aircraft (with a thin ground-clamped trail shown before arming).
@@ -103,12 +111,21 @@ The 3D map mirrors the rest of Kite's overlays, each placed at real altitude:
 
 ## Settings worth knowing
 
-In **Settings → Interface → Map**:
+In **Settings → Map → 3D View**:
 
-- **Altitude Curtain (3D)** — the vertical wall under the track (above).
+- **Altitude Curtain (3D)** — the vertical wall under the track (above); off by default.
+- **3D Buildings (OSM)** — OpenStreetMap building extrusions on the globe; needs the Cesium Ion token
+  (above).
 - **Real Daytime and Lighting (3D)** — light the globe with the real sun position (day/night, shadows).
 - **Log Replay Time (3D)** — during replay, drive that lighting from the log's actual time of day, so a
   dusk flight looks like dusk.
+- **High-Resolution 3D** — render the globe at the display's native pixel density (on) or at half
+  of it (off). On by default on the desktop, off on phones and tablets; switch it on for a sharp
+  globe on a high-DPI screen, off to give a weak integrated GPU room (one laptop went from 30 to
+  55 fps with video running).
+
+In **Settings → Interface → Display**:
+
 - **Power Saving** — cap the 3D frame rate to save battery: **Off (60 fps)**, **On (20 fps)** or
   **Auto** (20 fps on battery). Helpful on laptops and tablets. While active it also drops the smooth
   bar animations in the speed and battery widgets (they jump straight to the current value) and the
@@ -116,10 +133,6 @@ In **Settings → Interface → Map**:
   while the map moves, so this saves noticeable CPU and GPU during a flight; the readings are unchanged.
   On phones and tablets the glass blur of the widgets, buttons and chips over the map is always off
   (only the panels keep it), because it was the single biggest rendering cost there.
-- **High-Resolution 3D** — render the globe at the display's native pixel density (on) or at half
-  of it (off). On by default on the desktop, off on phones and tablets; switch it on for a sharp
-  globe on a high-DPI screen, off to give a weak integrated GPU room (one laptop went from 30 to
-  55 fps with video running).
 
 ## Where to go next
 

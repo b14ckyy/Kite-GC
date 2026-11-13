@@ -113,7 +113,7 @@ impl RadarSource for AdsbOnlineSource {
             // came back 429 while a new TLS connection per request never did (same IP, same minute).
             // One handshake per poll is nothing next to the JSON payload.
             let client = reqwest::Client::builder()
-                .user_agent("Kite-GC/0.5 radar")
+                .user_agent(crate::user_agent::user_agent("radar"))
                 .timeout(Duration::from_secs(10))
                 .pool_max_idle_per_host(0)
                 .build()

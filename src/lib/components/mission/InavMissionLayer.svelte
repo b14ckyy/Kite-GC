@@ -34,6 +34,7 @@
   import type { InterfaceSettings } from '$lib/stores/settings';
   import { convertAltitude, toAltitudeM, convertSpeed, toSpeedMs } from '$lib/utils/units';
   import { inavWpDetailLines } from '$lib/helpers/missionWpDetails';
+  import { numInputHtml as sharedNumInputHtml, newPopupState, renderEditorPopup, closeEditorPopup, deferWhileStepping } from '$lib/helpers/missionEditorPopup.svelte';
   import { t } from 'svelte-i18n';
 
   const IFACE_FALLBACK: InterfaceSettings = {
@@ -148,11 +149,10 @@
   let flightPath: L.Polyline | undefined;
   let modifierLines: L.Polyline[] = [];
   let paramLabels: L.Marker[] = [];
-  let editorPopup: L.Popup | undefined;
-  let editorPopupIdx: number = -1;
+  /** The WP editor popup — lifecycle, redraw guard and mounted steppers live in the shared helper. */
+  const popupState = newPopupState();
   // Content signature for the redraw guard: only rewrite the popup DOM when the rendered HTML changes,
   // so unrelated map redraws don't tear down an open dropdown (shared concept with missionEditorPopup).
-  let editorPopupHtml = '';
 
   function buildDisplayNumbers(waypoints: Waypoint[]): Map<number, number> {
     const nums = new Map<number, number>();
@@ -231,33 +231,12 @@
     return L.marker(latLng, { icon, interactive: false });
   }
 
-  function numInputHtml(field: string, value: number, step: number, min?: number, max?: number, modIdx?: number): string {
+  /** The shared popup stepper (a mounted `NumberStepper`, `helpers/missionEditorPopup.svelte.ts`) with
+   *  this layer's data-attribute convention. The unit shows inside the field. */
+  function numInputHtml(field: string, value: number, step: number, min?: number, max?: number, modIdx?: number,
+    unit = '', decimals = 0): string {
     const dataAttrs = modIdx !== undefined ? `data-field="${field}" data-mod-idx="${modIdx}"` : `data-field="${field}"`;
-    const minAttr = min !== undefined ? `min="${min}"` : '';
-    const maxAttr = max !== undefined ? `max="${max}"` : '';
-    return `<div class="wpe-num-ctrl"><button class="wpe-num-btn" data-numdir="-1" ${dataAttrs}>−</button><input type="number" ${dataAttrs} value="${value}" step="${step}" ${minAttr} ${maxAttr}/><button class="wpe-num-btn" data-numdir="1" ${dataAttrs}>+</button></div>`;
-  }
-
-  function attachNumBtnEvents(el: HTMLElement) {
-    el.querySelectorAll('.wpe-num-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const b = btn as HTMLElement;
-        const parent = b.closest('.wpe-num-ctrl');
-        if (!parent) return;
-        const input = parent.querySelector('input') as HTMLInputElement;
-        if (!input) return;
-        const dir = Number(b.dataset.numdir);
-        const step = Number(input.step) || 1;
-        const min = input.min !== '' ? Number(input.min) : -Infinity;
-        const max = input.max !== '' ? Number(input.max) : Infinity;
-        let val = Number(input.value) + dir * step;
-        val = Math.max(min, Math.min(max, val));
-        input.value = String(val);
-        input.dispatchEvent(new Event('change', { bubbles: true }));
-      });
-    });
+    return sharedNumInputHtml(dataAttrs, value, { step, min, max, unit, decimals });
   }
 
   function buildEditorHtml(wp: Waypoint, idx: number, total: number, displayNum: number,
@@ -271,7 +250,7 @@
     let html = `<div class="wp-editor-popup">`;
     html += `<div class="wpe-header">${$t('missionLayer.wpHeader', { values: { number: displayNum } })} <span class="wpe-type-name">${$t(WP_ACTION_KEYS[wp.action])}</span></div>`;
     html += `<div class="wpe-row"><label>${$t('missionLayer.type')}</label><select data-field="action">${typeOptions}</select></div>`;
-    html += `<div class="wpe-row"><label>${$t('missionLayer.alt')}</label>${numInputHtml('altitude', altVal, 1)}<span class="wpe-unit">${altC.unit}</span><button data-field="altToggle" class="wpe-toggle">${altType}</button></div>`;
+    html += `<div class="wpe-row"><label>${$t('missionLayer.alt')}</label>${numInputHtml('altitude', altVal, 1, undefined, undefined, undefined, altC.unit)}<button data-field="altToggle" class="wpe-toggle">${altType}</button></div>`;
 
     const latDeg = toDeg(wp.lat).toFixed(7);
     const lonDeg = toDeg(wp.lon).toFixed(7);
@@ -280,10 +259,10 @@
 
     if (wp.action === WpAction.Waypoint || wp.action === WpAction.Land) {
       const spd = spdDisp(wp.p1);
-      html += `<div class="wpe-row"><label>${$t('missionLayer.speed')}</label>${numInputHtml('p1', Math.round(spd.value * 10) / 10, 1, 0)}<span class="wpe-unit">${spd.unit}</span></div>`;
+      html += `<div class="wpe-row"><label>${$t('missionLayer.speed')}</label>${numInputHtml('p1', Math.round(spd.value * 10) / 10, 1, 0, undefined, undefined, spd.unit, 1)}</div>`;
     }
     if (wp.action === WpAction.PosholdTime) {
-      html += `<div class="wpe-row"><label>${$t('missionLayer.hold')}</label>${numInputHtml('p1', wp.p1, 1, 0)}<span class="wpe-unit">${$t('missionLayer.sec')}</span></div>`;
+      html += `<div class="wpe-row"><label>${$t('missionLayer.hold')}</label>${numInputHtml('p1', wp.p1, 1, 0, undefined, undefined, $t('missionLayer.sec'))}</div>`;
     }
 
     if (wp.action === WpAction.Waypoint || wp.action === WpAction.PosholdUnlim ||
@@ -307,10 +286,10 @@
       }
       if (mod.wp.action === WpAction.Jump) {
         html += `<div class="wpe-row"><label>${$t('missionLayer.toWp')}</label>${numInputHtml('mod-p1', mod.wp.p1, 1, 1, undefined, mi)}</div>`;
-        html += `<div class="wpe-row"><label>${$t('mission.repeat')}</label>${numInputHtml('mod-p2', mod.wp.p2, 1, -1, undefined, mi)}<span class="wpe-unit">${mod.wp.p2 === -1 ? '∞' : ''}</span></div>`;
+        html += `<div class="wpe-row"><label>${$t('mission.repeat')}</label>${numInputHtml('mod-p2', mod.wp.p2, 1, -1, undefined, mi, mod.wp.p2 === -1 ? '∞' : '')}</div>`;
       }
       if (mod.wp.action === WpAction.SetHead) {
-        html += `<div class="wpe-row"><label>${$t('missionLayer.headingField')}</label>${numInputHtml('mod-p1', mod.wp.p1, 1, -1, 359, mi)}<span class="wpe-unit">${mod.wp.p1 === -1 ? $t('missionLayer.free') : '°'}</span></div>`;
+        html += `<div class="wpe-row"><label>${$t('missionLayer.headingField')}</label>${numInputHtml('mod-p1', mod.wp.p1, 1, -1, 359, mi, mod.wp.p1 === -1 ? $t('missionLayer.free') : '°')}</div>`;
       }
       html += `</div>`;
     }
@@ -327,13 +306,13 @@
       html += `<div class="wpe-mod-section wpe-fbh-section">`;
       html += `<div class="wpe-mod-header">${$t('mission.flagFbh')} (${$t('missionLayer.wpHeader', { values: { number: fbhChild.num } })})<button data-action="removeFbh" class="wpe-mod-remove" title="${$t('missionLayer.removeWp')}">✕</button></div>`;
       html += `<div class="wpe-row"><label>${$t('missionLayer.type')}</label><select data-field="fbh-action">${fbhTypeOptions}</select></div>`;
-      html += `<div class="wpe-row"><label>${$t('missionLayer.alt')}</label>${numInputHtml('fbh-altitude', fAltVal, 1)}<span class="wpe-unit">${fAltC.unit}</span><button data-field="fbh-altToggle" class="wpe-toggle">${fAltType}</button></div>`;
+      html += `<div class="wpe-row"><label>${$t('missionLayer.alt')}</label>${numInputHtml('fbh-altitude', fAltVal, 1, undefined, undefined, undefined, fAltC.unit)}<button data-field="fbh-altToggle" class="wpe-toggle">${fAltType}</button></div>`;
       if (f.action === WpAction.Waypoint || f.action === WpAction.Land) {
         const fSpd = spdDisp(f.p1);
-        html += `<div class="wpe-row"><label>${$t('missionLayer.speed')}</label>${numInputHtml('fbh-p1', Math.round(fSpd.value * 10) / 10, 1, 0)}<span class="wpe-unit">${fSpd.unit}</span></div>`;
+        html += `<div class="wpe-row"><label>${$t('missionLayer.speed')}</label>${numInputHtml('fbh-p1', Math.round(fSpd.value * 10) / 10, 1, 0, undefined, undefined, fSpd.unit, 1)}</div>`;
       }
       if (f.action === WpAction.PosholdTime) {
-        html += `<div class="wpe-row"><label>${$t('missionLayer.hold')}</label>${numInputHtml('fbh-p1', f.p1, 1, 0)}<span class="wpe-unit">${$t('missionLayer.sec')}</span></div>`;
+        html += `<div class="wpe-row"><label>${$t('missionLayer.hold')}</label>${numInputHtml('fbh-p1', f.p1, 1, 0, undefined, undefined, $t('missionLayer.sec'))}</div>`;
       }
       const fua1 = (f.p3 >> 1) & 1; const fua2 = (f.p3 >> 2) & 1;
       const fua3 = (f.p3 >> 3) & 1; const fua4 = (f.p3 >> 4) & 1;
@@ -426,8 +405,6 @@
         missionUpdateWp(idx, { ...wp, p3: wp.p3 ^ (1 << bit) });
       });
     });
-
-    attachNumBtnEvents(el);
 
     for (const mod of modifiers) {
       const mi = mod.idx;
@@ -539,14 +516,11 @@
     // During the survey pattern generator the mission stays visible but its waypoints go
     // non-interactive (no drag / popup / path-insert / map-add) — consistent with the Ardu layer.
     const patternActive = activeSurveyPattern.isActive;
-    const keepPopup = editing && !patternActive && editorPopup && editorPopupIdx === selIdx && selIdx >= 0;
+    const keepPopup = editing && !patternActive && popupState.popup && popupState.anchorKey === selIdx && selIdx >= 0;
     missionGroup.clearLayers();
     wpMarkers = []; modifierLines = []; paramLabels = [];
 
-    if (!keepPopup) {
-      if (editorPopup) map.removeLayer(editorPopup);
-      editorPopup = undefined; editorPopupIdx = -1; editorPopupHtml = '';
-    }
+    if (!keepPopup) closeEditorPopup(map, popupState);
     // In replay the mission follows the "Show Mission" toggle; in planning/live
     // a loaded mission is always shown.
     if (currentReplayActive && !currentShowMission) return;
@@ -639,37 +613,27 @@
         }
 
         if (editing && primaryForPopup && !greyed && !patternActive) {
-          const htmlContent = buildEditorHtml(wp, i, m.waypoints.length, dn, modifiers, fbhChild);
-          const doAttach = () => setTimeout(() => { if (editorPopup) attachEditorEvents(editorPopup, wp, i, modifiers, fbhChild); }, 50);
-          if (keepPopup && editorPopup) {
-            editorPopup.setLatLng(latLng);
-            // Redraw guard: rewrite + re-wire only when the content actually changed, so unrelated map
-            // redraws (telemetry/home ticks) don't close an open dropdown mid-interaction.
-            if (htmlContent !== editorPopupHtml) {
-              const contentEl = editorPopup.getElement()?.querySelector('.leaflet-popup-content');
-              if (contentEl) { contentEl.innerHTML = htmlContent; editorPopupHtml = htmlContent; doAttach(); }
-            }
-          } else {
-            if (editorPopup) map.removeLayer(editorPopup);
-            // autoPan off: Leaflet's default only fits the popup into the map *container*,
-            // ignoring the panels/widgets overlapping the edges — which dumps the WP at the
-            // edge (worse at higher UI scale). We pan it into the visible area ourselves.
-            editorPopup = L.popup({
-              closeButton: false, autoClose: false, closeOnClick: false, autoPan: false,
-              className: 'wp-editor-popup-container', offset: L.point(0, -30), maxWidth: 240, minWidth: 190,
-            }).setLatLng(latLng).setContent(htmlContent).addTo(map);
-            editorPopupHtml = htmlContent;
-            // Center the freshly selected WP in the visible area: biased right (clears the
-            // mission panel on the left) and below centre (the editor popup opens upward, so
-            // this leaves it roughly centred, above the player/widgets at the bottom). The
-            // map is unzoomed, so this pixel math is independent of the global UI scale.
-            const size = map.getSize();
-            const wpPt = map.latLngToContainerPoint(latLng);
-            const targetPt = L.point(size.x * 0.55, size.y * 0.6);
-            map.panBy(wpPt.subtract(targetPt), { animate: true });
-            doAttach();
-          }
-          editorPopupIdx = selIdx;
+          renderEditorPopup(
+            map, popupState, selIdx, latLng,
+            buildEditorHtml(wp, i, m.waypoints.length, dn, modifiers, fbhChild),
+            (popup) => attachEditorEvents(popup, wp, i, modifiers, fbhChild),
+            {
+              // autoPan off: Leaflet's default only fits the popup into the map *container*,
+              // ignoring the panels/widgets overlapping the edges — which dumps the WP at the
+              // edge (worse at higher UI scale). We pan it into the visible area ourselves.
+              popupOptions: { autoPan: false },
+              // Center the freshly selected WP in the visible area: biased right (clears the
+              // mission panel on the left) and below centre (the editor popup opens upward, so
+              // this leaves it roughly centred, above the player/widgets at the bottom). The
+              // map is unzoomed, so this pixel math is independent of the global UI scale.
+              onCreate: (_popup, ll) => {
+                const size = map.getSize();
+                const wpPt = map.latLngToContainerPoint(ll);
+                const targetPt = L.point(size.x * 0.55, size.y * 0.6);
+                map.panBy(wpPt.subtract(targetPt), { animate: true });
+              },
+            },
+          );
         }
 
         if (!editing) {
@@ -886,14 +850,18 @@
   // svelte-ignore state_referenced_locally
   map.on('zoomend', onMapZoomRerender);
 
-  $effect(() => { void currentLaunch; void currentSelSet; void currentShowMission; void currentReplayActive; void currentActiveWp; void activeSurveyPattern.isActive; renderMission(currentMission, currentSelIdx, currentEditing); });
+  $effect(() => {
+    void currentLaunch; void currentSelSet; void currentShowMission; void currentReplayActive; void currentActiveWp; void activeSurveyPattern.isActive;
+    const render = () => renderMission(currentMission, currentSelIdx, currentEditing);
+    if (!deferWhileStepping(popupState, render)) render();
+  });
 
   onDestroy(() => {
     unsubMission(); unsubSelIdx(); unsubSelSet(); unsubEditMode(); unsubShowMission(); unsubReplayActive(); unsubLaunch(); unsubHomeLocked(); unsubActiveWp();
     if (launchMarker) { try { map.removeLayer(launchMarker); } catch {} launchMarker = undefined; }
     map.off('click', onMapClick);
     map.off('zoomend', onMapZoomRerender);
-    if (editorPopup) { map.removeLayer(editorPopup); editorPopup = undefined; }
+    closeEditorPopup(map, popupState);
     missionGroup.clearLayers();
     map.removeLayer(missionGroup);
   });
@@ -949,15 +917,10 @@
   :global(.wpe-type-name) { color: #888; font-weight: normal; font-size: 12px; margin-left: 4px; }
   :global(.wpe-row) { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
   :global(.wpe-row label) { width: 52px; color: #888; font-size: 12px; flex-shrink: 0; }
-  :global(.wpe-row input) { background: #2a2a2a; color: #ccc; border: 1px solid #555; border-radius: 0; padding: 3px 4px; font-size: 13px; width: 52px; text-align: center; appearance: textfield; -moz-appearance: textfield; }
-  :global(.wpe-row input::-webkit-inner-spin-button), :global(.wpe-row input::-webkit-outer-spin-button) { -webkit-appearance: none; margin: 0; }
-  :global(.wpe-row input:focus) { border-color: #37a8db; outline: none; }
+  :global(.wpe-row input:not(.ns-input)) { background: #2a2a2a; color: #ccc; border: 1px solid #555; border-radius: 0; padding: 3px 4px; font-size: 13px; width: 52px; text-align: center; appearance: textfield; -moz-appearance: textfield; }
+  :global(.wpe-row input:not(.ns-input)::-webkit-inner-spin-button), :global(.wpe-row input:not(.ns-input)::-webkit-outer-spin-button) { -webkit-appearance: none; margin: 0; }
+  :global(.wpe-row input:not(.ns-input):focus) { border-color: #37a8db; outline: none; }
   :global(.wpe-coord-input) { width: 110px !important; text-align: right !important; }
-  :global(.wpe-num-ctrl) { display: flex; align-items: stretch; border-radius: 4px; overflow: hidden; border: 1px solid #555; }
-  :global(.wpe-num-ctrl input) { border: none; border-left: 1px solid #555; border-right: 1px solid #555; border-radius: 0; }
-  :global(.wpe-num-btn) { background: #333; color: #aaa; border: none; width: 24px; cursor: pointer; font-size: 14px; font-weight: bold; line-height: 1; display: flex; align-items: center; justify-content: center; padding: 0; user-select: none; }
-  :global(.wpe-num-btn:hover) { background: #37a8db; color: #fff; }
-  :global(.wpe-num-btn:active) { background: #2980b9; }
   :global(.wpe-row select) { background: #2a2a2a; color: #ccc; border: 1px solid #555; border-radius: 3px; padding: 3px 4px; font-size: 13px; flex: 1; }
   :global(.wpe-toggle) { background: #2a2a2a; color: #ccc; border: 1px solid #555; border-radius: 3px; padding: 3px 8px; font-size: 12px; cursor: pointer; }
   :global(.wpe-toggle:hover) { background: #3a3a3a; }

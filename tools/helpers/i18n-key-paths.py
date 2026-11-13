@@ -4,7 +4,7 @@
 # This script reads the English locale JSON file, builds a dictionary of nested paths for all keys, and writes
 # the result to an output JSON file -- locales/xx.json.
 #
-# Usage: python tools/i18n-key-paths.py
+# Usage: python tools/helpers/i18n-key-paths.py
 #
 # Then add the xx 'locale' to lib/i18n/index.ts
 #

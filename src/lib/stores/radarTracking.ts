@@ -11,6 +11,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { haversineDistance, bearing } from '$lib/utils/geo';
 import { isHiddenCategory } from '$lib/helpers/radar3d';
+import type { AdsbLocalSource, RadarFormationFlightSettings } from '$lib/stores/settings';
 
 // ── Types (mirror the Rust serde output) ────────────────────────────
 
@@ -123,14 +124,14 @@ export interface RadarBackendConfig {
   adsb: {
     enabled: boolean;
     online: { name: string; url: string; apiKey?: string; enabled: boolean }[];
-    local: { name: string; transport: string; port: string; baud: number; host?: string; tcpPort?: number; enabled: boolean }[];
+    local: AdsbLocalSource[];
     mspFromFc: boolean;
     radiusKm: number;
     pollSec: number;
     /** `[lat, lon]` query centre (resolved user location), or null. */
     center: [number, number] | null;
   };
-  formationFlight: { enabled: boolean; port: string; baud: number; nodeName: string };
+  formationFlight: RadarFormationFlightSettings;
 }
 
 /** Push the radar config to the backend (starts/stops the pipeline). Idempotent. */

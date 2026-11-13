@@ -50,7 +50,9 @@ Kite Ground Control flying in 3D mode.
 
 ## Supported setups
 
-- **Autopilots:** INAV (7.0+), ArduPilot, and PX4.
+- **Platforms:** Windows, Linux and macOS, Android phones and tablets, and iPhone / iPad (built from
+  source for now — see **[Installation](getting-started/installation.md)**).
+- **Autopilots:** INAV (7.0+), ArduPilot (4.1+), and PX4.
 - **Aircraft:** fixed-wing, flying-wing, VTOL, multirotor, helicopter, rover, boat.
 - **Connections:** USB / serial, Bluetooth (SPP & BLE), TCP, and UDP.
 - **Link modes:** live control link, **passive** listen-only telemetry, or a **relay** that
@@ -68,7 +70,7 @@ Everything you'd expect from a ground station:
 - **Mission planning** — create, upload, download and edit missions; undo/redo; survey-pattern
   generator; terrain-following / AGL waypoints.
 - **[Vehicle control](guides/vehicle-control.md)** — arm/disarm, flight-mode changes, takeoff/RTL/loiter and more (ArduPilot/PX4).
-- **Comfort** — a multi-language interface (English, German, French, Chinese and Bulgarian; more
+- **Comfort** — a multi-language interface (English, German, French, Chinese, Bulgarian, Slovak and Spanish; more
   community translations welcome) and
   persistent window, layout and settings between sessions.
 
@@ -79,8 +81,9 @@ Everything you'd expect from a ground station:
 - **Terrain awareness** — AGL (above-ground) waypoints, a terrain-profile analysis for your mission,
   and live *terrain radar* / AGL widgets in flight.
 - **Flight Logbook** — a full flight logbook no other GCS offers: automatic recording with replay,
-  plus import of INAV blackbox, **ArduPilot Dataflash**, MAVLink `.tlog`, and **MWPTools-compatible
-  raw-MSP** logs — unified into one searchable flight history.
+  plus import of INAV blackbox, **ArduPilot Dataflash**, **PX4 ULog**, MAVLink `.tlog`, and
+  **MWPTools-compatible raw-MSP** logs — unified into one searchable flight history, with a
+  full-rate **high-resolution replay** of stored onboard logs.
 - **Fleet (Vehicle) Manager** — a build sheet per aircraft (airframe, propulsion, FC, sensors, photo)
   with lifetime statistics and records, auto-linked to your flights; export/import as `.kvehicle`.
 - **Battery Manager** — track each pack by serial: cycles, lifetime usage and health, with
@@ -93,6 +96,8 @@ Everything you'd expect from a ground station:
   map ⇄ video swapping.
 - **Telemetry relay** — re-encode and forward live telemetry to other ground stations, handsets, or an
   antenna tracker.
+- **[Telemetry API](reference/telemetry-api.md)** — serve the live telemetry as JSON to your own
+  programs and scripts (TCP stream, HTTP snapshot, UDP).
 - **RC control** — fly from the GCS with a gamepad/joystick (HID).
 - **RF link analysis** — visualise signal quality to find the best antenna setup.
 

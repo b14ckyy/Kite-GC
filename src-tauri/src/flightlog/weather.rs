@@ -34,7 +34,9 @@ pub struct WeatherData {
 /// Returns None on error — never blocks the recorder.
 pub async fn fetch_weather(lat: f64, lon: f64) -> Option<WeatherData> {
     let client = reqwest::Client::builder()
-        .user_agent("KiteGC/0.3.0")
+        .user_agent(crate::user_agent::user_agent("weather"))
+        // Callers await the result inline (flight selection, the recorder before its geocode).
+        .timeout(std::time::Duration::from_secs(10))
         .build()
         .ok()?;
 

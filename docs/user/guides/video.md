@@ -23,8 +23,8 @@ is remembered between sessions.
     **MJPEG** costs more bandwidth but is passed through untouched — the lightest option wherever
     nothing should be converted (see the
     [platform notes](#platform-notes-what-to-expect-per-operating-system)).
-    **HEVC/H.265** plays wherever the **Kite RTSP client** does the decoding: always on **Android**,
-    and on **Windows**, **Linux** and **macOS** with the *Native RTSP client* toggle on (hardware
+    **HEVC/H.265** plays wherever the **Kite RTSP client** does the decoding: always on **Android**
+    and **iPad**, and on **Windows**, **Linux** and **macOS** with the *Native RTSP client* on, the default (hardware
     decode; Windows additionally needs the free "HEVC Video Extensions" from the Microsoft Store).
     macOS is the one platform whose classic engine path plays HEVC as well.
 
@@ -62,12 +62,22 @@ Native additionally reaches devices that only the capture engine can see.
   for the chosen resolution and format.
 - **Mirror** — flip the image horizontally (handy for front-facing cameras). Applies to every place the
   feed is shown.
-- **Disable hardware acceleration** — force the CPU for any stream conversion. Only needed if the
-  picture is broken or unstable with hardware acceleration; the setting is remembered.
+- **Disable hardware acceleration** — force the CPU for the conversion of an RTSP stream into the
+  image stream. The switch appears only where that conversion runs on hardware: on **Linux**, for an
+  RTSP source with the *Native RTSP client* switched off, on a machine whose browser engine offers no
+  direct video path, with ffmpeg installed and a hardware decoder Kite's test found working (see the
+  [platform notes](#platform-notes-what-to-expect-per-operating-system)). Windows, macOS, Android and
+  iPad never show it. Only needed if the picture is broken or unstable with hardware acceleration; the
+  setting is remembered.
 
-While a feed is live the panel names the pipeline underneath the picture, with two labels:
-**Transcode** (`Copy` = nothing is converted · `Hardware` · `Software`) and **Surface** (how the
-picture reaches the screen). `Copy` is the cheapest possible case.
+The panel has no preview of its own — the picture lives in the floating window, the docked window or
+the widget (see [Where the video shows](#where-the-video-shows)). Its top shows the source's state
+instead (**Video off**, **Starting…**, **Live**, or the error), and while the feed is live the
+**resolution**, **frame rate** and, for an RTSP stream, the **codec** and (where it is measured) the
+**bitrate**.
+Below that it names the pipeline, with two labels: **Transcode** (`Copy` = nothing is converted ·
+`Hardware` · `Software`) and **Surface** (how the picture reaches the screen). `Copy` is the cheapest
+possible case.
 
 ### RTSP connections, transport and auto-reconnect
 
@@ -90,9 +100,9 @@ The RTSP source has a small **connection manager** built in:
   looks uneven — duplicated or skipped single frames — on a jittery link such as cellular; every step
   costs exactly that much extra latency, so leave it at 0 when the picture is already smooth. The
   setting takes effect immediately on the running stream and is remembered.
-- **Native RTSP client (experimental)** — Kite's own built-in stream client: no helper downloads,
+- **Native RTSP client** (on by default) — Kite's own built-in stream client: no helper downloads,
   UDP-first connection with automatic TCP fallback, and native hardware H.264/HEVC decode on Windows,
-  Linux and macOS (Android always uses it; there is no toggle there). Recommended on Linux — see the
+  Linux and macOS (Android and iPad always use it; there is no toggle there). Recommended on Linux — see the
   [platform notes](#platform-notes-what-to-expect-per-operating-system). If a particular source
   misbehaves with it, switch it off to fall back to the classic engine path.
 
@@ -104,10 +114,10 @@ feed are given a few seconds to heal on their own before a full reconnect is for
 signal dips don't interrupt the stream unnecessarily.
 
 !!! note "Helpers download themselves"
-    **Camera (device)** needs nothing extra, and **RTSP with the Native RTSP client** toggle on needs
-    no helper either (on Android that is always the case). **Native Capture** uses the bundled
-    **ffmpeg** engine. Classic-path **RTSP** (toggle off) uses **MediaMTX** for the direct video path
-    and **ffmpeg** for the image path — a machine whose browser engine offers no direct path (common
+    **Camera (device)** needs nothing extra, and **RTSP with the Native RTSP client** (the default)
+    needs no helper either (on Android that is always the case). **Native Capture** uses the bundled
+    **ffmpeg** engine. Classic-path **RTSP** (Native RTSP client switched off) uses **MediaMTX** for
+    the direct video path and **ffmpeg** for the image path — a machine whose browser engine offers no direct path (common
     on Linux) uses ffmpeg alone and never needs MediaMTX. Kite downloads whichever it needs
     **automatically** the first time you use that source — no manual install. On macOS ffmpeg is
     shipped with the app.
@@ -116,13 +126,20 @@ signal dips don't interrupt the stream unnecessarily.
 
 The same feed can appear in several places at once (they all share one stream):
 
-- **As a widget** — the **Video** widget in a dock, sized to the stream's aspect ratio.
-- **In a floating window** — a movable video frame over the map. **Drag the small square handle in its
+- **As a widget** — the **Video** widget in a dock. It always **crops the picture to fill** its tile,
+  whatever its size.
+- **In a floating window** — a movable video frame over the map. **Start** slides it in from the left
+  into the bottom-left corner (or to where you last left it) — unless a Video widget is active, in which
+  case the window stays parked because the widget already shows the picture. A **camera button** —
+  beside the window while it sits in the corner, otherwise in the bottom-left screen corner —
+  **parks** it off-screen to the left and brings it back; the stream keeps running while it
+  is parked, so it returns instantly. The window has a glass bezel like the widgets and no ✕ — the
+  camera button is the only way to hide it. **Drag the small square handle in its
   bottom-left corner** (the four-way arrow) to move it; dragging it to the **bottom-left screen corner
   snaps it there**, where it **displaces the bottom widget dock** to make room (the dock shrinks by the
   window's size). Drag it away from the corner to un-snap and free-float. The **top-right corner grip
   resizes** it (aspect-locked, touch-friendly).
-  **On a phone** there is a **docked window** instead: fixed to the bottom-right of the map, sized to
+  **On an Android phone** there is a **docked window** instead: fixed to the bottom-right of the map, sized to
   the stream (at most 40 % of the map height or half its width), no dragging. The **corner marker in
   its top-left** toggles between that size and a compact one (two thirds), for the video and the
   swapped-in map alike; the choice is remembered. A **camera button** above the map buttons slides the
@@ -166,11 +183,11 @@ How interactive the swapped-in **mini-map** is depends on where it landed:
   (right-drag and two fingers reach the map). The zoom buttons are hidden there to save room — use the
   mouse wheel, the touchpad or a pinch. To **move the floating frame itself**, drag the **square handle
   in its bottom-left corner**, the same one as in video mode.
-- **On a phone** (docked window or widget) — the widget's limits apply: 2D, follow, no panning. Tap
+- **On an Android phone** (docked window or widget) — the widget's limits apply: 2D, follow, no panning. Tap
   the small map to switch heading-up / north-up, slide a finger up or down on it to zoom (or pinch).
   Double-tap swaps. With the video full-screen, the corner button becomes a **map button** that hides
   and shows the small map; double-tap the full-screen video to send the map back. Unobstructed
-  fullscreen does not exist on the phone — the video fills the map area next to the widget column.
+  fullscreen does not exist on the Android phone — the video fills the map area next to the widget column.
 
 ![The map swapped into the video — mini-map over a full-screen feed](../assets/guides/video/video_map_swap.png)
 /// caption
@@ -204,17 +221,17 @@ and it is only fair to say so plainly.
 **Windows and macOS are the more predictable hosts for video.** Both ship a single, consistent media
 stack, so a network stream is played directly by the system's hardware-accelerated decoder. If a smooth,
 low-CPU, low-latency feed is important to you — and especially if you plan to fly with it — those are
-the platforms we can most confidently recommend. For RTSP network streams, Linux joins them once
-the **Native RTSP client** is switched on — see below.
+the platforms we can most confidently recommend. For RTSP network streams, Linux joins them with
+the **Native RTSP client**, which is on by default — see below.
 
-**On macOS both RTSP routes are available.** The classic engine plays H.264 *and* HEVC directly (the
-macOS browser engine is the only one that accepts HEVC on that path), and the **Native RTSP client**
-toggle switches to Kite's own client: H.264 and HEVC are decoded by the system's VideoToolbox and
-drawn straight into the video area — no helper programs, UDP-first with TCP fallback, mirror and
-rotate live. Either route is fine; the native one skips the helper download and the local relay leg.
+**On macOS both RTSP routes are available.** The classic engine (with the **Native RTSP client**
+switched off) plays H.264 *and* HEVC directly (the macOS browser engine is the only one that accepts
+HEVC on that path), and the **Native RTSP client**, on by default, is Kite's own client: H.264 and
+HEVC are decoded by the system's VideoToolbox and drawn straight into the video area — no helper
+programs, UDP-first with TCP fallback, mirror and rotate live. Either route is fine; the native one skips the helper download and the local relay leg.
 The detached video window works here too, and so does showing the picture in two places at once.
 
-**On Linux, switch on the *Native RTSP client* for network streams.** With that toggle (Video panel →
+**On Linux, keep the *Native RTSP client* on for network streams.** With it (the default; Video panel →
 RTSP section) Kite plays RTSP itself: **H.264 and HEVC go straight into the machine's hardware
 decoder** — Intel/AMD graphics via VA-API, the Raspberry Pi 4's H.264 and the Pi 5's HEVC block via
 V4L2, with an
@@ -264,7 +281,7 @@ cannot fix from its side on that classic path:
   720×576 frame took about 13 ms against roughly 2 ms, and longer while the machine was busy. So a
   frame rate that is effortless on Windows can be out of reach on comparable Linux hardware, whatever
   the CPU says.
-- **Whether that conversion uses your graphics hardware.** Kite tests your machine at start-up and uses
+- **Whether that conversion uses your graphics hardware.** Kite tests your machine the first time it is needed and uses
   the GPU for the conversion when it can — on Intel and AMD desktop graphics via VAAPI, and on
   Raspberry Pi 3/4 class boards via their built-in decoder. Where that works it is a large saving
   (measured on an Intel laptop: roughly a seventh of the CPU load). But it depends entirely on your
@@ -276,7 +293,8 @@ cannot fix from its side on that classic path:
   Linux can offer. If latency is your priority on Linux, prefer an MJPEG source. The Video panel shows
   **Transcode: Copy** when this applies.
 - **You can force the CPU path.** If hardware conversion misbehaves on your machine, switch on
-  **Disable hardware acceleration** in the Video panel; the setting is remembered.
+  **Disable hardware acceleration** in the Video panel; the setting is remembered. The switch is only
+  there when Kite's test found working conversion hardware — without it there is nothing to turn off.
 - **Local camera quirks.** On Linux the system camera layer can be slow or unresponsive on some setups.
   Kite works around the worst cases (it caps the automatic resolution and frame rate, and routes the
   advanced capture path around that layer entirely), but a camera the system itself can't open cleanly
@@ -294,12 +312,12 @@ cannot fix from its side on that classic path:
 
 None of this means Linux is unusable — with the **Native RTSP client** it is a first-class platform
 for network video, and a well-equipped desktop distribution generally plays the classic path fine
-too. In short: **on Linux, try the Native RTSP client first for RTSP; an MJPEG source is the lightest
+too. In short: **on Linux, keep the Native RTSP client on for RTSP; an MJPEG source is the lightest
 choice either way.**
 
 **On Android, RTSP runs entirely through Kite's own built-in stream client** — there is nothing to
 download and no engine choice: H.264 and HEVC are decoded by the device's hardware decoder, and MJPEG
-streams are shown directly. (On iOS, RTSP is not available yet.)
+streams are shown directly.
 
 - **Location updates pause during a Wi-Fi stream.** Every live location fix makes Android scan for
   Wi-Fi networks, and each scan takes the Wi-Fi radio off your network's channel for a moment — with
@@ -309,6 +327,11 @@ streams are shown directly. (On iOS, RTSP is not available yet.)
   the moment the stream stops. Streams received over **mobile data** (or Ethernet) are not affected,
   and neither is a manually placed GCS marker. When Kite cannot tell which way the stream travels
   (some VPN setups), it pauses to be safe.
+
+**The iPad works the same way.** RTSP runs through Kite's own client only (iPadOS cannot run helper
+programs), H.264 and HEVC are decoded in hardware by VideoToolbox, and the floating window, the
+full-screen swap and mirror/rotate all work. **On iPhone there is no video**: the Video
+panel only says so.
 
 ## Where to go next
 

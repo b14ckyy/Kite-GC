@@ -25,8 +25,8 @@ Linux and macOS.
 
 ```powershell
 winget install OpenJS.NodeJS.LTS
-winget install Casey.Just.Just
-# Rust: install from https://rustup.rs/
+winget install Casey.Just
+winget install Rustlang.Rustup    # or the installer from https://rustup.rs/
 ```
 
 !!! warning "Restart your terminal"
@@ -85,6 +85,11 @@ Both steps need an Apple Developer account, and specifically a **Developer ID Ap
 certificate: an "Apple Development" certificate cannot notarize. Credentials are read from your
 environment / keychain and never committed. List your identities with
 `security find-identity -v -p codesigning`.
+
+A release needs all three files from `release/`: the `.dmg`, the standalone `.zip` and the updater
+`_update.tar.gz`. `just notarize-macos` staples the ticket to the disk image and to the app in the other two, so a first
+launch works without a network connection. `scripts/make-update-manifest.sh` refuses an updater
+archive without that ticket, which keeps the unsigned CI build out of the in-app updater.
 
 ### Android
 
@@ -213,7 +218,7 @@ up itself, so only the bare `cargo check` needs it. (On Windows the prebuilt dir
 | Bluetooth LE | ✅ works | Native GATT via `BleSerial.kt`; the same serial profiles as desktop. Listen-only mode (the GATT dump) is not implemented yet. |
 | Joystick / HID RC control | ❌ not implemented | The backend is per-OS (WGI / evdev / IOKit); Android has none, so no device is ever listed. |
 | Log import (.kflight / .rawmsp / .tlog) | ✅ works | Parsed in-process. A `.kflight` brings the flight, its track and its records; the archived original log files inside it (INAV blackbox, ArduPilot dataflash) are left behind — the mobile database never stores originals. ArduPilot `.bin` and PX4 `.ulg` import are desktop-only. |
-| Blackbox import (.txt / .bbl / .bfl) | ❌ impossible | Needs the external `blackbox_decode` tool, and Android forbids executing a downloaded binary. Import on a desktop and bring flights over as `.kflight`. |
+| Blackbox import (.txt / .bbl / .bfl) | ❌ desktop-only | Not offered, like ArduPilot `.bin` and PX4 `.ulg` — the mobile database keeps no original log files. Import on a desktop and bring flights over as `.kflight`. |
 | Video: camera / OTG capture device | ✅ works (tablets) | The WebView's own capture path (`getUserMedia`), no helper involved. Hidden on phones until the phone UI decides. |
 | Video: RTSP (MJPEG / H.264 / HEVC) | ✅ works | Runs entirely on Kite's built-in RTSP client — no engine helpers (an Android app cannot spawn them, so the desktop engines are not offered). H.264/HEVC decode in device hardware onto a native surface below the WebView; MJPEG rides the multipart path. Native capture (ffmpeg) is not offered — the OS's own capture devices arrive through the camera kind. |
 | Custom database / raw-log folder | ✅ mirror | Browse grants ONE folder via the system picker (scoped storage — no permission). The app keeps working app-private (SQLite and the raw writers need real paths, which a SAF grant cannot provide) and **mirrors into the folder at session end**: raw logs as files, the database as an atomic snapshot. That copy survives an uninstall. |
@@ -303,13 +308,12 @@ are not run in CI.
 
 These are things to know when **running** the packaged Linux app (not build errors):
 
-- **Three helpers are fetched at runtime, not bundled**: `blackbox_decode` (Blackbox import shells out
-  to INAV's decoder), `ffmpeg` (the classic video image path) and `mediamtx` (the classic RTSP → WebRTC
-  engine) — the native RTSP client needs neither. Kite
-  looks for each next to the executable, then in its own app-data `bin/` directory, then on `PATH`, and
-  offers to download it on first use. Each failure is local to its feature — without `blackbox_decode`
-  only Blackbox import is affected, live recording and replay still work. On macOS `ffmpeg` is bundled
-  as a universal sidecar instead; the other two are fetched the same way as everywhere else.
+- **Two helpers are fetched at runtime, not bundled**: `ffmpeg` (the classic video image path) and
+  `mediamtx` (the classic RTSP → WebRTC engine) — the native RTSP client needs neither. Kite looks for
+  each next to the executable, then in its own app-data `bin/` directory, then on `PATH`, and offers to
+  download it on first use. Each failure is local to its feature. On macOS `ffmpeg` is bundled as a
+  universal sidecar instead; `mediamtx` is fetched the same way as everywhere else. INAV Blackbox logs
+  are decoded in-process — no helper.
 - **Serial permissions:** add yourself to the `dialout` group (`sudo usermod -aG dialout "$USER"`, then
   log out/in). Some distros use `uucp`.
 - **Blank 3D globe / WebView (WebKitGTK):** the 3D map runs in WebKitGTK, which is more fragile than

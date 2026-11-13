@@ -4,7 +4,7 @@
 // Connection state store
 // Manages the reactive state of the FC connection across the UI
 
-import { writable } from 'svelte/store';
+import { derived, writable } from 'svelte/store';
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
@@ -29,6 +29,15 @@ export function defaultNetPort(protocol: string, transport: string): number | un
   return NET_PORT_DEFAULTS[`${protocol}:${transport}`];
 }
 
+/** The address a network link actually uses. A blank host field means this machine, and so does a
+ *  typed "localhost" (the field's own placeholder): both become the literal IPv4 loopback, because the
+ *  TCP transport takes IP literals only and a resolved "localhost" may come back as IPv6 `::1`. Any
+ *  other host is passed on without its surrounding whitespace (touch keyboards append a space). */
+export function netHostOrLocal(host: string): string {
+  const h = host.trim();
+  return h === '' || h.toLowerCase() === 'localhost' ? '127.0.0.1' : h;
+}
+
 export interface InavVersion {
   major: number;
   minor: number;
@@ -44,6 +53,10 @@ export interface FeatureSet {
   msp_rc: boolean;
   aux_rc: boolean;
   adsb_msp: boolean;
+  /** Firmware can serve MSP over MAVLink TUNNEL (INAV ≥ 10.0) — capability only. */
+  msp_tunnel_capable: boolean;
+  /** THIS link runs MSP over MAVLink (the tunnel probe + INAV handshake through it succeeded). */
+  msp_tunnel: boolean;
 }
 
 export interface FcInfo {
@@ -89,6 +102,8 @@ export interface ConnectionInfo {
   baudRate: number;
   errorMessage: string;
   fcInfo: FcInfo | null;
+  /** MAVLink link to INAV 10.0+ with MSP over MAVLink up (`fcInfo.features.msp_tunnel`). */
+  mspTunnel: boolean;
 }
 
 export const connection = writable<ConnectionInfo>({
@@ -99,7 +114,29 @@ export const connection = writable<ConnectionInfo>({
   baudRate: 115200,
   errorMessage: '',
   fcInfo: null,
+  mspTunnel: false,
 });
+
+// ── Link capabilities: THE frontend answer to "what does this link carry" ──────────────────────────
+// Gate UI on these, never on `protocolType` alone: a MAVLink link to INAV 10.0+ with MSP over MAVLink up
+// (`mspTunnel`) serves the whole INAV/MSP surface, and its INAV identity must not reach the
+// ArduPilot/PX4 paths. The backend's counterpart is `state::with_msp`.
+
+/** The connected link carries MSP to an INAV FC — a direct MSP link, or MSP over MAVLink. */
+export function linkHasMsp(c: ConnectionInfo): boolean {
+  return c.status === 'connected' && (c.protocolType === 'msp' || c.mspTunnel);
+}
+
+/** The connected link is MAVLink to an ArduPilot/PX4-style autopilot (no MSP tunnel). */
+export function linkIsArduPilot(c: ConnectionInfo): boolean {
+  return c.status === 'connected' && c.protocolType === 'mavlink' && !c.mspTunnel;
+}
+
+/** Store form of `linkHasMsp` — INAV mission transfers, safehomes, geozones, craft name, stats. */
+export const hasMsp = derived(connection, linkHasMsp);
+
+/** Store form of `linkIsArduPilot` — ArduPilot mission panel, vehicle control, fence / rally. */
+export const isArduPilotLink = derived(connection, linkIsArduPilot);
 
 /** Platform type the handshake detected for the current link — `fcInfo.platform_type` diverges from it
  *  once the user overrides the type in the UAV Info panel (the panel shows the detected one as a hint). */

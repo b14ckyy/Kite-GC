@@ -11,6 +11,7 @@
 
 import { writable, get } from 'svelte/store';
 import { syncFromFc } from './rcMirror';
+import { activeVehicleId } from './vehicles';
 
 export type EngageMode = 'serial' | 'msp';
 
@@ -38,3 +39,13 @@ export async function engage(mode: EngageMode): Promise<boolean> {
 export function disengage(): void {
   if (get(rcEngaged).on) rcEngaged.set({ on: false, mode: null });
 }
+
+// Multi-vehicle: switching the active vehicle disengages RC. The backend re-points and disables its
+// stream at the same moment (AppState::retarget_rc); mirroring it here keeps the panel's engage state
+// truthful, so the operator re-engages on the new aircraft on purpose.
+let rcVehicle: string | null = null;
+activeVehicleId.subscribe((id) => {
+  if (id === rcVehicle) return;
+  rcVehicle = id;
+  disengage();
+});

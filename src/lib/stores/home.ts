@@ -11,6 +11,26 @@
 
 import { writable, derived } from 'svelte/store';
 
+/** FC home of every connected vehicle (multi-vehicle), keyed by vehicle id. `homePosition` below stays
+ *  the ACTIVE vehicle's home; switching vehicles re-seeds it from here (connectionController). */
+export interface VehicleHome { lat: number; lon: number; alt: number }
+export const vehicleHomes = writable<ReadonlyMap<string, VehicleHome>>(new Map());
+
+export function setVehicleHome(vehicleId: string, lat: number, lon: number, alt: number): void {
+  vehicleHomes.update((m) => {
+    const cur = m.get(vehicleId);
+    // Same ~0.5 m / 1 m dedup as the active path — HOME_POSITION is re-broadcast with jitter.
+    if (cur && Math.abs(cur.lat - lat) < 5e-6 && Math.abs(cur.lon - lon) < 5e-6 && Math.abs(cur.alt - alt) < 1) return m;
+    const next = new Map(m);
+    next.set(vehicleId, { lat, lon, alt });
+    return next;
+  });
+}
+
+export function clearVehicleHomes(): void {
+  vehicleHomes.set(new Map());
+}
+
 export type HomeSource = 'fc' | 'manual' | 'replay';
 
 export interface HomePosition {

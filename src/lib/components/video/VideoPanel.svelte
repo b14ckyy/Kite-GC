@@ -60,7 +60,7 @@
   import Button from '$lib/components/panel/Button.svelte';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
   import Toggle from '$lib/components/panel/Toggle.svelte';
-  import { isLinux, isMobile, isAndroid, isIOS, isPhone } from '$lib/platform';
+  import { isLinux, isMobile, isAndroid, isPhone, hasVideo } from '$lib/platform';
 
   // Which saved RTSP connection is being edited inline (null = none).
   let editingRtspId = $state<string | null>(null);
@@ -106,6 +106,22 @@
     }
     engineChecked = true;
   }
+
+  // "Disable hardware acceleration" steers one thing only: the ffmpeg H.264 → MJPEG transcode of an
+  // RTSP source, which runs when the classic path has no WebRTC (WebKitGTK), and which has a hardware
+  // variant on Linux alone (V4L2 M2M / VAAPI). Everywhere else the switch does nothing — the native
+  // client and the WebRTC path decode through the OS / the WebView — so it is shown only where it
+  // has an effect and the machine has hardware to switch off. The backend probes on the first ask.
+  let hwTranscode = $state(false);
+  const hwSwitchApplies = $derived(
+    isLinux && $videoState.kind === 'rtsp' && !$videoState.rtspNativeClient && !isWebrtcAvailable() && !!ffmpegVer,
+  );
+  $effect(() => {
+    if (!hwSwitchApplies) return;
+    invoke<boolean>('video_hw_transcode_available')
+      .then((ok) => { hwTranscode = ok; })
+      .catch(() => { hwTranscode = false; });
+  });
 
   async function checkFfmpeg(): Promise<void> {
     try {
@@ -174,7 +190,7 @@
   // MediaMTX is only needed for the WebRTC path. A WebView without it (WebKitGTK builds with WebRTC
   // compiled out — Raspberry Pi OS among them) runs RTSP entirely on ffmpeg now, so demanding the
   // engine there would block a machine that already has everything it needs.
-  // …and not at all when the experimental in-process native RTSP client is active.
+  // …and not at all when the in-process native RTSP client is active.
   const needsEngine = $derived(isWebrtcAvailable() && !$videoState.rtspNativeClient);
 
   // Mirror can't reach Android's hardware-decoded surface (see the toggle row's comment).
@@ -291,7 +307,7 @@
 {#snippet headerActions()}
   <Button
     variant={$videoState.enabled ? 'danger' : 'data'}
-    disabled={($videoState.kind === 'rtsp' && isIOS) || (!$videoState.enabled && $videoState.kind === 'rtsp' && needsEngine && engineChecked && !engineVer)}
+    disabled={(!$videoState.enabled && $videoState.kind === 'rtsp' && needsEngine && engineChecked && !engineVer)}
     onclick={toggleVideo}
   >
     {$videoState.enabled ? $t('video.stop') : $t('video.start')}
@@ -526,11 +542,11 @@
         </div>
       </div>
 
-      <!-- Experimental: Kite's own in-process RTSP client (MOBILE_RTSP.md) — no MediaMTX, no
-           ffmpeg. MJPEG on the multipart path; H.264/HEVC decode in hardware (Windows).
-           On Android it is the ONLY route (no sidecars on mobile) — forced on in the store,
-           nothing to toggle. -->
-      {#if !isAndroid}
+      <!-- Kite's own in-process RTSP client (MOBILE_RTSP.md) — no MediaMTX, no ffmpeg. MJPEG on the
+           multipart path; H.264/HEVC decode in hardware. On by default.
+           On Android and iOS it is the ONLY route (no sidecars on mobile) — forced on in the
+           store, nothing to toggle. -->
+      {#if !isMobile}
         <div class="field-row" title={$t('video.nativeClientHint')}>
           <Toggle
             checked={$videoState.rtspNativeClient}
@@ -592,13 +608,7 @@
         <NumberStepper bind:value={$rtspBufferFrames} min={0} max={3} step={1} />
       </div>
 
-      {#if isIOS}
-        <!-- RTSP is a placeholder on iOS only: the engine cannot run there, and the Kite-client
-             route arrives with MOBILE_RTSP P3. Android runs the Kite client (forced above). -->
-        <div class="ffmpeg-box">
-          <p class="hint">{$t('video.rtspMobilePlaceholder')}</p>
-        </div>
-      {:else if needsEngine && engineChecked && !engineVer}
+      {#if needsEngine && engineChecked && !engineVer}
         <!-- MediaMTX is required for the WebRTC path only — see `needsEngine`. -->
         <div class="ffmpeg-box">
           <p class="hint">{$t('video.engineMissing')}</p>
@@ -675,10 +685,9 @@
     {/if}
 
     <!-- Escape hatch: some driver/hardware combinations pass the backend probe but still misbehave on
-         a live feed. Hardware stays the default; this forces the software transcode. It only steers
-         the ffmpeg transcode path — the native RTSP client decodes through the OS (Media Foundation),
-         where this switch has no say, so it is hidden there. -->
-    {#if !($videoState.kind === 'rtsp' && $videoState.rtspNativeClient)}
+         a live feed. Hardware stays the default; this forces the software transcode. Shown only where
+         it has an effect — see `hwSwitchApplies`. -->
+    {#if hwSwitchApplies && hwTranscode}
       <div class="field-row">
         <Toggle
           checked={$videoState.disableHwAccel}
@@ -692,8 +701,16 @@
   </div>
 {/snippet}
 
+{#snippet iphoneBody()}
+  <p class="hint">{$t('video.iphoneUnsupported')}</p>
+{/snippet}
+
 <div class="vpv2">
-  <PanelShell variant="compact" title={$t('video.title')} {headerActions} {body} />
+  {#if !hasVideo}
+    <PanelShell variant="compact" title={$t('video.title')} body={iphoneBody} />
+  {:else}
+    <PanelShell variant="compact" title={$t('video.title')} {headerActions} {body} />
+  {/if}
 </div>
 
 <style>

@@ -18,7 +18,7 @@
   import { get } from 'svelte/store';
   import { invoke } from '@tauri-apps/api/core';
   import { t } from 'svelte-i18n';
-  import { connection } from '$lib/stores/connection';
+  import { connection, hasMsp } from '$lib/stores/connection';
   import { telemetry } from '$lib/stores/telemetry';
   import { settings } from '$lib/stores/settings';
   import {
@@ -40,7 +40,7 @@
   let expanded = $state<Set<number>>(new Set());
 
   const features = $derived($connection.fcInfo?.features ?? null);
-  const connectedMsp = $derived($connection.status === 'connected' && $connection.protocolType === 'msp');
+  const connectedMsp = $derived($hasMsp);
   const hasAutoland = $derived($safehomeConfig?.has_autoland ?? false);
   // Editing/saving is a live INAV ≥7.1 path (the house button only opens here, but the link can drop).
   const canEdit = $derived(connectedMsp && !!features?.autoland_config);

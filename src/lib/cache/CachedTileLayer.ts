@@ -8,8 +8,15 @@
 // tiles (a fixed blank the server returns above the available zoom) and fills
 // those tiles with the scaled-up parent imagery — mirroring how Cesium keeps the
 // parent tile visible — instead of leaving a blank.
+//
+// Custom (local tile folder) maps take their own path (`_createCustomTile`): no IndexedDB cache, and
+// every tile is a <canvas> — either the tile itself, or composed from its nearest existing ancestor
+// (scaled up) or, one level below the lowest level of an area, from its children (scaled down). A
+// custom layer with 512 / 128 px tiles runs with a zoomOffset; `_createCustomTile` converts Leaflet's
+// coords to file levels once, everything after it works in file levels.
 
 import L from "leaflet";
+import { invoke } from "@tauri-apps/api/core";
 import { getCachedTile, putCachedTile } from "$lib/cache/tileCache";
 import { loadTileBytes } from "$lib/cache/tileLoader";
 import {
@@ -20,9 +27,76 @@ import {
   setRegionVerified,
   MIN_DETECT_ZOOM,
 } from "$lib/cache/tileAvailability";
+import { isUserProviderId, type CustomMapSpec, type MapProvider } from "$lib/config/mapProviders";
+import { customLayerZoom, fillTileTemplate, userLayerZoom } from "$lib/helpers/tileTemplate";
+import { recordCustomTile } from "$lib/stores/customMaps";
+
+/** Backend answer for a custom-map tile that is not on disk (see `custom_maps::resolve_tile`). */
+interface CustomTilePlan {
+  kind: "tile" | "children" | "none";
+  z: number;
+  children: [boolean, boolean, boolean, boolean];
+}
+
+/** A tile address: Leaflet's coords, or a custom map's file-level address. */
+type TileXYZ = { x: number; y: number; z: number };
+
+/** Where tile `coords` sits inside its ancestor at zoom `ancestorZ`: the ancestor's x/y, the scale
+ *  (2^levels) and this tile's quadrant inside it. Shared by the ESRI placeholder fill and the
+ *  custom-map fallback (there in file levels). */
+function ancestorQuadrant(coords: TileXYZ, ancestorZ: number) {
+  const dz = Math.max(1, coords.z - ancestorZ);
+  const scale = 1 << dz;
+  return {
+    z: coords.z - dz,
+    scale,
+    px: coords.x >> dz,
+    py: coords.y >> dz,
+    qx: coords.x & (scale - 1),
+    qy: coords.y & (scale - 1),
+  };
+}
+
+/** Decode tile bytes into an image, off the paint path where the engine supports it. */
+async function decodeTileBytes(buf: ArrayBuffer): Promise<HTMLImageElement> {
+  const url = URL.createObjectURL(new Blob([buf]));
+  try {
+    const img = new Image();
+    img.decoding = "async";
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = () => reject(new Error("tile decode failed"));
+      img.src = url;
+    });
+    // Force the decode now (on the raster workers) rather than inside the first drawImage.
+    await img.decode().catch(() => {});
+    return img;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+/** Size a custom-map canvas to the image and draw it whole (Leaflet scales it to the grid). */
+function drawWhole(canvas: HTMLCanvasElement, img: HTMLImageElement): void {
+  canvas.width = img.naturalWidth || 256;
+  canvas.height = img.naturalHeight || 256;
+  canvas.getContext("2d")?.drawImage(img, 0, 0);
+}
+
+/** Release a removed custom-map canvas's pixels right away — WebKit keeps a canvas backing store
+ *  until the element is garbage-collected, which during a long pan is many tiles' worth. */
+function freeCanvasTile(e: L.TileEvent): void {
+  const el: HTMLElement = e.tile;
+  if (el instanceof HTMLCanvasElement) {
+    el.width = 0;
+    el.height = 0;
+  }
+}
 
 export const CachedTileLayer = L.TileLayer.extend({
   createTile(coords: L.Coords, done: L.DoneCallback): HTMLElement {
+    if (this.options.customMap) return this._createCustomTile(coords, done);
+
     const providerId: string | undefined = this.options.providerId;
 
     // Track gesture state once, so a learned-cap redraw can wait for idle
@@ -144,14 +218,9 @@ export const CachedTileLayer = L.TileLayer.extend({
   /** Fill `div` with ancestor zoom `cap`, scaled and offset to this tile's
    *  quadrant. Loads the ancestor from the IndexedDB cache, else the network. */
   _paintAncestor(div: HTMLElement, coords: L.Coords, cap: number, done: L.DoneCallback) {
-    const dz = Math.max(1, coords.z - cap);
-    const scale = 1 << dz;
-    const px = coords.x >> dz;
-    const py = coords.y >> dz;
-    const qx = coords.x & (scale - 1);
-    const qy = coords.y & (scale - 1);
+    const { z: pz, scale, px, py, qx, qy } = ancestorQuadrant(coords, cap);
     const ts = this.getTileSize();
-    const purl = this._buildUrlAt(px, py, coords.z - dz);
+    const purl = this._buildUrlAt(px, py, pz);
 
     // 1px bleed on every side so the clipped image always fully covers the tile
     // box (no sub-pixel hairline gap at the seams during movement).
@@ -248,23 +317,143 @@ export const CachedTileLayer = L.TileLayer.extend({
     }, 250);
   },
 
+  /**
+   * Custom-map tile: a <canvas> (the element must exist before we know what to draw). The tile on
+   * disk is drawn at its own resolution and the canvas is scaled to the layer's grid (`tileSize`: the
+   * map's detected 128 / 256 / 512) by Leaflet's inline tile size — so a 100 px tile fills a 128 px
+   * cell. A missing tile is composed from what the backend resolves: the nearest existing ancestor
+   * (scaled up, any number of levels), or, one level below the lowest level of an area, the
+   * up-to-four children (scaled down). Nothing is drawn further below. Never touches the IndexedDB
+   * tile cache.
+   */
+  _createCustomTile(coords: L.Coords, done: L.DoneCallback): HTMLElement {
+    const spec: CustomMapSpec = this.options.customMap;
+    // The ONE place a map zoom becomes a file level. Leaflet hands over its tile zoom (the map zoom,
+    // clamped to min/maxNativeZoom) and would fill a URL with it + zoomOffset; at that offset the
+    // layer's grid of tileSize-px cells IS the file level's grid, so x/y carry over unchanged. From
+    // here on — early-out, URLs, backend lookup, composing, debug record — everything is file levels.
+    const tile: TileXYZ = { x: coords.x, y: coords.y, z: coords.z + (this.options.zoomOffset ?? 0) };
+    const canvas = document.createElement("canvas");
+    canvas.setAttribute("role", "presentation");
+    canvas.width = 1;
+    canvas.height = 1;
+    // Leaflet requires `done` to run asynchronously (it registers the tile after createTile returns,
+    // and appends it to the level in the same synchronous `_update`, so it is connected by then).
+    // A canvas that is no longer in the document was aborted or unloaded: reporting it would let
+    // `_tileReady` (which looks the tile up by its KEY) mark a newer tile at the same coords loaded.
+    // `complete` mirrors an <img>: Leaflet's _abortLoading drops every other-level tile that is not
+    // complete on a zoom change — without it, the drawn canvases of the previous level would vanish
+    // at once instead of staying as the backdrop until the new level has loaded.
+    const finish = () => queueMicrotask(() => {
+      if (!canvas.isConnected) return;
+      (canvas as HTMLCanvasElement & { complete?: boolean }).complete = true;
+      done(undefined, canvas);
+    });
+    const { x, y, z } = tile;
+    if (z < Math.max(0, spec.minZoom - 1)) {
+      // More than one level below the lowest level: nothing to show, no backend round-trip.
+      recordCustomTile({ z, x, y, kind: "below", srcZ: null });
+      finish();
+      return canvas;
+    }
+    loadTileBytes(this._buildUrlAt(x, y, z), this._url)
+      .then(async (buf) => {
+        const img = await decodeTileBytes(buf);
+        if (canvas.isConnected) drawWhole(canvas, img);
+        recordCustomTile({ z, x, y, kind: "exact", srcZ: z });
+        finish();
+      })
+      .catch(() => this._composeCustomTile(canvas, tile, spec).then(() => finish(), () => finish()));
+    return canvas;
+  },
+
+  /** Fill `canvas` for a custom-map tile that is not on disk at its own level (see _createCustomTile).
+   *  `tile` is the FILE-level address. */
+  async _composeCustomTile(canvas: HTMLCanvasElement, tile: TileXYZ, spec: CustomMapSpec): Promise<void> {
+    const { x, y, z } = tile;
+    if (!canvas.isConnected) return; // aborted meanwhile — skip the lookup
+    const plan = await invoke<CustomTilePlan>("custom_map_resolve", { map: spec.name, z, x, y });
+    recordCustomTile({
+      z, x, y,
+      kind: plan.kind === "none" ? "none" : plan.kind === "children" ? "children" : plan.z === z ? "exact" : "ancestor",
+      srcZ: plan.kind === "none" ? null : plan.z,
+    });
+    if (plan.kind === "none") return;
+    const load = (lx: number, ly: number, lz: number) =>
+      loadTileBytes(this._buildUrlAt(lx, ly, lz), this._url).then(decodeTileBytes);
+
+    if (plan.kind === "tile" && plan.z === z) {
+      // Appeared on disk since the first read — draw it as it is.
+      const img = await load(x, y, z);
+      if (canvas.isConnected) drawWhole(canvas, img);
+      return;
+    }
+    // Don't allocate a backing store for a canvas Leaflet has already dropped.
+    if (!canvas.isConnected) return;
+
+    // Composite at the screen's pixel density so an up-scaled ancestor is not doubly blurred
+    // (`getTileSize()` = the layer's cell size, i.e. the map's 128 / 256 / 512).
+    const ts = this.getTileSize();
+    const dpr = Math.min(3, Math.max(1, window.devicePixelRatio || 1));
+    const w = Math.round(ts.x * dpr);
+    const h = Math.round(ts.y * dpr);
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.imageSmoothingQuality = "high";
+
+    if (plan.kind === "tile") {
+      // Nearest existing ancestor, scaled up: crop this tile's quadrant out of it.
+      const q = ancestorQuadrant(tile, plan.z);
+      const img = await load(q.px, q.py, q.z);
+      const sw = img.naturalWidth / q.scale;
+      const sh = img.naturalHeight / q.scale;
+      ctx.drawImage(img, q.qx * sw, q.qy * sh, sw, sh, 0, 0, w, h);
+      return;
+    }
+
+    // One level below the lowest level: the (up to) four children, scaled down into the quadrants.
+    await Promise.all(plan.children.map(async (has, i) => {
+      if (!has) return;
+      const dx = i & 1;
+      const dy = i >> 1;
+      try {
+        const img = await load(x * 2 + dx, y * 2 + dy, plan.z);
+        ctx.drawImage(img, (dx * w) / 2, (dy * h) / 2, w / 2, h / 2);
+      } catch { /* a child that vanished meanwhile just stays empty */ }
+    }));
+  },
+
   /** Build a tile URL at explicit x/y/z from the layer template (Leaflet's
    *  getTileUrl always uses the current map zoom, so we fill it manually). */
   _buildUrlAt(x: number, y: number, z: number): string {
+    // Puts z into the URL as it is: callers pass the URL level. Leaflet's coords.z is a MAP zoom, which
+    // differs on a layer with a zoomOffset — the custom-map path converts first (_createCustomTile);
+    // the ESRI placeholder path (map zoom) never runs on such a layer.
     const subs: string | string[] = this.options.subdomains ?? "abc";
-    const sub = subs[(x + y + z) % subs.length];
-    return this._url
-      .replace("{s}", sub)
-      .replace("{z}", String(z))
-      .replace("{x}", String(x))
-      .replace("{y}", String(y))
-      .replace("{r}", "");
+    return fillTileTemplate(this._url, z, x, y, subs);
   },
 });
 
 export function cachedTileLayer(
   url: string,
-  options?: L.TileLayerOptions & { providerId?: string },
+  options?: L.TileLayerOptions & { providerId?: string; customMap?: CustomMapSpec },
 ): L.TileLayer {
-  return new (CachedTileLayer as any)(url, options);
+  const layer: L.TileLayer = new (CachedTileLayer as any)(url, options);
+  // Custom-map tiles are canvases: free their pixels as soon as Leaflet drops them.
+  if (options?.customMap) layer.on("tileunload tileabort", freeCanvasTile as L.LeafletEventHandlerFn);
+  return layer;
+}
+
+/** Extra layer options for a provider's base layer: a custom map gets its local-tile path, no
+ *  attribution, and — like a user online map — its tile pixel size with the matching level shift,
+ *  `maxNativeZoom` = the map zoom showing its highest level (Leaflet scales the top level above it —
+ *  over-zoom) and the seam-CSS class (`customLayerZoom`). A user online map over-zooms the same way
+ *  above its highest level, so a source with a low max zoom does not cap the whole map
+ *  (`userLayerZoom`). Built-in providers get nothing. Spread AFTER the caller's own options. */
+export function providerLayerOptions(p: MapProvider): Partial<L.TileLayerOptions> & { customMap?: CustomMapSpec } {
+  if (isUserProviderId(p.id)) return userLayerZoom(p.maxZoom, p.tileSize ?? 256);
+  if (!p.custom) return {};
+  return { customMap: p.custom, ...customLayerZoom(p.custom.maxZoom, p.custom.tileSize), attribution: "" };
 }

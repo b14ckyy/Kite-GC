@@ -23,7 +23,7 @@ Kite uses three kinds of long-lived branches. Which one you target matters:
 | **`feat/<name>`** | Short-lived working branches, one per feature or fix, cut from `development` and deleted after the merge. Anything may be broken here. | Freely — it's yours |
 
 ```
-feat/my-feature ──▶ development ──▶ master ──▶ release/1.1.x ──▶ v1.1.0-rc1 … v1.1.0 … v1.1.2
+feat/my-feature ──▶ development ──▶ master ──▶ release/2.0.x ──▶ v2.0.0-rc1 … v2.0.0 … v2.0.2
                          ▲          (snapshot)  (feature freeze)              (tags)
                          │                            ▲
                          └──────── merge-up ───────────┴──── release/1.0.x
@@ -43,7 +43,7 @@ release line, if there is one, and into `development` — so nothing is lost and
 Base the PR on the release branch, not on `development`, and say so in the description.
 
 Release lines are maintained for a while: a feature release receives patches until the **second**
-feature release after it has shipped (1.0.x until 1.2.0 — see [Release support](../release-support.md)),
+feature release after it has shipped (1.0.x until 2.1.0 — see [Release support](../release-support.md)),
 so two lines take fixes side by side. That is why the regression marker below matters: it tells us at
 a glance which lines a fix belongs to.
 
@@ -105,19 +105,19 @@ in the release notes, so this one line saves the archaeology at release time.
 
 ## Internationalisation
 
-Kite ships in English, German, French, Chinese and Bulgarian. For contributions:
+Kite ships in English, German, French, Chinese, Bulgarian, Slovak and Spanish. For contributions:
 
 - **`en.json` is the source of truth and is required** — every new or changed UI string must have its
   English key.
-- **Other locales (`de.json`, `fr.json`, `zh.json`, `bg.json`) are optional but very welcome.** Keeping
+- **Other locales (`de.json`, `fr.json`, `zh.json`, `bg.json`, `sk.json`, `es.json`) are optional but very welcome.** Keeping
   them in sync is appreciated; an AI assistant makes this quick and is the recommended way to fill in
-  translations. Chinese and Bulgarian came in exactly that way, as community contributions.
+  translations. Chinese, Bulgarian and Slovak came in exactly that way, as community contributions.
 - Use **named placeholders** (`{name}`) for parameters, passed as an object.
 
 Missing non-English keys fall back gracefully, so an English-only PR is fine — a maintainer (or you, with
 AI help) can top up the other languages afterwards.
 
-**Finding the key for a string you see on screen:** `python tools/i18n-key-paths.py` writes a pseudo-locale
+**Finding the key for a string you see on screen:** `python tools/helpers/i18n-key-paths.py` writes a pseudo-locale
 `src/lib/i18n/locales/xx.json` in which every string is replaced by its own key path (`sensors.gyro`,
 `rcLink.noLink`, …). Register it locally in `src/lib/i18n/index.ts` as described in the script's header,
 start the dev app and switch the language to it — the interface then shows the key at every position

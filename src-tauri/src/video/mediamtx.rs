@@ -36,7 +36,6 @@ use std::time::{Duration, Instant};
 /// an unknown key makes MediaMTX refuse to start, so bump the pin and re-test as one step.
 const VERSION: &str = "v1.20.0";
 const REPO_RELEASES: &str = "https://github.com/bluenviron/mediamtx/releases";
-const HTTP_USER_AGENT: &str = "Kite-GC mediamtx-fetch";
 
 /// The single stream path name (fixed — one live feed).
 const STREAM_NAME: &str = "kite";
@@ -151,7 +150,7 @@ pub async fn download<F: FnMut(u8, &str)>(mut report: F) -> Result<PathBuf, Stri
     let url = format!("{REPO_RELEASES}/download/{VERSION}/{asset_name}");
 
     let client = reqwest::Client::builder()
-        .user_agent(HTTP_USER_AGENT)
+        .user_agent(crate::user_agent::user_agent("mediamtx-fetch"))
         .build()
         .map_err(|e| format!("HTTP client error: {e}"))?;
 

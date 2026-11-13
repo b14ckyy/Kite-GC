@@ -13,6 +13,8 @@ background and splits it into flights by **arm → disarm**. When a flight ends 
 **post-flight summary** where you can:
 
 - **Save or discard** the flight,
+- check the **vehicle** the flight was recognised as, or pick another one or none (see
+  **[Vehicles](vehicles.md#linking-flights)**),
 - enter the **battery** you flew (one or several serials, comma-separated — see **[Batteries](batteries.md)**),
 - add **notes**, and
 - **link the mission** that was loaded.
@@ -29,7 +31,9 @@ The post-flight summary — save or discard, link the battery (one or several se
 ## The flight list
 
 Flights are grouped into a collapsible tree you can re-organise with the **sort** selector — by
-**aircraft**, **location** and **date** in the order you prefer — and narrow with the **search** box.
+**aircraft**, **location** and **date** in the order you prefer — and narrow with the **search** box
+(it looks in the aircraft name, location, date and notes; a flight number such as `#170` finds exactly
+that flight).
 Each entry shows the essentials (date, aircraft, location, duration, distance); pick one to open its
 details.
 
@@ -38,7 +42,11 @@ details.
 The detail panel shows everything about the selected flight:
 
 - **Stats** — duration, max altitude / speed / distance, and more.
-- **Aircraft** — the craft name, soft-linked to its entry in the **[Vehicle library](vehicles.md)**.
+- **Craft** — the craft name the flight was recorded with; the ✎ button corrects it without changing
+  the vehicle link.
+- **Vehicle** — the **[Vehicle library](vehicles.md)** entry the flight belongs to (a click opens it).
+  The ✎ button picks another vehicle or none; a flight without one offers **Add vehicle**, which creates
+  the vehicle pre-filled from the flight and links the flight to it.
 - **Battery** — the linked pack(s), each as its own chip (open it in the Battery Manager, or shown as
   *not in library*); edit to add or change serials. See **[Batteries](batteries.md)**.
 - **Mission** — the linked mission, openable in the Mission Manager.
@@ -111,22 +119,31 @@ Use **Import** to pull in logs from outside Kite (one file or a batch). Supporte
 
 | Format | From |
 |---|---|
-| **INAV Blackbox** (`.bbl`, `.txt`) | INAV onboard flash (`.bbl`) or SD-card (`.txt`) blackbox |
-| **ArduPilot Dataflash** (`.bin`) | ArduPilot onboard logs |
+| **INAV Blackbox** (`.bbl`, `.bfl`, `.txt`) | INAV onboard flash (`.bbl` / `.bfl`) or SD-card (`.txt`) blackbox |
+| **ArduPilot Dataflash** (`.bin`) | ArduPilot (4.1 or newer) onboard logs |
 | **PX4 ULog** (`.ulg`) | PX4 onboard flash / SD-card logs |
 | **MAVLink telemetry** (`.tlog`) | a MAVLink ground-station recording |
 | **MWPTools raw-MSP** (`.rawmsp`) | mwp's raw telemetry capture |
 | **Kite flight** (`.kflight`) | a flight exported from another Kite install |
 
-A progress bar tracks the import. INAV Blackbox needs the **`blackbox_decode`** helper, which Kite
-fetches automatically the first time you import one. A `.bbl` pulled from the flight controller's
-flash usually holds **several flights** — one per arm / disarm cycle. Kite detects that and offers to
-import them all, each as its own logbook entry. Imported telemetry logs (`.tlog` / `.rawmsp`) are
+A progress bar tracks the import. Kite decodes INAV Blackbox logs itself and accepts only those: a
+Blackbox log written by another firmware (Betaflight, for example) is refused with a message that
+names the firmware. A `.bbl` pulled from the flight controller's flash usually holds **several
+flights** — one per arm / disarm cycle. Kite detects that and offers to import them all, each as its
+own logbook entry. A log in the file that cannot be read does not stop the others: Kite imports the
+rest and then lists which logs failed and why. Imported telemetry logs (`.tlog` / `.rawmsp`) are
 treated as telemetry recordings and **split into separate flights on the arm / disarm markers** in the
 log, the same way a live recording is.
 
 PX4 ULog note: PX4 doesn't log a throttle *output*, so a replayed `.ulg` flight shows the FC's
 **thrust setpoint** as the throttle value.
+
+!!! note "On Android, iPhone and iPad"
+    The mobile app imports **`.kflight`**, **`.tlog`** and **`.rawmsp`** files only. Onboard logs —
+    INAV Blackbox, ArduPilot Dataflash, PX4 ULog — are imported on a desktop install and moved over as
+    `.kflight`. The mobile database keeps no original log files (an imported `.kflight` brings the
+    flight, its track and its records, but not the stored original), so **HI-RES** replay and the
+    original-log export are desktop features, and so is the **Open** button.
 
 ## Exporting
 

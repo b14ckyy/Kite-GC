@@ -43,6 +43,19 @@ pub fn video_ffmpeg_status() -> Option<String> {
     ffmpeg::version()
 }
 
+/// Whether the ffmpeg MJPEG transcode of an RTSP source would run on hardware on this machine (V4L2
+/// M2M decode on Pi-class boards, VAAPI on a desktop GPU; Linux only). Decides whether the Video panel
+/// shows "Disable hardware acceleration" at all. Answers `false` without probing while ffmpeg is
+/// missing: the probes cache their verdict for the process, and "no ffmpeg yet" must not become
+/// "no hardware" for an ffmpeg installed a minute later.
+#[tauri::command(async)]
+pub fn video_hw_transcode_available() -> bool {
+    if ffmpeg::version().is_none() {
+        return false;
+    }
+    ffmpeg::v4l2_h264_decode_available() || ffmpeg::vaapi_render_node().is_some()
+}
+
 /// Download ffmpeg into the app-data `bin/` dir (Windows). Emits `ffmpeg-download-progress`
 /// (`{ pct, msg }`). Returns the installed path. The fallback reader resolves ffmpeg per stream
 /// start, so a fresh download is picked up without restarting anything.
