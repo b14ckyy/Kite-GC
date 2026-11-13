@@ -1585,8 +1585,9 @@
       if (vid != null) { void switchVehicle(vid); return; }
       const id = radarPickId(e.position);
       if (id != null) { radarSelection.update((cur) => (cur === id ? null : id)); return; }
-      // The own aircraft: the terrain behind it along the ray is not what the tap meant.
-      if (uavEntity && viewer?.scene.pick(e.position)?.id === uavEntity) return;
+      // The own aircraft: the terrain behind it along the ray is not what the tap meant. Looked for
+      // through everything under the click — its own track ends in the model and is usually on top.
+      if (uavEntity && viewer?.scene.drillPick(e.position, 8).some((p) => p?.id === uavEntity)) return;
       // Neither: the terrain under the click may be a Guided "Fly Here" target.
       onGuided3dClick(e.position);
     }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
