@@ -75,7 +75,15 @@
     const mine = ++seq;
     status = 'searching';
     hits = [];
-    const r = await runMapSearch(text, () => mine === seq);
+    let r: Awaited<ReturnType<typeof runMapSearch>>;
+    try {
+      r = await runMapSearch(text, () => mine === seq);
+    } catch (e) {
+      // Nothing in there should throw; if it does, the line must not sit on "Searching…" for ever.
+      console.warn('[map-search] search failed', e instanceof Error ? e.name : 'error');
+      if (mine === seq) status = 'failed';
+      return;
+    }
     if (mine !== seq) return; // closed or superseded meanwhile
     if (r.kind === 'jumped') { close(); return; }
     if (r.kind === 'hits') { hits = r.hits; status = 'hits'; return; }
