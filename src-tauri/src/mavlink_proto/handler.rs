@@ -149,6 +149,7 @@ fn handler_loop(
     const STALL_WARN_AFTER: Duration = Duration::from_secs(3);
     let mut last_fc_rx = Instant::now();
     let mut stall_warned = false;
+    let mut read_errors = crate::transport::ReadErrorThrottle::new();
     let mut msg_count: u64 = 0;
     let mut debug_tracker = super::debug::MavlinkDebugTracker::new();
     // Always-on link-rate meter (release too) — feeds the Relay panel's live RX/TX readout.
@@ -425,7 +426,8 @@ fn handler_loop(
                 return Some(transport);
             }
             Err(e) => {
-                log::warn!("MAVLink read error: {}", e);
+                // Not a known link loss, so no teardown — but it may repeat on every pass.
+                read_errors.on_error("MAVLink read error", &e);
             }
         }
 
