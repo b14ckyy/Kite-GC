@@ -53,9 +53,10 @@ export function jumpToHit(hit: PlaceHit): void {
 
 /** Digits with only separators, degree marks, signs, brackets and single hemisphere letters around them —
  *  no word in it. `Essen 1` or `B 100` are not this (a letter next to a letter, a letter that is no
- *  hemisphere). */
+ *  hemisphere). No lookbehind: iOS WebKit before 16.4 cannot parse one, and the lookahead on a letter
+ *  already rejects two letters in a row. */
 function looksLikeCoordinates(text: string): boolean {
-  return /\d/.test(text) && /^(?:[\d\s.,;:°º'"′″+\-()[\]|/]|(?<![A-Za-z])[NSEWnsew](?![A-Za-z]))+$/.test(text);
+  return /\d/.test(text) && /^(?:[\d\s.,;:°º'"′″+\-()[\]|/]|[NSEWnsew](?![A-Za-z]))+$/.test(text);
 }
 
 function jumpToPoint(lat: number, lon: number): void {

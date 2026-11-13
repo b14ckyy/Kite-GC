@@ -40,6 +40,7 @@
   import NumberStepper from '$lib/components/NumberStepper.svelte';
   import UnitStepper from '$lib/components/UnitStepper.svelte';
   import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+  import { outOfPanel } from '$lib/helpers/outOfPanel';
   import { getTotalWpCount, MAX_WAYPOINTS_TOTAL } from '$lib/stores/mission';
   import { settings } from '$lib/stores/settings';
   import type { InterfaceSettings } from '$lib/stores/settings';
@@ -427,7 +428,8 @@
 </script>
 
 <div class="survey-panel">
-  <ConfirmDialog bind:this={confirmDialog} />
+  <!-- Moved out of the panel shell: inside it the full-screen dialog is clipped to the panel. -->
+  <div use:outOfPanel><ConfirmDialog bind:this={confirmDialog} /></div>
 
   <div class="survey-header">
     <div>
