@@ -1730,7 +1730,7 @@ backup. A step that closes the door behind you is a major version.</p>
 <summary>Kite goes mobile — Android, iPhone and iPad</summary>
 <p>Kite now runs natively on <strong>Android</strong> tablets and phones (USB serial, Bluetooth LE and Wi-Fi
 links, touch-friendly layout, shared storage folders) and on <strong>iPhone / iPad</strong> (native build
-with phone and tablet layouts, touch RC, BLE and Wi-Fi MAVLink — contributed by Sebastian
+with phone and tablet layouts, BLE and Wi-Fi MAVLink — contributed by Sebastian
 Kumor). Features a device can't provide are hidden by capability, so the mobile app stays
 clean instead of half-working. <a href="https://github.com/b14ckyy/Kite-GC/pull/79">#79</a> · <a href="https://github.com/b14ckyy/Kite-GC/pull/16">#16</a></p>
 <p><strong>Phones got their own interface.</strong> In landscape the map fills the whole screen: no bars, a
@@ -1886,7 +1886,7 @@ internet. <a href="https://github.com/b14ckyy/Kite-GC/pull/246">#246</a></p>
 <li><strong>Bottom widget slots on the phone</strong> — three centred slots on the map's bottom edge (a larger
   middle one, two smaller beside it), filled by dragging widgets out of the column in edit mode;
   the follow centre moves up so the aircraft stays in the free map. <a href="https://github.com/b14ckyy/Kite-GC/pull/173">#173</a></li>
-<li><strong>iPhone &amp; iPad support</strong> — native iOS/iPadOS build: phone/tablet layout, touch RC, BLE,
+<li><strong>iPhone &amp; iPad support</strong> — native iOS/iPadOS build: phone/tablet layout, BLE,
   Wi-Fi MAVLink. Contributed by Sebastian Kumor. <a href="https://github.com/b14ckyy/Kite-GC/pull/16">#16</a></li>
 <li><strong>Native RTSP video client</strong> — Kite's own RTSP client with OS hardware decode (H.264/H.265)
   on Windows <a href="https://github.com/b14ckyy/Kite-GC/pull/85">#85</a>, Android <a href="https://github.com/b14ckyy/Kite-GC/pull/88">#88</a>, Linux <a href="https://github.com/b14ckyy/Kite-GC/pull/89">#89</a>, macOS <a href="https://github.com/b14ckyy/Kite-GC/pull/126">#126</a> and iPad <a href="https://github.com/b14ckyy/Kite-GC/pull/221">#221</a> (no video on iPhone).</li>
@@ -2015,9 +2015,9 @@ internet. <a href="https://github.com/b14ckyy/Kite-GC/pull/246">#246</a></p>
   only. A serial port that a radar source uses is greyed out for the flight connection and the
   other way round, and two sources set to the same UDP port get a warning. See
   <a href="../guides/radar-and-adsb/#connecting-a-local-device">Radar &amp; ADS-B</a>. <a href="https://github.com/b14ckyy/Kite-GC/pull/261">#261</a></li>
-<li><strong>No RC control on a phone.</strong> The RC tool and its switch in Settings are gone from the phone
-  layout: on-screen touch sticks are too easy to hit by accident for something that steers an
-  aircraft. Tablets and the desktop keep RC control. <a href="https://github.com/b14ckyy/Kite-GC/pull/260">#260</a></li>
+<li><strong>No RC control on phones and tablets.</strong> The RC tool and its switch in Settings are gone on
+  Android and iOS: on-screen touch sticks are too easy to hit by accident for something that
+  steers an aircraft. RC control stays a desktop feature for now. <a href="https://github.com/b14ckyy/Kite-GC/pull/260">#260</a> · <a href="https://github.com/b14ckyy/Kite-GC/pull/267">#267</a></li>
 </ul>
 <p><strong>Improved</strong></p>
 <ul>
