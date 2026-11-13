@@ -387,9 +387,7 @@ async function applyActiveVehicle(vehicleId: string, linkList: LinkSummary[] = g
   // MSP over MAVLink belongs to the link's handshake (primary) vehicle only — the backend's `with_msp`
   // refuses a secondary vehicle on the same link.
   const mspTunnel = protocolType === 'mavlink' && isPrimary && (fcInfo.features?.msp_tunnel ?? false);
-  // The transport kind comes from the link too: after a recovery the store still holds the default.
-  const transportType = transportTypeOf(link.transport);
-  connection.update((c) => ({ ...c, status: 'connected', protocolType, transportType: transportType ?? c.transportType, port: link.transport, fcInfo, mspTunnel }));
+  connection.update((c) => ({ ...c, status: 'connected', protocolType, port: link.transport, fcInfo, mspTunnel }));
   // Same status-box labels as connectFC.
   const tr = get(t);
   connectionProtocol.set({
@@ -450,15 +448,27 @@ export async function recoverBackendLinks(): Promise<boolean> {
   await invoke('announce_vehicles').catch(() => {});
   // Which vehicle the UI follows: the store's, else the backend's — and if neither names a vehicle on
   // one of the links just listed, the first link's primary. A link is up, so there is always one.
-  let active = get(activeVehicleId);
-  if (!active) active = await invoke<string | null>('get_active_vehicle').catch(() => null);
-  if (!active || !l.some((x) => x.linkId === parseVehicleId(active as string)?.link)) active = l[0].primaryVehicleId;
-  if (get(activeVehicleId) !== active) activeVehicleId.set(active);
+  const onAListedLink = (id: string | null): id is string => !!id && l.some((x) => x.linkId === parseVehicleId(id)?.link);
+  let active: string | null = get(activeVehicleId);
+  if (!onAListedLink(active)) active = await invoke<string | null>('get_active_vehicle').catch(() => null);
+  if (!onAListedLink(active)) active = l[0].primaryVehicleId;
+  // Through the backend, so both sides follow the same vehicle (a no-op there when it already is the
+  // active one); the store alone only if that call fails.
+  if (get(activeVehicleId) !== active) {
+    const id = active;
+    await selectVehicle(id).catch(() => activeVehicleId.set(id));
+  }
   const wasConnected = get(connection).status === 'connected';
   // The connection state FIRST, from the list just fetched. It used to come last, behind some twenty
   // more round trips to the backend (the telemetry listeners, the relays); when one of those failed or
   // hung, the widgets showed live data under a status bar that said "Disconnected".
   await applyActiveVehicle(active, l);
+  // After a reload the store holds its default transport kind; take the link's. Only here — a vehicle
+  // switch must not change it, the toolbar link's kind is what the Radar and Relay panels ask for.
+  if (!wasConnected) {
+    const kind = transportTypeOf(l.find((x) => x.linkId === parseVehicleId(active)?.link)?.transport ?? '');
+    if (kind) connection.update((c) => ({ ...c, transportType: kind }));
+  }
   // Always (re)arm the live feed: this runs after a page reload or a UI state that drifted, where the
   // module-level listeners may be gone even though the store still says "connected". From here on a
   // failing step is reported and the rest still runs.
