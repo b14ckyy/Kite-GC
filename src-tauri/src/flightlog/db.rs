@@ -5525,7 +5525,9 @@ mod tests {
                 break;
             }
         }
-        assert!(during >= 3, "only {during} commits overlapped the reclaim");
+        // One overlapping commit proves the point. Asking for three made the test depend on how fast the
+        // machine reclaims: a quick CI runner finished the reclaim after a single commit.
+        assert!(during >= 1, "no commit overlapped the reclaim");
         wait_for_reclaim(&file, std::time::Duration::from_secs(30));
         assert_eq!(freelist_pages(&conn).unwrap(), 0);
         drop(conn);
