@@ -77,8 +77,62 @@ impl From<std::io::Error> for TransportError {
             std::io::ErrorKind::ConnectionReset
             | std::io::ErrorKind::ConnectionAborted
             | std::io::ErrorKind::BrokenPipe
+            // ENOTCONN: what macOS answers on every read of a TCP socket whose peer is gone once a
+            // write has failed with EPIPE. Other systems report the same loss as a reset or as EOF.
+            | std::io::ErrorKind::NotConnected
             | std::io::ErrorKind::UnexpectedEof => TransportError::Disconnected,
             _ => TransportError::Io(e.to_string()),
+        }
+    }
+}
+
+// ── Read-error throttle ──────────────────────────────────────────
+
+/// Keeps a read loop from flooding the log and spinning on a read error that is not a known link loss.
+///
+/// A broken socket fails at once instead of waiting for the read timeout, so such an error can come back
+/// on every pass of the loop. One unthrottled log line per pass wrote gigabytes within minutes. With
+/// this, the first error is logged at once, later ones at most every `LOG_INTERVAL` with their count, and
+/// the loop pauses only while the errors follow each other without a gap — a single odd error on a
+/// working link costs no time.
+pub struct ReadErrorThrottle {
+    last_error: Option<std::time::Instant>,
+    last_log: Option<std::time::Instant>,
+    unreported: u64,
+}
+
+impl ReadErrorThrottle {
+    const LOG_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
+    /// Errors closer together than this come from a read that fails without waiting.
+    const RAPID: std::time::Duration = std::time::Duration::from_millis(10);
+    const BACKOFF: std::time::Duration = std::time::Duration::from_millis(50);
+
+    pub fn new() -> Self {
+        Self { last_error: None, last_log: None, unreported: 0 }
+    }
+
+    /// Account for one read error: returns the line to log now, if any, and whether to pause.
+    fn note(&mut self, what: &str, e: &TransportError, now: std::time::Instant) -> (Option<String>, bool) {
+        let rapid = self.last_error.map_or(false, |t| now.duration_since(t) < Self::RAPID);
+        self.last_error = Some(now);
+        self.unreported += 1;
+        let due = self.last_log.map_or(true, |t| now.duration_since(t) >= Self::LOG_INTERVAL);
+        let line = due.then(|| {
+            let n = std::mem::take(&mut self.unreported);
+            self.last_log = Some(now);
+            if n > 1 { format!("{what}: {e} ({n} since the last report)") } else { format!("{what}: {e}") }
+        });
+        (line, rapid)
+    }
+
+    /// Call from the read loop's catch-all error arm. `what` leads the log line ("MAVLink read error").
+    pub fn on_error(&mut self, what: &str, e: &TransportError) {
+        let (line, pause) = self.note(what, e, std::time::Instant::now());
+        if let Some(line) = line {
+            log::warn!("{line}");
+        }
+        if pause {
+            std::thread::sleep(Self::BACKOFF);
         }
     }
 }
@@ -213,6 +267,63 @@ impl fmt::Display for TransportType {
             TransportType::Tcp => write!(f, "TCP"),
             TransportType::Udp => write!(f, "UDP"),
             TransportType::Ble => write!(f, "BLE"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_closed_socket_is_a_lost_link_whatever_the_os_calls_it() {
+        for kind in [
+            std::io::ErrorKind::ConnectionReset,
+            std::io::ErrorKind::ConnectionAborted,
+            std::io::ErrorKind::BrokenPipe,
+            std::io::ErrorKind::NotConnected,
+            std::io::ErrorKind::UnexpectedEof,
+        ] {
+            let e = TransportError::from(std::io::Error::from(kind));
+            assert!(matches!(e, TransportError::Disconnected), "{kind:?} -> {e}");
+        }
+    }
+
+    #[test]
+    fn a_read_timeout_is_not_a_lost_link() {
+        for kind in [std::io::ErrorKind::TimedOut, std::io::ErrorKind::WouldBlock] {
+            assert!(matches!(TransportError::from(std::io::Error::from(kind)), TransportError::Timeout));
+        }
+    }
+
+    #[test]
+    fn a_repeating_read_error_is_logged_once_per_interval_and_pauses_the_loop() {
+        let mut t = ReadErrorThrottle::new();
+        let e = TransportError::Io("boom".into());
+        let t0 = std::time::Instant::now();
+        // The first error: logged at once, no pause.
+        let (line, pause) = t.note("read error", &e, t0);
+        assert_eq!(line.as_deref(), Some("read error: Transport I/O error: boom"));
+        assert!(!pause);
+        // A burst right behind it: silent, and the loop pauses.
+        for i in 1..=1000u64 {
+            let (line, pause) = t.note("read error", &e, t0 + std::time::Duration::from_micros(i));
+            assert!(line.is_none());
+            assert!(pause);
+        }
+        // After the interval: one line with the count.
+        let (line, _) = t.note("read error", &e, t0 + std::time::Duration::from_secs(6));
+        assert_eq!(line.as_deref(), Some("read error: Transport I/O error: boom (1001 since the last report)"));
+    }
+
+    #[test]
+    fn a_single_read_error_now_and_then_does_not_pause_the_loop() {
+        let mut t = ReadErrorThrottle::new();
+        let e = TransportError::Io("odd".into());
+        let t0 = std::time::Instant::now();
+        for i in 0..5u64 {
+            let (_, pause) = t.note("read error", &e, t0 + std::time::Duration::from_millis(200 * i));
+            assert!(!pause);
         }
     }
 }
