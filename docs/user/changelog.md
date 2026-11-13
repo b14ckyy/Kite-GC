@@ -128,6 +128,9 @@ inside the box of the feature release they belong to, so the notes for one relea
       treats this as the lost connection it is and disconnects, with the "Device connection lost"
       prompt for a running recording. On every system, a read error that keeps repeating is written
       to the log once every few seconds instead of every time.
+    - **Linux: bright lines along the map tile edges.** On systems with a recent WebKitGTK the 2D
+      map showed a thin bright grid, one line at every tile border, with every map provider and at
+      any display scaling. The tiles are drawn without those lines again.
     ---
 
     **1.0.1**{ .kite-patch } *2026-09-13*{ .kite-badge }
