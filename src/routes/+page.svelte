@@ -2921,7 +2921,9 @@
     // recorded" notice of a fleet session without group recording.
     void loadFleetMode().then(startFleetRecordingNotice);
     // Links the backend still holds (page reload / a UI state that drifted) → show them as connected.
-    void recoverBackendLinks().catch(() => {});
+    void recoverBackendLinks().catch((e) => {
+      void invoke('log_frontend', { level: 'warn', area: 'ui', message: `recoverBackendLinks failed at start-up: ${e}` }).catch(() => {});
+    });
     try {
       defaultFlightLogPath = await getDefaultFlightlogPath();
     } catch {

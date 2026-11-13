@@ -9,7 +9,7 @@ import type { FcInfo, PortInfo, BleDeviceInfo, TransportType, ProtocolType } fro
 import type { InavStats } from '$lib/stores/flightlogTypes';
 import { connection, connectionProtocol, fcLinkAlive, availablePorts, bleDevices, detectedPlatformType, hasMsp, isArduPilotLink } from '$lib/stores/connection';
 import { startTelemetryListeners, stopTelemetryListeners, resetTelemetry, setFcVariant } from '$lib/stores/telemetry';
-import { startVehicleListeners, activeVehicleId, resetVehicles, refreshLinks, selectVehicle, links, vehicles, type VehicleSummary } from '$lib/stores/vehicles';
+import { startVehicleListeners, activeVehicleId, resetVehicles, refreshLinks, selectVehicle, links, vehicles, type VehicleSummary, type LinkSummary } from '$lib/stores/vehicles';
 import { parseVehicleId } from '$lib/helpers/vehicleId';
 import { startFcModeListeners, clearFcModeLists } from '$lib/stores/fcModes';
 import { homePosition, vehicleHomes, clearVehicleHomes } from '$lib/stores/home';
@@ -349,8 +349,8 @@ vehicles.subscribe((known) => {
 /** Re-target every singleton store at the (already selected) active vehicle: drop the previous
  *  vehicle's telemetry/config, describe the new link in the connection store, reload its FC-side
  *  config (fence/rally or safehome/geozone). */
-async function applyActiveVehicle(vehicleId: string): Promise<void> {
-  const link = get(links).find((l) => l.linkId === parseVehicleId(vehicleId)?.link);
+async function applyActiveVehicle(vehicleId: string, linkList: LinkSummary[] = get(links)): Promise<void> {
+  const link = linkList.find((l) => l.linkId === parseVehicleId(vehicleId)?.link);
   // (The telemetry store re-seeds itself from the new vehicle's cached state — see stores/telemetry.)
   // Home: the new vehicle's FC home if we have seen one; otherwise the previous vehicle's locked home
   // must not masquerade as this one's — demote it to a manual reference (same as on disconnect).
@@ -366,7 +366,11 @@ async function applyActiveVehicle(vehicleId: string): Promise<void> {
   clearGeozones();
   clearFence();
   clearRally();
-  if (!link) return;
+  if (!link) {
+    // Must not stay silent: without the link the UI keeps whatever status it had (see recoverBackendLinks).
+    recoveryLog('warn', `applyActiveVehicle: no link for ${vehicleId} among ${linkList.length} link(s)`);
+    return;
+  }
   const protocolType: ProtocolType =
     link.protocol === 'MAVLink' ? 'mavlink' : link.protocol === 'MSP' ? 'msp' : 'telemetry';
   // A secondary vehicle on a shared MAVLink link has no handshake of its own — describe it from its
@@ -383,7 +387,9 @@ async function applyActiveVehicle(vehicleId: string): Promise<void> {
   // MSP over MAVLink belongs to the link's handshake (primary) vehicle only — the backend's `with_msp`
   // refuses a secondary vehicle on the same link.
   const mspTunnel = protocolType === 'mavlink' && isPrimary && (fcInfo.features?.msp_tunnel ?? false);
-  connection.update((c) => ({ ...c, status: 'connected', protocolType, port: link.transport, fcInfo, mspTunnel }));
+  // The transport kind comes from the link too: after a recovery the store still holds the default.
+  const transportType = transportTypeOf(link.transport);
+  connection.update((c) => ({ ...c, status: 'connected', protocolType, transportType: transportType ?? c.transportType, port: link.transport, fcInfo, mspTunnel }));
   // Same status-box labels as connectFC.
   const tr = get(t);
   connectionProtocol.set({
@@ -416,6 +422,19 @@ async function applyActiveVehicle(vehicleId: string): Promise<void> {
   }
 }
 
+/** Diagnostics of the link recovery go to the app log (a tester's log must show why the UI and the
+ *  backend disagreed). */
+function recoveryLog(level: 'info' | 'warn', message: string): void {
+  void invoke('log_frontend', { level, area: 'ui', message }).catch(() => {});
+}
+
+/** The transport kind of a link from the backend's description (`Serial(COM7)`, `TCP(host:port)`,
+ *  `UDP(host:port)`, `BLE(…)`); null when it names none of the four. */
+function transportTypeOf(description: string): TransportType | null {
+  const kind = description.split('(')[0].trim().toLowerCase();
+  return kind === 'serial' || kind === 'tcp' || kind === 'udp' || kind === 'ble' ? kind : null;
+}
+
 /**
  * Bring the singleton UI in line with what the backend actually holds. Used after a failed connect
  * (other links may still be open) and at startup (a page reload while connected): when links exist
@@ -429,17 +448,33 @@ export async function recoverBackendLinks(): Promise<boolean> {
   if (l.length === 0) return false;
   // The vehicle list is built from live `vehicle-discovered` events; after a reload ask for a replay.
   await invoke('announce_vehicles').catch(() => {});
+  // Which vehicle the UI follows: the store's, else the backend's — and if neither names a vehicle on
+  // one of the links just listed, the first link's primary. A link is up, so there is always one.
   let active = get(activeVehicleId);
-  if (!active) {
-    active = await invoke<string | null>('get_active_vehicle').catch(() => null);
-    if (active) activeVehicleId.set(active);
-  }
+  if (!active) active = await invoke<string | null>('get_active_vehicle').catch(() => null);
+  if (!active || !l.some((x) => x.linkId === parseVehicleId(active as string)?.link)) active = l[0].primaryVehicleId;
+  if (get(activeVehicleId) !== active) activeVehicleId.set(active);
+  const wasConnected = get(connection).status === 'connected';
+  // The connection state FIRST, from the list just fetched. It used to come last, behind some twenty
+  // more round trips to the backend (the telemetry listeners, the relays); when one of those failed or
+  // hung, the widgets showed live data under a status bar that said "Disconnected".
+  await applyActiveVehicle(active, l);
   // Always (re)arm the live feed: this runs after a page reload or a UI state that drifted, where the
-  // module-level listeners may be gone even though the store still says "connected".
-  await startTelemetryListeners();
-  if (get(connection).status !== 'connected') await applyRelaysOnConnect();
-  if (active) await applyActiveVehicle(active);
-  void invoke('log_frontend', { level: 'info', area: 'ui', message: `recoverBackendLinks: ${l.length} link(s), active ${active ?? 'none'} — telemetry listeners armed` }).catch(() => {});
+  // module-level listeners may be gone even though the store still says "connected". From here on a
+  // failing step is reported and the rest still runs.
+  try {
+    await startTelemetryListeners();
+  } catch (e) {
+    recoveryLog('warn', `recoverBackendLinks: arming the telemetry listeners failed: ${e}`);
+  }
+  if (!wasConnected) {
+    try {
+      await applyRelaysOnConnect();
+    } catch (e) {
+      recoveryLog('warn', `recoverBackendLinks: applying the relays failed: ${e}`);
+    }
+  }
+  recoveryLog('info', `recoverBackendLinks: ${l.length} link(s), active ${active} — connection state applied, telemetry listeners armed`);
   return true;
 }
 
