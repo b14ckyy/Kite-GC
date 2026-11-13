@@ -6,7 +6,7 @@
 <script lang="ts" module>
   /** One day-file of the diagnostics log, as the `list_log_files` command reports it. */
   export interface LogFileInfo {
-    /** `kite-gc-YYYY-MM-DD.log` — the date is read from here. */
+    /** `kite-gc-YYYY-MM-DD.log`, or `…-2.log` for a day's overflow file — the date is read from here. */
     name: string;
     /** Absolute path, what `share_file` takes. */
     path: string;
@@ -32,10 +32,12 @@
     onClose,
   }: { files: LogFileInfo[]; onPick: (path: string) => void; onClose: () => void } = $props();
 
-  /** `kite-gc-2026-09-16.log` → `2026-09-16`; a name outside the scheme is shown as it is. */
+  /** `kite-gc-2026-09-16.log` → `2026-09-16`, the day's overflow file `kite-gc-2026-09-16-2.log` →
+   *  `2026-09-16 (2)`; a name outside the scheme is shown as it is. */
   function dateOf(name: string): string {
-    const m = /^kite-gc-(\d{4}-\d{2}-\d{2})\.log$/.exec(name);
-    return m ? m[1] : name;
+    const m = /^kite-gc-(\d{4}-\d{2}-\d{2})(-2)?\.log$/.exec(name);
+    if (!m) return name;
+    return m[2] ? `${m[1]} (2)` : m[1];
   }
 
   /** Whole KB below 1 MB, one decimal above — the logbook's raw-log badge uses the same steps. */
