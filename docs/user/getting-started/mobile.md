@@ -76,10 +76,10 @@ See **[Video](../guides/video.md)**, especially its platform notes.
 ## Not available on mobile
 
 - **The detached video window** and the **Native Capture** video source.
-- **RC control from a gamepad or joystick** — the [RC control](../guides/rc-control.md) set-up is a
-  desktop feature.
-- On a **phone** also: **RC control** as a whole (no RC tool and no switch for it in Settings), the
-  **≡ Raw** telemetry popup and the stick overlay beside the replay player.
+- **RC control** as a whole — no RC tool and no switch for it in Settings on a phone or tablet. The
+  [RC control](../guides/rc-control.md) set-up with a gamepad, joystick or transmitter is a desktop
+  feature.
+- On a **phone** also: the **≡ Raw** telemetry popup and the stick overlay beside the replay player.
 
 ## Updates and diagnostics
 
