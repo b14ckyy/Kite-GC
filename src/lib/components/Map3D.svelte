@@ -5854,6 +5854,7 @@
     align-items: center;
     justify-content: center;
     backdrop-filter: var(--glass-blur, blur(6px));
+    -webkit-backdrop-filter: var(--glass-blur, blur(6px));
     transition: background 0.2s, border-color 0.2s, color 0.2s;
     padding: 0;
   }
