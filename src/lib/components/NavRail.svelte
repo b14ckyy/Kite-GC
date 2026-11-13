@@ -143,6 +143,7 @@
     justify-content: center;
     transition: background-color 0.2s;
     backdrop-filter: var(--glass-blur, blur(6px));
+    -webkit-backdrop-filter: var(--glass-blur, blur(6px));
   }
 
   .hamburger-btn:hover {
@@ -208,6 +209,7 @@
     overflow: hidden;
     transition: width 0.3s ease, background-color 0.2s;
     backdrop-filter: var(--glass-blur, blur(6px));
+    -webkit-backdrop-filter: var(--glass-blur, blur(6px));
     white-space: nowrap;
   }
 

@@ -50,6 +50,7 @@
     padding: 6px 8px 6px 10px;
     background: rgba(46, 46, 46, 0.92);
     backdrop-filter: var(--glass-blur, blur(6px));
+    -webkit-backdrop-filter: var(--glass-blur, blur(6px));
     border: 1px solid rgba(55, 168, 219, 0.5);
     border-radius: 8px;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
