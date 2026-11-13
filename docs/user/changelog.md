@@ -420,6 +420,11 @@ inside the box of the feature release they belong to, so the notes for one relea
       today's file. It now lists the day files, newest first, with date and size (the one this session
       writes is tagged *current*); tap one to send it to mail or a messenger — so yesterday's log is
       there after a restart. [#198]
+    - **The diagnostics log has a size limit** — a day's log file stops at 50 MB and is kept; the
+      log then continues in a second file for that day (`kite-gc-YYYY-MM-DD-2.log`), which starts
+      over each time it reaches 50 MB as well. A fault that repeats the same line without end can no
+      longer fill the disk, and you still have both ends of it: how it began in the first file, the
+      latest lines in the second. [#271]
     - **INAV over a MAVLink-only link gets its full MSP feature set** — INAV 10.0 can carry MSP inside
       the MAVLink stream, and Kite detects that automatically when you connect with the MAVLink
       protocol: the status shows **MSP/MAV**, UAV Info shows the real INAV version and craft name, and
@@ -649,6 +654,7 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#264]: https://github.com/b14ckyy/Kite-GC/pull/264
 [#265]: https://github.com/b14ckyy/Kite-GC/pull/265
 [#267]: https://github.com/b14ckyy/Kite-GC/pull/267
+[#271]: https://github.com/b14ckyy/Kite-GC/pull/271
 [#256]: https://github.com/b14ckyy/Kite-GC/pull/256
 [#259]: https://github.com/b14ckyy/Kite-GC/pull/259
 [#143]: https://github.com/b14ckyy/Kite-GC/pull/143

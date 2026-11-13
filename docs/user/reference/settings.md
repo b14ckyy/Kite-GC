@@ -163,7 +163,7 @@ See **[Flight logbook](../guides/logbook.md)** for how these are used.
 | Setting | What it does | Default |
 |---|---|---|
 | **Log Level** | How much Kite writes to its diagnostic log file — Off / Errors / Warnings / Debug (verbose). Raise it when reporting a problem. | Warnings |
-| **Log File** | **Open Folder** opens the folder containing the diagnostic log in your file manager. Kite writes one file per day and keeps the last 30 days. | — |
+| **Log File** | **Open Folder** opens the folder containing the diagnostic log in your file manager. Kite writes one file per day and keeps the last 30 days; a file stops at 50 MB and the log continues in a second file for that day (see [Getting a diagnostic log](../troubleshooting/connection.md#getting-a-diagnostic-log)). | — |
 | **Log File** → **Share log file** (Android) | Replaces **Open Folder** there — the log folder is app-private, no file manager can reach it. Opens a list of the day files, newest first, each with its date and size and the one this session writes tagged **current**; tap one to hand it to the Android share sheet (mail, messenger, a text editor). **Close** dismisses the list. | — |
 
 ## See also

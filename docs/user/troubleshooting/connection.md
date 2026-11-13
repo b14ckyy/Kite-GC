@@ -131,6 +131,12 @@ and keeping the last **30 days** (older files are pruned on startup), so a failu
 restarting Kite isn't lost. **Log File → Open Folder** takes you straight there; on Android **Share log file**
 lists the same day files, newest first, so you can pick yesterday's.
 
+A log file stops at **50 MB**. Should a day's file ever reach that, it is kept as it is and the log
+continues in a second file for that day, `kite-gc-YYYY-MM-DD-2.log` (shown as the date with **(2)** in
+the Android list). That second file starts over each time it reaches 50 MB too, so it always holds the
+latest lines. A log that large means something repeats without end — send both files with your report:
+the first shows how it began.
+
 !!! tip "Sharing a log"
     The log contains port names and firmware/version strings but no personal data. Attach it to a
     GitHub issue or the relevant chat when reporting a connection problem — it usually pinpoints the
