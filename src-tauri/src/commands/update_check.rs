@@ -21,7 +21,7 @@ pub enum UpdateChannel {
     Release,
     /// The latest stable release of the RUNNING minor only: 1.1.0 is told about 1.1.1, never 1.2.0.
     Patch,
-    /// The newest published release of any kind.
+    /// The highest published version of any kind.
     Prerelease,
 }
 
@@ -71,18 +71,57 @@ fn major_minor(version: &str) -> Option<(u64, u64)> {
     Some((major, minor))
 }
 
-/// Pick the release the channel wants out of GitHub's newest-first list. Pure — unit-tested.
+/// One chunk of a pre-release suffix: `rc10` is `[Text("rc"), Num(10)]`, so `b2` sorts below `b10`.
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+enum PreChunk {
+    Num(u64),
+    Text(String),
+}
+
+/// Sort key of a release tag, the same order as the frontend's `compareVersions` (utils/version.ts):
+/// numeric MAJOR.MINOR.PATCH, then a stable version above every pre-release of the same core, then
+/// the pre-release suffix compared naturally. A leading `v` is ignored; missing or unreadable numbers
+/// count as 0.
+fn version_key(tag: &str) -> ([u64; 3], bool, Vec<PreChunk>) {
+    let s = tag.trim().trim_start_matches(['v', 'V']);
+    let (core, pre) = s.split_once('-').unwrap_or((s, ""));
+    let mut nums = [0u64; 3];
+    for (slot, part) in nums.iter_mut().zip(core.split('.')) {
+        *slot = part.parse().unwrap_or(0);
+    }
+    let mut chunks = Vec::new();
+    let mut rest = pre;
+    while let Some(first) = rest.chars().next() {
+        let digits = first.is_ascii_digit();
+        let end = rest.find(|c: char| c.is_ascii_digit() != digits).unwrap_or(rest.len());
+        let (chunk, tail) = rest.split_at(end);
+        chunks.push(if digits { PreChunk::Num(chunk.parse().unwrap_or(0)) } else { PreChunk::Text(chunk.to_string()) });
+        rest = tail;
+    }
+    (nums, pre.is_empty(), chunks)
+}
+
+/// Pick the release the channel wants out of GitHub's list: the HIGHEST version among the published
+/// entries the channel accepts. GitHub documents no order for the list, and a patch of an older line
+/// published after a beta of the next version can stand in front of it, so the first matching entry
+/// is not the one to compare against. Pure — unit-tested.
 fn pick<'a>(releases: &'a [Value], channel: UpdateChannel, current: &str) -> Option<&'a Value> {
     let running = major_minor(current);
-    releases.iter().filter(|r| !is_draft(r)).find(|r| match channel {
-        UpdateChannel::Prerelease => true,
-        UpdateChannel::Release => !is_prerelease(r),
-        UpdateChannel::Patch => {
-            !is_prerelease(r)
-                && r.get("tag_name").and_then(Value::as_str).and_then(major_minor) == running
-                && running.is_some()
-        }
-    })
+    releases
+        .iter()
+        .filter(|r| !is_draft(r))
+        .filter(|r| match channel {
+            UpdateChannel::Prerelease => true,
+            UpdateChannel::Release => !is_prerelease(r),
+            UpdateChannel::Patch => {
+                !is_prerelease(r)
+                    && r.get("tag_name").and_then(Value::as_str).and_then(major_minor) == running
+                    && running.is_some()
+            }
+        })
+        .filter_map(|r| Some((version_key(r.get("tag_name")?.as_str()?), r)))
+        .max_by(|a, b| a.0.cmp(&b.0))
+        .map(|(_, r)| r)
 }
 
 /// Fetch the release to compare against. Returns `Ok(None)` when there's nothing to compare (e.g. no
@@ -116,7 +155,7 @@ pub async fn check_for_update(app: tauri::AppHandle, channel: UpdateChannel) -> 
         return Ok(to_info(&release));
     }
 
-    // Patch + pre-release channels walk the newest-first list (drafts skipped inside `pick`).
+    // Patch + pre-release channels take the highest matching version of the list (see `pick`).
     let releases: Value = client
         .get(RELEASES_LIST)
         .send()
@@ -163,5 +202,38 @@ mod tests {
         assert_eq!(tag(pick(&list, UpdateChannel::Patch, "1.3.0")), None);
         assert_eq!(tag(pick(&list, UpdateChannel::Release, "1.0.0")), Some("v1.1.2".into()));
         assert_eq!(tag(pick(&list, UpdateChannel::Prerelease, "1.0.0")), Some("v1.2.0-rc1".into()));
+    }
+
+    #[test]
+    fn version_order_matches_the_frontend() {
+        let ordered = ["1.0.0-b2", "1.0.0-b10", "1.0.0-rc1", "1.0.0", "1.0.1", "1.0.2", "2.0.0-b1", "2.0.0-b2", "2.0.0-rc1", "2.0.0", "10.0.0"];
+        for pair in ordered.windows(2) {
+            assert!(version_key(pair[0]) < version_key(pair[1]), "{} must sort below {}", pair[0], pair[1]);
+        }
+        assert!(version_key("v2.0.0-b1") == version_key("2.0.0-b1"));
+    }
+
+    #[test]
+    fn the_list_order_does_not_decide() {
+        let tag = |r: Option<&Value>| r.and_then(|r| r["tag_name"].as_str()).map(str::to_string);
+        // A patch of the older line stands first (published after the beta of the next version).
+        let list = vec![
+            release("v1.0.3", false, false),
+            release("v2.0.0-b2", true, false),
+            release("v2.0.0-b3", true, true), // draft: never offered
+            release("v1.0.2", false, false),
+            release("v2.0.0-b1", true, false),
+        ];
+        assert_eq!(tag(pick(&list, UpdateChannel::Prerelease, "2.0.0-b1")), Some("v2.0.0-b2".into()));
+        assert_eq!(tag(pick(&list, UpdateChannel::Prerelease, "1.0.2")), Some("v2.0.0-b2".into()));
+        // Patch channel: the highest patch of the running minor, also when it is not the first one listed.
+        let list = vec![
+            release("v1.0.4-rc1", true, false), // a pre-release of the running minor is not a patch
+            release("v1.0.2", false, false),
+            release("v1.0.3", false, false),
+            release("v1.1.0", false, false),
+        ];
+        assert_eq!(tag(pick(&list, UpdateChannel::Patch, "1.0.1")), Some("v1.0.3".into()));
+        assert_eq!(tag(pick(&[], UpdateChannel::Prerelease, "1.0.0")), None);
     }
 }
