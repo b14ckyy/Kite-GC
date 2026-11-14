@@ -4,6 +4,7 @@
 #
 #     KiteGC_Windows_x64_<Version>_<Type>.<ext>
 #     KiteGC_Android_<abi>_<Version>_installer.apk      (when an Android release build exists)
+#     KiteGC_Android_<abi>_<Version>_playstore.aab      (`just build-android-aab`, for Google Play)
 #
 #   Type = installer  (NSIS -setup.exe; the Android .apk)
 #        | portable   (kite-gc.exe, zipped with an empty `.portable` marker so the download keeps its
@@ -13,7 +14,8 @@
 # AND the GitHub release workflow, so the filenames are identical everywhere. The release/ folder is
 # git-ignored and refreshed on every run — `-Keep` adds to it instead.
 #
-# `-AndroidOnly` collects the APKs alone (implies -Keep). `just build-android` uses it: an Android
+# `-AndroidOnly` collects the APKs and the Play bundle alone (implies -Keep). `just build-android` and
+# `just build-android-aab` use it: an Android
 # build leaves the DESKTOP outputs of an earlier build untouched in target/release, and collecting
 # them would republish a stale binary under the current version number — a 1.0.0-rc2 kite-gc.exe
 # came out as KiteGC_Windows_x64_1.1.0-dev_portable.zip (found 2026-09-04).
@@ -91,9 +93,26 @@ Get-ChildItem $apkRoot -Directory -ErrorAction SilentlyContinue | ForEach-Object
     }
 }
 
+# Android App Bundle for Google Play: `tauri android build --aab` leaves it under
+# outputs\bundle\<abi>Release\. Same handling as the APKs.
+$aabRoot = Join-Path $root 'src-tauri\gen\android\app\build\outputs\bundle'
+Get-ChildItem $aabRoot -Directory -Filter '*Release' -ErrorAction SilentlyContinue | ForEach-Object {
+    $abiDir = $_
+    $aab = Get-ChildItem (Join-Path $abiDir.FullName '*.aab') -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if ($aab) {
+        $name = $abiDir.Name -replace 'Release$', ''
+        $abi = if ($abiNames.ContainsKey($name)) { $abiNames[$name] } else { $name }
+        $dest = "${app}_Android_${abi}_${version}_playstore.aab"
+        Copy-Item $aab.FullName (Join-Path $out $dest) -Force
+        Remove-Item $abiDir.FullName -Recurse -Force -ErrorAction SilentlyContinue
+        $script:collected += $dest
+    }
+}
+
 Write-Host ''
 if ($collected.Count -eq 0) {
-    $where = if ($AndroidOnly) { $apkRoot } else { $rel }
+    $where = if ($AndroidOnly) { Split-Path $apkRoot } else { $rel }
     Write-Host "[collect-release] No build outputs found under $where - did the build succeed?" -ForegroundColor Yellow
 } else {
     Write-Host "[collect-release] Collected into $out :" -ForegroundColor Green

@@ -14,6 +14,9 @@
 #         scripts/make-update-manifest.sh [tag]        # tag defaults to v<package.json version>
 #     gh release create <tag> --notes-file … release/*
 #
+# A `*_playstore.aab` in release/ belongs to the Play Console, not to the GitHub release — move it
+# out before the `gh release create` line above.
+#
 # What it does:
 #   1. Signs every updater artifact that has no `.sig` beside it. Nothing is signed at build time —
 #      not on CI, not on Sebastian's macOS machine — so the private key never leaves the
