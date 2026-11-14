@@ -136,11 +136,11 @@ inside the box of the feature release they belong to, so the notes for one relea
       fix: after each zoom step the map shows the previous zoom level for a single frame. That is a
       fault in WebKitGTK 2.54 itself (WebKit bug 321993), corrected by its developers; it goes away
       with a later system update.
-    ---
     - **Update check with *Include pre-releases*: a beta or release candidate could go unannounced.**
       Kite compared itself against whichever release GitHub listed first, which is not always the
       highest version: a patch release published after a beta of the next version hid that beta.
       Kite now picks the highest version from the list itself.
+    ---
 
     **1.0.1**{ .kite-patch } *2026-09-13*{ .kite-badge }
 
