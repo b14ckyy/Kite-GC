@@ -16,7 +16,9 @@
 //!   overwrite a running executable but allows renaming it, so the old one is moved to `<exe>.old`
 //!   first and removed on the next start (`remove_stale_executable`). Linux overwrites in place.
 //!
-//! Mobile has no in-app updating on either platform; the dialog links to the store instead.
+//! Mobile has no in-app updating on either platform. A store installation (Google Play, the App Store)
+//! is updated by its store, so the dialog links to the listing there; an Android APK installed by hand
+//! gets the GitHub release page.
 
 use serde::Serialize;
 use tauri::AppHandle;
@@ -33,8 +35,10 @@ pub enum UpdateKind {
     Installer,
     /// Portable ZIP — own binary swap.
     Portable,
-    /// Android / iOS — store link only.
-    Mobile,
+    /// Installed by a store (Google Play, the App Store) — the store updates it; link to the listing.
+    Store,
+    /// Android APK installed by hand — link to the GitHub release page.
+    Sideload,
 }
 
 /// Download / install progress, emitted as `update-progress` while `install_update` runs.
@@ -49,9 +53,24 @@ pub struct UpdateProgress {
 
 #[tauri::command]
 pub fn update_kind() -> UpdateKind {
-    #[cfg(mobile)]
+    #[cfg(target_os = "ios")]
     {
-        UpdateKind::Mobile
+        UpdateKind::Store
+    }
+    #[cfg(target_os = "android")]
+    {
+        // A failed lookup counts as an APK: that keeps the notice working, at the price of the release
+        // page instead of the store listing.
+        let play = crate::android::install_source::is_play_store().unwrap_or_else(|e| {
+            log::warn!("Update: install source lookup failed, treating as APK: {e}");
+            false
+        });
+        log::info!("Update: installed {}", if play { "from Google Play" } else { "as APK" });
+        if play {
+            UpdateKind::Store
+        } else {
+            UpdateKind::Sideload
+        }
     }
     #[cfg(desktop)]
     {

@@ -26,7 +26,7 @@
   import type { AppSettings, InterfaceSettings, RadarSettings, GcsMode, AirspaceSettings, AirspaceProvider, SystemMessagesLevel, LogLevel, RcControlSettings, TelemetryApiSettings, UpdateCheckSettings, UpdateCheckMode, DefaultProtocol } from '$lib/stores/settings';
   import { revealItemInDir, openPath } from '@tauri-apps/plugin-opener';
   import { isAndroid, isMobile, hasDbCompact, hasCustomMaps, hasRcControl } from '$lib/platform';
-  import { updatesSupported } from '$lib/controllers/updateCheck';
+  import { updatesSupported, updateKind } from '$lib/controllers/updateCheck';
   import { blackboxDecoderVersion, blackboxLegacyMode, downloadBlackboxDecode } from '$lib/stores/flightlog';
   import type { TileCacheStats } from '$lib/cache/tileCache';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
@@ -628,17 +628,27 @@
     {#if updatesSupported}
     <div class="s-group">
       <h4 class="s-head">{$t('settings.updates')}</h4>
-      <div class="s-row">
-        <span class="s-label">{$t('settings.updateCheck')}</span>
-        <select id="update-check" class="s-select" value={updateCheck.mode}
-          onchange={(e) => onPatch({ updateCheck: { ...updateCheck, mode: (e.target as HTMLSelectElement).value as UpdateCheckMode } })}>
-          <option value="disabled">{$t('settings.updateDisabled')}</option>
-          <option value="release">{$t('settings.updateRelease')}</option>
-          <option value="patch">{$t('settings.updatePatch')}</option>
-          <option value="prerelease">{$t('settings.updatePrerelease')}</option>
-        </select>
-      </div>
-      <p class="cesium-hint">{$t('settings.updateHint')}</p>
+      {#if $updateKind === 'store'}
+        <!-- A store installation: the store decides the version, so the channel choice is an on/off switch. -->
+        <div class="s-row">
+          <label class="s-label" for="update-check">{$t('settings.updateCheck')}</label>
+          <Toggle checked={updateCheck.mode !== 'disabled'} id="update-check"
+            onchange={(c) => onPatch({ updateCheck: { ...updateCheck, mode: c ? 'release' : 'disabled' } })} />
+        </div>
+        <p class="cesium-hint">{$t('settings.updateHintStore')}</p>
+      {:else}
+        <div class="s-row">
+          <span class="s-label">{$t('settings.updateCheck')}</span>
+          <select id="update-check" class="s-select" value={updateCheck.mode}
+            onchange={(e) => onPatch({ updateCheck: { ...updateCheck, mode: (e.target as HTMLSelectElement).value as UpdateCheckMode } })}>
+            <option value="disabled">{$t('settings.updateDisabled')}</option>
+            <option value="release">{$t('settings.updateRelease')}</option>
+            <option value="patch">{$t('settings.updatePatch')}</option>
+            <option value="prerelease">{$t('settings.updatePrerelease')}</option>
+          </select>
+        </div>
+        <p class="cesium-hint">{$updateKind === 'sideload' ? $t('settings.updateHintSideload') : $t('settings.updateHint')}</p>
+      {/if}
     </div>
     {/if}
   {:else if tab === 'map'}

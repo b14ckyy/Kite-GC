@@ -6,7 +6,8 @@
 <!-- UpdateDialog.svelte — one-shot "new version available" prompt driven by the update-check controller.
      Shows the release notes (GitHub's release body, rendered from markdown) above the choices: skip this
      version, remind me later, open the release page, or "Update and Restart" — which downloads + installs
-     in place with a progress bar and relaunches (mobile builds link to their store instead). Styled like
+     in place with a progress bar and relaunches. Mobile builds cannot install: a store installation
+     links to its store listing only, an Android APK to the release page only. Styled like
      ConfirmDialog. -->
 <script lang="ts">
   import { t } from 'svelte-i18n';
@@ -21,11 +22,18 @@
   const info = $derived($pendingUpdate);
   const busy = $derived($installState.phase === 'download' || $installState.phase === 'install');
 
+  /** The sections of a release body that tell how to download and install the packages by hand. A store
+   *  installation is updated by its store and must not be walked through installing an APK, so these
+   *  are cut from its notes. The headings are the ones of the release template (Dev-Docs
+   *  `releases/TEMPLATE.md`); a section runs to the next `## ` heading. */
+  const INSTALL_SECTIONS = /^## +(?:Before you install|Installation)[^\n]*\n[\s\S]*?(?=^## |(?![\s\S]))/gim;
+
   /** Release body → sanitised HTML. The centred banner block at the top of every release is dropped (it is
    *  the page header, not notes), and GitHub's `> [!NOTE]`-style alerts become classed blockquotes. */
   const notesHtml = $derived.by(() => {
     if (!info?.body) return '';
-    const md = info.body.replace(/^\s*<p align="center">[\s\S]*?<\/p>\s*/i, '');
+    let md = info.body.replace(/^\s*<p align="center">[\s\S]*?<\/p>\s*/i, '');
+    if ($updateKind === 'store') md = md.replace(/\r\n/g, '\n').replace(INSTALL_SECTIONS, '');
     const html = marked.parse(md, { async: false, gfm: true });
     const alerts = html.replace(
       /<blockquote>\s*<p>\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*(?:<br\s*\/?>)?\s*/gi,
@@ -36,13 +44,14 @@
 
   /** Primary button label per update kind. */
   const primaryLabel = $derived.by(() => {
-    if ($updateKind !== 'mobile') return $t('update.install');
-    if (!storeUrl()) return $t('update.openPage');
+    if ($updateKind === 'installer' || $updateKind === 'portable') return $t('update.install');
+    if ($updateKind === 'sideload' || !storeUrl()) return $t('update.openPage');
     return isAndroid ? $t('update.playStore') : $t('update.appStore');
   });
 
   function onPrimary() {
-    if ($updateKind === 'mobile') void openStore();
+    if ($updateKind === 'store') void openStore();
+    else if ($updateKind === 'sideload') void openReleasePage();
     else void installUpdate();
   }
 
@@ -98,7 +107,7 @@
         <div class="dialog-buttons">
           <button class="dialog-btn dialog-btn-cancel" onclick={skipVersion}>{$t('update.skip')}</button>
           <button class="dialog-btn" onclick={remindLater}>{$t('update.later')}</button>
-          {#if $updateKind !== 'mobile' || storeUrl()}
+          {#if $updateKind === 'installer' || $updateKind === 'portable'}
             <button class="dialog-btn" onclick={openReleasePage}>{$t('update.openPage')}</button>
           {/if}
           <button class="dialog-btn dialog-btn-primary" onclick={onPrimary}>{primaryLabel}</button>

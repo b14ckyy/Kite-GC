@@ -35,7 +35,7 @@
   import PhoneWidgetPanel from "$lib/components/phone/PhoneWidgetPanel.svelte";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import UpdateDialog from "$lib/components/UpdateDialog.svelte";
-  import { runUpdateCheck } from "$lib/controllers/updateCheck";
+  import { runUpdateCheck, resolveUpdateKind } from "$lib/controllers/updateCheck";
   import ContextMenu from "$lib/components/ContextMenu.svelte";
   import BatchEditPopup from "$lib/components/mission/BatchEditPopup.svelte";
   import ArduBatchEditPopup from "$lib/components/mission/ArduBatchEditPopup.svelte";
@@ -3533,6 +3533,7 @@
   // Startup update check (GitHub releases). Deferred a few seconds so it never competes with launch work;
   // failures are swallowed inside the controller — it must never disrupt the app.
   onMount(() => {
+    void resolveUpdateKind(); // Settings needs it before the check runs
     const id = setTimeout(() => { void runUpdateCheck(); }, 4000);
     return () => clearTimeout(id);
   });

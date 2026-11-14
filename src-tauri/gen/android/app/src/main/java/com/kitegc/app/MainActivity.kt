@@ -48,6 +48,7 @@ class MainActivity : TauriActivity() {
     LinkService.init(this, notificationPermission)
     NativeVideo.init(this)
     NetInfo.init(this)
+    InstallSource.init(this)
 
     enableEdgeToEdge()
 

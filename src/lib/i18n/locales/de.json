@@ -1156,6 +1156,8 @@
     "updatePatch": "Nur Patch-Releases",
     "updatePrerelease": "Pre-Releases einschließen",
     "updateHint": "Prüft beim Start auf GitHub auf eine neuere Version. Heruntergeladen wird erst, wenn du „Aktualisieren und neu starten“ wählst.",
+    "updateHintStore": "Meldet beim Start, wenn eine neuere Version erschienen ist, samt Release Notes. Das Update selbst kommt aus dem Store.",
+    "updateHintSideload": "Prüft beim Start auf GitHub auf eine neuere Version. Der Hinweis führt zur Release-Seite mit der neuen APK.",
     "alertThresholdsHint": "Warnschwellen. 0 = deaktiviert.",
     "hudWidgets": "HUD Widgets",
     "rateHint": "Ratenänderungen gelten ab nächster Verbindung.",
