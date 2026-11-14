@@ -283,6 +283,7 @@
     border-radius: 0 0 8px 8px;
     box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
     backdrop-filter: var(--panel-blur, blur(10px));
+    -webkit-backdrop-filter: var(--panel-blur, blur(10px));
     padding: 10px 12px;
     z-index: 199;
     font-family: 'Segoe UI', Tahoma, sans-serif;

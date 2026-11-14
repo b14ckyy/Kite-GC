@@ -52,6 +52,11 @@ What you need on the INAV side: firmware **10.0 or newer**, a serial port with t
 function, `mavlink_version` left at 2 (the default) and a board with more than 512 KB of flash (F722 and
 F411 boards have no MAVLink). Nothing needs to be enabled in the CLI.
 
+!!! note "INAV before 10.0 over MAVLink"
+    An older INAV version on a MAVLink link has no MSP tunnel, so Kite only gets what INAV's MAVLink
+    emulation delivers. Such a connection works on a **best-effort** basis and is **not officially
+    supported**. For INAV before 10.0 the supported link is **MSP**.
+
 Not available on such a link: RC control from Kite, ADS-B from the flight controller's own receiver,
 and the INAV-only telemetry details that need MSP polling (mode boxes, arming-blocked reasons, sensor
 status) — those badges in UAV Info show *Not available over MSP/MAV*.
