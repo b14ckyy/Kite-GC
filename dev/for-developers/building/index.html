@@ -2324,12 +2324,19 @@ replace it.</p>
 <p>Android orders builds by an integer <code>versionCode</code>, and Google Play accepts an upload only with a higher
 one than before. <code>app/build.gradle.kts</code> derives it from the version name in <code>package.json</code>
 (<code>playVersionCode</code>):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>major * 1_000_000 + minor * 10_000 + patch * 100 + stage
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>stage: -bN = N (1–39) · -rcN = 40 + N (N 1–39) · final = 99 · -dev = 0
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>major * 10_000_000 + minor * 100_000 + patch * 1_000 + stage * 10 + build
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>stage: -bN (or -betaN) = N (1–39) · -rcN = 40 + N (N 1–39) · final = 99 · -dev = 0
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>build: 0–9, from the environment variable KITE_ANDROID_BUILD (unset or empty = 0)
 </code></pre></div>
-<p>So <code>2.0.0-b1</code> is 2000001, <code>2.0.0-rc1</code> 2000041, <code>2.0.0</code> 2000099 and <code>2.0.1</code> 2000199. A version name
-outside this pattern — another suffix, a beta (<code>-bN</code>) or rc number above 39 — stops the build with a message.
-Two uploads need two version names.</p>
+<p>So <code>2.0.0-b1</code> is 20000010, <code>2.0.0-rc1</code> 20000410, <code>2.0.0</code> 20000990 and <code>2.0.1</code> 20001990. A version name
+outside this pattern stops the build with a message: another suffix, a beta or rc without a number or
+with one outside 1–39, a minor or patch above 99, a major above 209, or a <code>KITE_ANDROID_BUILD</code> that is not
+a digit.</p>
+<p>Play never takes a code twice, not even after an upload was rejected or became invalid. The <strong>build</strong>
+digit is for that case: set <code>KITE_ANDROID_BUILD=1</code> (then 2, …; in PowerShell <code>$env:KITE_ANDROID_BUILD = 1</code>)
+to upload the same version again. Build the APK of that release <strong>locally with the same value</strong>
+(<code>just build-android</code>) — Android refuses to install a lower code over a higher one, and the GitHub
+workflow always builds with 0. The file names in <code>release/</code> do not carry the digit.</p>
 <p>The <strong>App Bundle</strong> that Google Play takes is built locally only — the GitHub workflow keeps building the
 APK:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>just<span class="w"> </span>build-android-aab<span class="w">    </span><span class="c1"># release/KiteGC_Android_&lt;abi&gt;_&lt;version&gt;_playstore.aab</span>
