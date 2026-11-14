@@ -168,288 +168,231 @@ inside the box of the feature release they belong to, so the notes for one relea
 
     **Added**
 
-    - **Android support** — native app with USB serial, Bluetooth LE and Wi-Fi links, touch layout
-      and scoped storage folders. [#79]
-    - **Bottom widget slots on the phone** — three centred slots on the map's bottom edge (a larger
-      middle one, two smaller beside it), filled by dragging widgets out of the column in edit mode;
-      the follow centre moves up so the aircraft stays in the free map. [#173]
-    - **iPhone & iPad support** — native iOS/iPadOS build: phone/tablet layout, BLE,
-      Wi-Fi MAVLink. Contributed by Sebastian Kumor. [#16]
-    - **Native RTSP video client** — Kite's own RTSP client with OS hardware decode (H.264/H.265)
-      on Windows [#85], Android [#88], Linux [#89], macOS [#126] and iPad [#221] (no video on iPhone).
-    - **Unobstructed fullscreen video** — aspect-exact video box with a blurred follow-map
-      backdrop. [#90]
-    - **PX4 ULog import** — the logbook imports `.ulg` flash/SD logs, split into flights like any
-      other log. [#82]
+    *Mobile*
+
+    - **Android support** — native app for tablets and phones with USB serial, Bluetooth LE and
+      Wi-Fi links, a touch layout and shared storage folders (APK download; the Play Store
+      follows later). [#79]
+    - **iPhone & iPad support** — native iOS/iPadOS build with phone and tablet layouts, Bluetooth
+      LE and Wi-Fi MAVLink (App Store only, follows later). Contributed by Sebastian Kumor. [#16]
+    - **Phone layout** — landscape interface with a full-screen map, a connection pop-out, a widget
+      column with two pages, three widget slots on the map's bottom edge and long-press editing.
+      [#102] · [#173]
+    - **Phone video** — docked window in two sizes with a park button, the Video widget in the
+      column and a map ⇄ video swap. [#105] · [#152]
+    - **Background telemetry on Android** — a notification keeps the link, the recording and the
+      track running while Kite is minimised. [#111]
+
+    *Video*
+
+    - **Native RTSP video client** — Kite's own RTSP client with the operating system's hardware
+      decoder (H.264/H.265) on Windows [#85], Android [#88], Linux [#89], macOS [#126] and iPad
+      [#221]. No video on iPhone yet.
+    - **Video in two places at once** — with the native RTSP client the picture runs in the Video
+      widget and in the floating window or the fullscreen swap at the same time. Desktop only.
+      [#129] · [#132] · [#135]
+    - **Detached video window** — the floating video frame moves into its own always-on-top window,
+      beside Kite or on a second monitor, and returns there at the next start. Needs the native
+      RTSP client. Desktop only (Windows, macOS and Linux), not on tablets.
+      [#130] · [#132] · [#135]
+    - **Unobstructed fullscreen video** — fullscreen video keeps its aspect ratio, with a blurred
+      map that follows the aircraft as the backdrop instead of black bars. [#90]
+    - **Mini-map gestures** — when the map is swapped into the Video widget or into the phone's
+      docked video window, a tap on it toggles heading-up ⇄ north-up and sliding one finger up or
+      down zooms. The map in the floating window and in the detached window is operated as usual.
+      [#152]
+
+    *Map*
+
+    - **Map search** — a magnifier button jumps the 2D or 3D map to a place or to coordinates, and
+      a location button next to it to your own position. See
+      [Map search](guides/telemetry-and-display.md#map-search). [#263]
+    - **Custom online map providers** — add any online tile service by its URL template, with your
+      own API key if it needs one. See [Your own maps](guides/custom-maps.md). [#249]
+    - **Custom offline maps (desktop)** — a folder of tiles in the `Z/X/Y` layout shows up in the
+      map selector and works without internet. See [Your own maps](guides/custom-maps.md).
+      [#246] · [#253]
     - **3D buildings** — optional OpenStreetMap building extrusions on the 3D map. [#48]
-    - **Automatic database backup** — before a Kite update upgrades the flight database, a full
-      backup is written next to it; Settings shows it with size and a delete button. [#96]
-    - **High-resolution replay** — HI-RES switch in the player re-decodes the stored log at full
-      rate for fluid instruments; slow-motion speeds 0.25× / 0.5×. [#97]
+    - **High-Resolution 3D** — the globe at the screen's native pixel density, or at half
+      resolution for weak GPUs; Settings → Map → 3D View. [#111]
+    - **Guided "Fly Here" from the 3D map** — a click or tap on the terrain opens the same target
+      form as on the 2D map, in every camera mode except FPV. See
+      [Vehicle control](guides/vehicle-control.md#guided-flight-fly-here). [#265]
+
+    *Logbook and replay*
+
+    - **INAV Blackbox import without a helper program** — Kite decodes INAV Blackbox logs itself;
+      imports are faster and no longer lose the frames after a flight-mode change. [#234]
+    - **PX4 ULog import** — the logbook imports `.ulg` logs, split into flights like any other
+      log. [#82]
+    - **High-resolution replay** — a HI-RES switch in the player re-decodes the stored log at its
+      full rate; new slow-motion speeds 0.25× / 0.5×. [#97]
     - **Open a log without importing it** — drop an onboard log on the map or use the Logbook's
-      Open button to replay it straight from the file; import it afterwards if you like. [#99]
-    - **Resizable widgets** — small/large for square widgets, wide/large/small for Live AGL and
-      Video, switched with a corner button in edit mode; docks adapt to their largest widget. [#101]
-    - **Raw telemetry view** — the **≡ Raw** button next to Relay lists every telemetry value with
-      its raw unit; replaces the Raw Telemetry widget. [#101]
-    - **Phone layout** — landscape interface for phones: full-screen map, connection pop-out,
-      widget column with two pages and long-press editing. [#102]
-    - **Phone video** — docked window with a park button, the Video widget in the column, map ⇄
-      video swap with a locked mini map; off-screen video is not rendered but keeps its stream. [#105]
-    - **Background telemetry on Android** — a foreground service with a live notification keeps
-      the link, the recording and the track running while Kite is minimised. [#111]
-    - **High-Resolution 3D** — the globe at native pixel density (sharp on phones, tablets and
-      high-DPI screens) or at half resolution for weak GPUs; Settings → Map → 3D View. [#111]
-    - **Detached video window** — the floating video frame moves out of the app into its own
-      always-on-top window: put it beside Kite or on a second monitor, which then becomes your video
-      screen and is filled automatically at start. An **unplug button** appears on the floating
-      window when you hover it; the detached window's own hover buttons bring the picture back
-      (top-left) and switch to fullscreen (bottom-right). Where it stands — including fullscreen —
-      is remembered; if that screen is gone next time, it opens on Kite's own. Needs the Native RTSP
-      client; Windows, macOS and Linux. [#130] · [#132] · [#135]
-    - **The video shows in two places at once** — with Kite's own RTSP client the picture now runs
-      in the Video widget **and** the floating window (or the fullscreen swap) at the same time,
-      as it always did with the other sources. One decode feeds both. [#129] · [#132] · [#135]
-    - **Desktop video window with a park button** — Start slides the window in, the camera button
-      beside it parks and recalls it while the source runs; glass bezel, resize corner, no ✕. The
-      Video panel replaces its preview with a status block (state, resolution, fps, codec, bitrate). [#127]
-    - **Long-press widget editing on the desktop** — hold a widget (mouse or touch) to enter edit
-      mode and drag it right away; the ✎ button is gone. Click outside the docks or Escape to leave. [#127]
-    - **Default protocol** in Settings → Interface → UI. It stays on **Last used**, which is what Kite
-      has always done, and can be pinned to MSP, MAVLink or Telemetry instead, so the app opens on
-      the link you actually fly no matter what the last session happened to use. [#151]
-    - **Mini-map gestures** — the small map in the video frame or widget tile stays follow-locked, but
-      a tap on it toggles heading-up ⇄ north-up (remembered) and sliding one finger up or down zooms
-      in or out; a second finger hands over to pinch. [#152]
-    - **Phone docked window in two sizes** — a corner marker in the frame's top-left toggles between
-      the full size and a compact one, for the video and the swapped-in map alike. [#152]
-    - **Vehicle type override in the UAV Info panel** — the Type row is a dropdown: Kite fills in the
-      detected type, you can change it for the session, and the map model and the recorded flights
-      follow it. The panel also shows the flight controller's hardware **FC ID** (with a copy button)
-      and gains **Save to vehicle library**, which creates the library entry from the connected craft —
-      name, type, board, firmware, FC ID, the reported sensors and the blackbox state — or jumps to the
-      entry that already carries this FC ID. [#157]
+      Open button to replay it straight from the file. [#99]
+    - **Automatic database backup** — before an update upgrades the flight database, a full backup
+      is written next to it; Settings shows it with its size and a delete button. [#96]
 
-    - **Update and Restart** — the update notice installs the new version in place (installer,
-      app bundle or portable executable) and restarts Kite; the release notes are shown in the
-      dialog. [#162]
-    - **Patch releases only** — update-check channel that offers bug-fix releases of the running
+    *Vehicles and control*
+
+    - **INAV over a MAVLink-only link (MSP/MAV)** — with INAV 10.0, missions, safe homes, geozones,
+      craft name and flight statistics work over ELRS/mLRS in MAVLink mode, SiK radios and MAVLink
+      Wi-Fi bridges. INAV versions before 10.0 connect over MAVLink on a best-effort basis and
+      are not officially supported. See
+      [Connecting → INAV over MAVLink](guides/connecting.md#inav-over-mavlink-mspmav). [#202]
+    - **ArduPlane: Takeoff button for fixed-wing planes** — switches the plane to TAKEOFF mode
+      (hold to confirm). In that mode the motor starts as soon as you arm. [#242]
+    - **Vehicle type override, FC ID and "Save to vehicle library" in the UAV Info panel** — the
+      detected type can be changed for the session, the flight controller's hardware ID is shown,
+      and the connected craft can be saved as a library vehicle. [#157]
+    - **Local radar devices over the network** — an ADS-B receiver and the FormationFlight module
+      connect over TCP or UDP as well as over a serial port. See
+      [Radar & ADS-B](guides/radar-and-adsb.md#connecting-a-local-device). [#261]
+
+    *Connection and data*
+
+    - **Telemetry API** — Kite serves its live telemetry as read-only JSON over TCP, HTTP and UDP
+      for other programs. See the [Telemetry API](reference/telemetry-api.md) reference. [#123]
+    - **Default protocol** — Settings → Interface → UI pins the protocol Kite opens with to MSP,
+      MAVLink or Telemetry; the default stays *Last used*. [#151]
+
+    *Interface*
+
+    - **Resizable widgets** — every flight widget has two or three sizes, switched with a corner
+      button in edit mode; the docks adapt to their largest widget. [#101]
+    - **Raw telemetry view** — the **≡ Raw** button in the top bar lists every telemetry value in
+      its raw unit. [#101]
+    - **Update and Restart** — the update notice shows the release notes and installs the new
+      version in place. [#162]
+    - **Patch releases only** — an update channel that offers bug-fix releases of the running
       version only (2.0.0 → 2.0.1, never 2.1.0). [#162]
-    - **Slovak interface language** (Settings → Language), contributed by Sebastian Kumor. [#222]
-    - **Spanish interface language** (Settings → Language). [#225]
-
-    **Removed**
-
-    - **Video window (detach)** — the old detached window was the browser's Picture-in-Picture: it
-      never worked with Kite's own RTSP client and only ever existed on Windows. A real detached
-      video window replaces it. [#129]
+    - **Slovak interface language**, contributed by Sebastian Kumor. [#222]
+    - **Spanish interface language.** [#225]
 
     **Changed**
 
-    - **Flights belong to their vehicle by FC ID** — every flight now stores the library vehicle it
-      belongs to, recognised when it is saved: by the flight controller's **FC hardware ID** first, by
-      the craft name when the flight has no FC ID or its FC ID matches no vehicle — but never by craft
-      name to a vehicle that stores a different FC ID: when unsure, the flight stays unassigned.
-      Existing flights are linked once during the database upgrade by the same rule. The post-flight
-      summary shows the vehicle with a picker and asks when the pick needs a decision (store the FC ID,
-      FC swapped, a second aircraft, leave unassigned, create a vehicle); the flight detail changes or
-      clears the vehicle; a new vehicle, a changed craft name or a newly entered FC ID offers to link
-      the existing flights. An FC ID belongs to one vehicle — moving it to another asks first. Deleting
-      a vehicle can transfer its flights to another one. INAV over plain MAVLink and simulators with a
-      placeholder ID (INAV SITL, PX4 SITL as system ID 1) report no FC ID. [#228]
-    - **`.kflight` files of INAV Blackbox flights are smaller** — and a file written by 2.0 still
-      imports into Kite 1.0, linked pairs (live recording + onboard log) included. [#232]
-    - **Settings has three tabs: Interface, Map and Data.** Interface holds the display options, HUD
-      widgets, units, alerts, language, UI scale, the default protocol and updates; the new Map tab
-      gathers the 3D view, the mission defaults, the providers (custom offline maps, custom online
-      providers, Cesium Ion token, Airspace Manager) and the tile and terrain caches; Data keeps
-      telemetry, the flight logbook and diagnostics. *Tile Provider* is now called **Map Provider**.
-      The 3D **Altitude Curtain** is off by default for new installations, because it costs a lot of
-      performance; an installation that already has the setting keeps it. See
-      [Settings](reference/settings.md). [#250]
-    - **Guided "Fly Here" from the 3D map.** A click or tap on the terrain in the 3D view opens
-      the same target form as on the 2D map, in every camera mode except FPV, and the 3D map shows
-      the target the flight controller reports as a green point with a dashed line. See
-      [Vehicle control](guides/vehicle-control.md#guided-flight-fly-here). [#265]
-    - **Map search.** A magnifier button — in the top bar on the desktop and on tablets, at the top
-      of the map buttons on a phone — jumps the 2D or 3D map to a place or to coordinates, and a
-      location button next to it jumps to your own position. Coordinates work offline; place
-      names are looked up at OpenStreetMap when you press Enter. See
-      [Map search](guides/telemetry-and-display.md#map-search). [#263]
-    - **Bigger icons on the map buttons.** The 2D / 3D, follow, camera-mode and video buttons use
-      one icon size that fills the button, instead of several small ones. [#263]
-    - **Tablet: the map buttons sit in the corner again.** On a tablet the 2D map's buttons were
-      lifted so far that the top one slid under the lowest widget of the right dock, with an empty
-      strip below them. [#264]
-    - **Android: the background notification shows the Kite icon** instead of a blank placeholder.
-      [#264]
-    - **The bottom widget dock uses the room next to the video window.** With the floating video
-      window in its corner the dock gave up more width than the window takes, which squeezed
-      the widgets and left a gap beside the video button. [#264]
-    - **Panels no longer flicker when they open over video in Power Saving.** With Power Saving
-      active and a video running, a panel disappeared for an instant right after it opened.
-      [#264]
-    - **3D map: leaving FPV puts the camera back at a normal viewpoint.** Switching from the FPV
-      view to the free camera left the camera in the cockpit — banked with the aircraft and
-      looking at the horizon — and on a touch screen it could then hardly be tilted or turned.
-      The free camera now starts behind and above the aircraft, looking down at it. [#262]
-    - **Local radar devices over the network.** An ADS-B receiver and the FormationFlight module can
-      be connected over **TCP** or **UDP** as well as over a serial port — on Android, where serial
-      ports are limited, and on iPhone and iPad, which have none and now offer the network links
-      only. A serial port that a radar source uses is greyed out for the flight connection and the
-      other way round, and two sources set to the same UDP port get a warning. See
-      [Radar & ADS-B](guides/radar-and-adsb.md#connecting-a-local-device). [#261]
-    - **No RC control on phones and tablets.** The RC tool and its switch in Settings are gone on
-      Android and iOS: on-screen touch sticks are too easy to hit by accident for something that
-      steers an aircraft. RC control stays a desktop feature for now. [#260] · [#267]
+    *Video*
 
-    **Improved**
+    - **RTSP uses Kite's own client by default** on Windows, macOS and Linux; the classic engine
+      (MediaMTX / ffmpeg) can still be selected in the Video panel. **Disable hardware
+      acceleration** appears only where it has an effect: on Linux, on the classic path, when Kite
+      found hardware for the stream conversion. [#259]
+    - **Floating video window** — starting a source slides the window in, and a camera button next
+      to it parks it off-screen and brings it back while the stream keeps running. The Video panel
+      shows the source's state, resolution, frame rate, codec and bitrate instead of a preview.
+      [#127]
+    - **The floating video window moves by a handle** in its bottom-left corner; dragging the
+      picture, the right mouse button and two fingers go to the map in the frame. [#152]
+    - **The map inside the floating window or a widget has no + / − zoom buttons.** Zoom it with
+      the mouse wheel, a pinch or the mini-map's slide gesture. [#152]
 
-    - **The Native RTSP client is on by default and no longer experimental.** RTSP on Windows, macOS
-      and Linux runs through Kite's own client unless you switch it off in the Video panel. Existing
-      installations are switched over once at the first start of 2.0; if you switch it off after
-      that, it stays off. Switching it off still gives you the classic engine path (MediaMTX /
-      ffmpeg). **Disable hardware acceleration** now appears only where it does something: on Linux,
-      on the classic path, when Kite found hardware for the stream conversion. [#259]
-    - **Location names for the logbook keep to the map service's limit.** Kite asks OpenStreetMap's
-      Nominatim for the place name of a flight's take-off point. Requests are now at least a second
-      apart, as the service demands, and flights from the same field reuse the name instead of
-      asking again — a batch import from one site asks once, not once per flight. [#255]
-    - **3D map: fewer tiles with High-Resolution 3D switched off.** On a standard-density screen
-      the globe kept loading online map tiles as fine as for the full resolution although it
-      renders at half of it. It now takes them up to one zoom level coarser — as few as a quarter
-      of the tiles and requests for the same picture, which matters on a slow link or with a tile
-      service that has a quota. High-density screens keep their tiles. [#254] · [#256]
-    - **ArduPilot: the control panel offers the modes your flight controller really has.** From
-      ArduPilot 4.7 on, Kite reads the mode list from the flight controller: modes missing from your
-      firmware or switched off there are no longer offered, and modes the panel did not have before
-      are (Auto RTL, AutoLand, Thermal, Follow, Dock and more). Kite keeps its own names and the RC
-      lock for stick-flown modes; a mode Kite does not know, such as one from a Lua script, shows
-      the flight controller's name. Older ArduPilot versions and PX4 use the built-in list, which
-      is complete for Copter, Plane and Rover now. [#242]
-    - **ArduPlane: a Takeoff button for fixed-wing planes.** It switches the plane to TAKEOFF mode
-      (hold to confirm); the plane climbs to `TKOFF_ALT` and loiters. Until now a plain plane could
-      not be put into that mode from Kite. Mind that in TAKEOFF mode the motor starts as soon as
-      you arm — the panel says so while the plane waits disarmed in that mode. [#242]
-    - **Stick-flown modes fold out from an "RC modes" bar** instead of the small *Show all modes*
-      checkbox. The bar is finger-sized and shows *No RC link* while those modes are locked. [#242]
-    - **ArduPilot: returning and landing in one place, always with a hold.** A QuadPlane has
-      **RTL / QRTL** and **Loiter QLand / QLand** as two pairs of hold-to-confirm buttons instead
-      of QRTL and QLand as single clicks among the mode buttons; a fixed-wing plane on ArduPilot
-      4.7 gets **AutoLand** next to RTL. A rover or boat shows only RTL, and a Sub shows
-      **Surface** in place of RTL and Land, which it does not have. Among the mode buttons,
-      SmartRTL (Copter, Rover) and Auto RTL need a hold too and are listed after the ordinary
-      flight modes. [#242] · [#258]
-    - **Compact Database no longer freezes the app, and cannot be started twice.** It runs in the
-      background behind a notice that stays until it is done — on a hard disk or an SD card a large
-      database takes minutes. It is refused while a flight is being recorded or an import is
-      running, and it now works together with the automatic space reclaim instead of colliding
-      with it. When it is done, Kite says how much space was freed. On Android and iOS the button
-      is no longer shown: the database holds no original log files there and deleting flights
-      already gives the space back; on Android a compact would also need the whole database in
-      memory. [#243]
-    - **INAV flash download: one unreadable log no longer ends the import.** A `.bbl` from the
-      flight controller's flash holds one log per flight. If one of them was damaged, the import
-      stopped there and the following flights were never imported. Kite now imports the rest and
-      shows which logs failed and why. [#243]
-    - **Network links: an empty host means this device.** The host field starts empty with a faded
-      `localhost` hint instead of a pre-filled address; leave it empty (or type `localhost`) and Kite
-      connects to `127.0.0.1` — what a local simulator needs. An address saved earlier is still shown. [#237]
-    - **The second battery widget is labelled "BAT 2".** [#237]
-    - **System messages default to *Warning*, and a new *Debug* level shows the firmware's
-      developer chatter.** ArduPilot sends some texts at its DEBUG severity — "Sending unknown
-      message (44)" twice a second when a ground station in the loop asks for a message the board's
-      firmware cannot send, for example — and Kite showed them as info toasts. They now appear only
-      with *System messages* set to *Debug*; *All* is everything up to info, and a fresh install
-      starts at *Warning*. [#186]
-    - **Power Saving also drops the glass blur** — with the mode active (or on battery in *Auto*),
-      panels and widgets lose their frosted-glass blur: every blurred surface is re-rendered on each
-      frame while the map moves, and on the phone that was the single biggest rendering cost. On
-      phones and tablets the blur of the widgets, buttons and chips over the map is always off; only
-      the panels keep it. The pressed / active fill of the map's glass buttons is a touch darker, so
-      an open video toggle stays visible over light terrain. [#174]
-    - **Radar contacts cost less** — a contact's icon is rebuilt only when it visibly changes
-      (heading, colour, size, label), not on every position update; with many ADS-B contacts that
-      was a steady stream of DOM rebuilds. [#174]
-    - **Floating video window at UI scale above 100 %** — the snapped window landed past the bottom
-      edge of the screen; its geometry is now computed in the scaled layer's own units. [#127]
-    - **Replay player folds away while playing** — a slim strip (craft, time, progress) replaces
-      the panel; hover or tap the area to unfold it, paused = always open. Clicking anywhere
-      outside the Logbook collapses it to its info card. [#100]
-    - **Live AGL projected flight line is smoother** — the glide path is low-pass filtered instead
-      of following every vario wobble; compass and horizon now share the widgets' blurred glass. [#101]
-    - **Park a panel with a second click** — clicking the active tool's rail icon again slides the
-      panel off the map without losing its state (a mission stays in edit mode); click once more to
-      bring it back. [#102]
-    - **Replay player is narrower** — the times moved under the buttons, which now share the full
-      width. [#102]
-    - **Android launcher icon** fills its circle instead of floating small in it. [#102]
+    *Map*
+
+    - **Bigger icons on the map buttons** — the 2D / 3D, follow, camera-mode and video buttons use
+      one icon size that fills the button. [#263]
     - **3D mission markers** match the 2D marker size and are sharp on high-DPI screens. [#111]
-    - **Raspberry Pi 5 HEVC** — the native RTSP client no longer aborts on streams whose picture is
-      padded to the encoder's block size (NVENC 720p, every 1080p): the padding is decoded zero-copy
-      and hidden under the interface. Start-up no longer drops the frames right after the keyframe,
-      and after any packet loss the video pauses until the next keyframe instead of freezing the
-      Pi's hardware decoder. Kernel-side report: raspberrypi/linux#7609. [#112]
-    - **The network port follows the protocol**, not just the transport. MAVLink offers UDP 14550 or
-      TCP 5760 and MSP offers TCP 5761, instead of the MSP port showing up for a MAVLink connection.
-      A port you typed yourself is never touched. [#151]
-    - **Floating video window moves by its handle** — a small four-way-arrow handle in the picture's
-      bottom-left corner moves the window; dragging the picture, the right mouse button and two
-      fingers now go to the map in the frame (3D tilt, pinch). Both corner handles are translucent. [#152]
-    - **No zoom buttons on the map in a frame** — the floating window and the widget tile hide the
-      + / − buttons that did not fit at larger UI scales; wheel, pinch and the mini-map slide zoom
-      there. [#152]
-    - **iPad panels fit the screen** — the tool panels respect the toolbar and the widget dock height
-      on tablets, so their content no longer runs under the dock. [#153]
-    - **Chinese and Bulgarian** — the connection-status and toolbar strings that fell back to English
-      are translated. [#154] · [#156]
-    - **The mouse wheel steps any + / − number field** — click into the field, then turn: up
-      increases, down decreases, faster turning steps in bigger increments, and a field without focus
-      never reacts, so scrolling a panel stays safe. The waypoint editor popups use the very same
-      field now (same look, unit inside the box). [#189] · [#191]
-    - **Frontend errors now reach the support log** — a JavaScript error that used to show only in
-      the browser console is written to Kite's backend log file too, so a report from a release build
-      carries the full picture. [#193]
-    - **Windows: an Xbox-class gamepad that Windows.Gaming.Input lists but never reads is now read
-      through XInput instead** — the backend log also shows what the game-controller thread sees
-      (which pads it finds, which one streams, the first reading), so a report pins down exactly
-      where a pad drops out. If the sticks feel inverted after this, re-learn the mapping in the RC
-      panel. [#196]
-    - **Android: "Share log file" lets you pick the day** — Kite keeps one diagnostics log per day in
-      app-private storage that no file manager can reach, and the Share button only ever handed out
-      today's file. It now lists the day files, newest first, with date and size (the one this session
-      writes is tagged *current*); tap one to send it to mail or a messenger — so yesterday's log is
-      there after a restart. [#198]
+    - **Many radar contacts load the map less** — a contact's symbol is redrawn only when it
+      visibly changes, not on every position update. [#174]
+    - **Location names for the logbook** — requests to OpenStreetMap's Nominatim are at least a
+      second apart, and flights from the same field reuse the name instead of asking again. [#255]
+
+    *Logbook and replay*
+
+    - **A smaller flight database** — imported INAV Blackbox flights no longer carry an unused
+      text copy of their rows, and space freed by deleting flights or stored logs is handed back
+      to the disk. [#232]
+    - **Flights belong to their vehicle by FC ID** — every flight stores the library vehicle it
+      belongs to, recognised by the flight controller's hardware ID first and by the craft name
+      second; when unsure, the flight stays unassigned. Existing flights are linked once during
+      the database upgrade. The post-flight summary and the flight detail show the vehicle and
+      let you change it. [#228]
+    - **`.kflight` files of INAV Blackbox flights are smaller** — a file written by 2.0 still
+      imports into Kite 1.0. [#232]
+    - **Compact Database runs in the background** behind a notice, is refused while a flight is
+      being recorded or an import is running, and reports how much space was freed. [#243]
+
+    *Vehicles and control*
+
+    - **ArduPilot: the control panel offers the modes your flight controller really has.** From
+      ArduPilot 4.7 on, Kite reads the mode list from the flight controller. Older ArduPilot
+      versions and PX4 use the built-in list, which is complete for Copter, Plane and Rover now.
+      [#242]
+    - **Stick-flown modes fold out from an "RC modes" bar** instead of the *Show all modes*
+      checkbox; the bar shows *No RC link* while those modes are locked. [#242]
+    - **ArduPilot: returning and landing are hold-to-confirm buttons in one place.** A QuadPlane
+      has **RTL / QRTL** and **Loiter QLand / QLand**, a fixed-wing plane on ArduPilot 4.7 gets
+      **AutoLand** next to RTL, a rover or boat shows only RTL, and a Sub shows **Surface**.
+      SmartRTL and Auto RTL need a hold too. [#242] · [#258]
+    - **System messages default to *Warning*, and a new *Debug* level** shows the texts a flight
+      controller sends at its debug severity; they no longer appear as info messages. [#186]
+
+    *Connection and data*
+
+    - **Network links: an empty host means this device.** The host field starts empty with a
+      `localhost` hint; left empty, Kite connects to `127.0.0.1`. [#237]
+    - **The network port follows the protocol.** MAVLink offers UDP 14550 or TCP 5760 and MSP
+      offers TCP 5761. A port you typed yourself is never touched. [#151]
     - **The diagnostics log has a size limit** — a day's log file stops at 50 MB and is kept; the
-      log then continues in a second file for that day (`kite-gc-YYYY-MM-DD-2.log`), which starts
-      over each time it reaches 50 MB as well. A fault that repeats the same line without end can no
-      longer fill the disk, and you still have both ends of it: how it began in the first file, the
-      latest lines in the second. [#271]
-    - **macOS 13 / 14 and iOS 16 / 17: panels and widgets get their background blur** — on these
-      systems the blur behind the side panels, the widgets and the map buttons was missing; they
-      were only semi-transparent, which made panels harder to read over a bright map. macOS 15 and
-      iOS 18 were not affected. [#274]
-    - **INAV over a MAVLink-only link gets its full MSP feature set** — INAV 10.0 can carry MSP inside
-      the MAVLink stream, and Kite detects that automatically when you connect with the MAVLink
-      protocol: the status shows **MSP/MAV**, UAV Info shows the real INAV version and craft name, and
-      missions (incl. EEPROM and multi-mission), safe homes, geozones, craft name and flight statistics
-      work as over a direct MSP link — over ELRS/mLRS MAVLink, SiK radios or a Wi-Fi bridge. Telemetry
-      stays MAVLink; nothing is polled through the tunnel. RC control and FC-side ADS-B are not on this
-      path yet. The work also surfaced an INAV firmware bug in long tunnel replies (fixed upstream). [#202]
-    - **UDP links: a busy local port falls back to a stable alternate, and commands reach every recent
-      sender.** When another program already listens on
-      the port you target (Mission Planner on 14550, say), Kite now binds the same port plus 10000
-      instead of a random one, so a relay that streams to Kite's address finds it again after a
-      reconnect — and a failed handshake names the busy port and what to do about it. Frames go to every
-      source heard in the last ten seconds (several SITL instances or bridges on one port each speak from
-      their own socket; before, only the last one to speak got them). Contributed by dldnjsxo95. [#194] · [#204]
-    - **PX4: take-off and land no longer head for 0°N 0°E, missions with unset yaw or action items
-      upload, integer parameters read and write correctly, and the desktop RC panel shows COM_RC_IN_MODE
-      with a one-click fix when it blocks joystick input.** A geofence or rally save now lists the
-      parameters Kite could not write (on PX4: ones the vehicle does not report) as a warning instead of
-      failing after the geometry is already on the vehicle. For ArduPilot too: mission, fence and rally
-      transfers address the autopilot component, so they pass through a routing relay such as Mission
-      Planner's MAVLink mirror. Contributed by dldnjsxo95. [#195] · [#205]
+      log continues in a second file for that day, which starts over each time it reaches 50 MB.
+      [#271]
+    - **Errors of the user interface are written to the diagnostics log file** as well, so a
+      report from a release build is complete. [#193]
+
+    *Interface*
+
+    - **Settings has three tabs: Interface, Map and Data.** The new Map tab gathers the 3D view,
+      the mission defaults, the providers and the caches. *Tile Provider* is now called **Map
+      Provider**, and the 3D **Altitude Curtain** is off by default for new installations. See
+      [Settings](reference/settings.md). [#250]
+    - **Widgets are rearranged by long-pressing them** — mouse or finger; the ✎ button is gone.
+      Click outside the docks or press Escape to finish. [#127]
+    - **The replay player folds away while playing** — a slim strip with craft, time and progress
+      replaces the panel; hover or tap it to unfold. The player is also narrower. [#100] · [#102]
+    - **Park a panel with a second click** — clicking the active tool's icon again slides the
+      panel off the map without losing its state; click once more to bring it back. [#102]
+    - **The mouse wheel steps any + / − number field** that has the focus; a field without focus
+      never reacts, so scrolling a panel stays safe. [#189] · [#191]
+    - **Power Saving also drops the glass blur** of panels and widgets. [#174]
+    - **Live AGL: the projected flight line is smoother**, and the compass and horizon have the
+      frosted-glass look of the other widgets. [#101]
+    - **The second battery widget is labelled "BAT 2".** [#237]
+
+    **Fixed**
+
+    Every fix of 1.0.1 and 1.0.2 is part of 2.0. This list holds what is fixed in 2.0 only.
+
+    - **3D map: leaving FPV left the camera in the cockpit** — banked with the aircraft and
+      looking at the horizon, and on a touch screen it could hardly be tilted or turned. The free
+      camera now starts behind and above the aircraft, looking down at it. [#262]
+    - **Floating video window at a UI scale above 100 %** — the snapped window landed past the
+      bottom edge of the screen. [#127]
+    - **INAV flash download: one unreadable log ended the import.** If one log of a `.bbl` was
+      damaged, the following flights were never imported. Kite now imports the rest and shows
+      which logs failed and why. [#243]
+    - **UDP links: a busy local port, and several senders on one port.** When another program
+      already listens on the port you target, Kite binds the same port plus 10000 instead of a
+      random one, so a relay finds it again after a reconnect. Commands go to every source heard
+      in the last ten seconds instead of only the last one. Contributed by dldnjsxo95.
+      [#194] · [#204]
+    - **PX4: take-off and land headed for 0°N 0°E, missions with unset yaw or action items did
+      not upload, and integer parameters were read and written wrongly.** The desktop RC panel
+      also shows `COM_RC_IN_MODE` with a one-click fix when it blocks joystick input, and a
+      geofence or rally save lists the parameters Kite could not write as a warning instead of
+      failing. For ArduPilot too: mission, fence and rally transfers pass through a routing relay
+      such as Mission Planner's MAVLink mirror. Contributed by dldnjsxo95. [#195] · [#205]
+    - **Windows: an Xbox-class gamepad that was listed but delivered no input** is now read
+      through XInput. If the sticks feel inverted after this, re-learn the mapping in the RC
+      panel. [#196]
+    - **macOS 13 / 14: panels, widgets and map buttons had no background blur**; they were only
+      semi-transparent. macOS 15 was not affected. [#274]
+    - **Chinese and Bulgarian** — the connection-status and toolbar strings that fell back to
+      English are translated. [#154] · [#156]
+
+    **Removed**
+
+    - **Video window (detach)** — the old detached window was the browser's Picture-in-Picture and
+      only existed on Windows. The detached video window replaces it. [#129]
+    - **Raw Telemetry widget** — replaced by the **≡ Raw** view. [#101]
+    - **`blackbox_decode` download** — no longer needed for INAV Blackbox imports. [#234]
 
 ??? note "1.0 — Initial release · Live"
 
@@ -640,7 +583,6 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#103]: https://github.com/b14ckyy/Kite-GC/pull/103
 [#105]: https://github.com/b14ckyy/Kite-GC/pull/105
 [#111]: https://github.com/b14ckyy/Kite-GC/pull/111
-[#112]: https://github.com/b14ckyy/Kite-GC/pull/112
 [#123]: https://github.com/b14ckyy/Kite-GC/pull/123
 [#126]: https://github.com/b14ckyy/Kite-GC/pull/126
 [#221]: https://github.com/b14ckyy/Kite-GC/pull/221
@@ -663,25 +605,19 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#249]: https://github.com/b14ckyy/Kite-GC/pull/249
 [#250]: https://github.com/b14ckyy/Kite-GC/pull/250
 [#253]: https://github.com/b14ckyy/Kite-GC/pull/253
-[#254]: https://github.com/b14ckyy/Kite-GC/pull/254
 [#255]: https://github.com/b14ckyy/Kite-GC/pull/255
 [#258]: https://github.com/b14ckyy/Kite-GC/pull/258
-[#260]: https://github.com/b14ckyy/Kite-GC/pull/260
 [#261]: https://github.com/b14ckyy/Kite-GC/pull/261
 [#262]: https://github.com/b14ckyy/Kite-GC/pull/262
 [#263]: https://github.com/b14ckyy/Kite-GC/pull/263
-[#264]: https://github.com/b14ckyy/Kite-GC/pull/264
 [#265]: https://github.com/b14ckyy/Kite-GC/pull/265
-[#267]: https://github.com/b14ckyy/Kite-GC/pull/267
 [#271]: https://github.com/b14ckyy/Kite-GC/pull/271
 [#274]: https://github.com/b14ckyy/Kite-GC/pull/274
-[#256]: https://github.com/b14ckyy/Kite-GC/pull/256
 [#259]: https://github.com/b14ckyy/Kite-GC/pull/259
 [#143]: https://github.com/b14ckyy/Kite-GC/pull/143
 [#145]: https://github.com/b14ckyy/Kite-GC/pull/145
 [#151]: https://github.com/b14ckyy/Kite-GC/pull/151
 [#152]: https://github.com/b14ckyy/Kite-GC/pull/152
-[#153]: https://github.com/b14ckyy/Kite-GC/pull/153
 [#154]: https://github.com/b14ckyy/Kite-GC/pull/154
 [#156]: https://github.com/b14ckyy/Kite-GC/pull/156
 [#157]: https://github.com/b14ckyy/Kite-GC/pull/157
@@ -697,7 +633,6 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#191]: https://github.com/b14ckyy/Kite-GC/pull/191
 [#193]: https://github.com/b14ckyy/Kite-GC/pull/193
 [#196]: https://github.com/b14ckyy/Kite-GC/pull/196
-[#198]: https://github.com/b14ckyy/Kite-GC/pull/198
 [#202]: https://github.com/b14ckyy/Kite-GC/pull/202
 [#194]: https://github.com/b14ckyy/Kite-GC/pull/194
 [#204]: https://github.com/b14ckyy/Kite-GC/pull/204

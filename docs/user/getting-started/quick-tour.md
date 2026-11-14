@@ -253,7 +253,7 @@ Each widget, at a glance — expand for what it shows and how it works:
 ??? note "Video"
     A live **video feed** embedded as a widget — an RTSP stream or a local capture device / camera (e.g. a
     USB capture card), always cropped to fill its tile. **Double-click** it to swap the feed with the
-    map. Not available on iPhone. See **[Video](../guides/video.md)**.
+    map. Not available on iPhone at present. See **[Video](../guides/video.md)**.
 
     <!-- SCREENSHOT: ../assets/getting-started/widgets/video.png -->
 
@@ -315,7 +315,7 @@ room for either the map or a widget, rarely both. Tablets keep the desktop layou
   the like) may extend over the widget column to the right screen edge, and when the replay player's
   full controls are showing on a narrow phone, the widget column slides aside until playback runs and
   the player folds into its compact strip.
-- **Video** has no floating window on an Android phone (iPhone has no video). Once a source runs (Video panel → Start), a
+- **Video** has no floating window on an Android phone (iPhone has no video at present). Once a source runs (Video panel → Start), a
   **camera button** appears above the map buttons: it slides a **docked video window** into the
   bottom-right corner of the map, and slides it out again — behind the widget column and off the
   screen — so the picture is one tap away and never in the way. The corner marker in the window's

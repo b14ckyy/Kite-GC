@@ -330,8 +330,8 @@ streams are shown directly.
 
 **The iPad works the same way.** RTSP runs through Kite's own client only (iPadOS cannot run helper
 programs), H.264 and HEVC are decoded in hardware by VideoToolbox, and the floating window, the
-full-screen swap and mirror/rotate all work. **On iPhone there is no video**: the Video
-panel only says so.
+full-screen swap and mirror/rotate all work. **On iPhone there is no video at present**: the Video
+panel only says so. Whether video can come to the iPhone is being looked into.
 
 ## Where to go next
 
