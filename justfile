@@ -60,7 +60,7 @@ update-manifest tag="":
 # Needs ANDROID_HOME + NDK_HOME (see the Build Guide); prefer the "Android" GitHub Actions
 # workflow, which needs nothing installed locally. The APK lands in release/ under the unified name
 # (KiteGC_Android_<abi>_<version>_installer.apk). `-AndroidOnly` / `--android-only` keeps whatever
-# desktop outputs are already in release/ and collects NOTHING but the APK: an earlier desktop
+# desktop outputs are already in release/ and collects NOTHING but the Android files: an earlier desktop
 # build's binaries still sit in target/release, and collecting them here would republish a stale
 # one under the current version number.
 # Android APK, arm64 (EXPERIMENTAL)
@@ -72,6 +72,22 @@ build-android:
 [unix]
 build-android:
     npm run tauri android build -- --apk --target aarch64
+    @bash scripts/collect-release.sh --android-only
+
+# Local only — the store upload is a maintainer step and needs the release key
+# (`src-tauri/gen/android/app/key.properties`, see the Build Guide); without it the bundle is
+# debug-signed and Play refuses it. Lands in release/ as KiteGC_Android_<abi>_<version>_playstore.aab;
+# the versionCode comes from the version name (`playVersionCode` in app/build.gradle.kts). The bundle
+# is for the Play Console only: take it out of release/ before `gh release create … release/*`.
+# Android App Bundle for Google Play, arm64 (maintainer)
+[windows]
+build-android-aab:
+    npm run tauri android build -- --aab --target aarch64
+    @powershell -ExecutionPolicy Bypass -File scripts/collect-release.ps1 -AndroidOnly
+
+[unix]
+build-android-aab:
+    npm run tauri android build -- --aab --target aarch64
     @bash scripts/collect-release.sh --android-only
 
 # Android dev build on a connected device / emulator, with hot reload
