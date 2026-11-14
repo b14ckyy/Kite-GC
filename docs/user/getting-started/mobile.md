@@ -84,7 +84,8 @@ See **[Video](../guides/video.md)**, especially its platform notes.
 ## Updates and diagnostics
 
 - **Updates:** Android tells you about a new version at start-up like the desktop, but has no in-app
-  install — the notice offers the release page instead of *Update and Restart*. On iPhone and iPad the
+  install. Installed from Google Play, the notice offers the Play Store and the setting is an on/off
+  switch; installed from the `.apk`, the notice offers the release page. On iPhone and iPad the
   update check is switched off. See **[Settings → Updates](../reference/settings.md#updates)**.
 - **Diagnostic log on Android:** the log folder is app-private, so **Settings → Diagnostics → Share log
   file** replaces *Open Folder* — pick the day and hand it to mail or a messenger. See

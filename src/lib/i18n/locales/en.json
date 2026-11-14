@@ -1156,6 +1156,8 @@
     "updatePatch": "Patch releases only",
     "updatePrerelease": "Include pre-releases",
     "updateHint": "Checks GitHub for a newer version on startup. Nothing is downloaded until you choose Update and Restart.",
+    "updateHintStore": "Tells you on startup when a newer version is out, with its release notes. The update itself comes from the store.",
+    "updateHintSideload": "Checks GitHub for a newer version on startup. The notice links to the release page, where the new APK is.",
     "alertThresholdsHint": "Alert thresholds. 0 = disabled.",
     "hudWidgets": "HUD Widgets",
     "rateHint": "Rate changes take effect on next connect.",
