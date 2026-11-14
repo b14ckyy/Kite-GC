@@ -77,7 +77,8 @@ build-android:
 # Local only — the store upload is a maintainer step and needs the release key
 # (`src-tauri/gen/android/app/key.properties`, see the Build Guide); without it the bundle is
 # debug-signed and Play refuses it. Lands in release/ as KiteGC_Android_<abi>_<version>_playstore.aab;
-# the versionCode comes from the version name (`playVersionCode` in app/build.gradle.kts). The bundle
+# the versionCode comes from the version name (`playVersionCode` in app/build.gradle.kts), plus the
+# digit in KITE_ANDROID_BUILD (default 0) for a second upload of the same version. The bundle
 # is for the Play Console only: take it out of release/ before `gh release create … release/*`.
 # Android App Bundle for Google Play, arm64 (maintainer)
 [windows]

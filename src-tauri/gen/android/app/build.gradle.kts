@@ -28,15 +28,20 @@ val keystoreProperties = Properties().apply {
 // upload, and the one Tauri writes to tauri.properties ignores the pre-release part — every 2.0.0-*
 // build would be 2000000.
 //
-//   major * 1_000_000 + minor * 10_000 + patch * 100 + stage
+//   major * 10_000_000 + minor * 100_000 + patch * 1_000 + stage * 10 + build
 //   stage: -bN (or -betaN) = N (1..39) · -rcN = 40 + N (41..79) · final = 99 · -dev = 0
+//   build: 0..9 from the environment variable KITE_ANDROID_BUILD (default 0) — a second upload of
+//          the SAME version, because Play never takes a code twice (not even after a rejected or
+//          invalidated upload).
 //   Any other suffix stops the build: it would share stage 0 with -dev and collide on Play.
 //
-//   2.0.0-b1 = 2000001 · 2.0.0-rc1 = 2000041 · 2.0.0 = 2000099 · 2.0.1 = 2000199 · 10.0.0 = 10000099
+//   2.0.0-b1 = 20000010 · 2.0.0-rc1 = 20000410 · 2.0.0 = 20000990 · 2.0.1 = 20001990 · 10.0.0 = 100000990
 //
-// This scheme is PERMANENT once a build is on Play: a code can never go down again. A build with
-// stage 0 (-dev) installs, but is never meant for Play.
-fun playVersionCode(name: String): Int {
+// This scheme is PERMANENT: a code can never go down again. Code 2000001 (2.0.0-b1 under the first
+// scheme, without the build digit) is spent on Play and lies below everything this one produces
+// from major version 1 on.
+// A build with stage 0 (-dev) installs, but is never meant for Play.
+fun playVersionCode(name: String, build: Int): Int {
     val m = Regex("""^(\d+)\.(\d+)\.(\d+)(?:-([A-Za-z]+)\.?(\d+)?)?$""").matchEntire(name)
         ?: throw GradleException("versionName '$name' is not MAJOR.MINOR.PATCH[-bN|-rcN|-dev]")
     val major = m.groupValues[1].toInt()
@@ -44,8 +49,11 @@ fun playVersionCode(name: String): Int {
     val patch = m.groupValues[3].toInt()
     val kind = m.groupValues[4].lowercase()
     val n = m.groupValues[5].toIntOrNull() ?: 0
-    if (minor > 99 || patch > 99) {
-        throw GradleException("versionName '$name': minor and patch must stay below 100 for the versionCode")
+    if (major > 209 || minor > 99 || patch > 99) {
+        throw GradleException("versionName '$name': major must stay below 210, minor and patch below 100, for the versionCode")
+    }
+    if (build !in 0..9) {
+        throw GradleException("KITE_ANDROID_BUILD must be 0..9, got $build")
     }
     val stage = when (kind) {
         "" -> 99
@@ -54,7 +62,7 @@ fun playVersionCode(name: String): Int {
         "dev" -> 0
         else -> throw GradleException("versionName '$name': unknown pre-release '$kind' (use bN, rcN or dev)")
     }
-    return major * 1_000_000 + minor * 10_000 + patch * 100 + stage
+    return major * 10_000_000 + minor * 100_000 + patch * 1_000 + stage * 10 + build
 }
 
 android {
@@ -66,7 +74,13 @@ android {
         minSdk = 24
         targetSdk = 36
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0.0")
-        versionCode = playVersionCode(versionName!!)
+        versionCode = playVersionCode(
+            versionName!!,
+            providers.environmentVariable("KITE_ANDROID_BUILD").orNull?.trim()?.ifEmpty { null }.let { raw ->
+                (raw ?: "0").toIntOrNull()
+                    ?: throw GradleException("KITE_ANDROID_BUILD must be a number 0..9, got '$raw'")
+            },
+        )
     }
     signingConfigs {
         keystoreProperties.getProperty("storeFile")?.let { storePath ->

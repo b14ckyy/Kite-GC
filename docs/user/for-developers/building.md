@@ -175,13 +175,21 @@ one than before. `app/build.gradle.kts` derives it from the version name in `pac
 (`playVersionCode`):
 
 ```text
-major * 1_000_000 + minor * 10_000 + patch * 100 + stage
-stage: -bN = N (1–39) · -rcN = 40 + N (N 1–39) · final = 99 · -dev = 0
+major * 10_000_000 + minor * 100_000 + patch * 1_000 + stage * 10 + build
+stage: -bN (or -betaN) = N (1–39) · -rcN = 40 + N (N 1–39) · final = 99 · -dev = 0
+build: 0–9, from the environment variable KITE_ANDROID_BUILD (unset or empty = 0)
 ```
 
-So `2.0.0-b1` is 2000001, `2.0.0-rc1` 2000041, `2.0.0` 2000099 and `2.0.1` 2000199. A version name
-outside this pattern — another suffix, a beta (`-bN`) or rc number above 39 — stops the build with a message.
-Two uploads need two version names.
+So `2.0.0-b1` is 20000010, `2.0.0-rc1` 20000410, `2.0.0` 20000990 and `2.0.1` 20001990. A version name
+outside this pattern stops the build with a message: another suffix, a beta or rc without a number or
+with one outside 1–39, a minor or patch above 99, a major above 209, or a `KITE_ANDROID_BUILD` that is not
+a digit.
+
+Play never takes a code twice, not even after an upload was rejected or became invalid. The **build**
+digit is for that case: set `KITE_ANDROID_BUILD=1` (then 2, …; in PowerShell `$env:KITE_ANDROID_BUILD = 1`)
+to upload the same version again. Build the APK of that release **locally with the same value**
+(`just build-android`) — Android refuses to install a lower code over a higher one, and the GitHub
+workflow always builds with 0. The file names in `release/` do not carry the digit.
 
 The **App Bundle** that Google Play takes is built locally only — the GitHub workflow keeps building the
 APK:
