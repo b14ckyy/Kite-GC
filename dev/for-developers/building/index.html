@@ -1727,6 +1727,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#version-code-and-the-play-bundle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Version code and the Play bundle
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#building-locally" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2001,6 +2012,17 @@
     <span class="md-ellipsis">
       
         Signing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#version-code-and-the-play-bundle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Version code and the Play bundle
       
     </span>
   </a>
@@ -2298,6 +2320,22 @@ replace it.</p>
 <a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="na">keyPassword</span><span class="o">=</span><span class="s">…</span>
 </code></pre></div>
 <p>It is gitignored, so the key never lands in the repository.</p>
+<h4 id="version-code-and-the-play-bundle">Version code and the Play bundle<a class="headerlink" href="#version-code-and-the-play-bundle" title="Permanent link">&para;</a></h4>
+<p>Android orders builds by an integer <code>versionCode</code>, and Google Play accepts an upload only with a higher
+one than before. <code>app/build.gradle.kts</code> derives it from the version name in <code>package.json</code>
+(<code>playVersionCode</code>):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>major * 1_000_000 + minor * 10_000 + patch * 100 + stage
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>stage: -bN = N (1–39) · -rcN = 40 + N (N 1–39) · final = 99 · -dev = 0
+</code></pre></div>
+<p>So <code>2.0.0-b1</code> is 2000001, <code>2.0.0-rc1</code> 2000041, <code>2.0.0</code> 2000099 and <code>2.0.1</code> 2000199. A version name
+outside this pattern — another suffix, a beta (<code>-bN</code>) or rc number above 39 — stops the build with a message.
+Two uploads need two version names.</p>
+<p>The <strong>App Bundle</strong> that Google Play takes is built locally only — the GitHub workflow keeps building the
+APK:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>just<span class="w"> </span>build-android-aab<span class="w">    </span><span class="c1"># release/KiteGC_Android_&lt;abi&gt;_&lt;version&gt;_playstore.aab</span>
+</code></pre></div>
+<p>Without <code>key.properties</code> the bundle is debug-signed, and Play refuses it. The bundle is for the Play
+Console only; it does not belong on the GitHub release.</p>
 <h4 id="building-locally">Building locally<a class="headerlink" href="#building-locally" title="Permanent link">&para;</a></h4>
 <ol>
 <li><strong>JDK 17</strong> — <code>sudo apt install openjdk-17-jdk</code> (or Temurin on Windows/macOS).</li>
@@ -2307,20 +2345,20 @@ replace it.</p>
    <code>i686-linux-android</code>, <code>x86_64-linux-android</code> only if you need those ABIs; arm64 covers every
    Android phone and tablet made in the last decade).</li>
 </ol>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>npm<span class="w"> </span>ci
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>npm<span class="w"> </span>run<span class="w"> </span>tauri<span class="w"> </span>android<span class="w"> </span>build<span class="w"> </span>--<span class="w"> </span>--apk<span class="w"> </span>--target<span class="w"> </span>aarch64<span class="w">   </span><span class="c1"># APK in src-tauri/gen/android/app/build/outputs/apk</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>npm<span class="w"> </span>run<span class="w"> </span>tauri<span class="w"> </span>android<span class="w"> </span>dev<span class="w">                               </span><span class="c1"># on-device dev build with hot reload</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>npm<span class="w"> </span>ci
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>npm<span class="w"> </span>run<span class="w"> </span>tauri<span class="w"> </span>android<span class="w"> </span>build<span class="w"> </span>--<span class="w"> </span>--apk<span class="w"> </span>--target<span class="w"> </span>aarch64<span class="w">   </span><span class="c1"># APK in src-tauri/gen/android/app/build/outputs/apk</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>npm<span class="w"> </span>run<span class="w"> </span>tauri<span class="w"> </span>android<span class="w"> </span>dev<span class="w">                               </span><span class="c1"># on-device dev build with hot reload</span>
 </code></pre></div>
 <p><code>src-tauri/gen/android</code> is <strong>committed</strong> — it is the Android app project (manifest, Gradle build,
 icons, the Rust Gradle plugin), edited by hand. Do <strong>not</strong> run <code>tauri android init</code>: it would
 regenerate the project and overwrite the manifest's permissions and the landscape orientation.</p>
 <p>To type-check the Rust side for Android without a full Gradle build, use <code>just check-android</code>, or by
 hand:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nv">BIN</span><span class="o">=</span><span class="s2">"</span><span class="nv">$NDK_HOME</span><span class="s2">/toolchains/llvm/prebuilt/linux-x86_64/bin"</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">CC_aarch64_linux_android</span><span class="o">=</span><span class="s2">"</span><span class="nv">$BIN</span><span class="s2">/aarch64-linux-android24-clang"</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">AR_aarch64_linux_android</span><span class="o">=</span><span class="s2">"</span><span class="nv">$BIN</span><span class="s2">/llvm-ar"</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="nb">export</span><span class="w"> </span><span class="nv">CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER</span><span class="o">=</span><span class="s2">"</span><span class="nv">$CC_aarch64_linux_android</span><span class="s2">"</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>cargo<span class="w"> </span>check<span class="w"> </span>--manifest-path<span class="w"> </span>src-tauri/Cargo.toml<span class="w"> </span>--target<span class="w"> </span>aarch64-linux-android<span class="w"> </span>--lib
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nv">BIN</span><span class="o">=</span><span class="s2">"</span><span class="nv">$NDK_HOME</span><span class="s2">/toolchains/llvm/prebuilt/linux-x86_64/bin"</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">CC_aarch64_linux_android</span><span class="o">=</span><span class="s2">"</span><span class="nv">$BIN</span><span class="s2">/aarch64-linux-android24-clang"</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">AR_aarch64_linux_android</span><span class="o">=</span><span class="s2">"</span><span class="nv">$BIN</span><span class="s2">/llvm-ar"</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="nb">export</span><span class="w"> </span><span class="nv">CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER</span><span class="o">=</span><span class="s2">"</span><span class="nv">$CC_aarch64_linux_android</span><span class="s2">"</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>cargo<span class="w"> </span>check<span class="w"> </span>--manifest-path<span class="w"> </span>src-tauri/Cargo.toml<span class="w"> </span>--target<span class="w"> </span>aarch64-linux-android<span class="w"> </span>--lib
 </code></pre></div>
 <p>Those variables are not optional: <code>cc-rs</code> looks for an <code>aarch64-linux-android-clang</code> that the NDK does
 not ship — its compilers are API-versioned (<code>…android24-clang</code>, matching <code>minSdk</code>) — so without them
@@ -2417,24 +2455,24 @@ up itself, so only the bare <code>cargo check</code> needs it. (On Windows the p
 <p>Where a feature is missing the backend returns a clear message rather than failing to build, so the
 rest of the app is unaffected.</p>
 <h2 id="workflow">Workflow<a class="headerlink" href="#workflow" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>just<span class="w"> </span>install<span class="w">      </span><span class="c1"># install frontend dependencies (npm install)</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>just<span class="w"> </span>dev<span class="w">          </span><span class="c1"># start development mode with hot reload</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>just<span class="w"> </span>install<span class="w">      </span><span class="c1"># install frontend dependencies (npm install)</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>just<span class="w"> </span>dev<span class="w">          </span><span class="c1"># start development mode with hot reload</span>
 </code></pre></div>
 <p>Other useful commands:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>just<span class="w"> </span>--list<span class="w">          </span><span class="c1"># list all commands</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>just<span class="w"> </span>check<span class="w">           </span><span class="c1"># svelte-check + cargo check</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>just<span class="w"> </span>build<span class="w">           </span><span class="c1"># production build for the current platform</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>just<span class="w"> </span>build-windows<span class="w">   </span><span class="c1"># explicit Windows release build</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>just<span class="w"> </span>build-linux<span class="w">     </span><span class="c1"># explicit Linux release build</span>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>just<span class="w"> </span>build-macos<span class="w">     </span><span class="c1"># explicit macOS universal build (unsigned; adds mac targets + ffmpeg)</span>
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>just<span class="w"> </span>clean<span class="w">           </span><span class="c1"># clean build artifacts</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>just<span class="w"> </span>--list<span class="w">          </span><span class="c1"># list all commands</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>just<span class="w"> </span>check<span class="w">           </span><span class="c1"># svelte-check + cargo check</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>just<span class="w"> </span>build<span class="w">           </span><span class="c1"># production build for the current platform</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>just<span class="w"> </span>build-windows<span class="w">   </span><span class="c1"># explicit Windows release build</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>just<span class="w"> </span>build-linux<span class="w">     </span><span class="c1"># explicit Linux release build</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>just<span class="w"> </span>build-macos<span class="w">     </span><span class="c1"># explicit macOS universal build (unsigned; adds mac targets + ffmpeg)</span>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>just<span class="w"> </span>clean<span class="w">           </span><span class="c1"># clean build artifacts</span>
 </code></pre></div>
 <p>The classic commands still work too (<code>npm install</code>, <code>npm run tauri dev</code>, <code>npm run tauri build</code>).</p>
 <h3 id="build-outputs">Build outputs<a class="headerlink" href="#build-outputs" title="Permanent link">&para;</a></h3>
 <p>Every build (<code>just build</code> / <code>build-windows</code> / <code>build-linux</code> / <code>build-macos</code>) gathers its final artifacts
 into a <strong><code>release/</code></strong> folder at the repo root, renamed to a unified scheme so local builds match the CI
 release builds:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>KiteGC_&lt;OS&gt;_&lt;arch&gt;_&lt;version&gt;_&lt;type&gt;.&lt;ext&gt;
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>KiteGC_&lt;OS&gt;_&lt;arch&gt;_&lt;version&gt;_&lt;type&gt;.&lt;ext&gt;
 </code></pre></div>
 <ul>
 <li><strong>Type</strong> = <code>installer</code> (<code>.exe</code> / <code>.deb</code> / <code>.rpm</code> / <code>.dmg</code>, and the Android <code>.apk</code>), <code>standalone</code>
@@ -2459,7 +2497,7 @@ desktop outputs also remain in <code>src-tauri/target/release/</code> (and its <
 consumed installer bundles and APKs are removed so a stale file can never be re-collected under a newer
 version.</p>
 <h2 id="quality-checks">Quality checks<a class="headerlink" href="#quality-checks" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>just<span class="w"> </span>check
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>just<span class="w"> </span>check
 </code></pre></div>
 <p>runs <code>npm run check</code> (svelte-check + TypeScript) and <code>cargo check</code>. <code>just check</code> / <code>just clean</code> have
 platform-specific variants (via just's <code>[windows]</code> / <code>[unix]</code> attributes) and pick the right one
@@ -2493,8 +2531,8 @@ Installer.</p>
   log out/in). Some distros use <code>uucp</code>.</li>
 <li><strong>Blank 3D globe / WebView (WebKitGTK):</strong> the 3D map runs in WebKitGTK, which is more fragile than
   Windows' WebView2 (notably on some Nvidia setups). Try launching with the DMA-BUF renderer disabled:
-  <div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="nv">WEBKIT_DISABLE_DMABUF_RENDERER</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>./kite-gc<span class="w">      </span><span class="c1"># most common fix</span>
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="nv">WEBKIT_DISABLE_COMPOSITING_MODE</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>./kite-gc<span class="w">     </span><span class="c1"># if compositing misbehaves</span>
+  <div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="nv">WEBKIT_DISABLE_DMABUF_RENDERER</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>./kite-gc<span class="w">      </span><span class="c1"># most common fix</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="nv">WEBKIT_DISABLE_COMPOSITING_MODE</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>./kite-gc<span class="w">     </span><span class="c1"># if compositing misbehaves</span>
 </code></pre></div></li>
 <li><strong>Which package to test:</strong> <code>tauri build</code> produces <code>.deb</code>, <code>.AppImage</code> and <code>.rpm</code> in
   <code>src-tauri/target/release/bundle/</code>. The <code>.deb</code> (or the raw binary in <code>…/release/</code>) is usually the most
