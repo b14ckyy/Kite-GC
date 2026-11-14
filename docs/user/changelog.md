@@ -142,8 +142,9 @@ inside the box of the feature release they belong to, so the notes for one relea
         again — on Windows and Linux through the installer of the package you have (a `.deb`/`.rpm`
         asks for your password), on macOS by replacing the app bundle, and a **portable** copy
         replaces its own executable. Nothing is downloaded until you press the button. Android has
-        no in-app install and offers the release page instead; on iPhone and iPad the update check
-        is off.
+        no in-app install: a copy from Google Play gets the notice with a button to the Play Store
+        and an on/off switch in the settings, a copy from the `.apk` is offered the release page.
+        On iPhone and iPad the update check is off.
 
         **Patch releases only.** A new choice under Settings → Updates keeps you on the bug-fix
         line of the version you run: 2.0.0 is told about 2.0.1, never about 2.1.0. The default

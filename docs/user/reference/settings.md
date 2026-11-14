@@ -65,7 +65,7 @@ These are **global** — every widget, map read-out and panel follows them. See
 
 | Setting | What it does | Default |
 |---|---|---|
-| **Check for updates** | Whether Kite asks GitHub for a newer version when it starts — **Disabled**, **Stable releases**, **Patch releases only** (bug-fix releases of the version you run, e.g. 2.0.0 → 2.0.1, never 2.1.0), or **Include pre-releases** (betas and release candidates). | Stable releases |
+| **Check for updates** | Whether Kite asks GitHub for a newer version when it starts — **Disabled**, **Stable releases**, **Patch releases only** (bug-fix releases of the version you run, e.g. 2.0.0 → 2.0.1, never 2.1.0), or **Include pre-releases** (betas and release candidates). | Stable releases (from Google Play: on) |
 
 Kite never downloads anything on its own. When a newer version exists you get a notice with the
 version you have, the one that is available, and the release notes, plus four choices:
@@ -73,11 +73,26 @@ version you have, the one that is available, and the release notes, plus four ch
 - **Update and Restart** downloads the new version, installs it and restarts Kite. On Windows and
   Linux this runs the installer of the package you installed (a `.deb`/`.rpm` asks for your password);
   on macOS the app bundle is replaced in place. A **portable** copy replaces its own executable and
-  restarts. Android has no in-app install and no store listing yet, so the notice there offers only
-  the other three choices.
+  restarts. Not on Android, see below.
 - **Open Release Page** shows the release on GitHub in your browser, with every download.
 - **Remind me later** asks again at the next start.
 - **Skip this version** suppresses the notice for that one version only.
+
+**Android** has no in-app install, and what you get depends on where Kite was installed from:
+
+- **From Google Play:** *Check for updates* is a plain on/off switch. Google Play delivers one
+  version and installs it by itself, so there is no channel to choose. The notice shows the release
+  notes and offers **Open in Play Store** in place of *Update and Restart* and *Open Release Page*.
+  A beta from the Play test track is told about newer betas as well.
+
+    The notice gives you a choice only when **automatic updates for Kite are switched off in the Play
+    Store** (Kite's store page → ⋮ → *Enable auto-update*). With them on, Google Play installs the
+    new version by itself, usually before you have seen the notice.
+
+    The notice can also arrive a little before Google Play offers the version. The store page then
+    shows *Open* instead of *Update*; try again later.
+- **From the `.apk`:** the setting has all four choices, and the notice offers **Open Release Page**,
+  where the new `.apk` is, in place of *Update and Restart*.
 
 On iPhone and iPad the update check is switched off and this section is hidden. TestFlight and the
 App Store tell you about new versions themselves, and GitHub releases have no iOS build.
