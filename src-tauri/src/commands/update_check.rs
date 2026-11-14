@@ -37,8 +37,50 @@ fn to_info(r: &Value) -> Option<UpdateInfo> {
     Some(UpdateInfo { version, tag, url, name, prerelease })
 }
 
+/// One chunk of a pre-release suffix: `rc10` is `[Text("rc"), Num(10)]`, so `b2` sorts below `b10`.
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+enum PreChunk {
+    Num(u64),
+    Text(String),
+}
+
+/// Sort key of a release tag, the same order as the frontend's `compareVersions` (utils/version.ts):
+/// numeric MAJOR.MINOR.PATCH, then a stable version above every pre-release of the same core, then
+/// the pre-release suffix compared naturally. A leading `v` is ignored; missing or unreadable numbers
+/// count as 0.
+fn version_key(tag: &str) -> ([u64; 3], bool, Vec<PreChunk>) {
+    let s = tag.trim().trim_start_matches(['v', 'V']);
+    let (core, pre) = s.split_once('-').unwrap_or((s, ""));
+    let mut nums = [0u64; 3];
+    for (slot, part) in nums.iter_mut().zip(core.split('.')) {
+        *slot = part.parse().unwrap_or(0);
+    }
+    let mut chunks = Vec::new();
+    let mut rest = pre;
+    while let Some(first) = rest.chars().next() {
+        let digits = first.is_ascii_digit();
+        let end = rest.find(|c: char| c.is_ascii_digit() != digits).unwrap_or(rest.len());
+        let (chunk, tail) = rest.split_at(end);
+        chunks.push(if digits { PreChunk::Num(chunk.parse().unwrap_or(0)) } else { PreChunk::Text(chunk.to_string()) });
+        rest = tail;
+    }
+    (nums, pre.is_empty(), chunks)
+}
+
+/// The published release with the highest version. GitHub documents no order for the release list,
+/// and a patch of an older line published after a beta of the next version can stand in front of it,
+/// so the first entry is not the one to compare against. Pure — unit-tested.
+fn highest_published(releases: &[Value]) -> Option<&Value> {
+    releases
+        .iter()
+        .filter(|r| !r.get("draft").and_then(Value::as_bool).unwrap_or(false))
+        .filter_map(|r| Some((version_key(r.get("tag_name")?.as_str()?), r)))
+        .max_by(|a, b| a.0.cmp(&b.0))
+        .map(|(_, r)| r)
+}
+
 /// Fetch the release to compare against. `include_prerelease` = the user's "Pre-Release" channel choice:
-/// when true we take the newest published release of any kind; when false only the latest **stable**
+/// when true we take the highest published release of any kind; when false only the latest **stable**
 /// release (GitHub's `/releases/latest`, which excludes drafts + pre-releases). Returns `Ok(None)` when
 /// there's nothing to compare (e.g. no stable release exists yet → the `/latest` endpoint 404s). Any
 /// network/parse failure is an `Err` the frontend logs and ignores — an update check never disrupts use.
@@ -50,7 +92,7 @@ pub async fn check_for_update(include_prerelease: bool) -> Result<Option<UpdateI
         .map_err(|e| format!("HTTP client error: {e}"))?;
 
     if include_prerelease {
-        // Newest published release of any kind; the list is newest-first, skip drafts.
+        // Highest published release of any kind (drafts skipped), whatever order the list is in.
         let releases: Value = client
             .get(RELEASES_LIST)
             .send()
@@ -61,10 +103,8 @@ pub async fn check_for_update(include_prerelease: bool) -> Result<Option<UpdateI
             .json()
             .await
             .map_err(|e| format!("Release JSON parse failed: {e}"))?;
-        let first = releases
-            .as_array()
-            .and_then(|a| a.iter().find(|r| !r.get("draft").and_then(Value::as_bool).unwrap_or(false)));
-        Ok(first.and_then(to_info))
+        let list = releases.as_array().map(Vec::as_slice).unwrap_or(&[]);
+        Ok(highest_published(list).and_then(to_info))
     } else {
         // Latest stable (non-prerelease, non-draft). No stable release yet → 404 → nothing to compare.
         let resp = client
@@ -82,5 +122,43 @@ pub async fn check_for_update(include_prerelease: bool) -> Result<Option<UpdateI
             .await
             .map_err(|e| format!("Release JSON parse failed: {e}"))?;
         Ok(to_info(&release))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn rel(tag: &str, draft: bool) -> Value {
+        json!({ "tag_name": tag, "html_url": "https://example.invalid", "draft": draft, "prerelease": tag.contains('-') })
+    }
+
+    fn picked(releases: &[Value]) -> Option<String> {
+        highest_published(releases).and_then(to_info).map(|i| i.version)
+    }
+
+    #[test]
+    fn version_order_matches_the_frontend() {
+        let ordered = ["1.0.0-b2", "1.0.0-b10", "1.0.0-rc1", "1.0.0", "1.0.1", "1.0.2", "2.0.0-b1", "2.0.0-b2", "2.0.0-rc1", "2.0.0", "10.0.0"];
+        for pair in ordered.windows(2) {
+            assert!(version_key(pair[0]) < version_key(pair[1]), "{} must sort below {}", pair[0], pair[1]);
+        }
+        assert!(version_key("v2.0.0-b1") == version_key("2.0.0-b1"));
+    }
+
+    #[test]
+    fn a_later_patch_of_an_older_line_does_not_hide_the_beta() {
+        // The patch stands first in the list (published after the beta).
+        let list = [rel("v1.0.2", false), rel("v2.0.0-b1", false), rel("v1.0.1", false)];
+        assert_eq!(picked(&list).as_deref(), Some("2.0.0-b1"));
+    }
+
+    #[test]
+    fn drafts_are_never_picked() {
+        let list = [rel("v2.0.0-b2", true), rel("v1.0.2", false), rel("v2.0.0-b1", false)];
+        assert_eq!(picked(&list).as_deref(), Some("2.0.0-b1"));
+        assert_eq!(picked(&[rel("v2.0.0", true)]), None);
+        assert_eq!(picked(&[]), None);
     }
 }
