@@ -18,153 +18,136 @@ inside the box of the feature release they belong to, so the notes for one relea
     **Highlights**
 
     ??? info "Kite goes mobile — Android, iPhone and iPad"
-        Kite now runs natively on **Android** tablets and phones (USB serial, Bluetooth LE and Wi-Fi
-        links, touch-friendly layout, shared storage folders) and on **iPhone / iPad** (native build
-        with phone and tablet layouts, BLE and Wi-Fi MAVLink — contributed by Sebastian
-        Kumor). Features a device can't provide are hidden by capability, so the mobile app stays
-        clean instead of half-working. [#79] · [#16]
+        Kite runs natively on **Android** tablets and phones, with USB serial, Bluetooth LE and
+        Wi-Fi links. It comes as an APK download; the Play Store follows later. [#79]
 
-        **Phones got their own interface.** In landscape the map fills the whole screen: no bars, a
-        chain-link button opens the connection pop-out, and the instruments live in a frosted-glass
-        **widget column** on the right edge with two swipeable pages — the map keeps running
-        underneath it. Long-press a widget to rearrange or resize it; the others shift live to show
-        where they will land. Pinch to zoom, 2D/3D and follow next to the column. [#102]
+        **iPhone and iPad** get a native app as well, contributed by Sebastian Kumor: the phone
+        interface on the iPhone, the tablet interface on the iPad, connected over Bluetooth LE or
+        the network (TCP / UDP) — these devices have no serial port. The iPad plays RTSP video
+        with hardware decoding. The app comes through the App Store only, which follows later.
+        [#16] · [#221]
 
-        **Video on an Android phone** sits in a docked window at the bottom-right of the map — a camera
-        button parks it off-screen and brings it back instantly — or in the Video widget of the
-        column; double-tap swaps map and video. [#105] The 3D view centres on the visible map area
-        next to the column. [#103] · [#111]
+        On every mobile device, features the device cannot provide are hidden.
 
-        **The link keeps running in the background.** While connected, Android shows a notification
-        with the aircraft, battery, flight mode and distance to home; minimising Kite or switching
-        apps no longer stops telemetry or the recording, and the trail catches up when you come
-        back. [#111]
+        **Phones have their own interface.** In landscape the map fills the whole screen. A
+        chain-link button opens the connection pop-out, and the instruments sit in a **widget
+        column** on the right edge with two swipeable pages, plus three slots on the map's bottom
+        edge. Long-press a widget to rearrange or resize it. [#102] · [#173]
 
-    ??? info "Native RTSP video client with hardware decode"
-        RTSP video no longer needs the external video engine: Kite ships its **own RTSP client** and
-        decodes H.264/H.265 with the **operating system's hardware decoder** on Windows, Android,
-        Linux, macOS and iPad — lower latency, a fraction of the CPU load, and rock-solid reconnects.
-        [#85] · [#88] · [#89] · [#126]
+        **Video on an Android phone** sits in a docked window at the bottom-right of the map; a
+        camera button parks it and brings it back. It can also run in the Video widget of the
+        column, and a double-tap swaps map and video. Video on the iPhone is being looked into
+        but is not available yet. [#105]
 
-    ??? info "Video in two places at once — and on a screen of its own"
-        With Kite's own RTSP client the picture now runs in the **Video widget and a large surface at
-        the same time** — the floating window or the fullscreen swap — the way the other sources
-        always did. One decode feeds both — on Windows, macOS and Linux. [#129] · [#132] · [#135]
+        **Android only: the link keeps running in the background.** While connected, Android shows
+        a notification with the aircraft, battery, flight mode and distance to home. Minimising
+        Kite or switching apps does not stop telemetry or the recording. iOS does not offer the
+        interfaces for this. [#111]
 
-        **And it can leave the app.** Hover the floating window and a **broken-chain button** appears
-        in its top-left corner: the frame moves out into its own window, **always on top**, framed
-        exactly like the one inside Kite. Put it beside the app or on a **second monitor, which then
-        becomes your video screen** — Kite fills it again by itself at the next start, in the same
-        place and, if you left it that way, in fullscreen. The detached window has no title bar: the
-        buttons appear when the pointer is over it — top-left brings the picture home, bottom-right
-        goes fullscreen. Drag the picture to move it, the top-right corner resizes it, and the frame
-        keeps the stream's aspect ratio. Windows, macOS and Linux (a Wayland desktop cannot keep it
-        above other applications). [#130] · [#132] · [#135]
+        **RC control** from Kite is not available on phones and tablets for now. We will look at
+        it again for a later update.
 
-    ??? info "Telemetry API — live telemetry for other programs"
-        Kite can now **serve its live telemetry as JSON** to anything that can read it: an NDJSON
-        stream over TCP (port 27300), an HTTP snapshot (port 27301) and UDP subscribers (send `subscribe`, get
-        fed).
-        Read-only, everything the Raw telemetry popup shows — position, attitude, battery, link, flight
-        mode, sensors, home and the ground-station position — the same for INAV, ArduPilot, PX4 and
-        passive links, and it keeps running in the background, also on Android. Loopback by default,
-        one switch for the network. The full contract with every field and copy-paste examples is in
-        the **[Telemetry API](reference/telemetry-api.md)** reference. [#123]
+    ??? info "Native RTSP video — hardware decode, two surfaces, a window of its own"
+        Kite has its **own RTSP client** and decodes H.264/H.265 with the **operating system's
+        hardware decoder** on Windows, Android, Linux, macOS and iPad. RTSP no longer needs the
+        external video engine, which lowers latency and CPU load; on the desktop the classic engine
+        can still be selected in the Video panel. [#85] · [#88] · [#89] · [#126] · [#221]
 
-    ??? info "Unobstructed fullscreen video"
-        Fullscreen video now keeps its exact aspect ratio in a clean box, with a blurred, slowly
-        following map as the backdrop instead of black bars — and the floating panels stay on top
-        where they belong. [#90]
+        **Two places at once (desktop).** The picture runs in the Video widget and in the floating
+        window or the fullscreen swap at the same time. [#129] · [#132] · [#135]
 
-    ??? info "High-resolution replay and instant log preview"
-        The replay player gained a **HI-RES** switch: the stored onboard log is re-decoded at its
-        **full rate** and drives the horizon, instruments and stick overlay at your screen's refresh
-        rate, with new **slow-motion speeds** (0.25× / 0.5×) to study a manoeuvre frame by frame.
-        And you no longer need to import a log to look at it — **drop it on the map** (or use the
-        Logbook's new **Open** button) while disconnected, replay it exactly like a logbook flight,
-        and import it for real only if you want to keep it. [#97] · [#99]
+        **A window of its own (desktop).** A button on the floating window moves the picture into
+        its own always-on-top window — beside Kite or on a second monitor, where it opens again at
+        the next start, in fullscreen if you left it that way. A Wayland desktop cannot keep it
+        above other applications. [#130] · [#132] · [#135]
 
-    ??? info "Resizable widgets and a raw telemetry view"
-        Every flight widget now has **two or three sizes**: in the dock's edit mode a corner button
-        steps it from small to large (and, for the wide Live AGL and Video tiles, to a square).
-        The docks shrink to their largest widget, so a row of small tiles hands the freed space back
-        to the map or the fullscreen video. The compass and horizon picked up the frosted-glass look
-        of the other widgets, and the old Raw Telemetry widget gave way to a **≡ Raw** button in the
-        top bar: one popup with **every** value the telemetry link delivers, in its raw unit. [#101]
+        **Unobstructed fullscreen.** A new switch in the Video panel keeps the fullscreen video
+        clear of the interface: the picture no longer runs underneath the widgets but takes the
+        free area beside them, and grows into the space of a dock that is hidden or empty. It
+        keeps the stream's exact aspect ratio, and instead of black bars a blurred map that follows
+        the aircraft fills the rest of the screen. Off by default. [#90]
 
-        **The desktop adopted the phone's handling.** Starting a video source brings the floating
-        window in from the left; a single camera button next to it parks it off-screen and back
-        (the stream keeps running), the frame got the widgets' glass bezel with a resize corner, and
-        the Video panel shows the source's state, resolution, frame rate and codec instead of a
-        preview. Widgets are rearranged by **long-pressing** them — mouse or finger — with no edit
-        button any more; click outside the docks or press Escape to finish. [#127]
-
-    ??? info "Kite updates itself"
-        The update notice now shows the **release notes** right in the dialog, and next to *Open
-        Release Page* there is **Update and Restart**: Kite downloads the new version, installs it
-        and starts again — on Windows and Linux through the installer of the package you have
-        (a `.deb`/`.rpm` asks for your password), on macOS by swapping the app bundle, and a
-        **portable** copy replaces its own executable. Nothing is downloaded until you press the
-        button; *Remind me later* and *Skip this version* work as before. Android has no in-app
-        install and offers the release page instead; on iPhone and iPad the update check is off.
-
-        **Patch releases only.** A new choice under Settings → Updates keeps you on the bug-fix
-        line of the version you run: 2.0.0 is told about 2.0.1, never about 2.1.0. The default stays
-        *Stable releases*. [#162]
+        Details in the [Video](guides/video.md) guide.
 
     ??? info "INAV over ELRS, mLRS, SiK or Wi-Fi — the full planner on a MAVLink-only link"
-        ELRS and mLRS in MAVLink mode, SiK radios and MAVLink Wi-Fi bridges carry no MSP — and MSP is
-        what an INAV flight controller needs for missions, safe homes and geozones. Until now such a
-        link gave you INAV's MAVLink emulation only: telemetry, but no planner. **INAV 10.0** can carry
-        MSP inside the MAVLink stream, and Kite uses that by itself: connect with the **MAVLink**
-        protocol as you would for ArduPilot, and when the flight controller answers on the tunnel the
-        status shows **MSP/MAV**, UAV Info lists the real INAV version, board and craft name, and
-        mission upload and download (EEPROM and multi-mission included), safe homes, geozones, craft
-        name and flight statistics work as over a direct MSP link. Telemetry stays MAVLink — nothing
-        is polled through the tunnel, so the radio carries no extra load in flight. Needs INAV 10.0 or
-        newer and a MAVLink telemetry port on MAVLink 2 (the default). RC control from Kite and the
-        flight controller's own ADS-B receiver are not on this path yet. Setup and limits:
+        ELRS and mLRS in MAVLink mode, SiK radios and MAVLink Wi-Fi bridges carry no MSP, and MSP
+        is what an INAV flight controller needs for missions, safe homes and geozones. **INAV 10.0**
+        can carry MSP inside the MAVLink stream, and Kite uses that by itself: connect with the
+        **MAVLink** protocol, and when the flight controller answers on the tunnel the status shows
+        **MSP/MAV**. Mission upload and download (EEPROM and multi-mission included), safe homes,
+        geozones, craft name and flight statistics then work as over a direct MSP link. Telemetry
+        stays MAVLink; nothing is polled through the tunnel.
+
+        Needs INAV 10.0 or newer. RC control from Kite and the flight controller's own ADS-B
+        receiver are not available on this path. INAV versions before 10.0 connect over MAVLink on a
+        best-effort basis and are not officially supported. Setup and limits:
         [Connecting → INAV over MAVLink](guides/connecting.md#inav-over-mavlink-mspmav). [#202]
 
-    ??? info "A much smaller flight database"
-        The upgrade to 2.0 shrinks the flight database. Imported INAV Blackbox flights no longer carry
-        an unused text copy of their rows, and space freed by deleting flights or stored logs is now
-        handed back to the disk. A real logbook with 44 flights went from 1.2 GB to 0.75 GB. Tracks,
-        replay and the stored original logs are untouched. [#232]
-
-    ??? info "INAV Blackbox import without a helper program"
-        Kite now decodes INAV Blackbox logs itself: there is no `blackbox_decode` download any more,
-        and imports are noticeably faster. They are also complete — the old tool lost every frame
-        between a flight-mode change and the next key frame; those stretches are now in the track,
-        with correct mAh and GPS values. **HI-RES** replay uses the same decoder. Only INAV logs are
-        accepted: a Blackbox log from another firmware, Betaflight for example, is refused with a
-        message that names it (earlier versions imported such logs with wrong values; those flights
-        stay, without HI-RES replay). If an import goes wrong, starting Kite with the environment
-        variable `KITE_BLACKBOX_LEGACY=1` brings back the old decoder for now — please report the
-        log that failed. [#234]
-
     ??? info "Your own maps — online with your own key, offline from a folder"
-        **Custom online providers.** Add any online tile service by its URL template — `{z}`, `{x}` and
-        `{y}` (or `{-y}` for a TMS service), optionally `{s}` and `{r}` — under Settings → Map →
-        Providers → *Custom Online Provider*. An API key simply goes into the URL. Give the provider a name,
-        the highest zoom level the service delivers and an optional attribution, check it with
-        **Test**, and it shows up in the map selector under *Custom online maps*, after the built-in
-        maps — on the 2D map and the 3D globe, on every platform including Android, iPhone and iPad.
-        Services with 512 px tiles are drawn at their real size, with a quarter of the requests and
-        labels as the service intended; **Test** detects the tile size for you. Its tiles go into the
-        tile cache like those of the built-in maps, and past the service's highest level the 2D map
-        enlarges them instead of stopping. [#249]
+        **Custom online providers.** Add any online tile service by its URL template under
+        Settings → Map → Providers; an API key goes into the URL. **Test** checks the service and
+        detects its tile size. The provider then appears in the map selector, on the 2D map and the
+        3D globe, on every platform, and its tiles go into the tile cache. [#249]
 
-        **Custom maps: offline tiles from a folder (desktop).** Put tiles in the usual `Z/X/Y` layout
-        (`.png`, `.jpg`, `.webp`) into a subfolder of the custom map location and the folder shows up
-        at the end of the map selector — on the 2D map and the 3D globe, without internet. Kite
-        detects the tile size by itself, so 128 px and 512 px tile sets are drawn at their real size.
-        [#253] Gaps are filled from lower zoom levels, and a frame on the 2D map shows where the
-        detailed tiles are: a dashed rectangle from far out, the exact outline once you are close.
-        The location can be moved in Settings. Not on Android and iOS; the 3D terrain still needs the
-        internet. [#246]
+        **Offline tiles from a folder (desktop).** Put tiles in the usual `Z/X/Y` layout into a
+        subfolder of the custom map location and the folder appears in the map selector, on the 2D
+        map and the 3D globe, without internet. Gaps are filled from lower zoom levels, and a frame
+        on the 2D map shows where the detailed tiles are. Not on Android and iOS; the 3D terrain
+        still needs the internet. [#246] · [#253]
 
         Both are described in [Your own maps](guides/custom-maps.md).
+
+    ??? info "Logbook and replay — native Blackbox import, HI-RES replay, a smaller database"
+        **INAV Blackbox import without a helper program.** Kite decodes INAV Blackbox logs itself:
+        no `blackbox_decode` download, faster imports, and the stretches the old tool lost after a
+        flight-mode change are in the track. Only INAV logs are accepted; a Blackbox log from
+        another firmware is refused with a message that names it. If an import goes wrong, starting
+        Kite with the environment variable `KITE_BLACKBOX_LEGACY=1` brings back the old decoder for
+        now — please report the log that failed. [#234]
+
+        **High-resolution replay.** A **HI-RES** switch in the player re-decodes the stored onboard
+        log at its full rate for the horizon, the instruments and the stick overlay, with
+        slow-motion speeds of 0.25× and 0.5×. [#97]
+
+        **Open a log without importing it.** Drop a log on the map, or use the Logbook's **Open**
+        button, while disconnected. It replays like a logbook flight, and you import it only if you
+        want to keep it. [#99]
+
+        **A smaller flight database.** The upgrade removes an unused text copy from imported INAV
+        Blackbox flights; a logbook that consists of such flights can shrink by more than 30 %.
+        Flights from ArduPilot and PX4 logs keep their size. For every flight, space freed by
+        deleting flights or stored logs is now handed back to the disk. [#232]
+
+    ??? info "Telemetry API — live telemetry for other programs"
+        Kite can **serve its live telemetry as JSON** to other programs: an NDJSON stream over TCP
+        (port 27300), an HTTP snapshot (port 27301) and UDP subscribers. It is read-only and holds
+        everything the Raw telemetry view shows — position, attitude, battery, link, flight mode,
+        sensors, home and the ground-station position — the same for INAV, ArduPilot, PX4 and
+        passive links. It keeps running in the background, also on Android. Loopback by default,
+        one switch for the network. Every field and examples are in the
+        **[Telemetry API](reference/telemetry-api.md)** reference. [#123]
+
+    ??? info "Widgets in several sizes, and a raw telemetry view"
+        Every flight widget has **two or three sizes**: in edit mode a corner button steps it from
+        small to large (and, for the wide Live AGL and Video tiles, to a square). The docks shrink
+        to their largest widget, which hands the freed space back to the map. Widgets are
+        rearranged by **long-pressing** them, with the mouse or a finger. [#101] · [#127]
+
+        The **≡ Raw** button in the top bar opens one view with every value the telemetry link
+        delivers, in its raw unit. It replaces the Raw Telemetry widget. [#101]
+
+    ??? info "Kite updates itself"
+        The update notice shows the **release notes** in the dialog, and next to *Open Release Page*
+        there is **Update and Restart**: Kite downloads the new version, installs it and starts
+        again — on Windows and Linux through the installer of the package you have (a `.deb`/`.rpm`
+        asks for your password), on macOS by replacing the app bundle, and a **portable** copy
+        replaces its own executable. Nothing is downloaded until you press the button. Android has
+        no in-app install and offers the release page instead; on iPhone and iPad the update check
+        is off.
+
+        **Patch releases only.** A new choice under Settings → Updates keeps you on the bug-fix
+        line of the version you run: 2.0.0 is told about 2.0.1, never about 2.1.0. The default
+        stays *Stable releases*. [#162]
 
     **Added**
 
@@ -195,8 +178,9 @@ inside the box of the feature release they belong to, so the notes for one relea
       beside Kite or on a second monitor, and returns there at the next start. Needs the native
       RTSP client. Desktop only (Windows, macOS and Linux), not on tablets.
       [#130] · [#132] · [#135]
-    - **Unobstructed fullscreen video** — fullscreen video keeps its aspect ratio, with a blurred
-      map that follows the aircraft as the backdrop instead of black bars. [#90]
+    - **Unobstructed fullscreen video** — a switch in the Video panel keeps the fullscreen video
+      clear of the widgets instead of running underneath them, with a blurred map that follows the
+      aircraft as the backdrop instead of black bars. [#90]
     - **Mini-map gestures** — when the map is swapped into the Video widget or into the phone's
       docked video window, a tap on it toggles heading-up ⇄ north-up and sliding one finger up or
       down zooms. The map in the floating window and in the detached window is operated as usual.
@@ -580,7 +564,6 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#100]: https://github.com/b14ckyy/Kite-GC/pull/100
 [#101]: https://github.com/b14ckyy/Kite-GC/pull/101
 [#102]: https://github.com/b14ckyy/Kite-GC/pull/102
-[#103]: https://github.com/b14ckyy/Kite-GC/pull/103
 [#105]: https://github.com/b14ckyy/Kite-GC/pull/105
 [#111]: https://github.com/b14ckyy/Kite-GC/pull/111
 [#123]: https://github.com/b14ckyy/Kite-GC/pull/123

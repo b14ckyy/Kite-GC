@@ -105,6 +105,15 @@ debug-severity texts such as this one only appear at *Debug*.
 At present video is available on the iPad, on Android and on the desktop, but not on the iPhone:
 the Video panel only says so there. Whether video can come to the iPhone is being looked into.
 
+### Why does the detached video window not stay on top on Linux?
+
+On a desktop that runs on **Wayland** — GNOME's default — an application is not allowed to put its
+own window above other applications, so *always on top* has no effect there and the detached window
+takes its turn in the normal stacking order. Put it beside Kite or on a second monitor. On Windows
+and macOS the window stays on top. See the
+**[platform notes](guides/video.md#platform-notes-what-to-expect-per-operating-system)** in the
+Video guide.
+
 ## Flight controller setup
 
 ### Can Kite edit flight controller parameters?
