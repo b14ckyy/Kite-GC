@@ -168,6 +168,31 @@ keyPassword=…
 
 It is gitignored, so the key never lands in the repository.
 
+#### Version code and the Play bundle
+
+Android orders builds by an integer `versionCode`, and Google Play accepts an upload only with a higher
+one than before. `app/build.gradle.kts` derives it from the version name in `package.json`
+(`playVersionCode`):
+
+```text
+major * 1_000_000 + minor * 10_000 + patch * 100 + stage
+stage: -bN = N (1–39) · -rcN = 40 + N (N 1–39) · final = 99 · -dev = 0
+```
+
+So `2.0.0-b1` is 2000001, `2.0.0-rc1` 2000041, `2.0.0` 2000099 and `2.0.1` 2000199. A version name
+outside this pattern — another suffix, a beta (`-bN`) or rc number above 39 — stops the build with a message.
+Two uploads need two version names.
+
+The **App Bundle** that Google Play takes is built locally only — the GitHub workflow keeps building the
+APK:
+
+```bash
+just build-android-aab    # release/KiteGC_Android_<abi>_<version>_playstore.aab
+```
+
+Without `key.properties` the bundle is debug-signed, and Play refuses it. The bundle is for the Play
+Console only; it does not belong on the GitHub release.
+
 #### Building locally
 
 1. **JDK 17** — `sudo apt install openjdk-17-jdk` (or Temurin on Windows/macOS).

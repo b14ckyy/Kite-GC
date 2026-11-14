@@ -5,6 +5,7 @@
 #
 #     KiteGC_<OS>_<Arch>_<Version>_<Type>.<ext>
 #     KiteGC_Android_<abi>_<Version>_installer.apk      (when an Android release build exists)
+#     KiteGC_Android_<abi>_<Version>_playstore.aab      (`just build-android-aab`, for Google Play)
 #
 #   Type = installer   (.deb / .rpm / .dmg; the Android .apk)
 #        | standalone  (.AppImage / .app-as-zip — self-contained runnable app)
@@ -19,7 +20,8 @@
 # filenames are identical everywhere. The release/ folder is git-ignored and refreshed on every
 # run — `--keep` adds to it instead.
 #
-# `--android-only` collects the APKs alone (implies --keep). `just build-android` uses it: an
+# `--android-only` collects the APKs and the Play bundle alone (implies --keep). `just build-android`
+# and `just build-android-aab` use it: an
 # Android build leaves the DESKTOP outputs of an earlier build untouched in target/release, and
 # collecting them would republish a stale binary under the current version number (found on the
 # Windows side 2026-09-04: a 1.0.0-rc2 kite-gc.exe came out as a 1.1.0-dev portable zip).
@@ -150,10 +152,25 @@ for abi_dir in "$APK_ROOT"/*/; do
     collected+=("$dest")
 done
 
+# Android App Bundle for Google Play: `tauri android build --aab` leaves it under
+# outputs/bundle/<abi>Release/. Same handling as the APKs.
+AAB_ROOT="$ROOT/src-tauri/gen/android/app/build/outputs/bundle"
+for abi_dir in "$AAB_ROOT"/*Release/; do
+    [ -d "$abi_dir" ] || continue
+    aab="$(ls -1dt "$abi_dir"*.aab 2>/dev/null | head -n1)"
+    [ -n "$aab" ] && [ -e "$aab" ] || continue
+    abi="$(basename "$abi_dir")"; abi="${abi%Release}"
+    case "$abi" in x86_64) abi="x64" ;; esac
+    dest="${APP}_Android_${abi}_${VERSION}_playstore.aab"
+    cp -f "$aab" "$OUT/$dest"
+    rm -rf "$abi_dir"
+    collected+=("$dest")
+done
+
 echo ""
 if [ ${#collected[@]} -eq 0 ]; then
     if [ "$ANDROID_ONLY" = 1 ]; then
-        echo "[collect-release] No APK found under $APK_ROOT — did the build succeed?"
+        echo "[collect-release] No APK or AAB found under $(dirname "$APK_ROOT") — did the build succeed?"
     else
         echo "[collect-release] No build outputs found under $TARGET — did the build succeed?"
     fi

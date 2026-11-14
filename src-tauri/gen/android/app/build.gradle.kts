@@ -24,6 +24,39 @@ val keystoreProperties = Properties().apply {
     }
 }
 
+// versionCode for Google Play, derived from the version name. Play wants a higher code for every
+// upload, and the one Tauri writes to tauri.properties ignores the pre-release part — every 2.0.0-*
+// build would be 2000000.
+//
+//   major * 1_000_000 + minor * 10_000 + patch * 100 + stage
+//   stage: -bN (or -betaN) = N (1..39) · -rcN = 40 + N (41..79) · final = 99 · -dev = 0
+//   Any other suffix stops the build: it would share stage 0 with -dev and collide on Play.
+//
+//   2.0.0-b1 = 2000001 · 2.0.0-rc1 = 2000041 · 2.0.0 = 2000099 · 2.0.1 = 2000199 · 10.0.0 = 10000099
+//
+// This scheme is PERMANENT once a build is on Play: a code can never go down again. A build with
+// stage 0 (-dev) installs, but is never meant for Play.
+fun playVersionCode(name: String): Int {
+    val m = Regex("""^(\d+)\.(\d+)\.(\d+)(?:-([A-Za-z]+)\.?(\d+)?)?$""").matchEntire(name)
+        ?: throw GradleException("versionName '$name' is not MAJOR.MINOR.PATCH[-bN|-rcN|-dev]")
+    val major = m.groupValues[1].toInt()
+    val minor = m.groupValues[2].toInt()
+    val patch = m.groupValues[3].toInt()
+    val kind = m.groupValues[4].lowercase()
+    val n = m.groupValues[5].toIntOrNull() ?: 0
+    if (minor > 99 || patch > 99) {
+        throw GradleException("versionName '$name': minor and patch must stay below 100 for the versionCode")
+    }
+    val stage = when (kind) {
+        "" -> 99
+        "beta", "b" -> if (n in 1..39) n else throw GradleException("versionName '$name': beta number must be 1..39")
+        "rc" -> if (n in 1..39) 40 + n else throw GradleException("versionName '$name': rc number must be 1..39")
+        "dev" -> 0
+        else -> throw GradleException("versionName '$name': unknown pre-release '$kind' (use bN, rcN or dev)")
+    }
+    return major * 1_000_000 + minor * 10_000 + patch * 100 + stage
+}
+
 android {
     compileSdk = 36
     namespace = "com.kitegc.app"
@@ -32,8 +65,8 @@ android {
         applicationId = "com.kitegc.app"
         minSdk = 24
         targetSdk = 36
-        versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
-        versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
+        versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0.0")
+        versionCode = playVersionCode(versionName!!)
     }
     signingConfigs {
         keystoreProperties.getProperty("storeFile")?.let { storePath ->
