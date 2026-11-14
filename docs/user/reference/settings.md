@@ -108,7 +108,7 @@ See **[Flight logbook](../guides/logbook.md)** for how these are used.
 
 | Setting | What it does | Default |
 |---|---|---|
-| **Check for updates** | Whether Kite asks GitHub for a newer version when it starts — **Disabled**, **Stable releases**, or **Include pre-releases** (betas and release candidates). | Stable releases |
+| **Check for updates** | Whether Kite asks GitHub for a newer version when it starts — **Disabled**, **Stable releases**, or **Include pre-releases** (betas and release candidates; Kite then compares against the highest version of any kind, so choose *Stable releases* to be told about the patch releases of the version you run). | Stable releases |
 
 Kite never downloads or installs an update on its own. When a newer version exists you get a notice
 with the version you have, the one that is available, and three choices: **Open Release Page** to read
