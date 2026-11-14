@@ -65,7 +65,7 @@ These are **global** — every widget, map read-out and panel follows them. See
 
 | Setting | What it does | Default |
 |---|---|---|
-| **Check for updates** | Whether Kite asks GitHub for a newer version when it starts — **Disabled**, **Stable releases**, **Patch releases only** (bug-fix releases of the version you run, e.g. 2.0.0 → 2.0.1, never 2.1.0), or **Include pre-releases** (betas and release candidates). | Stable releases (from Google Play: on) |
+| **Check for updates** | Whether Kite asks GitHub for a newer version when it starts — **Disabled**, **Stable releases**, **Patch releases only** (bug-fix releases of the version you run, e.g. 2.0.0 → 2.0.1, never 2.1.0), or **Include pre-releases** (betas and release candidates; Kite then compares against the highest version of any kind). | Stable releases (from Google Play: on) |
 
 Kite never downloads anything on its own. When a newer version exists you get a notice with the
 version you have, the one that is available, and the release notes, plus four choices:
