@@ -1486,10 +1486,60 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#can-i-connect-an-inav-flight-controller-over-mavlink" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Can I connect an INAV flight controller over MAVLink?
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#why-does-kite-keep-showing-a-firmware-message-that-mission-planner-doesnt" class="md-nav__link">
     <span class="md-ellipsis">
       
         Why does Kite keep showing a firmware message that Mission Planner doesn't?
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#video" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Video
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Video">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-is-there-no-video-on-the-iphone" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why is there no video on the iPhone?
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-does-the-detached-video-window-not-stay-on-top-on-linux" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why does the detached video window not stay on top on Linux?
       
     </span>
   </a>
@@ -1901,10 +1951,60 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#can-i-connect-an-inav-flight-controller-over-mavlink" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Can I connect an INAV flight controller over MAVLink?
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#why-does-kite-keep-showing-a-firmware-message-that-mission-planner-doesnt" class="md-nav__link">
     <span class="md-ellipsis">
       
         Why does Kite keep showing a firmware message that Mission Planner doesn't?
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#video" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Video
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Video">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-is-there-no-video-on-the-iphone" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why is there no video on the iPhone?
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-does-the-detached-video-window-not-stay-on-top-on-linux" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why does the detached video window not stay on top on Linux?
       
     </span>
   </a>
@@ -2024,6 +2124,13 @@ have a key for can be added yourself as a <strong><a href="../guides/custom-maps
 by its tile URL template — whether its terms allow that use, including Kite's tile cache, is yours to
 check.</p>
 <h2 id="connections">Connections<a class="headerlink" href="#connections" title="Permanent link">&para;</a></h2>
+<h3 id="can-i-connect-an-inav-flight-controller-over-mavlink">Can I connect an INAV flight controller over MAVLink?<a class="headerlink" href="#can-i-connect-an-inav-flight-controller-over-mavlink" title="Permanent link">&para;</a></h3>
+<p>Yes, from <strong>INAV 10.0</strong> on. That version carries MSP inside the MAVLink stream, and Kite uses it
+automatically, so missions, safe homes and geozones work over a MAVLink-only radio link — see
+<strong><a href="../guides/connecting/#inav-over-mavlink-mspmav">Connecting → INAV over MAVLink</a></strong>.</p>
+<p>INAV versions <strong>before 10.0</strong> can be connected over MAVLink too, but Kite then only gets what
+INAV's MAVLink emulation delivers. That works on a best-effort basis and is not officially
+supported. For these versions, connect over <strong>MSP</strong>.</p>
 <h3 id="why-does-kite-keep-showing-a-firmware-message-that-mission-planner-doesnt">Why does Kite keep showing a firmware message that Mission Planner doesn't?<a class="headerlink" href="#why-does-kite-keep-showing-a-firmware-message-that-mission-planner-doesnt" title="Permanent link">&para;</a></h3>
 <p>When Kite is connected through <strong>another ground station's MAVLink forward</strong> (Mission Planner's
 forward or mirror, for example), it sees everything the aircraft sends — including replies to
@@ -2042,6 +2149,17 @@ firmware refuses a request it cannot serve once instead of repeating the complai
 other ground station up to date as well. To keep the notification banner quiet in the meantime,
 set <strong><a href="../reference/settings/">Settings → Alerts → System messages</a></strong> to <em>Warning</em> (the default) —
 debug-severity texts such as this one only appear at <em>Debug</em>.</p>
+<h2 id="video">Video<a class="headerlink" href="#video" title="Permanent link">&para;</a></h2>
+<h3 id="why-is-there-no-video-on-the-iphone">Why is there no video on the iPhone?<a class="headerlink" href="#why-is-there-no-video-on-the-iphone" title="Permanent link">&para;</a></h3>
+<p>At present video is available on the iPad, on Android and on the desktop, but not on the iPhone:
+the Video panel only says so there. Whether video can come to the iPhone is being looked into.</p>
+<h3 id="why-does-the-detached-video-window-not-stay-on-top-on-linux">Why does the detached video window not stay on top on Linux?<a class="headerlink" href="#why-does-the-detached-video-window-not-stay-on-top-on-linux" title="Permanent link">&para;</a></h3>
+<p>On a desktop that runs on <strong>Wayland</strong> — GNOME's default — an application is not allowed to put its
+own window above other applications, so <em>always on top</em> has no effect there and the detached window
+takes its turn in the normal stacking order. Put it beside Kite or on a second monitor. On Windows
+and macOS the window stays on top. See the
+<strong><a href="../guides/video/#platform-notes-what-to-expect-per-operating-system">platform notes</a></strong> in the
+Video guide.</p>
 <h2 id="flight-controller-setup">Flight controller setup<a class="headerlink" href="#flight-controller-setup" title="Permanent link">&para;</a></h2>
 <h3 id="can-kite-edit-flight-controller-parameters">Can Kite edit flight controller parameters?<a class="headerlink" href="#can-kite-edit-flight-controller-parameters" title="Permanent link">&para;</a></h3>
 <p>Only the ones that belong to a mission or to its safety net. Kite is a <strong>mission planner, mission
