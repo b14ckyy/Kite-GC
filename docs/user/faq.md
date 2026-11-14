@@ -66,6 +66,16 @@ check.
 
 ## Connections
 
+### Can I connect an INAV flight controller over MAVLink?
+
+Yes, from **INAV 10.0** on. That version carries MSP inside the MAVLink stream, and Kite uses it
+automatically, so missions, safe homes and geozones work over a MAVLink-only radio link — see
+**[Connecting → INAV over MAVLink](guides/connecting.md#inav-over-mavlink-mspmav)**.
+
+INAV versions **before 10.0** can be connected over MAVLink too, but Kite then only gets what
+INAV's MAVLink emulation delivers. That works on a best-effort basis and is not officially
+supported. For these versions, connect over **MSP**.
+
 ### Why does Kite keep showing a firmware message that Mission Planner doesn't?
 
 When Kite is connected through **another ground station's MAVLink forward** (Mission Planner's
@@ -87,6 +97,22 @@ firmware refuses a request it cannot serve once instead of repeating the complai
 other ground station up to date as well. To keep the notification banner quiet in the meantime,
 set **[Settings → Alerts → System messages](reference/settings.md)** to *Warning* (the default) —
 debug-severity texts such as this one only appear at *Debug*.
+
+## Video
+
+### Why is there no video on the iPhone?
+
+At present video is available on the iPad, on Android and on the desktop, but not on the iPhone:
+the Video panel only says so there. Whether video can come to the iPhone is being looked into.
+
+### Why does the detached video window not stay on top on Linux?
+
+On a desktop that runs on **Wayland** — GNOME's default — an application is not allowed to put its
+own window above other applications, so *always on top* has no effect there and the detached window
+takes its turn in the normal stacking order. Put it beside Kite or on a second monitor. On Windows
+and macOS the window stays on top. See the
+**[platform notes](guides/video.md#platform-notes-what-to-expect-per-operating-system)** in the
+Video guide.
 
 ## Flight controller setup
 
