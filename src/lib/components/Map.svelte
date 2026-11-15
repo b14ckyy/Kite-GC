@@ -154,20 +154,20 @@
 
   // ── UAV model marker (top-down canvas render of the same .glb used in 3D) ── a persistent <canvas>, so
   // there is no toDataURL/setIcon churn; redrawn only on a changed tilt (see modelDrawn).
-  let uavMesh: UavMesh | null = null;       // geometry for the current model kind
+  let uavMesh: UavMesh | null = null;
   let uavMeshToken = 0;                       // guards out-of-order async loads
   const MODEL_REAL_SPAN_M = 14;              // real-world span the model represents (zoom-scaled)
   const MODEL_MIN_PX = 100, MODEL_MAX_PX = 200;
   const MODEL_TINT = 0; // no mode tint on the model (same as 3D); the trail carries the mode colour
 
-  // (Re)load the mesh whenever the resolved model kind changes (platform type or override).
   $effect(() => {
     const kind = resolveModelKind(platformType, modelOverride);
     const token = ++uavMeshToken;
     loadUavMesh(modelUri(kind)).then((m) => {
-      if (token !== uavMeshToken) return; // a newer load superseded us
+      if (token !== uavMeshToken) return;
       uavMesh = m;
-      applyFollowFrame(); // redraw with the new model
+      modelDrawn = null; // the tilt gate knows nothing of the mesh
+      applyFollowFrame();
     }).catch(() => { /* keep the previous mesh / fallback dot */ });
   });
 
@@ -175,15 +175,12 @@
     const h = hex.replace('#', '');
     return [parseInt(h.slice(0, 2), 16) / 255, parseInt(h.slice(2, 4), 16) / 255, parseInt(h.slice(4, 6), 16) / 255];
   }
-  /** Model pixel size at the current zoom (clamped), then scaled by the UI scaling setting. */
   function modelSizePx(lat: number): number {
     if (!map) return MODEL_MIN_PX;
     const mpp = 156543.03392 * Math.cos(lat * Math.PI / 180) / Math.pow(2, map.getZoom());
     return Math.round(Math.max(MODEL_MIN_PX, Math.min(MODEL_MAX_PX, MODEL_REAL_SPAN_M / mpp)) * (uiScale || 1));
   }
-  // Resize the model when the UI scaling setting changes.
   $effect(() => { uiScale; if (map) onZoomEnd(); });
-  /** A DivIcon whose content is a blank canvas of `size`px (drawn into by drawModel). */
   function makeModelIcon(size: number): L.DivIcon {
     return L.divIcon({
       className: 'uav-model-icon',
@@ -191,7 +188,7 @@
       iconSize: [size, size], iconAnchor: [size / 2, size / 2],
     });
   }
-  /** Draw the model into a marker's persistent canvas (cheap — no DOM churn). */
+  /** Software raster, the expensive step of a follow frame: call it only behind the modelDrawn gate. */
   function drawModel(marker: L.Marker | undefined, heading: number, pitch: number, roll: number, color: string) {
     const cv = marker?.getElement()?.querySelector('canvas') as HTMLCanvasElement | null;
     const ctx = cv?.getContext('2d');
@@ -203,7 +200,6 @@
     }
     renderUavTopDown(ctx, uavMesh, cv.width, heading, pitch, roll, hexToRgb01(color), MODEL_TINT);
   }
-  /** Zoom changed → resize the marker canvases to the new pixel size, then redraw. */
   function onZoomEnd() {
     const lat = followCurrent?.lat ?? 0;
     for (const mk of [uavMarker, playbackMarker]) mk?.setIcon(makeModelIcon(modelSizePx(lat)));
@@ -218,7 +214,8 @@
   let modelDrawn: { marker: L.Marker; color: string; pitch: number; roll: number } | null = null;
   function turnModel(marker: L.Marker, heading: number) {
     const cv = marker.getElement()?.querySelector('canvas');
-    const turn = `rotate(${heading.toFixed(1)}deg)`;
+    // Rounded the way the style reads back ("90deg", not "90.0deg"), or the comparison never matches.
+    const turn = `rotate(${Math.round(heading * 10) / 10}deg)`;
     if (cv && cv.style.transform !== turn) cv.style.transform = turn;
   }
 
@@ -1812,7 +1809,8 @@
       const d = modelDrawn;
       if (
         !d || d.marker !== activeFollowMarker || d.color !== activeColor ||
-        Math.abs(t.pitch - d.pitch) >= MODEL_TILT_STEP_DEG || Math.abs(t.roll - d.roll) >= MODEL_TILT_STEP_DEG
+        Math.abs(t.pitch - d.pitch) >= MODEL_TILT_STEP_DEG ||
+        Math.abs(((t.roll - d.roll + 540) % 360) - 180) >= MODEL_TILT_STEP_DEG
       ) {
         modelDrawn = { marker: activeFollowMarker, color: activeColor, pitch: t.pitch, roll: t.roll };
         drawModel(activeFollowMarker, 0, t.pitch, t.roll, activeColor);
@@ -1825,9 +1823,7 @@
       mapHeading = followCurrent.heading;
       setMapRotation(-mapHeading);
     }
-    // Don't fight an in-progress zoom animation (would snap mid-zoom; the animation itself heads for
-    // the aircraft, see the zoomanim hook in onMount). A pinch in flight is anchored instead of panned.
-    // Fleet view modes never recentre on the active vehicle.
+    // Don't fight a zoom animation (it would snap mid-zoom; the zoomanim hook in onMount heads for the aircraft).
     if ((viewMode === 'follow' || viewMode === 'heading-follow') && !(map as unknown as { _animatingZoom?: boolean })._animatingZoom) {
       followDrivingView = true;
       if (pinching()) anchorPinch(ll);
@@ -3156,7 +3152,7 @@
   :global(.map.heading-up .leaflet-map-pane > .leaflet-pane) {
     --kite-upright: calc(-1 * var(--map-rotation, 0deg));
   }
-  /* Exception — the UAV model is drawn with its heading; the map rotation is what makes it point up. */
+  /* Exception — the model canvas carries the heading (turnModel); the map rotation is what makes it point up. */
   :global(.map.heading-up .uav-model-icon) {
     --kite-upright: 0deg;
   }
