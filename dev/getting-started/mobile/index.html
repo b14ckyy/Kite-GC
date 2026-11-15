@@ -1983,13 +1983,18 @@ the full guide.</p>
 <p>A fresh install starts on <strong>MAVLink</strong> over <strong>UDP</strong> port <code>14550</code>, the usual Wi-Fi telemetry setup. Kite
 remembers your last connection from then on, as on the desktop. Details:
 <strong><a href="../../guides/connecting/">Connecting</a></strong>.</p>
+<p><strong>The screen stays on while the aircraft is armed.</strong> Connected but disarmed, the normal screen
+timeout of the device applies. Two things keep the screen on for the whole connection: a continuous
+raw recording (<strong>Settings → Data → Flight Logbook → Continuous Raw Logging</strong>) and a telemetry feed
+that does not report whether the aircraft is armed. <strong>Settings → Interface → UI → Stay awake without
+connection</strong> keeps it on whenever Kite is open, connected or not. While Kite holds the screen it
+stays at its normal brightness — the system offers an app no "dim, but stay on". Kite does not switch a screen back on that has already gone dark: wake the device before take-off,
+or use that setting.</p>
 <p><strong>Android only:</strong></p>
 <ul>
 <li><strong>The link keeps running in the background.</strong> While connected, a notification shows the aircraft,
   battery, flight mode and distance to home, and telemetry, recording and the track continue while
   Kite is minimised. See the Android note in <strong><a href="../../guides/connecting/">Connecting</a></strong>.</li>
-<li><strong>The screen stays on</strong> while a link is active; after you disconnect, the normal screen timeout
-  applies again.</li>
 </ul>
 <h2 id="logbook-and-logs">Logbook and logs<a class="headerlink" href="#logbook-and-logs" title="Permanent link">&para;</a></h2>
 <ul>

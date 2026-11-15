@@ -1744,6 +1744,10 @@ edge. Long-press a widget to rearrange or resize it. <a href="https://github.com
 camera button parks it and brings it back. It can also run in the Video widget of the
 column, and a double-tap swaps map and video. Video on the iPhone is being looked into
 but is not available yet. <a href="https://github.com/b14ckyy/Kite-GC/pull/105">#105</a></p>
+<p><strong>The screen stays on while the aircraft is armed.</strong> Connected but disarmed, the device's
+own screen timeout applies. A continuous raw recording, or a telemetry feed that does not
+report arming, keeps the screen on for the whole connection, and <strong>Stay awake without
+connection</strong> in the settings keeps it on whenever Kite is open. <a href="https://github.com/b14ckyy/Kite-GC/pull/285">#285</a></p>
 <p><strong>Android only: the link keeps running in the background.</strong> While connected, Android shows
 a notification with the aircraft, battery, flight mode and distance to home. Minimising
 Kite or switching apps does not stop telemetry or the recording. iOS does not offer the
@@ -1864,6 +1868,9 @@ stays <em>Stable releases</em>. <a href="https://github.com/b14ckyy/Kite-GC/pull
   column and a map ⇄ video swap. <a href="https://github.com/b14ckyy/Kite-GC/pull/105">#105</a> · <a href="https://github.com/b14ckyy/Kite-GC/pull/152">#152</a></li>
 <li><strong>Background telemetry on Android</strong> — a notification keeps the link, the recording and the
   track running while Kite is minimised. <a href="https://github.com/b14ckyy/Kite-GC/pull/111">#111</a></li>
+<li><strong>Screen stays on while armed</strong> — on phones and tablets; for the whole connection during a
+  continuous raw recording or without an arming state in the feed, and always with <strong>Stay awake
+  without connection</strong>. <a href="https://github.com/b14ckyy/Kite-GC/pull/285">#285</a></li>
 </ul>
 <p><em>Video</em></p>
 <ul>
