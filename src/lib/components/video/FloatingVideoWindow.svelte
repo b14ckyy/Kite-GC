@@ -48,10 +48,9 @@
   /** The map sits in this frame (swapped) — +page renders it top-level, the body is omitted. */
   const mapHere = $derived($videoState.mapLocation === 'floating');
   const live = $derived($videoState.status === 'live');
-  /** The unplug button: take the picture out of the app into its own window (D3). Native decode
-   *  sink only (D2) — the DOM paths render into THIS WebView and cannot be handed to another one.
-   *  Every desktop platform serves it now, each in its own way: a child window on Windows, a second
-   *  AppKit host on macOS, a second GStreamer pipeline on Linux. */
+  /** The unplug button: take the picture into its own window (D3). Native decode sink only (D2) — the DOM
+   *  paths render into THIS WebView. Each desktop platform serves it its own way (child window / second AppKit
+   *  host / second GStreamer pipeline). */
   const canDetach = $derived(!isMobile && live && $videoState.nativeSink);
   /** The hardware layer is positioned and shown for this window (the router's ack). */
   const armed = $derived($activeNativeSurfaces.has('floating'));
@@ -172,12 +171,9 @@
       data-nv-clip={armed ? 'floating' : undefined}
     ></div>
 
-    <!-- content: the video. When the map is in this frame, it's rendered (top-level) by +page here
-         instead, and the body is omitted. Double-click the video → the map jumps into this frame.
-         `data-nv-clip="floating"` while it holds the hardware layer: the opaque bezel this box
-         paints (its border + the ring around it) sits BEHIND the widget tile, whose own hole is
-         transparent — so the bezel showed through the tile's picture wherever the two overlap. The
-         router cuts it away with the holes of the surfaces above this one, never with its own. -->
+    <!-- content: the video (omitted when +page renders the map into this frame; double-click → the map jumps
+         here). `data-nv-clip="floating"` while it holds the hardware layer: its opaque bezel sits BEHIND the widget
+         tile's transparent hole, so the router cuts it with the holes of the surfaces above, never its own. -->
     {#if !mapHere}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div
@@ -190,12 +186,9 @@
         {#if live && $videoState.nativeSink}
           <!-- Native decode sink (hole punch): the video is a hardware layer BELOW the WebView;
                this div is the transparent hole it shows through. See controllers/nativeVideo. -->
-          <!-- Mobile: the window tells the router where it comes to rest (its box without the slide
-               transform), the layer is placed there once and the hole is cut in one step when the frame
-               stands still — the phone dock's pattern (nativeVideo.ts, NativeSurfaceSpec). The desktop
-               keeps the hole following a drag. The frame and body stay opaque until the hole is open
-               (`holeOpen`), so a sliding frame shows its ground, not the map; the placeholder text only
-               when the sink really serves another surface, not while this one is being armed. -->
+          <!-- Mobile: the router gets the rest box (no slide transform) and cuts the hole in one step when the frame
+               stands still (the phone dock's pattern, NativeSurfaceSpec); the desktop follows a drag. Frame and body stay
+               opaque until `holeOpen`; the placeholder only when the sink really serves another surface. -->
           <div class="native-hole" class:armed={holeOpen} use:nativeSurface={isMobile ? { id: 'floating', rest: restRect } : 'floating'}>
             {#if $activeNativeSurfaces.size > 0 && !armed}<span>{$t('video.sinkElsewhere')}</span>{/if}
           </div>
@@ -243,10 +236,8 @@
       </div>
     {/if}
 
-    <!-- Corner handles: the lighter L just inside the picture's top-right corner resizes, the
-         rounded square with the four-way arrow in the bottom-left corner moves. Video mode only —
-         with the map in the frame its layer covers the chrome, so +page draws the same corners
-         above the map. -->
+    <!-- Corner handles: the light L inside the picture's top-right resizes, the four-way-arrow square bottom-left
+         moves. Video mode only — with the map in the frame, +page draws the same corners above the map. -->
     {#if !mapHere}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div class="fw-grip" onpointerdown={onGripPointerDown} title={$t('video.resizeWindow')}></div>
@@ -338,10 +329,9 @@
     border: 1px solid rgba(255, 255, 255, 0.12);
     touch-action: none; /* nothing to scroll or pan on the picture */
   }
-  /* Native-sink hole: while this window holds the hardware video layer, the glass must stop
-     painting (the native layer shows through transparent DOM); the bezel is painted as an opaque
-     ring OUTSIDE the body instead — a box-shadow on the body, not on the hole: the body's
-     overflow:hidden would clip a shadow of its child (see VideoWidget for the same trick). */
+  /* Native-sink hole: the glass stops painting (the native layer shows through transparent DOM); the bezel is an
+     opaque ring OUTSIDE the body — a box-shadow on the body, since its overflow:hidden would clip a child's shadow
+     (same trick as VideoWidget). */
   .fw-frame.nv-active {
     background: transparent;
     backdrop-filter: none;

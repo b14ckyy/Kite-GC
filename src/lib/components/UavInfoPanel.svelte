@@ -4,10 +4,9 @@
 -->
 
 <script lang="ts">
-  // UAV Info on the panel framework (docs/active/PANEL_FRAMEWORK.md): the `info` variant —
-  // content-sized, unframed. Besides the read-only FC facts it hosts two small live actions:
-  // the platform-type override (session-only, see connectionController.setLivePlatformType) and
-  // "Save to vehicle library" for links with an FC identity (MSP / MAVLink).
+  // UAV Info (`info` variant of the panel framework): read-only FC facts plus two live actions — the
+  // session-only platform-type override (connectionController.setLivePlatformType) and "Save to vehicle
+  // library" for links with an FC identity.
   import { t } from 'svelte-i18n';
   import { get } from 'svelte/store';
   import { untrack } from 'svelte';

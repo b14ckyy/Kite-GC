@@ -4,12 +4,9 @@
 -->
 
 <script lang="ts">
-  // Video control panel on the panel framework (docs/active/PANEL_FRAMEWORK.md): a `compact`
-  // PanelShell. Header = Start/Stop; content = status/info lines + source/resolution/mirror
-  // settings; no footer. No preview surface either: the picture lives in the
-  // floating window (docked window on the phone) / the widget / the map swap — a started source
-  // appears there, and the window's own toggle parks it (PHONE_VIDEO.md D1 + §10).
-  // Kept deliberately simple but extensible (more sources can slot into the content field).
+  // Video control panel: a `compact` PanelShell (docs/active/PANEL_FRAMEWORK.md) — Start/Stop in the header,
+  // status/info lines + source settings below. No preview: the picture lives in the floating / docked window,
+  // the widget or the map swap (PHONE_VIDEO.md D1 + §10).
   import { t } from 'svelte-i18n';
   import { onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
@@ -66,26 +63,16 @@
   let editingRtspId = $state<string | null>(null);
   const inputVal = (e: Event) => (e.currentTarget as HTMLInputElement).value;
 
-  // Populate the getUserMedia device list. It is only consumed by the `camera` source; on Linux,
-  // enumerating it drives WebKit's GStreamer/pipewire stack, which can hang ~35 s on an unreachable
-  // pipewire and freeze the app — so there we enumerate it only while the camera source is selected.
-  // (The native list comes from the Rust backend and is enumerated once on mount, below.)
-  //
-  // The condition MUST come through this narrow $derived: an effect that reads `$videoState` directly
-  // depends on the WHOLE store, and every enumeration writes back into it (devices / nativeDevices) —
-  // which re-triggers the effect forever. That hit Linux only, because there the `||` short-circuit
-  // does not skip the store read: a permanent enumerate → patch → enumerate loop (IPC + an ffmpeg
-  // probe process + a localStorage write per round, and a stream restart when the saved device is
-  // stale). A $derived boolean re-evaluates but only propagates when it actually flips.
+  // getUserMedia list: on Linux enumerating drives WebKit's GStreamer/pipewire stack (can hang ~35 s), so only
+  // while the camera source is selected. The condition MUST be this narrow $derived: an effect reading
+  // $videoState would re-trigger itself on every enumeration write-back (endless enumerate loop).
   const needCameraList = $derived(!isLinux || $videoState.kind === 'camera');
   $effect(() => {
     if (needCameraList) void enumerateVideoDevices();
   });
 
-  // ── RTSP / V4L2 dependencies ──────────────────────────────────────────
-  // MediaMTX is required (the RTSP→WebRTC engine); ffmpeg is the optional fallback reader for
-  // sources its native client can't pull (e.g. obs-rtspserver), and the V4L2 path always uses it.
-  // Both are downloaded on demand.
+  // ── RTSP / V4L2 dependencies ── MediaMTX is required (RTSP→WebRTC engine); ffmpeg is the optional fallback
+  // reader for sources its client can't pull, and the V4L2 path always uses it. Both download on demand.
   let engineVer = $state<string | null>(null);
   let engineChecked = $state(false);
   let engineDownloading = $state(false);
@@ -107,11 +94,9 @@
     engineChecked = true;
   }
 
-  // "Disable hardware acceleration" steers one thing only: the ffmpeg H.264 → MJPEG transcode of an
-  // RTSP source, which runs when the classic path has no WebRTC (WebKitGTK), and which has a hardware
-  // variant on Linux alone (V4L2 M2M / VAAPI). Everywhere else the switch does nothing — the native
-  // client and the WebRTC path decode through the OS / the WebView — so it is shown only where it
-  // has an effect and the machine has hardware to switch off. The backend probes on the first ask.
+  // "Disable hardware acceleration" steers only the ffmpeg H.264 → MJPEG transcode (classic path without
+  // WebRTC), which has a hardware variant on Linux alone (V4L2 M2M / VAAPI). Shown only there and only with
+  // hardware to switch off; the backend probes on the first ask.
   let hwTranscode = $state(false);
   const hwSwitchApplies = $derived(
     isLinux && $videoState.kind === 'rtsp' && !$videoState.rtspNativeClient && !isWebrtcAvailable() && !!ffmpegVer,
@@ -181,16 +166,12 @@
     return () => unlisteners.forEach((u) => u());
   });
 
-  // Native capture is available on every desktop OS (Linux V4L2 / Windows DirectShow / macOS
-  // AVFoundation) — all through ffmpeg, which cannot run on mobile. There, the OS's own capture
-  // devices (USB/OTG included) already arrive through the camera kind (getUserMedia), so the native
-  // kind would add nothing and is not offered.
+  // Native capture runs through ffmpeg, which can't run on mobile; there USB/OTG capture devices arrive through
+  // the camera kind (getUserMedia) anyway.
   const KINDS: VideoKind[] = isMobile ? ['camera', 'rtsp'] : ['camera', 'rtsp', 'native'];
 
-  // MediaMTX is only needed for the WebRTC path. A WebView without it (WebKitGTK builds with WebRTC
-  // compiled out — Raspberry Pi OS among them) runs RTSP entirely on ffmpeg now, so demanding the
-  // engine there would block a machine that already has everything it needs.
-  // …and not at all when the in-process native RTSP client is active.
+  // MediaMTX is only needed for the WebRTC path: without WebRTC (WebKitGTK builds with it compiled out) RTSP
+  // runs entirely on ffmpeg, and with the in-process native client on neither.
   const needsEngine = $derived(isWebrtcAvailable() && !$videoState.rtspNativeClient);
 
   // Mirror can't reach Android's hardware-decoded surface (see the toggle row's comment).
@@ -214,15 +195,9 @@
     ),
   );
 
-  // Info-line frame rate — each path reports it from the stage that actually knows.
-  //
-  // `videoElFps` counts `requestVideoFrameCallback` on a visible <video> sink (store), which fires
-  // through the page's render loop: it reads 50–53 on a rock-steady 60 fps feed whenever the UI is
-  // busy, because it is measuring our own rendering, not the stream. So a WebRTC feed takes the
-  // decoder's own rate from the inbound stats and only falls back to the sampled count where there
-  // are none (camera / getUserMedia). The MJPEG reader counts its own drawn frames, which is exact on
-  // every platform; the <img> fallback (WebKitGTK, which fires `load` once per multipart image) has no
-  // countable rate, hence the configured rate as a last resort.
+  // Info-line fps from the stage that knows: WebRTC → the decoder's inbound stats (`videoElFps` measures our own
+  // rendering and reads low when the UI is busy); camera → `videoElFps`; MJPEG reader → its drawn frames; the
+  // <img> fallback has no countable rate → the configured rate.
   const fpsText = $derived.by(() => {
     const s = $videoState;
     // Native decode sink: the backend counts what it actually presents (1 Hz poll).
@@ -234,18 +209,9 @@
     return s.frameRate ? `${curStr}/${Math.round(s.frameRate)}` : curStr;
   });
 
-  // Codec + bitrate for a network stream, from whichever pipeline is carrying it. Both are facts
-  // about the feed the user is looking at, and neither was visible outside the Debug Monitor.
-  // On the image path this used to read "MJPEG" for every source, because MJPEG is what reaches the
-  // screen — true, and not what the user is asking. The transcode verdict answers the real question:
-  // the backend only gets `copy` when the mpjpeg muxer accepted the source's own packets, which no
-  // codec but MJPEG survives. Anything else was decoded and re-encoded, and the only other codec Kite
-  // supports over RTSP is H.264.
-  //
-  // Both ends are named on the transcode path, because the bitrate next to it is the MJPEG one and
-  // reading a source's codec beside the pipeline's output rate is how "3 Mbit H.264" turns into a
-  // puzzling 25 Mbit/s. The source's own bitrate is not on offer: ffmpeg reports what it writes, not
-  // what a live RTSP input costs.
+  // Codec + bitrate of a network stream. On the image path the transcode verdict names the SOURCE codec: only
+  // MJPEG survives a `copy`, anything else was H.264 re-encoded. Both ends are named there, since the bitrate
+  // is the MJPEG output's (ffmpeg reports what it writes, not what the RTSP input costs).
   const streamCodec = $derived.by(() => {
     const s = $videoState;
     if (s.kind !== 'rtsp' || s.status !== 'live') return null;
@@ -261,14 +227,9 @@
     return kbps >= 1000 ? `${(kbps / 1000).toFixed(1)} Mbit/s` : `${Math.round(kbps)} kbit/s`;
   });
 
-  // Diagnostic: what the LIVE feed actually does. Two independent questions, so two badges:
-  //   • transcode — reported by the backend for this stream (`activeTranscode`), never inferred from
-  //     what the host *could* do: an MJPEG camera is stream-copied and a user can force software, so
-  //     "this host has VAAPI" says nothing about the feed in front of you.
-  //   • surface   — `<video>` on a hardware overlay, or the image path: a JPEG decoded per frame and
-  //     drawn into a canvas. That canvas is its own compositing layer, but it is still not a hardware
-  //     video surface, which is what this badge is about.
-  // A `<video>` feed transcodes nothing (the WebView decodes it), so it shows only the surface badge.
+  // Diagnostic, two badges: transcode — the backend's report for THIS feed (`activeTranscode`), never inferred
+  // from host capability; surface — `<video>` on a hardware overlay vs the image path (per-frame JPEG into a
+  // canvas). A `<video>` feed transcodes nothing, so it shows only the surface badge.
   const TRANSCODE_LABEL: Record<string, string> = { vaapi: 'VAAPI', v4l2m2m: 'V4L2' };
   const pipeline = $derived.by(():
     | { method: string; transcode: string | null; transcodeHw: boolean; surfaceHw: boolean }
@@ -284,9 +245,8 @@
       const engine = mode ? TRANSCODE_LABEL[mode] : undefined;
       const via = engine ?? (mode === 'copy' ? $t('video.pipeline.copy') : undefined);
       return {
-        // Always ffmpeg: the image path reads the source itself and broadcasts `-f mpjpeg` through
-        // Kite's own server. It used to run through go2rtc, whose republish was measured as the
-        // cause of the freezes, and naming go2rtc here now would point at the wrong component.
+        // Always ffmpeg: the image path reads the source itself and broadcasts `-f mpjpeg` through Kite's own server
+        // (no engine involved).
         method: s.rtspEngine === 'kite'
           ? 'Kite RTSP client → MJPEG'
           : `ffmpeg → MJPEG${via ? ` (${via})` : ''}`,
@@ -316,9 +276,8 @@
 
 {#snippet body()}
   <div class="vp-body">
-    <!-- No preview surface (PHONE_VIDEO.md D1, desktop since §10): the picture is in the floating /
-         docked window or the widget. What the preview used to say about a source that is not live
-         is said here instead. -->
+    <!-- No preview surface (PHONE_VIDEO.md D1, desktop since §10): the picture is in the floating / docked
+         window or the widget; the status of a source that is not live is said here instead. -->
     <!-- Status block — the room the preview left goes to what the user looks for first: the state
          of the source, then resolution / fps / codec / bitrate as readable tiles. -->
     <div class="vp-status" class:live={$videoState.status === 'live'} class:starting={$videoState.status === 'starting'} class:error={$videoState.status === 'error'}>
@@ -542,10 +501,8 @@
         </div>
       </div>
 
-      <!-- Kite's own in-process RTSP client (MOBILE_RTSP.md) — no MediaMTX, no ffmpeg. MJPEG on the
-           multipart path; H.264/HEVC decode in hardware. On by default.
-           On Android and iOS it is the ONLY route (no sidecars on mobile) — forced on in the
-           store, nothing to toggle. -->
+      <!-- Kite's own in-process RTSP client (MOBILE_RTSP.md) — no MediaMTX, no ffmpeg; MJPEG on the multipart
+           path, H.264/HEVC decoded in hardware. On by default; the ONLY route on mobile (forced in the store). -->
       {#if !isMobile}
         <div class="field-row" title={$t('video.nativeClientHint')}>
           <Toggle
@@ -598,11 +555,9 @@
         </div>
       {/if}
 
-      <!-- Receive-buffer depth in frame times, applied live and persisted — to the WebRTC
-           receiver, the MJPEG reader's cushion, or the native decode sink's paced
-           presentation queue. 0 = minimal latency (present on arrival/decode); each step
-           trades one frame time of latency for smoothing of arrival jitter. Expressed in
-           frames so the same setting means the same smoothing at 30 and 60 fps. -->
+      <!-- Receive-buffer depth in frame times (applied live, persisted) — to the WebRTC receiver, the MJPEG
+           reader's cushion or the native sink's presentation queue. 0 = present on arrival; each step trades one
+           frame time of latency for jitter smoothing, the same at 30 and 60 fps. -->
       <div class="field buffer-row" title={$t('video.bufferHint')}>
         <span class="label">{$t('video.bufferLabel')}</span>
         <NumberStepper bind:value={$rtspBufferFrames} min={0} max={3} step={1} />
@@ -669,9 +624,9 @@
       <span class="label">{$t('video.rotate180')}</span>
     </div>
 
-    <!-- Unobstructed fullscreen: the map-swap video shrinks so occupied widget panels and the
-         nav rail stay clear of the picture; an empty/hidden panel releases its edge. Off = the
-         video fills the whole map zone as before. Layout math lives in +page.svelte. -->
+    <!-- Unobstructed fullscreen: the map-swap video shrinks so occupied widget panels and the nav rail stay
+         clear of the picture; an empty/hidden panel releases its edge. Off = the video fills the whole map
+         zone. Layout math lives in +page.svelte. -->
     {#if !isPhone}
       <!-- Not on the phone: no docks to retreat from, four corner buttons at most (PHONE_VIDEO.md). -->
       <div class="field-row" title={$t('video.unobstructedHint')}>

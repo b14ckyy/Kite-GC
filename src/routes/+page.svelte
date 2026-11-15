@@ -154,10 +154,8 @@
 
   // Map view mode: 2D (Leaflet) or 3D (CesiumJS)
   let mapViewMode = $state<'2d' | '3d'>('2d');
-  // 3D is expensive to spin up (Cesium viewer + terrain). Mount it lazily on the
-  // first switch to 3D, then KEEP it mounted (hidden behind the 2D map) so further
-  // toggles are instant — no viewer re-init. The Map3D `active` prop pauses its
-  // render loop while hidden.
+  // Mounted lazily on the first switch to 3D, then kept mounted (hidden) so toggles skip the viewer
+  // re-init; Map3D's `active` prop pauses its render loop while hidden.
   let map3dEverOpened = $state(false);
   $effect(() => { if (mapViewMode === '3d') map3dEverOpened = true; });
   // Waypoints can only be edited on the full 2D map: entering edit mode leaves 3D and brings the map back
@@ -240,10 +238,8 @@
   // Measured container dimensions (bind:clientWidth/Height on grid zones)
   let bottomDockW = $state(800);
   let bottomDockH = $state(200);
-  // Live toolbar height (exposed as --toolbar-h). The phone toolbar wraps/collapses so its height
-  // varies; the absolutely-positioned nav-rail + panels track this so they never hide under it.
-  // The phone has no toolbar at all (Dev-Docs active/PHONE_UI.md): its chrome is the burger + chips,
-  // the connection popout, the right-hand widget column and a bottom-left status strip.
+  // Live toolbar height (exposed as --toolbar-h); the absolutely-positioned nav rail + panels track it.
+  // The phone has no toolbar at all (Dev-Docs active/PHONE_UI.md).
   const phoneUi = isPhoneDevice;
   let toolbarH = $state(phoneUi ? 0 : 53);
   /** Rendered width of the phone widget column (reported by PhoneWidgetPanel) → the grid column. */
@@ -261,11 +257,9 @@
 
   /** The replay player's full panel is showing (paused / pinned) — reported by LogPlayer. */
   let playerExpanded = $state(false);
-  // Phone: the full player must fit between the burger (12 + 42 + 8) and the chain-link button
-  // (8 + 42 + 8 from the column) with 8px on each side. Whatever is missing slides the widget
-  // column (and the button) out to the right — never further than the column is wide. 0 on wide
-  // phones (21:9) and whenever the player is collapsed or closed, so the column is anchored while
-  // a replay runs.
+  // Phone: the full player must fit between the burger (12 + 42 + 8) and the chain-link button (8 + 42 + 8)
+  // with 8px each side; the shortfall slides the widget column out right, at most by its width. 0 while
+  // the player is collapsed or closed.
   const PHONE_PLAYER_CHROME_PX = 62 + 58 + 16;
   const phoneShift = $derived(
     phoneUi && playerExpanded
@@ -296,30 +290,22 @@
   // Fully populated nav rail in logical px: hamburger 44 + 4 top margin + 9 tabs ×40 + 8 gaps ×2
   // (DEV excluded). A fixed reference on purpose — the live rail height varies with connection state.
   const NAV_RAIL_FULL_HEIGHT = 424;
-  // Bottom reserve for the floating panels (PanelShell). Panels normally stop above the bottom
-  // widget dock, but once that cap would make them shorter than the nav rail, they may overlay the
-  // dock instead — the rail already scrolls past it, so the panel just follows. Logical px
-  // throughout, so the switch adapts to the UI scale. The 6px keeps the rail's visual gap above
-  // the status bar instead of sitting flush on it. `toolbarH` is the live bar height (53 on the
-  // desktop, taller on the iPad where the bar carries the status-bar inset), so the tablet uses the
-  // same rule (PanelShell's tablet block reads the reserve too).
+  // Bottom reserve for the floating panels: they stop above the widget dock unless that would make them
+  // shorter than the nav rail, then they overlay the dock. Logical px (adapts to the UI scale); the 6px keeps
+  // the rail's gap above the status bar. PanelShell's tablet block reads the reserve too.
   const panelBottomReserve = $derived(
     winH / uiScale - toolbarH - bottomDockH - 24 - 12 < NAV_RAIL_FULL_HEIGHT ? '6px' : gridBottomHeight
   );
 
-  // Floating-window rect — ONE computation (`floatFrameRect`, store) for the window itself (it gets
-  // the rect as props), the map placed inside its frame when the view is swapped, and the dock
-  // reserve. The window lives in the zoomed `.ui-scale` layer, so it is computed in that layer's
-  // logical px (viewport / uiScale); the map is unzoomed, so its visual rect is the logical rect *
-  // uiScale. The desktop frame has a glass bezel: the map goes into the INNER box.
+  // Floating-window rect: ONE computation (`floatFrameRect`) for the window, the map swapped into its frame
+  // and the dock reserve. In the zoomed layer's logical px; the unzoomed map's rect is that × uiScale,
+  // inside the desktop frame's bezel.
   const logicalW = $derived(winW / uiScale);
   const logicalH = $derived(winH / uiScale);
   const floatFrame = $derived(floatFrameRect($videoState, logicalW, logicalH));
-  // Phone (PHONE_VIDEO.md D2): the DOCKED frame instead — the stream aspect fitted into 40 % of the
-  // map-area height / 50 % of its width, whichever binds — or 2/3 of that with the frame's corner
-  // toggle (`phoneDockCompact`); bottom-right of the map area, left of the corner-control column
-  // (8 + 38 + 8), bottom-aligned with the chip row (8 px; the safe inset is 0 on Android, iPhone
-  // has no video). Same numbers drive PhoneVideoDock and the in-frame map.
+  // Phone (PHONE_VIDEO.md D2): the docked frame — stream aspect fitted into 40 % of the map-area height /
+  // 50 % of its width (2/3 of that when compact), bottom-right left of the corner-control column, aligned
+  // with the chip row. Same numbers drive PhoneVideoDock and the in-frame map.
   const phoneMapW = $derived(winW - phonePanelW + phoneShift);
   const dockH = $derived.by(() => {
     const aspect = $videoState.aspect || 16 / 9;
@@ -345,10 +331,8 @@
       : ($videoState.floating && $videoState.floatSnapped ? floatW + FLOAT_BTN_GAP_PX : 0) +
         FLOAT_MARGIN_PX + FLOAT_BTN_PX + FLOAT_BTN_GAP_PX,
   );
-  // `videoReserve` is measured from the window's left edge, but the bottom dock zone starts right of
-  // the nav rail column in the wide layout (and at the edge in the narrow one). The dock only has to
-  // yield what reaches into its own zone — taking the full value pressed the widgets together and left
-  // a rail-wide gap between the video button and the first widget.
+  // `videoReserve` is measured from the window's left edge, but the dock zone starts right of the nav-rail
+  // column in the wide layout — the dock yields only the part that reaches into its own zone.
   let bottomDockEl = $state<HTMLDivElement | null>(null);
   let bottomDockLeft = $state(0);
   $effect(() => {
@@ -375,11 +359,8 @@
    *  bottom tiles keep clear of it (PHONE_BOTTOM_WIDGETS.md B4). */
   const NAV_RAIL_RIGHT_PX = 54;
   const phoneMapInsetBottom = $derived(phoneUi && !mapInFrame && phoneBarH > 0 ? phoneBarH + 8 : 0);
-  // Full-screen map box, rounded to whole px (issue #52): the CSS fallback `calc(53px * scale)`
-  // lands on fractions at uiScale 1.25/1.5 (66.25px / 79.5px), which is what leaked tile seams —
-  // see mapFrameStyle above for the mechanism. The map sliding ≤ half a px under the toolbar edge
-  // is invisible (chrome z1 covers map z0); Map.svelte's ResizeObserver re-invalidates on the
-  // resulting size change by itself.
+  // Full-screen map box rounded to whole px (see mapFrameStyle): the CSS fallback `calc(53px * scale)` lands
+  // on fractions at uiScale 1.25/1.5 and leaks tile seams. Map.svelte's ResizeObserver handles the resize.
   const mapLayerStyle = $derived(
     phoneUi
       ? 'top:0; bottom:0;' // the whole screen — the map runs on under the widget column's glass
@@ -387,12 +368,9 @@
   );
   const mapFloating = $derived($videoState.mapLocation === 'floating');
   const mapInWidget = $derived($videoState.mapLocation === 'widget');
-  // Rounded to whole px, here and everywhere the unzoomed map layer is placed (issue #52): a
-  // fractional box origin (floatLeft × 1.25 …) puts every 256px tile edge on a subpixel boundary,
-  // and WebKitGTK antialiases each tile as its own composited layer — hairline seams between tiles,
-  // shimmering during heading-follow rotation. Chromium snaps layers to device pixels, which is why
-  // Windows never showed it. The frame drawn by the zoomed chrome may sit up to half a px off the
-  // rounded map rect — invisible, and .miniframe-ctl uses this same string so it stays aligned.
+  // Rounded to whole px wherever the unzoomed map layer is placed: a fractional origin puts tile edges on
+  // subpixels and WebKitGTK antialiases each tile layer → hairline seams. .miniframe-ctl uses this same
+  // string so it stays aligned.
   const mapFrameStyle = $derived(
     `left:${Math.round((floatLeft + floatBezel) * uiScale)}px; top:${Math.round((floatTop + floatBezel) * uiScale)}px; width:${Math.round((floatW - 2 * floatBezel) * uiScale)}px; height:${Math.round((floatH - 2 * floatBezel) * uiScale)}px;`,
   );
@@ -412,13 +390,9 @@
     }
   });
 
-  // The WIDGET mini-map is locked to a clean nav view: 2D + follow, zoom-only (3D/mode buttons hidden
-  // via `miniControls`). Heading-up or north-up is the one choice left — a tap on the mini map
-  // toggles it (Map.svelte) and the choice is remembered in the settings. The FLOATING map stays
-  // fully operational on the desktop; on the phone the docked frame is a mini map too and takes the
-  // same lock (PHONE_VIDEO.md D6). Restore the view on release.
-  // Only while the map is actually in a frame (mapInFrame includes `status === 'live'`): a stale
-  // mapLocation with the video off must not put the FULL map into mini mode (half-size markers).
+  // The widget mini map (and the phone's docked frame, PHONE_VIDEO.md D6) is locked to 2D + follow, zoom
+  // only; a tap toggles heading-up/north-up (remembered). Only while mapInFrame — a stale mapLocation with
+  // the video off must not put the FULL map into mini mode.
   const miniMapLocked = $derived(mapInFrame && (mapInWidget || phoneUi));
   let miniLockActive = false;
   let savedMapViewMode: '2d' | '3d' = '2d';
@@ -447,21 +421,16 @@
     });
   });
 
-  // Per-container px-per-unit: 1 unit = cross-axis fraction so that
-  // LARGE_BASE_VMIN units == cross-axis px (widget fills dock height/width).
-  // This fully decouples bottom dock and side dock scaling.
-  // Subtract zone padding (6px each side) from cross-axis measurement.
+  // Per-container px-per-unit: LARGE_BASE_VMIN units == cross-axis px minus the zone padding (6px each side),
+  // so the bottom and side docks scale independently.
   const DOCK_PAD = 6;
   // On phone the dock is two rows tall, so a tile is sized to ONE row (dock height / rows). Desktop
   // and tablet keep the full-height single-row tile.
   const bottomPxPerUnit = $derived((bottomDockH / bottomRows - 2 * DOCK_PAD) / LARGE_BASE_VMIN);
   const sidePxPerUnit   = $derived((sideDockW  - 2 * DOCK_PAD) / LARGE_BASE_VMIN);
 
-  // Available space expressed in abstract units (container px / pxPerUnit)
-  // Bottom: subtract the zone padding (12px) and what the video window takes. (An edit button beside the
-  // panel used to cost another 34px; widget editing is a long-press now.) Multiply by the row
-  // count so the sizing algorithm (which lays out in one line) budgets for two rows on phone and keeps
-  // the tiles a readable size; flex-wrap then splits them across the rows.
+  // Available units (px / pxPerUnit) after the zone padding and the video window, multiplied by the row
+  // count so the one-line sizing budgets for two rows on the phone; flex-wrap then splits them.
   const bottomAvailUnits = $derived(Math.max(0, ((bottomDockW - 2 * DOCK_PAD - videoReserveDock) / bottomPxPerUnit) * bottomRows));
   const rightAvailUnits  = $derived(Math.max(0, (sideDockH - 2 * DOCK_PAD) / sidePxPerUnit));
 
@@ -498,10 +467,8 @@
   let terrainOpen = $state(false);
   terrainAnalysis.subscribe((s) => { terrainOpen = s.open; });
 
-  // Debug Monitor + dev UI. In dev builds `import.meta.env.DEV` is true; in a RELEASE build it's enabled
-  // at runtime when started with `--debug` (backend `is_debug_mode`, fetched in initPage → debugMode).
-  // Because DEV_MODE now depends on a runtime value, Vite can no longer prove the DebugPanel import dead,
-  // so the chunk stays in the release bundle (loaded lazily only when debug mode is actually on).
+  // Debug Monitor + dev UI: DEV builds, or a release started with `--debug` (backend `is_debug_mode`).
+  // The runtime flag keeps the DebugPanel chunk in the release bundle; it loads lazily only in debug mode.
   let debugMode = $state(false);
   const DEV_MODE = $derived(import.meta.env.DEV || debugMode);
   let debugOpen = $state(false);
@@ -512,7 +479,6 @@
     }
   });
 
-  // Reactive telemetry subscription
   let liveTelem = $state(get(telemetry));
   let prevArmed = false;
   // Seed `prevArmed` from the FIRST valid telemetry frame of each connection so a reconnect mid-flight
@@ -526,10 +492,8 @@
   let accStartLat: number | null = null, accStartLon: number | null = null;
   let accLastLat: number | null = null, accLastLon: number | null = null;
 
-  // Multi-vehicle: the arm-edge detector and the flight-stats accumulator belong to ONE vehicle. When
-  // the active vehicle changes, park the current vehicle's state and bring back the new one's — a
-  // switch from a disarmed to an armed aircraft must not read as an arm edge (which would clear its
-  // track, reset its stats and move Home), nor a switch the other way as a disarm (End-Flight dialog).
+  // Multi-vehicle: arm-edge detector and flight stats belong to ONE vehicle; park/restore them on a switch,
+  // so switching to an armed aircraft is no arm edge (track clear, Home move) and the reverse no disarm.
   interface FlightStatsSlot {
     prevArmed: boolean; armEdgeInit: boolean; armStartMs: number;
     accMaxAlt: number; accMaxSpeed: number; accMaxDist: number; accMah: number; accTotalDist: number;
@@ -566,30 +530,24 @@
     }
   });
 
-  // Multi-vehicle: the End-Flight dialog, the recovery prompt of an interrupted recording and the
-  // captured flown mission belong to ONE vehicle's session — the one whose `flight-recording-ended` /
-  // `-interrupted` (or, unrecorded, whose disarm) opened them. Lifecycle events of other vehicles (a
-  // secondary re-arming on the same link) must not close or clear them. A reconnect brings the aircraft
-  // back under a new key, so an owner that is gone hands over to the active vehicle.
+  // Multi-vehicle: End-Flight dialog, recovery prompt and captured mission belong to the vehicle whose
+  // recording-ended/-interrupted (or disarm) opened them; other vehicles' lifecycle events must not touch
+  // them. An owner that is gone (a reconnect means a new key) hands over to the active vehicle.
   let recordingOwner: string | null = null;
   function isRecordingOwner(vehicleId: string | null | undefined): boolean {
     if (vehicleId == null) return true; // payload without a vehicle (not per-vehicle)
     if (vehicleId === recordingOwner) return true;
     const ownerGone = recordingOwner === null || !get(vehicles).has(recordingOwner);
-    // A vehicle the frontend does not know yet belongs to the link being connected: its recorder can
-    // report (resumed / committed) before the vehicle is announced — a link that runs the MSP-tunnel
-    // probe announces it only afterwards. Secondaries are announced (`vehicle-discovered`) before
-    // their frames are dispatched, so this never adopts another link's secondary.
+    // An unknown vehicle belongs to the link being connected: its recorder can report before the vehicle is
+    // announced (MSP-tunnel probe). Secondaries are announced before their frames, so none is adopted here.
     return ownerGone && (vehicleId === get(activeVehicleId) || !get(vehicles).has(vehicleId));
   }
   telemetry.subscribe((t) => {
     liveTelem = t;
     // Accumulate the live flown track (RAM) for the Terrain Analyzer
     const armed = isArmed(t.armingFlags, t.lastUpdate);
-    // Baseline the armed state on the first frame that actually CARRIES it (statusSeen) → no false
-    // edge on reconnect. Gating on any first frame (lastUpdate) raced: attitude/GPS at 5–10 Hz beat
-    // the 1 Hz status after a reconnect, seeding prevArmed=false from a frame without arming info —
-    // the first real status then looked like an arm edge and moved Home to wherever the aircraft was.
+    // Baseline on the first frame that CARRIES the armed state (statusSeen), not any first frame: 5–10 Hz
+    // attitude/GPS beat the 1 Hz status after a reconnect and would fake an arm edge (moving Home).
     if (!armEdgeInit && t.statusSeen) { armEdgeInit = true; prevArmed = armed; }
     if (armed && !prevArmed) {
       clearLiveTrack();
@@ -653,10 +611,8 @@
   // a replay (those own the Home store); never downgrades an FC home.
   launchPoint.subscribe((lp) => {
     if (!lp) return;
-    // Never mirror an invalid / 0,0 launch into Home: before a GPS fix the launch auto-place can fall
-    // back to the map centre (≈ 0,0), which would otherwise light up the Home widget with a bogus
-    // ~5800 km distance to null island. Home stays unset until a real reference (FC home on arm, a
-    // valid manual placement, or replay) exists.
+    // Never mirror an invalid / 0,0 launch into Home: before a GPS fix the auto-place can fall back to the
+    // map centre (≈ 0,0), which would show a bogus distance to null island.
     if (!isValidGpsCoordinate(lp.lat, lp.lng)) return;
     const h = get(homePosition);
     if (h.source === 'fc' || h.source === 'replay') return;
@@ -717,12 +673,9 @@
   let flightLoggingEnabled = $state(false);
   let flightRecordingEnabled = $state(false);
   let flightLogDbPath = $state("");
-  // Open a log WITHOUT importing it (Dev-Docs active/OPEN_LOG_WITHOUT_IMPORT.md): the file is parsed
-  // by the ordinary importers into a throwaway scratch DB dir; while one is open, every logbook /
-  // replay READ goes there instead of the main DB (writes are unreachable — the panel is read-only).
-  // Several files can be open at once (a multi-file drop, or files dropped one after another): the
-  // scratch DB collects them, each scratch flight remembers its source file (+ log index inside a
-  // multi-log flash dump) so it can be imported for real on its own.
+  // Open a log WITHOUT importing it (Dev-Docs active/OPEN_LOG_WITHOUT_IMPORT.md): parsed into a scratch DB
+  // that every logbook/replay READ uses while open; each scratch flight keeps its source file (+ log index)
+  // so it can be imported for real on its own.
   type OpenedFlight = { id: number; sourcePath: string; logIndex?: number };
   let openedLogs = $state<{ dir: string; flights: OpenedFlight[] } | null>(null);
   const activeDbPath = $derived(openedLogs?.dir ?? flightLogDbPath);
@@ -812,10 +765,8 @@
   let disconnectArmedDialog: ReturnType<typeof DisconnectArmedDialog>;
   // True after "Continue on Reconnect" until the next connection resolves the recovered session.
   let awaitingResumeReconnect = $state(false);
-  // Per vehicle: bumped whenever that vehicle's pending session in the backend may change hands (arm,
-  // resume, a new end/interrupt prompt, a grace auto-commit): a Save retry stops then, so it never
-  // commits a newer flight with this dialog's input (another vehicle's it cannot reach — the commit
-  // names the vehicle). An event without a vehicle bumps every vehicle's epoch.
+  // Per vehicle: bumped whenever its pending backend session may change hands (arm, resume, new prompt,
+  // grace auto-commit), so a Save retry never commits a newer flight. No vehicle → bump all.
   // (A plain record: `Map` is the map component in this file.)
   const pendingEpochs: Record<string, number> = {};
   let pendingEpochAll = 0;
@@ -848,16 +799,9 @@
   // Raw telemetry popup (toolbar button next to Relay; connected only).
   let rawTelemetryOpen = $state(false);
 
-  // Unobstructed fullscreen (Video panel toggle): the map-swap video box retreats from the
-  // nav-rail column (always, in this mode) and from OCCUPIED widget panels, so widgets never
-  // overlay the picture. A panel counts as occupied only while visible AND holding widgets —
-  // an empty or hidden panel contributes 0 and the video keeps that edge. Values are logical
-  // px (the wrapper lives in the zoomed .app layer); the measured dock sizes (clientWidth/
-  // clientHeight binds above) track user resizes and the phone/tablet overrides for free.
-  // The reserve is the panel's OWN extent (its largest widget + the zone padding), not the whole
-  // dock zone: a dock of small tiles hugs the screen edge and the video gets the rest
-  // (WIDGET_OVERHAUL.md D7). Capped at the zone in case a bind lags a frame.
-  // Not on the phone: there is no dock to retreat from, the video runs under the widget column.
+  // Unobstructed fullscreen: the map-swap video box retreats from the nav-rail column and from OCCUPIED
+  // (visible + non-empty) widget panels by each panel's own extent (WIDGET_OVERHAUL.md D7), capped at the
+  // zone. Logical px. Not on the phone: the video runs under the widget column there.
   const ufActive = $derived($videoState.unobstructedFullscreen && mapInFrame && !phoneUi);
   const ufRight = $derived(
     ufActive && $layout.sideDock.visible && panels.right.length > 0
@@ -869,13 +813,9 @@
       ? Math.min(bottomDockH, bottomPanelCrossPx + 2 * DOCK_PAD)
       : 0
   );
-  // The wrapper itself stays FULL-SIZE (so the blurred backdrop map fills the whole zone,
-  // widgets and nav rail float on it); the reserves only shrink the AVAILABLE AREA the
-  // video box is fitted into: 62px nav-rail column left (always in this mode), the occupied
-  // docks right/bottom. Inside that area the box is cut to the stream's aspect ratio and
-  // centred — no letterbox bars at all (the native sink's own black letterbox never becomes
-  // visible because box = picture). Null until the wrapper is measured (or when the mode is
-  // off) — the box then falls back to filling the wrapper via CSS.
+  // The wrapper stays full-size (the blurred backdrop map fills the zone); the reserves only shrink the area
+  // the box is fitted into, cut to the stream aspect and centred — no letterbox. Null until measured or
+  // when off; CSS then fills the wrapper.
   let ufWrapW = $state(0);
   let ufWrapH = $state(0);
   const ufBox = $derived.by(() => {
@@ -893,20 +833,15 @@
     };
   });
 
-  // Cache stats subscription
   let cacheStats = $state<TileCacheStats>({ usedBytes: 0, maxBytes: 0, tileCount: 0 });
   tileCacheStats.subscribe((s) => { cacheStats = s; });
 
   const baudRates = [115200, 57600, 38400, 19200, 9600, 230400, 460800, 921600];
 
-  // NavRail icons — migrating from glyphs to flat, high-contrast inline SVG (monochrome,
-  // `currentColor` so they follow the rail's inactive/hover/active colours). UAV Info uses a
-  // flight-controller (microchip) icon: neutral across UAV types, matches the panel content
-  // (FC variant/version/board/sensors). Remaining tabs stay glyphs until converted.
+  // NavRail icons: flat inline SVG in `currentColor`, so they follow the rail's state colours.
   const ICON_UAV_INFO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="6.5" y="6.5" width="11" height="11" rx="1.5"/><rect x="9.7" y="9.7" width="4.6" height="4.6" rx="0.6"/><path d="M9 6.5V3.8M12 6.5V3.8M15 6.5V3.8M9 17.5v2.7M12 17.5v2.7M15 17.5v2.7M6.5 9H3.8M6.5 12H3.8M6.5 15H3.8M17.5 9h2.7M17.5 12h2.7M17.5 15h2.7"/></svg>';
 
-  // 6-tooth gear (Settings) — original-style proportions (chunky body, modest teeth) but
-  // with sharp (non-rounded) tooth corners; solid + punched centre hole (evenodd).
+  // 6-tooth gear (Settings), punched centre hole (evenodd).
   const ICON_SETTINGS = '<svg viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" clip-rule="evenodd" d="M19.52 9.26 22.31 10 22.31 14 19.52 14.74 18.13 17.14 18.89 19.92 15.42 21.93 13.39 19.88 10.61 19.88 8.58 21.93 5.11 19.92 5.87 17.14 4.48 14.74 1.69 14 1.69 10 4.48 9.26 5.87 6.86 5.11 4.08 8.58 2.07 10.61 4.12 13.39 4.12 15.42 2.07 18.89 4.08 18.13 6.86ZM12 8.5A3.5 3.5 0 1 0 12 15.5 3.5 3.5 0 0 0 12 8.5Z"/></svg>';
   // Solid spiral notebook (Logbook): filled cover with knocked-out (transparent) 2px text
   // lines + spiral binding holes on the left (mask = white keeps, black cuts out).
@@ -919,8 +854,7 @@
   const ICON_FLEET = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8V4h4M17 4h4v4M21 16v4h-4M7 20H3v-4"/><polygon points="12,7 9.6,13 12,11.8 14.4,13" fill="currentColor" stroke="none"/><polygon points="7.5,12 5.1,18 7.5,16.8 9.9,18" fill="currentColor" stroke="none"/><polygon points="16.5,12 14.1,18 16.5,16.8 18.9,18" fill="currentColor" stroke="none"/></svg>';
   // Solid flat movie camera (Video): two reels + body + lens funnel.
   const ICON_VIDEO = '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="7" cy="7" r="2.9"/><circle cx="12.6" cy="7" r="2.9"/><rect x="2.5" y="9.5" width="13" height="9" rx="1.6"/><path d="M15.5 12 21.5 9.5V18.5L15.5 16Z"/></svg>';
-  // Radar dish on a mast with two sweep arcs (Radar / foreign-vehicle tracking).
-  // Stylised radar scope: outer ring + inner range ring + sweep line + contact blips.
+  // Radar scope: range rings + sweep line + contact blip (Radar / foreign-vehicle tracking).
   const ICON_RADAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.3"/><path d="M12 12 18.7 6.4"/><circle cx="17.6" cy="9.4" r="1.15" fill="currentColor" stroke="none"/><circle cx="7.6" cy="15.4" r="0.85" fill="currentColor" stroke="none"/><circle cx="9.4" cy="6.8" r="0.85" fill="currentColor" stroke="none"/></svg>';
 
   // Stacked layers (Airspace Manager / aeronautical data).
@@ -941,18 +875,14 @@
   const isTelemetryConnected = $derived(
     $connection.status === 'connected' && $connection.protocolType === 'telemetry'
   );
-  // Also hidden on an MSP-over-MAVLink link (INAV 10.0+): the MSP RC stream doesn't run through the tunnel
-  // and the ArduPilot override adapter must not drive INAV (rcPlatform is null there). Hidden until
-  // Stage 3 — MAVLink-RX mode, see Dev-Docs active/MSP_OVER_MAVLINK.md.
+  // Also hidden on an MSP-over-MAVLink link: the MSP RC stream doesn't run through the tunnel and the
+  // ArduPilot override adapter must not drive INAV (Dev-Docs active/MSP_OVER_MAVLINK.md, Stage 3).
   // Never on a phone or tablet, whatever the stored switch says — see `hasRcControl`.
   const rcTabAvailable = $derived(
     hasRcControl && $settings.rcControl.enabled && !isTelemetryConnected && !($connection.status === 'connected' && $connection.mspTunnel)
   );
-  // On mobile there is no joystick, but the on-screen touch sticks (VirtualSticks) can drive RC over
-  // Wi-Fi. RC is safety-relevant and barely field-tested, so touch control is opt-in behind the SAME
-  // master switch as the joystick path (`rcTabAvailable`) rather than appearing whenever an FC is
-  // connected — one switch governs both, no matter the input device. On top of that, mobile also needs a
-  // control-capable connection (MSP or MAVLink, not passive telemetry).
+  // Mobile touch sticks (VirtualSticks) sit behind the SAME master switch as the joystick path — RC is
+  // safety-relevant — and additionally need a control-capable link (MSP or MAVLink, not passive).
   const mobileRcAvailable = $derived(
     isMobile && rcTabAvailable && $connection.status === 'connected'
   );
@@ -981,8 +911,7 @@
   const geozonesAvailable = $derived($geozoneWorking?.has_geozones ?? false);
   const fenceAvailable = $derived($fenceWorking?.has_fence ?? false);
   const rallyAvailable = $derived($rallyWorking?.has_rally ?? false);
-  // Fleet tab: only once MORE THAN ONE vehicle is connected — a single-vehicle session must look exactly as
-  // before. Protocol-agnostic on purpose; behind the fleet feature gate.
+  // Fleet tab only with MORE THAN ONE vehicle connected; protocol-agnostic, behind the fleet feature gate.
   const fleetTabAvailable = $derived($fleetEnabled && $vehicles.size >= 2);
   // With the gate off, a Fleet tab restored from the last session (or open when it was switched off) must
   // not stay rendered — the same fallback as the RC tab above.
@@ -1015,15 +944,14 @@
   let connStatus: string = $state("disconnected");
   let fcInfo = $state<FcInfo | null>(null);
 
-  // Subscribe to stores
   connection.subscribe((c) => {
     const wasConnected = connStatus === 'connected';
     connStatus = c.status;
     fcInfo = c.fcInfo;
     // Fresh connection → re-baseline the arm-edge detector (see armEdgeInit).
     if (!wasConnected && c.status === 'connected') armEdgeInit = false;
-    // Auto-refresh the logbook on disconnect (picks up a just-recorded live flight) — replaces
-    // the manual Refresh button. Disarm is covered by the flight-recording-ended listener.
+    // Auto-refresh the logbook on disconnect (picks up a just-recorded live flight). Disarm is covered by
+    // the flight-recording-ended listener.
     if (wasConnected && c.status !== 'connected') {
       void loadLogbook();
       // Lost the FC → the locked home becomes a manual reference (keeps its position so planning
@@ -1039,12 +967,9 @@
   // One geolocation check at app start (refreshes the persisted user location for Night-Mode auto).
   ensureUserLocation();
 
-  /** Protocol the connection bar starts on. Settings → Interface → UI owns the choice: "Last used"
-   *  (the default, and the behaviour Kite has always had) restores the stored protocol, while a
-   *  fixed value wins over that store on every launch. Only a protocol we actually support is
-   *  honoured, with MSP as the fallback: the old form mapped everything that was not MAVLink onto
-   *  MSP, which silently rewrote a stored `telemetry` choice, so a pilot who last connected in
-   *  passive Telemetry mode came back to MSP selected. */
+  /** Protocol the connection bar starts on: "Last used" (Settings → Interface → UI) restores the stored
+   *  protocol, a fixed value wins on every launch. Any supported stored protocol (incl. `telemetry`) is
+   *  honoured, MSP otherwise. */
   function resolveStartupProtocol(s: AppSettings): ProtocolType {
     const wanted = s.defaultProtocol === 'last' ? s.lastProtocol : s.defaultProtocol;
     return wanted === 'mavlink' || wanted === 'telemetry' ? wanted : 'msp';
@@ -1080,7 +1005,7 @@
     : storedPort;
   if (saved.lastBleDevice) selectedBleDevice = saved.lastBleDevice;
   navPanelOpen = saved.navPanelOpen;
-  // Drop any legacy "-v2" suffix from a persisted tab (the migration scaffolding is gone now).
+  // Drop any legacy "-v2" suffix from a persisted tab.
   activeTab = (saved.activeTab ?? 'uav-info').replace(/-v2$/, '');
   attitudeRateHz = saved.attitudeRateHz;
   positionRateHz = saved.positionRateHz;
@@ -1160,15 +1085,9 @@
   // ── Radar (foreign-vehicle tracking) — independent of the main connection ──
   /** Free-look: cap the query centre's offset from the camera nadir (and the radius) at 150 km. */
   const FREE_LOOK_MAX_OFFSET_KM = 150;
-  /** ONLINE ADS-B query centre + radius — all measured over the ground (the query is a surface circle).
-   *  - **Free-look 3D:** centre = the screen-centre ground point, but its offset from the camera nadir
-   *    (subpoint) is capped at 150 km; if the view runs past that — or hits no ground (looking above the
-   *    horizon) — the centre is projected 150 km along the look direction. The radius = that horizontal
-   *    offset, floored at the configured download radius. So the camera sits at the circle's near edge
-   *    and looks into it; straight-down collapses the offset → the configured radius.
-   *  - **UAV-locked 3D (follow/orbit/fpv) and 2D:** the UAV/reference (or 2D map centre) + the configured
-   *    radius — unchanged from before.
-   *  (Distance/bearing labels use `radarReference` separately.) */
+  /** ONLINE ADS-B query circle (ground distances). Free-look 3D: centre = screen-centre ground point, capped
+   *  at 150 km from the camera nadir along the look direction; radius = that offset, floored at the
+   *  configured radius. UAV-locked 3D and 2D: the UAV/reference or map centre + the configured radius. */
   function radarQueryView(): { lat: number; lon: number; radiusKm: number } {
     const cfgKm = radarSettings.adsb.radiusKm > 0 ? radarSettings.adsb.radiusKm : 25;
 
@@ -1255,9 +1174,8 @@
   function pushRadarConfig() {
     const { lat, lon } = radarQueryView();
     lastRadarCenterKey = '';
-    // Don't clear per-provider status here: the backend now reconfigures in place (keeps the aggregator),
-    // so the live provider counts shouldn't blink on an unrelated source toggle. Disabled providers stop
-    // emitting and aren't shown anyway.
+    // Don't clear per-provider status here: the backend reconfigures in place, so the live provider counts
+    // must not blink on an unrelated source toggle.
     void configureRadar({
       enabled: radarSettings.enabled,
       sim: radarSettings.sim,
@@ -1344,9 +1262,9 @@
   // Auto-start video with the last settings if it was running at last close.
   if (typeof window !== 'undefined') void initVideo();
 
-  // Detached video window (VIDEO_MULTISINK_WINDOW.md PR B): the controller reconciles the second OS
-  // window against `videoState.undocked` — including at launch, so a session that ended detached
-  // comes back detached as soon as the auto-started source is live.
+  // Detached video window (Dev-Docs VIDEO_MULTISINK_WINDOW.md): the controller reconciles the second OS
+  // window against `videoState.undocked` — also at launch, so a session that ended detached comes back
+  // detached once the auto-started source is live.
   onMount(() => {
     startDetachedVideo();
     return () => stopDetachedVideo();
@@ -1373,10 +1291,9 @@
     }
   }
 
-  // Collapse-anywhere (Dev-Docs active/REPLAY_PANEL_COMPACT.md): a click/tap on any surface other
-  // than the logbook itself or a dialog collapses the flight view to its info card — the mini-map
-  // click used to be the only way, awkward in fullscreen video. Capture phase, so a surface that
-  // stops propagation still counts. The handler reads state at event time (not tracked).
+  // Collapse-anywhere (Dev-Docs active/REPLAY_PANEL_COMPACT.md): a click outside the logbook or a dialog
+  // collapses the flight view to its info card. Capture phase, so surfaces that stop propagation count.
+  // The handler reads state at event time (not tracked).
   $effect(() => {
     const onDown = (e: PointerEvent) => {
       if (!logbookHasFlightOnMap || logbookMinimized) return;
@@ -1395,8 +1312,7 @@
     }
   }
 
-  // Persist a settings patch + mirror it into the local reactive vars the page binds. Shared by
-  // the legacy SettingsPanel and the new SettingsPanel.
+  // Persist a settings patch + mirror it into the local reactive vars the page binds.
   function applySettingsPatch(patch: Partial<AppSettings>) {
     settings.patch(patch);
     if (patch.attitudeRateHz != null) attitudeRateHz = patch.attitudeRateHz;
@@ -1485,10 +1401,8 @@
   });
 
   function selectTab(tabId: string) {
-    // Re-clicking the ACTIVE tab's button hides its panel without touching its state (the mission
-    // edit mode stays armed, a half-typed form survives): the panel slides out to the left and the
-    // map gets the whole screen; the next click brings it back. Only switching to another tab or
-    // closing the rail (the hamburger X) deactivates as before. Same for the terrain overlay.
+    // Re-clicking the ACTIVE tab's button hides its panel without touching its state (edit mode, half-typed
+    // forms survive); the next click brings it back. Only another tab or the hamburger X deactivates.
     const isActive = terrainOpen ? tabId === 'terrain' : tabId === activeTab;
     if (navPanelOpen && isActive) {
       panelHidden = !panelHidden;
@@ -1518,11 +1432,9 @@
     }
   }
 
-  /** Folder picker for the storage-location settings. Desktop: the dialog plugin, a real path.
-   *  Android: the system tree picker — the user grants ONE folder (scoped storage, no permission),
-   *  the setting stores the grant's content:// tree URI, and a session-end mirror copies the
-   *  artefacts into it (the app itself keeps writing app-private; SQLite and the raw writers need
-   *  real paths, which a SAF grant does not provide). */
+  /** Folder picker for the storage-location settings. Desktop: a real path. Android: the SAF tree picker —
+   *  the setting stores the content:// grant and a session-end mirror copies the artefacts there (SQLite
+   *  and the raw writers need real paths, so the app keeps writing app-private). */
   async function pickStorageFolder(defaultPath?: string): Promise<string | null> {
     if (isAndroid) {
       return await invoke<string | null>('storage_pick_folder');
@@ -1565,12 +1477,9 @@
     settings.patch({ flightLogRawPath: '' });
   }
 
-  // Set when the flight DB was written by a NEWER Kite (downgrade guard, `db-newer:` marker from
-  // the backend) — the logbook shows a targeted "restore a backup or update Kite" notice instead
-  // of a generic error and stays disabled; the DB file is never touched. Cleared on a successful
-  // load (e.g. after the user pointed the DB path at a compatible copy). The explanatory popup
-  // fires ONCE per session, and ONLY on a real schema mismatch — every other DB error keeps the
-  // generic error bar.
+  // Set when the flight DB was written by a NEWER Kite (`db-newer:` marker): the logbook shows a "restore a
+  // backup or update" notice, stays disabled and never touches the file; cleared on a successful load. The
+  // popup fires once per session and only on that mismatch — other DB errors keep the generic error bar.
   let logbookDbIncompatible = $state<string | null>(null);
   let dbNewerPopupShown = false;
 
@@ -1699,10 +1608,8 @@
   }
 
   // ── Open logs WITHOUT importing them (Dev-Docs active/OPEN_LOG_WITHOUT_IMPORT.md) ──────────
-  // Desktop only, and only while nothing is connected (the player is replay-only anyway). Files run
-  // through the ordinary importers into the scratch dir — force_import (nothing there to be a
-  // duplicate of), no linking prompt (no live flights there), a multi-log .bbl imports all its logs
-  // without the prompt. `.kflight` stays import-only: it IS a logbook export.
+  // Desktop only, while disconnected. The ordinary importers write into the scratch dir (force_import, no
+  // linking or multi-log prompt). `.kflight` stays import-only: it IS a logbook export.
   const OPEN_EXTS = ['txt', 'bbl', 'bfl', 'bin', 'ulg', 'rawmsp', 'tlog'];
   const canOpenLogFile = $derived(!isMobile && flightLoggingEnabled);
   const isOpenableLog = (p: string) => new RegExp(`\\.(${OPEN_EXTS.join('|')})$`, 'i').test(p);
@@ -1936,9 +1843,8 @@
   }
 
   /** A Configurator flash download holds one log per arm/disarm cycle, and `blackbox_decode --stdout`
-   *  refuses such a file without `--index`. Import every log as its own flight; a single-log file
-   *  keeps passing no index at all. One bad log does not stop the others: failures are collected and
-   *  reported together with the count at the end (nothing extra when every log went in). */
+   *  refuses it without `--index`: import every log as its own flight (a single-log file passes no index).
+   *  Failures are collected and reported with the count at the end. */
   async function performBlackboxImport(filePath: string) {
     const logCount = await logbookCtrl.countBlackboxLogs(filePath);
     if (logCount <= 1) {
@@ -1998,10 +1904,8 @@
     return p.split(/[\\/]/).pop() ?? p;
   }
 
-  /** INAV blackbox text logs are decoded by the built-in decoder; only the legacy switch
-   *  (`KITE_BLACKBOX_LEGACY=1`) needs the external `blackbox_decode`. If it's missing then, offer to
-   *  fetch it from GitHub and report progress on the shared import progress bar.
-   *  Returns true when the import can go ahead. */
+  /** Only the legacy switch (`KITE_BLACKBOX_LEGACY=1`) needs the external `blackbox_decode`; offer to fetch
+   *  it when missing, with progress on the import bar. Returns true when the import can go ahead. */
   async function ensureBlackboxDecoder(): Promise<boolean> {
     try {
       if (!(await blackboxLegacyMode())) return true;
@@ -2036,12 +1940,9 @@
    *  .tlog, ArduPilot .bin, PX4 .ulg) they are parsed in-process by the Rust backend; only the legacy
    *  switch (`KITE_BLACKBOX_LEGACY=1`) sends them through the external `blackbox_decode`. */
   const BLACKBOX_EXTS = /\.(txt|bbl|bfl)$/i;
-  /** Extensions offered in the file picker / accepted from a drop. Mobile keeps what the device can
-   *  produce itself or receive from a desktop — .kflight archives and the raw links (.rawmsp / .tlog)
-   *  — and drops the onboard logs: INAV blackbox, ArduPilot dataflash (.bin) and PX4 ULog (.ulg) grow
-   *  to tens or hundreds of megabytes for a tablet database that never archives originals
-   *  (ANDROID_SUPPORT.md §4). This gate is the frontend's alone — the backend would decode a blackbox
-   *  log on mobile too. Recording, replay and export are unaffected. */
+  /** Extensions offered in the picker / accepted from a drop. Mobile drops the onboard logs (blackbox, .bin,
+   *  .ulg — tens to hundreds of MB; ANDROID_SUPPORT.md §4) and keeps .kflight/.rawmsp/.tlog. The gate is
+   *  the frontend's alone: the backend would decode them on mobile too. */
   const IMPORT_EXTS = isMobile
     ? ['kflight', 'rawmsp', 'tlog']
     : ['txt', 'bbl', 'bfl', 'bin', 'ulg', 'kflight', 'rawmsp', 'tlog'];
@@ -2049,9 +1950,8 @@
   /** Import a batch of files, isolating each so one bad/corrupt/non-log file doesn't abort the rest;
    *  failures (with the per-importer reason) are collected and surfaced together. */
   async function importFiles(files: string[]) {
-    // Second line of defence for mobile: the picker no longer offers blackbox formats, but a file can
-    // still arrive by another route (a drop, a picker that ignores the filter). Turn it away here with
-    // a message — nothing behind this point stops it.
+    // Second line of defence for mobile: a blackbox file can still arrive by a drop or a picker that ignores
+    // the filter, and nothing behind this point stops it.
     if (isMobile) {
       const rejected = files.filter((f) => BLACKBOX_EXTS.test(f));
       files = files.filter((f) => !BLACKBOX_EXTS.test(f));
@@ -2121,14 +2021,9 @@
     await importFiles(supported);
   }
 
-  /** Import a mission file dropped anywhere over the app (the docs' "drag a mission file onto the
-   *  map") — the ONLY working drop path is Tauri's native drag-drop event: with `dragDropEnabled`
-   *  the WebView never sees DOM drop events, so element-scoped drop zones cannot exist. Routed by
-   *  extension: .mission → INAV, .plan/.waypoints → the ArduPilot/PX4 stack. `.txt` stays with the
-   *  logbook (SD blackbox logs use it too). If the file belongs to the other mission family, the
-   *  editor switches — with 'keep': INAV and Ardu keep separate stores, so nothing is lost — unless
-   *  a connected FC locks the system, which reports instead of silently importing into a hidden
-   *  store. */
+  /** Import a mission file dropped anywhere — only via Tauri's native drag-drop event (with dragDropEnabled
+   *  the WebView gets no DOM drop events). .mission → INAV, .plan/.waypoints → ArduPilot/PX4 (.txt is the
+   *  logbook's); switches the editor family ('keep') unless a connected FC locks it, which reports instead. */
   async function importDroppedMission(path: string): Promise<void> {
     console.log('[IMPORT] mission file dropped:', path);
     try {
@@ -2186,9 +2081,7 @@
     const src = selectedFlight.source;
     if (src !== 'blackbox' && src !== 'both') return;
     try {
-      // Keep the stored original file's extension (INAV .txt/.bbl, ArduPilot .bin, .tlog, raw-MSP, …)
-      // and build a descriptive default name: <craft>_<date>_<flightId>.<ext>. The user can rename in
-      // the dialog. (Previously hardcoded to blackbox_flight_<id>.TXT — wrong extension for non-INAV.)
+      // Keep the stored original's extension; default name <craft>_<date>_<flightId>.<ext> (renamable).
       const orig = blackboxFileInfo?.filename ?? '';
       const dot = orig.lastIndexOf('.');
       const ext = (dot > 0 ? orig.slice(dot + 1) : 'log').toLowerCase();
@@ -2416,10 +2309,8 @@
     resetPlayback();
     resetHires(true); // a different flight's cache is stale — drop it
 
-    // While connected to a UAV, selecting a logbook entry shows DETAILS ONLY — nothing is loaded
-    // onto the map (no mission, home, launch or playback), so the live FC mission/home stay
-    // authoritative (this was the source of the FC↔map desync). To fly a logbook flight's mission,
-    // open it from the detail's linked-mission chip → Mission Manager.
+    // While connected, selecting a logbook entry shows DETAILS ONLY — nothing goes onto the map, so the live
+    // FC mission/home stay authoritative. A flight's mission flies via its linked-mission chip → Mission Manager.
     if (connStatus === 'connected') {
       replayWpTotal.set(null);
       await loadLogbook();
@@ -2428,10 +2319,8 @@
 
     if (data.hasGpsData) playbackActive = true;
 
-    // Resolve the replay WP total (X for the WP N/X readout) and load the flown mission.
-    // If the flight has a linked library mission, load it onto the map (so the mission overlay
-    // + active-WP highlight show what was actually flown — hideable via the player MISSION
-    // toggle). X = linked mission's WP count, else the Blackbox-header count, else null.
+    // Replay WP total (X in WP N/X): the linked library mission's count (it is loaded onto the map for the
+    // overlay + active-WP highlight), else the Blackbox-header count, else null.
     replayWpTotal.set(null);
     try {
       const linked = await missionDbForFlight(flightId, activeDbPath);
@@ -2735,13 +2624,9 @@
     selectedPort = await refreshSerialPorts(selectedPort);
   }
 
-  // ── Auto-discovery while disconnected (Quick Note: auto-discover changed COM ports + auto-scan BLE) ──
-  // Only runs while a connection is neither active nor being established. The kickoff is wrapped in
-  // `untrack` so the effect tracks only the transport/status it gates on — never the port/scan state it
-  // writes (which would self-trigger).
-  //
-  // Serial: cheap port enumeration polled every 1 s; newly plugged adapters are auto-selected and
-  // unplugged ones disappear (diff logic in refreshSerialPorts) — no manual ⟳ needed.
+  // ── Auto-discovery while disconnected ──
+  // The kickoff is `untrack`ed: the effect tracks only the transport/status it gates on, never the
+  // port/scan state it writes (self-trigger). Serial: ports enumerated every 1 s, diffed in refreshSerialPorts.
   $effect(() => {
     if (selectedTransport !== 'serial' || connStatus === 'connected' || connStatus === 'connecting') return;
     const id = setInterval(() => { void refreshPorts(); }, 1000);
@@ -2749,12 +2634,9 @@
     return () => clearInterval(id);
   });
 
-  // BLE discovery is a firehose: the backend scan puts the adapter into CONTINUOUS discovery, and
-  // BlueZ emits a D-Bus signal per advertisement (hundreds/s in a busy RF area) for as long as it
-  // runs — pegging dbus-daemon + bluetoothd, not Kite itself. So we never hold it open: each scan is
-  // a short bounded WINDOW. One fires on entering BLE (list ready), and one each time the device
-  // dropdown is opened (fresh RSSI) via onRescanBle. Devices stream in through the `ble-device` event
-  // (listener set up in initPage) during the window.
+  // BLE discovery is never held open: BlueZ emits a D-Bus signal per advertisement during CONTINUOUS
+  // discovery, pegging dbus-daemon + bluetoothd. Each scan is a short WINDOW — on entering BLE and on each
+  // dropdown open (onRescanBle); devices stream in via the `ble-device` event.
   let bleScanTimer: ReturnType<typeof setTimeout> | undefined;
   const BLE_SCAN_WINDOW_MS = 6000;
   function bleScanWindow() {
@@ -3048,10 +2930,8 @@
       : null,
   );
   const showPlayer = $derived(playbackActive && !isPrimaryConnected && selectedFlight != null);
-  // Blackbox-replay position for the video-backdrop map — a replayed model is a valid UAV
-  // position, so the backdrop follows it exactly like the mini map does. Null outside a
-  // replay or when the record carries no usable coordinates (the track is already
-  // GPS-filtered above, so the null checks are belt-and-braces).
+  // Blackbox-replay position for the video-backdrop map (it follows it like the mini map); null outside a
+  // replay or without usable coordinates.
   const ufReplayPos = $derived(
     playbackPoint != null && playbackPoint.lat != null && playbackPoint.lon != null
       ? { lat: playbackPoint.lat, lon: playbackPoint.lon }
@@ -3118,9 +2998,8 @@
   );
 
   // ── Active-WP highlight trust gating (see MISSION_TRACKING_AND_PROVENANCE.md) ──
-  // The highlight only shows when the loaded mission is trusted for the active context:
-  //  - replay: the mission has the DB flag (or the user confirmed once for this log/file)
-  //  - live:   the mission has the FC flag and the UAV is armed (or the user confirmed at arm)
+  // Replay: the mission has the DB flag (or the user confirmed once for this log/file).
+  // Live: the mission has the FC flag and the UAV is armed (or the user confirmed at arm).
   let replayTrackConfirmed = $state(false);
   let liveTrackConfirmed = $state(false);
   let replayAskedFlightId: number | null = null;
@@ -3146,10 +3025,9 @@
     let trusted = false;
     if (isReplay) trusted = f.db || replayTrackConfirmed;
     else if (isPrimaryConnected) {
-      // ArduPilot/MAVLink reports its own current mission item (MISSION_CURRENT) — that is the FC's
-      // own truth, so trust it whenever armed + in a mission mode. INAV needs the mission to be FC-
-      // synced (or operator-confirmed) since the active WP is matched against the loaded planner mission
-      // — also over MSP over MAVLink, where the planner mission is INAV's.
+      // ArduPilot/MAVLink reports its own current item (MISSION_CURRENT) — trusted whenever armed in a mission
+      // mode. INAV (also over MSP over MAVLink) matches against the planner mission, so it needs FC sync or
+      // operator confirmation.
       const fcOwnsActiveWp = get(isArduPilotLink);
       trusted = armed && (fcOwnsActiveWp || f.fc || liveTrackConfirmed);
     }
@@ -3179,10 +3057,8 @@
     prevFileFlagForTrack = fileFlag;
   });
 
-  // Live prompt: once at arm, if connected and the mission isn't FC-synced.
-  // Suppressed while a system switch is pending (e.g. an INAV mission is still loaded when an
-  // ArduPilot FC connects): the Clear-or-Disconnect dialog handles that mission, so tracking the
-  // soon-to-be-cleared INAV waypoints during the new flight is meaningless.
+  // Live prompt: once at arm, if connected and the mission isn't FC-synced. Suppressed while a system switch
+  // is pending — the Clear-or-Disconnect dialog handles that mission.
   $effect(() => {
     const armed = isArmed(telem.armingFlags, telem.lastUpdate);
     if (isPrimaryConnected && armed && !prevArmedForTrack && !get(pendingSystemSwitch)) {
@@ -3236,10 +3112,8 @@
   });
 
   // ── Mission recording link (deferred commit, ADR-041) ────────────────
-  // The flown mission is captured at disarm (while FC-sync still reflects what the FC flew) and
-  // linked when the pending session is committed (Save, or a grace-lapsed re-arm auto-commit).
-  // Captured per active autopilot system: INAV carries an FC-sync flag (links silently when synced);
-  // ArduPilot/PX4 have no provenance flag yet (Phase 2) → linked only on explicit user opt-in.
+  // Captured at disarm (FC sync still reflects what was flown), linked at commit. INAV links silently when
+  // FC-synced; ArduPilot/PX4 have no provenance flag → linked only on explicit opt-in.
   interface EndedMissionSnapshot {
     system: 'inav' | 'ardupilot' | 'px4';
     inavWps: Waypoint[];
@@ -3304,11 +3178,9 @@
     if (get(pendingSystemSwitch)) confirmSystemSwitch('keep');
   }
 
-  /** The planner follows the active vehicle, so only its session gets the flown mission captured;
-   *  another vehicle's session gets an empty snapshot (nothing is linked to it). Without an active
-   *  vehicle (a connecting link's recorder reports before its vehicle is announced) there is no other
-   *  vehicle the planner could belong to, so the mission is captured as well. Taken when the recording
-   *  ends (while FC-sync still reflects what the FC flew); its dialog may open later (flightDialogQueue). */
+  /** Only the active vehicle's session gets the flown mission (the planner follows it); others get an empty
+   *  snapshot. No active vehicle (a recorder reports before its announcement) → captured as well. Taken when
+   *  the recording ends; its dialog may open later (flightDialogQueue). */
   function endedMissionFor(vehicleId: string | null): EndedMissionSnapshot {
     const active = get(activeVehicleId);
     if (vehicleId == null || active == null || vehicleId === active) return currentMissionSnapshot();
@@ -3321,10 +3193,8 @@
     return String(e).includes('No pending recording session to commit');
   }
 
-  /** End-Flight Save: commit `vehicleId`'s pending session. A failed commit stays pending in the
-   *  backend (in that vehicle's slot), so the pilot can retry until it works; Cancel keeps it for the
-   *  next start. Null = kept, nothing pending, or a re-arm / new prompt of that vehicle took the pending
-   *  session meanwhile. */
+  /** End-Flight Save: commit `vehicleId`'s pending session; a failed commit stays pending so the pilot can
+   *  retry, Cancel keeps it. Null = kept, nothing pending, or a re-arm / new prompt took the session meanwhile. */
   async function commitPendingWithRetry(vehicleId: string | null): Promise<number | null> {
     const epoch = pendingEpochOf(vehicleId);
     for (;;) {
@@ -3377,10 +3247,8 @@
         await flightlogDiscardPending(vehicleId);
         return;
       }
-      // Save → commit the pending session, then link mission + battery/notes against the new id. The
-      // notes and the mission link are written first: an abandoned follow-up question below (battery /
-      // vehicle) can never lose them. A failed commit offers Retry; a successful retry continues here
-      // with this dialog's input.
+      // Save → commit, then link mission + battery/notes. Notes and mission link go first, so an abandoned
+      // follow-up question (battery / vehicle) cannot lose them.
       const flightId = await commitPendingWithRetry(vehicleId);
       if (flightId === null) return;
       if (res.notes) await updateFlightNotes(flightId, res.notes, flightLogDbPath);
@@ -3463,10 +3331,8 @@
     }
   }
 
-  // Startup recovery (ADR-042): if a crash/close left an orphan temp session, prompt for it. A pile
-  // of stragglers is settled in this one launch: Discard sweeps them all in the backend, and after
-  // Save / Continue the scan runs again (the handled session is excluded by then) until nothing is
-  // left — no more "one prompt per start" for the same pile. Bounded so a failing action cannot spin.
+  // Startup recovery (ADR-042): prompt for orphan temp sessions. Discard sweeps them all; after Save /
+  // Continue the scan repeats (handled one excluded) until none is left — bounded so a failure cannot spin.
   async function runStartupRecovery(): Promise<void> {
     // Hi-res caches and the opened-file scratch store left by a crash are worthless (always
     // reproducible) — wipe them in passing.
@@ -3500,12 +3366,9 @@
 
   onMount(() => { void runStartupRecovery(); });
 
-  // The Windows main window starts hidden (`visible: false` in tauri.windows.conf.json): it is
-  // `transparent: true` for the native-video hole punch, so before the WebView's first paint the
-  // whole app area was see-through to the desktop with only the frame visible. Show it once the
-  // UI is actually mounted. No-op on platforms whose window starts visible. A failure here is
-  // fatal for a portable build (no window-state plugin to show the window instead — it was the
-  // missing `core:window:allow-show` permission once), so it goes to the file log, not into void.
+  // The Windows main window starts hidden: it is `transparent` for the native-video hole punch and would be
+  // see-through before the first paint. Shown once mounted (no-op elsewhere). A failure is fatal for a
+  // portable build (no window-state plugin to show it), so it goes to the file log.
   onMount(() => {
     void import('@tauri-apps/api/webviewWindow').then(({ getCurrentWebviewWindow }) => {
       const win = getCurrentWebviewWindow();
@@ -3682,10 +3545,8 @@
         void importDroppedMission(missionFile);
         return;
       }
-      // Log files: dropped ON the Logbook panel → import as before. Dropped anywhere else (the map)
-      // → open for replay without importing (desktop, disconnected). The native event carries the
-      // drop position in physical pixels; hit-test it against the panel root. Without a position
-      // (older payloads) the old behaviour stands: logbook tab open = import.
+      // Log files: dropped ON the Logbook panel → import; anywhere else → open for replay (desktop, disconnected).
+      // The drop position is physical px, hit-tested against the panel root; without one an open logbook tab imports.
       const pos = event.payload.position;
       let overLogbook = activeTab === 'logbook';
       if (overLogbook && pos) {
@@ -3755,13 +3616,10 @@
   {/if}
 
   <!-- ======= MAP LAYER — unzoomed / native resolution (see docs/archive/UI_SCALING.md) =======
-       The map must stay crisp, so it lives OUTSIDE the zoomed `.ui-scale` layer. It is the
-       same single Map/Map3D instance (no re-mount). Normally it sits behind the chrome; when
-       video is primary it flips above the chrome into the floating window's body (.in-frame). -->
-  <!-- Phone: the swapped-in mini map is clipped to the box of the frame it sits in — the map area
-       (docked frame: it parks BEHIND the widget column like the video does) or the column's tile
-       area (widget: it scrolls out with the page instead of hanging over the glass). Desktop: a
-       transparent, non-clipping wrapper. Same coordinate system as before (inset 0). -->
+       Outside the zoomed `.ui-scale` layer so it stays crisp; one Map/Map3D instance that flips above
+       the chrome into the floating window's body (.in-frame) when video is primary. -->
+  <!-- Phone: the swapped-in mini map is clipped to its frame's box — the map area (docked frame: it parks
+       BEHIND the widget column) or the column's tile area. Desktop: transparent, non-clipping (inset 0). -->
   <!-- `inert={dbCompacting}` here and on the other layers below: while "Compact Database" runs, nothing
        behind CompactDbModal takes focus or keys (the modal itself sits outside those subtrees). -->
   <div
@@ -3842,8 +3700,7 @@
        floating window or a widget tile, and map-bound banners would then cover that tiny tile. This
        container sits above everything in the content area so alerts stay readable. -->
   <!-- --toast-dock-inset = the open left-docked panel's right edge (0 when none); the system-message
-       toasts read it to centre in the free area beside the panel (issue #10). The radar banner ignores
-       it and stays frame-centred + on top. -->
+       toasts centre beside the panel with it. The radar banner ignores it and stays frame-centred + on top. -->
   <div class="app-toasts" inert={dbCompacting} style:--toast-dock-inset="{panelHidden ? 0 : $panelDockRight}px">
     <!-- Conflict-alert banner (renders nothing when idle). -->
     <RadarAlertBanner {interfaceSettings} />
@@ -4243,11 +4100,9 @@
   </div><!-- .ui-scale -->
 
   <!-- ======= FLOATING PANELS LAYER — scaled like .ui-scale, ABOVE the in-frame mini-map ======= -->
-  <!-- .ui-scale is one stacking context (its transform), so nothing inside it can stack over the
-       unzoomed in-frame map (z2) / its corner controls (z3). The floating panels + modal dialogs
-       therefore live in this second, identically-scaled layer (z4) — panels cover the mini-map
-       exactly like they cover the floating video window. The host replicates .app's positioning
-       context and grid vars so PanelShell geometry is untouched. -->
+  <!-- .ui-scale is one stacking context (its transform), so nothing in it can stack over the unzoomed
+       in-frame map (z2) / its controls (z3): panels + modal dialogs live in this second, identically-scaled
+       layer (z4), whose host replicates .app's positioning context and grid vars for PanelShell. -->
   <div class="ui-scale panels-layer">
     <!-- Everything in this layer except CompactDbModal (below) goes inert while it shows; the wrapper
          adds no box (display: contents), so geometry and stacking stay as they were. -->
@@ -4437,11 +4292,8 @@
 </div><!-- .ui-root -->
 
 <style>
-  /* ============================================================
-     Kite Ground Control Theme — Floating Panel Layout
-     Color palette derived from INAV Configurator
-     https://github.com/iNavFlight/inav-configurator
-     ============================================================ */
+  /* Kite theme — floating panel layout. Palette derived from the INAV Configurator
+     (https://github.com/iNavFlight/inav-configurator). */
 
   /* Continue-on-reconnect status banner (recovery, ADR-042) */
   .resume-banner {
@@ -4481,18 +4333,15 @@
     -webkit-user-select: text;
   }
 
-  /* Leaflet map tooltips (hover hints / "toasts") live in the unzoomed map. Scale them
-     with the global UI scale via font-size + padding (Leaflet sets an inline transform
-     for positioning, so a CSS transform would be overridden — em/px scaling reflows the
-     box instead). --ui-scale inherits from `.ui-root`. Base values match Leaflet defaults. */
+  /* Leaflet tooltips live in the unzoomed map: scale them via font-size + padding, since Leaflet's inline
+     positioning transform would override a CSS transform. Base values match Leaflet defaults. */
   :global(.leaflet-tooltip) {
     font-size: calc(12px * var(--ui-scale, 1));
     padding: calc(6px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1));
   }
 
   /* ── Global UI scaling (see docs/archive/UI_SCALING.md) ──────────
-     `.ui-root` fills the viewport. `.ui-scale` holds all chrome and is zoomed by
-     --ui-scale (sized /scale so it fills exactly the viewport after the zoom).
+     `.ui-scale` holds all chrome, zoomed by --ui-scale (sized /scale so it fills the viewport after it);
      `.layer-map` holds the single Map/Map3D instance UNZOOMED so it stays crisp. */
   .ui-root {
     position: relative;
@@ -4506,11 +4355,8 @@
     left: 0;
     width: calc(100vw / var(--ui-scale, 1));
     height: calc(100vh / var(--ui-scale, 1));
-    /* Scale the chrome up to fill the viewport (the box is sized /scale above, then scaled back from
-       the top-left corner). We use transform: scale() rather than `zoom` because WebKitGTK (Linux)
-       does not support CSS `zoom` — it left the chrome at the /scale size, i.e. SMALLER than the
-       window. transform is geometrically identical here (origin 0 0: logical→viewport = ×scale, same
-       mapping the offset/rect math relies on) and works on both WebView2 (Windows) and WebKitGTK. */
+    /* transform: scale(), not `zoom`: WebKitGTK does not support CSS `zoom`. With origin 0 0 it maps
+       logical→viewport ×scale, as the offset/rect math expects. */
     transform: scale(var(--ui-scale, 1));
     transform-origin: 0 0;
     z-index: 1;
@@ -4548,12 +4394,9 @@
       "status-bar   status-bar   status-bar   status-bar";
   }
 
-  /* The chrome layer sits ABOVE the unzoomed map, so its empty centre must let pointer
-     events fall through to the map (pan/zoom/Leaflet controls + the WP editor popup,
-     which is part of the map). BOTH `.ui-scale` (the parent covering the viewport) and
-     `.app` must be click-through, or the parent eats events the moment `.app` passes them
-     on. Solid children re-capture; the widget docks + map-controls stay click-through so
-     the map is draggable under/around them. See docs/archive/UI_SCALING.md. */
+  /* The chrome sits ABOVE the unzoomed map, so its empty centre must pass pointer events through —
+     BOTH `.ui-scale` and `.app`, or the parent eats them. Solid children re-capture; the widget docks
+     + map-controls stay click-through so the map drags under them. */
   .ui-scale {
     pointer-events: none;
   }
@@ -4612,14 +4455,9 @@
     right: calc(var(--phone-panel-w, 0px) - var(--phone-shift, 0px));
     transition: right 0.3s ease;
   }
-  /* Video primary: the mini map in the floating / docked frame parks with it — off the screen (the
-     frame itself unmounts; the map layer is +page's, so it moves): left on the desktop, where the
-     window snaps bottom-left, right on the phone, behind the column and out.
-     Touches on the phone: the mini map takes them (pinch zoom — Leaflet's dragging and double-tap
-     zoom are off in mini mode, D6) and relays a long-press to the tile underneath (PhoneWidgetPanel);
-     while the grid is in EDIT mode (html.phone-editing) the layer goes touch-free so the tile can be
-     dragged. The desktop's counterpart is `.edit-passive` (map in the widget tile + dock edit mode):
-     WidgetPanel relays the long-press on the map to the tile, then the tile gets the pointer. */
+  /* Video primary: the frame's mini map parks off screen with it (left on the desktop, right behind the
+     column on the phone). Phone touches: pinch zoom + long-press relayed to the tile (PhoneWidgetPanel);
+     touch-free while the grid is in edit mode. Desktop counterpart: `.edit-passive`. */
   .layer-map.in-frame {
     transition: transform 0.3s ease;
   }
@@ -4635,10 +4473,8 @@
   :global(html.is-phone) .layer-map.in-frame.parked {
     transform: translateX(100vw);
   }
-  /* The clipping wrapper: transparent on the desktop; on the phone it bounds the mini map to the
-     map area (docked frame — the map slides out BEHIND the column, like the video) or to the
-     column's tile box (widget — the map leaves with its page instead of hanging over the glass).
-     pointer-events is inherited: the wrapper takes none, the map layer opts back in. */
+  /* Clipping wrapper: transparent on the desktop; on the phone it bounds the mini map to the map area
+     (docked frame) or the column's tile box (widget). It takes no pointer events; the map layer opts in. */
   .map-clip {
     position: absolute;
     inset: 0;
@@ -4672,10 +4508,8 @@
     top: var(--safe-top, 0px);
   }
 
-  /* Phone portrait is too narrow to fit the toolbar on one row, so it wraps to multiple lines
-     (see Toolbar.svelte). Size the toolbar grid row to its content instead of the fixed one-row
-     height so the wrapped bar is never clipped and the nav-rail / panels below are pushed down
-     cleanly rather than tucked under it. Tablets keep the fixed row (wider screen fits one row). */
+  /* Phone portrait: the toolbar wraps to several lines (Toolbar.svelte), so its grid row sizes to content
+     and the nav rail / panels below are pushed down instead of tucked under it. */
   @media (max-width: 600px) {
     :global(html.is-mobile) .app {
       /* Bottom bar hidden on phone (redundant with the collapsed top strip; arming moves into it). The
@@ -4699,26 +4533,19 @@
     :global(html.is-mobile) .layer-map {
       bottom: 0;
     }
-    /* Top-align the right side dock so MODE sits just under the toolbar (the zone centered the whole
-       widget block vertically, leaving a big gap above it). The 8px top padding matches the panel/
-       nav-rail offset so MODE lines up with the UAV Info panel below the bar. */
+    /* Top-align the right side dock so MODE sits just under the toolbar; 8px matches the panel/nav-rail offset. */
     :global(html.is-mobile) .zone-side-dock {
       align-items: flex-start;
       padding-top: 8px;
     }
   }
 
-  /* Map layer — UNZOOMED overlay over the content area. The toolbar (53px) and status
-     bar (24px) live in the zoomed `.ui-scale`, so their visual heights are *--ui-scale;
-     the map offsets track that. z-index 0 keeps it behind the chrome normally. When the
-     view is swapped into the floating window it flips above the chrome (.in-frame) and
-     uses the inline rect (already *--ui-scale in mapFrameStyle). */
+  /* Map layer — UNZOOMED overlay over the content area; offsets track the zoomed toolbar (53px) and status
+     bar (24px) × --ui-scale. z0 behind the chrome; .in-frame flips it above and uses the inline rect. */
   .layer-map {
     position: absolute;
-    /* top/bottom only as the no-JS fallback: the inline `mapLayerStyle` overrides them with the
-       same values rounded to whole px — a fractional box origin (53px × 1.25 = 66.25px) put every
-       tile edge on a subpixel boundary and WebKitGTK rendered hairline seams between the tiles
-       (issue #52). */
+    /* No-JS fallback only: the inline `mapLayerStyle` overrides top/bottom rounded to whole px (fractional
+       origins give WebKitGTK hairline tile seams). */
     top: calc(53px * var(--ui-scale, 1));
     left: 0;
     right: 0;
@@ -4855,19 +4682,14 @@
   .map-video-wrap.nv-active {
     background: transparent;
   }
-  /* Unobstructed fullscreen (Video panel toggle): the wrapper KEEPS its full-zone box (the
-     blurred backdrop map inside it fills everything — widgets, docks and nav rail float on
-     it); the video box alone retreats from the reserves, computed in ufBox. The wrapper only
-     stops painting its own black so the backdrop (or the app ground, without a position)
-     shows through. */
+  /* Unobstructed fullscreen: the wrapper keeps its full-zone box (the blurred backdrop map fills it); only
+     the video box retreats (ufBox). The wrapper stops painting black so the backdrop shows through. */
   .map-video-wrap.unobstructed {
     background: transparent;
   }
-  /* Inner video box: fills the wrapper normally; in unobstructed mode the inline style from
-     ufBox cuts it to the stream's aspect (left+width beat the inset's right, top+height its
-     bottom) and it reads as a deliberately framed surface — panel-style accent border, black
-     only behind the picture itself (≤1px rounding slivers). border-box keeps the frame inside
-     the aspect-exact rect. */
+  /* Inner video box: fills the wrapper normally; in unobstructed mode ufBox cuts it to the stream's aspect
+     (left+width beat the inset's right, top+height its bottom), framed with an accent border. border-box
+     keeps the frame inside the aspect-exact rect. */
   .map-video-box {
     position: absolute;
     inset: 0;
@@ -4972,14 +4794,11 @@
   }
 
   /* ── Phone chrome (Dev-Docs active/PHONE_UI.md) ──────────────────────────────────────────
-     One row: the map area (everything floats over it) and the full-height widget column whose
-     width the panel reports (--phone-panel-w). No toolbar, no docks, no status bar. Declared
-     after the is-mobile rules so it wins at equal specificity. */
+     One row: the map area plus the full-height widget column (--phone-panel-w). Declared after the
+     is-mobile rules so it wins at equal specificity. */
   :global(html.is-phone) .app {
-    /* minmax(0, 1fr): a grid row's default min-height is its CONTENT — the widget column's
-       two pages are 2× the panel height, so a plain 1fr row grew with them, the panel measured
-       the taller row, the slot grew, the pages grew … (measured: slot 419 840 px, the screen
-       flickering). The row must be the viewport, never the content. */
+    /* minmax(0, 1fr): a plain 1fr row's min-height is its content — the column's two pages are 2× the panel
+       height, so row, panel and pages grew each other in a loop. The row must be the viewport. */
     grid-template-rows: minmax(0, 1fr);
     grid-template-columns: 1fr var(--phone-panel-w, 0px);
     grid-template-areas: "main phone-widgets";
@@ -5000,10 +4819,9 @@
   .zone-phone-widgets > :global(*) {
     pointer-events: auto;
   }
-  /* The widget column slides out to the right by --phone-shift (set on .ui-root) while the full
-     replay player needs more room than the gap between the burger and the chain-link button offers
-     (narrow 16:9 phones); the chain-link button rides along so the gap really grows. The grid
-     column itself stays put — a transform only, so the packer and the map centre are untouched. */
+  /* The widget column slides right by --phone-shift while the full replay player needs more room than the
+     burger-to-chain-link gap; the chain-link button rides along. A transform only, so the packer and the
+     map centre are untouched. */
   .zone-phone-widgets {
     transform: translateX(var(--phone-shift, 0px));
     transition: transform 0.3s ease;
@@ -5015,11 +4833,9 @@
     z-index: 110;
     transition: right 0.3s ease;
   }
-  /* Map search (MapSearch, phone variant): on top of the map's corner column, riding along with the
-     widget column like the dock toggle; --ms-bottom (+page) stacks it above the visible buttons. Its
-     line opens to the left, at most up to the burger (12 + 42 + 8); its hit list rises above it, at
-     most up to the top safe edge. Over the chips and tiles, under the panels (150 / 160): the line
-     measures an open side panel when it opens and stays right of it (MapSearch `fitBesidePanel`). */
+  /* Map search (phone): on top of the map's corner column, riding with the widget column; --ms-bottom stacks
+     it above the visible buttons. The line opens left up to the burger, the hit list rises up to the safe
+     edge. Over chips and tiles, under the panels (150 / 160); `fitBesidePanel` keeps it beside an open panel. */
   .phone-map-search {
     position: absolute;
     right: calc(var(--phone-panel-w, 0px) + 8px - var(--phone-shift, 0px));
@@ -5029,10 +4845,9 @@
     --ms-line-max: calc(100vw - var(--phone-panel-w, 0px) + var(--phone-shift, 0px) - 8px - 38px - 6px - 62px - var(--safe-left, 0px));
     --ms-drop-max: calc(100vh - var(--ms-bottom, 100px) - var(--safe-bottom, 0px) - 38px - 6px - 8px - var(--safe-top, 0px));
   }
-  /* Bottom-left corner: arming + sensor chips (under the panels — they peek out left of an open
-     panel), then the dev Debug button in the panels layer (over them), then the Leaflet
-     attribution (--phone-bottom-w / --phone-debug-w, published by the two components); the nav
-     rail stops above the row. */
+  /* Bottom-left corner: arming + sensor chips (under the panels), then the dev Debug button (panels layer),
+     then the Leaflet attribution (--phone-bottom-w / --phone-debug-w, published by the components); the
+     nav rail stops above the row. */
   .phone-bottom-chips {
     position: absolute;
     left: calc(12px + var(--safe-left, 0px));
@@ -5046,10 +4861,9 @@
     bottom: calc(8px + var(--safe-bottom, 0px));
     z-index: 170; /* over every panel (150 / 160), under the dialogs */
   }
-  /* Toasts and alerts live in the TOP band between the burger (12 + 42 + 8) and the chain-link
-     button (panel-w + 8 + 42 + 8 from the right) — the same gap the replay player uses. The
-     container already sits at --safe-top (is-mobile rule), so its children start 8px down, in
-     the buttons' row; the right edge rides along when the widget column slides out. */
+  /* Toasts live in the TOP band between the burger (12 + 42 + 8) and the chain-link button (panel-w + 8 +
+     42 + 8 from the right), as the replay player does; the container sits at --safe-top, so children start
+     8px down, and the right edge rides along when the column slides out. */
   :global(html.is-phone) .app-toasts {
     left: calc(62px + var(--safe-left, 0px));
     right: calc(var(--phone-panel-w, 0px) - var(--phone-shift, 0px) + 58px);

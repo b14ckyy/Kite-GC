@@ -4,11 +4,8 @@
 -->
 
 <script lang="ts">
-  // Settings on the panel framework (docs/active/PANEL_FRAMEWORK.md): a `compact` PanelShell with
-  // a SegmentedToggle tab switcher (Interface / Map / Data) in the toolbar; each tab is grouped into
-  // labelled subsections. On/off switches use the shared <Toggle>, actions use <Button>, selects
-  // match the framework height. Most hints are tooltips; only the Cesium-token, airspace-key and
-  // update-check hints are shown as text (`.cesium-hint`).
+  // Settings: a `compact` PanelShell (docs/active/PANEL_FRAMEWORK.md) with a tab switcher (Interface / Map /
+  // Data) in the toolbar. Most hints are tooltips; only a few are shown as text (`.cesium-hint`).
   import { invoke } from '@tauri-apps/api/core';
   import { t, locale } from 'svelte-i18n';
   import { SUPPORTED_LOCALES } from '$lib/i18n';
@@ -202,11 +199,9 @@
     }
   }
 
-  // Reveal the backend diagnostic log file in the OS file manager (Settings → Diagnostics).
-  // The path is also shown as plain text: on a minimal desktop (a Raspberry Pi was the case that
-  // exposed this) there may be no `org.freedesktop.FileManager1` service and no xdg-open at all, so
-  // "reveal" simply cannot work — and this is the one screen a stuck user is sent to. It must never
-  // fail silently, which is exactly what the old `catch {}` did.
+  // Reveal the diagnostic log file in the OS file manager. The path is also shown as text: a minimal desktop
+  // may have no FileManager1 service and no xdg-open, so "reveal" can't work — and this is the screen a stuck
+  // user is sent to, so it must never fail silently.
   let logPath = $state<string | null>(null);
   let logOpenError = $state('');
 
@@ -319,10 +314,8 @@
     onPatch({ uiScale: Number((event.target as HTMLSelectElement).value) });
   }
 
-  // ── Pre-migration DB backup (Dev-Docs active/DB_MIGRATIONS.md) ──────
-  // Exactly ONE backup exists (created automatically before a schema upgrade, next to the DB
-  // file — multi-GB with blackbox logs, hence no rotation). Shown with its size + a delete
-  // button; anyone wanting a permanent copy moves the file elsewhere themselves.
+  // ── Pre-migration DB backup (Dev-Docs active/DB_MIGRATIONS.md) ── exactly ONE backup (made before a schema
+  // upgrade, next to the DB — multi-GB with blackbox logs, hence no rotation), shown with its size + delete.
   let dbBackup = $state<{ path: string; size_bytes: number } | null>(null);
   async function loadDbBackup(): Promise<void> {
     try {

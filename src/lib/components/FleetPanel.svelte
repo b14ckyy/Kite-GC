@@ -3,12 +3,9 @@
   Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 -->
 
-<!-- FleetPanel — the multi-vehicle list on the nav rail: every known vehicle with its key state (mode,
-     arming, battery, GPS, altitude, speed, link freshness), warnings floated to the top, a checkbox per
-     row for the GROUP selection (stores/fleetSelection) and a row click to make a vehicle the ACTIVE
-     one (the same arm-switch confirmation as LinkManager). Quick-select chips, a "Frame fleet" camera
-     button, and the last group command's per-vehicle results with a retry for the failed ones.
-     See docs/02-design/features/fleet-control.design.md §4.1. -->
+<!-- FleetPanel — the multi-vehicle list: key state per vehicle (warnings first), a GROUP-selection checkbox
+     (stores/fleetSelection), row click = make ACTIVE (same arm-switch confirmation as LinkManager), plus
+     quick-select, "Frame fleet" and per-vehicle group results. See docs/02-design/features/fleet-control.design.md §4.1. -->
 <script lang="ts">
   import { t } from 'svelte-i18n';
   import { onMount } from 'svelte';

@@ -1,16 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Custom Leaflet TileLayer that checks IndexedDB cache before fetching from network.
-// Falls back to normal network fetch on cache miss and stores the result.
-//
-// For flagged providers (ESRI satellite) it also detects over-zoom "placeholder"
-// tiles (a fixed blank the server returns above the available zoom) and fills
-// those tiles with the scaled-up parent imagery — mirroring how Cesium keeps the
-// parent tile visible — instead of leaving a blank.
-//
-// Custom (local tile folder) maps take their own path (`_createCustomTile`): no IndexedDB cache, every
-// tile a <canvas>, and file levels from there on (512 / 128 px maps run with a zoomOffset).
+// Leaflet TileLayer with an IndexedDB cache in front of the network. For flagged providers (ESRI) it fills
+// over-zoom "placeholder" tiles with the scaled-up parent, as Cesium does. Custom (local folder) maps take
+// `_createCustomTile`: no cache, every tile a <canvas>, file levels (512 / 128 px maps via zoomOffset).
 
 import L from "leaflet";
 import { invoke } from "@tauri-apps/api/core";
@@ -113,10 +106,8 @@ export const CachedTileLayer = L.TileLayer.extend({
     const tile = document.createElement("img");
     tile.alt = "";
     tile.setAttribute("role", "presentation");
-    // Decode off the paint path: after a zoom, 20-40 fresh tiles land at once, and without this the
-    // engine may decode them synchronously in the frame that first paints them - which on a weak SoC
-    // is 3-8 ms per tile and reads as the whole interface stalling right after the gesture. With it,
-    // decoding happens on the raster workers and each tile appears when its pixels are ready.
+    // Decode off the paint path: after a zoom 20-40 tiles land at once, and a synchronous decode in the first
+    // painting frame costs 3-8 ms per tile on a weak SoC (UI stall).
     tile.decoding = "async";
     const url = this.getTileUrl(coords);
 
@@ -183,12 +174,8 @@ export const CachedTileLayer = L.TileLayer.extend({
       });
   },
 
-  /**
-   * Build an over-zoom tile as a clipping <div> holding a scaled child <img> of
-   * the real ancestor tile (resolved through the IndexedDB cache, then network).
-   * The div's overflow:hidden crops the oversized image to the correct quadrant
-   * — reliable across engines (CSS background on an <img> is not).
-   */
+  /** Over-zoom tile: a clipping <div> holding a scaled <img> of the real ancestor (cache, then network); the
+   *  div's overflow:hidden crops it to the quadrant — reliable across engines, unlike CSS background on <img>. */
   _createFallbackTile(coords: L.Coords, done: L.DoneCallback): HTMLElement {
     const providerId: string = this.options.providerId;
     const z = coords.z;
@@ -314,11 +301,9 @@ export const CachedTileLayer = L.TileLayer.extend({
     }, 250);
   },
 
-  /**
-   * Custom-map tile: a <canvas> (the element must exist before we know what to draw), scaled to the
-   * layer's grid by Leaflet. A missing tile is composed from its nearest existing ancestor (scaled up)
-   * or, one level below an area's lowest level, its children (scaled down). No IndexedDB cache.
-   */
+  /** Custom-map tile: a <canvas> (it must exist before we know what to draw), scaled to the grid by Leaflet.
+   *  A missing tile is composed from its nearest ancestor (scaled up) or, one level below an area's lowest
+   *  level, its children (scaled down). No IndexedDB cache. */
   _createCustomTile(coords: L.Coords, done: L.DoneCallback): HTMLElement {
     const spec: CustomMapSpec = this.options.customMap;
     // The ONE place a map zoom becomes a file level: at zoomOffset the layer's tileSize grid IS the file

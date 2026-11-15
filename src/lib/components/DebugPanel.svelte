@@ -154,11 +154,9 @@
     s.logarithmicDepthBuffer = pLogDepth;
     s.highDynamicRange = pHdr;
     s.debugShowFramesPerSecond = pFpsOverlay;
-    // While the fps overlay is on, force continuous rendering — otherwise requestRenderMode renders
-    // only on change, so the counter freezes when the map is idle and is skewed when it only ticks on
-    // a load/update. Set it directly for immediate effect AND flag it in the store so Map3D's own
-    // requestRenderMode reverters (alert/WP pulses, radar clear) keep honouring it. Restored when the
-    // overlay (or the panel) closes.
+    // While the fps overlay is on, force continuous rendering (requestRenderMode freezes or skews the counter).
+    // Set directly AND flagged in the store, so Map3D's requestRenderMode reverters (pulses, radar) honour it.
+    // Restored when the overlay (or the panel) closes.
     perf3dForceContinuous.set(pFpsOverlay);
     s.requestRenderMode = !pFpsOverlay;
     s.requestRender();
@@ -189,11 +187,9 @@
     return stopJankProbe;
   });
 
-  // Load live values when the Performance tab is open, and RE-load whenever the 3D viewer attaches or
-  // detaches — the 3D view may mount after the tab was opened, so a one-shot load on tab-open would stay
-  // stuck on "3D not loaded". While the tab is open and 3D is attached, force continuous rendering so the
-  // fps readout (and overlay) tick live instead of freezing under requestRenderMode; restore on-demand
-  // rendering when leaving the tab (unless the user pinned the overlay on).
+  // Load live values while the Performance tab is open, and RE-load when the 3D viewer attaches/detaches (it may
+  // mount after the tab opened). With 3D attached, force continuous rendering so fps ticks live; restore
+  // on-demand rendering when leaving the tab (unless the overlay is pinned on).
   $effect(() => {
     if (tab !== 'performance') return;
     if (!$perf3dAttached) { perfReady = false; return; }
@@ -1448,10 +1444,8 @@
       {/if}
     </div>
   {:else if tab === 'video'}
-    <!-- WebRTC inbound pipeline, one row per stage: what arrives from the engine (recv), what the decoder
-         manages (decoded/dropped) and what the playout reports (freezes/delay). Splitting the stages is
-         the whole point — it tells whether an unstable picture loses frames upstream of the WebView,
-         in the decoder, or only at presentation. -->
+    <!-- WebRTC inbound pipeline, one row per stage — arrival (recv), decoder (decoded/dropped), playout
+         (freezes/delay) — to tell whether an unstable picture loses frames upstream, in the decoder or at presentation. -->
     <div class="perf-tab">
       <div class="debug-stats">
         <div class="stat-group">

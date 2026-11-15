@@ -55,10 +55,7 @@ export async function loadFlights(dbPath: string): Promise<FlightSummary[]> {
   return listFlights(dbPath);
 }
 
-/**
- * Fetch flight details, track, and lazily enrich metadata (geocode + weather).
- * Returns everything needed to populate the page state in one call.
- */
+/** Flight details + track, lazily enriching metadata (geocode + weather) — all the page needs, in one call. */
 export async function selectFlightData(
   flightId: number,
   dbPath: string,
@@ -178,10 +175,7 @@ export async function getPartnerTrack(
   return getFlightTrack(flightId, dbPath);
 }
 
-/**
- * Import a blackbox log file. Returns the raw result from the backend
- * (may be 'success' or 'duplicate' — caller handles the UI confirmation).
- */
+/** Import a blackbox log; returns the raw backend result ('success' or 'duplicate' — the caller confirms). */
 export async function importBlackbox(
   filePath: string,
   dbPath: string,
@@ -197,9 +191,7 @@ export async function countBlackboxLogs(filePath: string) {
   return blackboxLogCount(filePath);
 }
 
-/**
- * Import an ArduPilot DataFlash .bin file.
- */
+/** Import an ArduPilot DataFlash .bin file. */
 export async function importArdupilot(
   filePath: string,
   dbPath: string,
@@ -209,9 +201,7 @@ export async function importArdupilot(
   return importArdupilotLog(filePath, dbPath, forceImport, locale);
 }
 
-/**
- * Import a PX4 ULog .ulg file.
- */
+/** Import a PX4 ULog .ulg file. */
 export async function importUlog(
   filePath: string,
   dbPath: string,

@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Fleet mode without group recording (the default until the group end screen exists, backend
-// `fleet_mode`): one vehicle at a time is recorded. Said once per app run when a second vehicle appears
-// — a toast in the system-message banner, not a dialog (it must never displace an open End-Flight
-// question). "Once" counts only a notice that was actually shown: one the "System Messages" filter
-// dropped is tried again on the next vehicle change.
+// Fleet mode without group recording (backend `fleet_mode`) records one vehicle at a time — said once per run
+// when a second vehicle appears, as a toast (never a dialog that could displace an End-Flight question). A
+// notice the "System Messages" filter dropped doesn't count; it is tried again on the next vehicle change.
 
 import { get } from 'svelte/store';
 import { t } from 'svelte-i18n';

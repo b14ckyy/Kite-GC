@@ -15,15 +15,9 @@
   const saved = get(settings);
   initI18n(saved.locale);
 
-  // Block FRAME-level zoom gestures app-wide. A trackpad pinch (or Ctrl/Cmd +/-) otherwise zooms the
-  // whole WebView — scaling the widgets out of view — instead of the map. The map keeps its own
-  // zoom: preventDefault() stops only the browser's page zoom; it does NOT stop propagation, so the
-  // map's wheel/pinch handlers still receive the event and zoom the map.
-  //   - Chromium / WebView2 (Windows): a trackpad pinch arrives as `wheel` with `ctrlKey` set.
-  //   - macOS / WKWebView: a trackpad pinch fires the WebKit `gesture*` events.
-  //   - Ctrl/Cmd +/-/0/= keyboard zoom.
-  // NOTE: Linux/WebKitGTK handles the pinch natively in GTK and ignores preventDefault entirely, so the
-  // frame zoom there is suppressed in the Rust setup hook (lib.rs, pins the WebView zoom-level at 1.0).
+  // Block FRAME-level zoom app-wide (trackpad pinch, Ctrl/Cmd +/-) — it scales the whole WebView; preventDefault
+  // stops only the page zoom, so the map's own handlers still zoom. WebView2 sends a pinch as ctrl+wheel, WKWebView
+  // as gesture* events; WebKitGTK ignores preventDefault, so lib.rs pins its zoom level at 1.0 instead.
   onMount(() => {
     // Uncaught frontend errors go to the backend file log (log_frontend) — a release build has no console.
     const report = (kind: string, detail: unknown) => {

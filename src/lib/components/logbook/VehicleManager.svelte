@@ -3,14 +3,9 @@
   Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 -->
 
-<!-- VehicleManager.svelte
-     Vehicle library on the panel framework (docs/active/PANEL_FRAMEWORK.md) — its own PanelShell
-     (compact ↔ advanced 1:2 split): vehicle list grouped by type in the main field, the build-sheet
-     detail (image header + structured specs + stats + linked flights) in the detail field. Opened
-     from the Flight Logbook's "Vehicles" toggle. Flights link by their stored `vehicle_id`; giving a
-     vehicle a craft name / FC id offers to link the existing flights flown with it
-     (controllers/vehicleLinkController.ts). See docs/active/VEHICLE_DB.md.
--->
+<!-- VehicleManager — vehicle library in its own PanelShell (compact ↔ advanced 1:2 split): list by type +
+     build-sheet detail; opened from the logbook's "Vehicles" toggle. Flights link by `vehicle_id`; see
+     controllers/vehicleLinkController.ts and docs/active/VEHICLE_DB.md. -->
 <script lang="ts">
   import { t } from 'svelte-i18n';
   import { anyCase } from '$lib/helpers/fileFilters';
@@ -338,11 +333,9 @@
     try {
       // The flight this vehicle was created from belongs to it.
       if (forFlight != null) await flightSetVehicle(forFlight, targetId, dbPath());
-      // Offer to link the existing flights flown with the vehicle's identity — over both keys, craft name
-      // and FC id: for a new vehicle, and on an edit that changed the craft name or entered an FC id where
-      // there was none. A REPLACED FC id (an FC swap) offers by the new id only — flights already flown
-      // with the new FC and stored unassigned; at count 0 there is no prompt, so a normal swap stays
-      // silent and the earlier flights stay linked through their vehicle id.
+      // Offer to link existing flights by craft name and FC id — for a new vehicle, a changed craft name or a newly
+      // entered FC id. A REPLACED FC id (FC swap) offers by the new id only; at count 0 there is no prompt, and the
+      // earlier flights stay linked through their vehicle id.
       const craftChanged = input.craft_name != null
         && (!before || input.craft_name.toLowerCase() !== (before.craft_name ?? '').trim().toLowerCase());
       const uidAdded = uid != null && !(before?.fc_uid ?? '').trim();

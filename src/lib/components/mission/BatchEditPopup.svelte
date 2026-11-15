@@ -4,16 +4,9 @@
 -->
 
 <script lang="ts">
-  // Batch-edit popup for a multi-selection of waypoints. One APPLY button (no
-  // live-apply → undo/redo-friendly). Fields use the shared UnitStepper/
-  // NumberStepper; a field shows "---" (empty) when the selected WPs differ.
-  // Editing a field applies it to ALL applicable WPs; after APPLY the popup
-  // reloads fresh (relative-change resets, diff state recomputed).
-  //   • Altitude (absolute) + Relative Change (delta, keeps relative differences)
-  //   • Alt-mode toggle — blocked + warning when modes differ; clicking converts
-  //     all selected to one mode (terrain/launch-aware)
-  //   • Speed (Waypoint/Land), Hold time (PosHold-Time), User-Action bits
-  // All values are unit-aware (steppers keep metric base internally).
+  // Batch-edit popup for selected INAV waypoints: one APPLY (undo-friendly), "---" where values differ; a field
+  // applies to ALL applicable WPs. Altitude + relative change, alt-mode toggle (blocked when modes differ),
+  // speed, hold time, User-Action bits — unit-aware, metric base internally.
   import { t } from 'svelte-i18n';
   import {
     mission, selectedWpIndices, missionUpdateWp, WpAction, hasLocation,

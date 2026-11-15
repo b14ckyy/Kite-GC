@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Local radar source links (ADS-B receivers, the FormationFlight module): how a source's link is shown,
-// edited and pushed on this platform, and which serial port is claimed by whom. The one place for
-// "who has COM7" — the Radar panel (its ADS-B and FormationFlight rows) and the main connection's port
-// list (ConnectionControls: desktop toolbar, phone popout, link manager) all ask here.
+// Local radar source links (ADS-B receivers, FormationFlight): how a link is shown, edited and pushed here, and
+// the one place for "who has COM7" (Radar panel and the main connection's port list ask here).
 
 import { defaultNetPort } from '$lib/stores/connection';
 import type { RadarLinkFields, RadarLinkTransport, RadarSettings } from '$lib/stores/settings';
@@ -79,14 +77,9 @@ export type PortOwner =
 /** Serial port → the owners claiming it (normally one; a stale config may list a port twice). */
 export type PortClaims = Map<string, PortOwner[]>;
 
-/**
- * Serial ports claimed by the radar sources (and, if given, the main connection).
- * - `activeOnly: true` — what the main connection must avoid: only sources that run right now (radar master
- *   switch on, the system enabled and, for an ADS-B receiver, the receiver itself enabled).
- * - `activeOnly: false` — what the Radar panel must avoid: every configured source of an enabled system,
- *   running or not (an ADS-B receiver that is switched off still has its port reserved, as before).
- * Only sources whose transport is serial claim a port; an IP source's stale `port` field claims nothing.
- */
+/** Serial ports claimed by the radar sources (and, if given, the main connection). `activeOnly: true`: only
+ *  sources running now (what the main connection must avoid); `false`: every configured source of an enabled
+ *  system (what the Radar panel must avoid). Only serial sources claim a port. */
 export function serialPortClaims(
   radar: RadarSettings,
   opts: { activeOnly: boolean; mainPort?: string | null },
@@ -111,13 +104,9 @@ export function serialPortClaims(
   return claims;
 }
 
-/**
- * Who else listens on UDP port `port`, or null. A UDP link binds the local port with the number the user
- * entered; a second listener on the same number gets no data (the backend refuses to start it), so the
- * Radar panel warns before that happens. Counts every configured UDP source of an enabled system and the
- * main connection's UDP port (`mainUdpPort`: the port set for the main link while UDP is selected there,
- * connected or not — a radar source that binds it first would push the main link onto another port).
- */
+/** Who else listens on UDP `port`, or null — a second listener on the same number gets no data (the backend
+ *  refuses it). Counts every configured UDP source of an enabled system and `mainUdpPort` (the main link's UDP
+ *  port while UDP is selected, connected or not). */
 export function udpPortOwner(
   radar: RadarSettings,
   self: PortOwner,

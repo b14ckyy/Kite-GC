@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// FC system messages (MAVLink STATUSTEXT) shown as top-of-screen toasts. The backend emits
-// `mavlink-statustext` ({ severity, text }); we keep the most recent few, expire each one 20 s after
-// it individually arrived (unless it's already slid out of the buffer), and play a severity-tiered
-// audio cue. Severity is MAV_SEVERITY (0 = emergency … 7 = debug).
+// FC system messages (MAVLink STATUSTEXT, `mavlink-statustext`) as top-of-screen toasts: the last few, each
+// expiring 20 s after it arrived, with a severity-tiered audio cue. Severity = MAV_SEVERITY (0 = emergency … 7 = debug).
 
 import { writable, get } from 'svelte/store';
 import { isActive, vehicles } from '$lib/stores/vehicles';
@@ -60,11 +58,9 @@ function levelAllowed(level: StatusTextLevel): boolean {
 
 export const statusTexts = writable<StatusTextMsg[]>([]);
 
-/** Recent ArduPilot/PX4 "PreArm: …" failure reasons (newline-joined), for the arming indicator tooltip.
- *  Tracked independently of the toast `systemMessages` filter (so the detail is available even with
- *  toasts off). The red "not ready" STATE itself comes from the SYS_STATUS PREARM_CHECK bit, not this —
- *  this only supplies the human-readable reasons. Distinct lines accumulate during a check burst and the
- *  whole set clears once the FC stops repeating them (block cleared / armed). */
+/** Recent ArduPilot/PX4 "PreArm: …" reasons (newline-joined) for the arming tooltip, independent of the toast
+ *  filter. The red "not ready" STATE comes from SYS_STATUS PREARM_CHECK, not this. Lines accumulate during a
+ *  burst; the set clears once the FC stops repeating them. */
 export const prearmReason = writable<string | null>(null);
 // ArduPilot phrases arming blockers as "PreArm: …"; PX4 uses "Preflight Fail: …" / "Arming denied: …".
 // (PX4 matching is best-effort / untested — the SYS_STATUS PREARM_CHECK bit is the other fallback.)
@@ -118,12 +114,9 @@ function push(severity: number, text: string, vehicle?: StatusTextVehicle): bool
   const expiresAt = Date.now() + CLEAR_AFTER_MS;
   let repeated = false;
   statusTexts.update((list) => {
-    // De-dup against the WHOLE buffer, not just the last line. An FC that nags with two alternating
-    // messages (INAV's "UNABLE TO ARM" / "WAITING FOR GPS FIX" while it waits for a fix) never repeats
-    // its *last* line, so a last-line-only check appends a fresh row for every nag and fills the banner
-    // within seconds. A repeat instead refreshes the existing line's lifetime and bumps its counter,
-    // keeping its position so the banner doesn't reshuffle while you're reading it. With several
-    // vehicles the same text from two craft is two lines (keyed by vehicle too).
+    // De-dup against the WHOLE buffer: an FC nagging with two alternating messages never repeats its last line.
+    // A repeat refreshes the existing line's lifetime and counter in place (no reshuffle). Keyed by vehicle too,
+    // so the same text from two craft is two lines.
     const idx = list.findIndex((m) => m.text === clean && (m.vehicle?.vehicleId ?? null) === (vehicle?.vehicleId ?? null));
     if (idx !== -1) {
       repeated = true;

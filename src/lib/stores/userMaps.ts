@@ -1,14 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// User online maps: tile sources the user added by URL template (Settings → Custom Online Provider), on every
-// platform. Persisted as `settings.userMapProviders`; each becomes a provider `user:<id>` in the
-// map-provider registry (`config/mapProviders.ts`), so every map view resolves it through
-// `getProviderById` like a built-in one, and its tiles take the same online path (backend `fetch_tile`,
-// IndexedDB cache — the per-layer concurrency key is the template).
-//
-// The URL template may carry the user's API key: it is never logged. Log the provider id or name, and
-// for a host `templateHost` (no path, no query).
+// User online maps (Settings → Custom Online Provider, all platforms): persisted in `settings.userMapProviders`,
+// each a `user:<id>` provider resolved like a built-in, tiles via the normal online path. The template may carry
+// the user's API key: never log it — log the id/name, or `templateHost`.
 
 import { get } from 'svelte/store';
 import { settings } from '$lib/stores/settings';
@@ -67,12 +62,9 @@ function decodeImageSize(buf: ArrayBuffer): Promise<{ width: number; height: num
   }).finally(() => URL.revokeObjectURL(url));
 }
 
-/**
- * Settings → Test: fetch the tile under the current 2D map centre (at zoom 12, or the map's max zoom
- * if lower) through the normal tile loader and decode it. Not cached. The error text never carries the
- * URL (the key may be in it): the backend strips it, and any copy that slips through is replaced by
- * the host.
- */
+/** Settings → Test: fetch and decode the tile under the 2D map centre (zoom 12 or the map's max) through the
+ *  normal loader, uncached. The error text never carries the URL (the key may be in it): the backend strips it,
+ *  any slipped copy is replaced by the host. */
 export async function testUserMapTemplate(template: string, maxZoom: number): Promise<UserMapTestResult> {
   const t = template.trim();
   const [lat, lon] = get(settings).map.center;

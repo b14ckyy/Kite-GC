@@ -184,10 +184,8 @@ export function packPhoneMove(
   });
   const landed = (res: PackResult) => res.placements.some((x) => x.id === id && x.page === p && x.row === r);
   const fits = (res: PackResult) => res.overflow.length === 0;
-  // A move never costs a widget its place: an order that leaves one without a slot (a 1×1 dropped
-  // onto a page of 2×2 tiles would push one out) is not taken while another order keeps them all.
-  // The last one is the plain order without the swap — what a move was before there were orders —
-  // and the answer when none of them fits.
+  // A move never costs a widget its place: an order that leaves one without a slot is not taken while another
+  // keeps them all. The last try is the plain order without the swap — the answer when none fits.
   const tries = [
     packPhoneGrid(next, geom, { id, late: false }),
     packPhoneGrid(next, geom, { id, late: true }),

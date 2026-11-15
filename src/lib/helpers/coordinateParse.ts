@@ -1,14 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Coordinates typed into the map search, recognised locally (they never leave the device, and they
-// must work offline). Accepted, each as a latitude/longitude pair:
-//  - decimal degrees: `51.4886, 11.97` · `51.4886 11.97` · `-33.9 151.2` · `51,4886; 11,97`
-//  - with hemisphere letters, before or after: `51.4886N 11.97E` · `N 51.4886 E 11.97` · `11.97E 51.48N`
-//  - degrees + decimal minutes: `51 29.316 N 11 58.2 E` · `N51°29.316' E011°58.200'`
-//  - degrees-minutes-seconds: `51°29'19"N 11°58'12"E` · `51 29 19 11 58 12`
-// Without letters the first value is the latitude. Out-of-range values (|lat| > 90, |lon| > 180,
-// minutes or seconds ≥ 60) and anything ambiguous give null — the text then goes to the place search.
+// Coordinates typed into the map search, parsed locally (never sent, work offline): decimal degrees (`51.4886,
+// 11.97`, decimal comma `51,4886; 11,97`), hemisphere letters before/after, degrees + decimal minutes, and DMS
+// (`51°29'19"N 11°58'12"E`). Without letters the first value is the latitude; out-of-range or ambiguous → null.
 
 export interface ParsedCoordinates {
   lat: number;
@@ -144,11 +139,9 @@ export function parseCoordinates(input: string): ParsedCoordinates | null {
     return a && b ? pair(a, b) : null;
   }
 
-  // Otherwise every split point that leaves two valid halves is a candidate (letters and marks rule
-  // most of them out). Plain numbers must split evenly (`51 29.3 11 58.2`, never `51 | 29 11 58`).
-  // A letter between two numbers belongs to the side the text's style puts it on: trailing when the
-  // text starts with a number (`51.48N 11.97`), leading when it starts with a letter. Still more than
-  // one left: the even split, or none at all.
+  // Otherwise every split leaving two valid halves is a candidate. Plain numbers must split evenly; a letter
+  // between two numbers goes trailing when the text starts with a number, leading when it starts with a letter.
+  // Still more than one: the even split, or none.
   const plain = !fields.some((f) => f.t === 'hemi' || (f.t === 'num' && f.mark !== null));
   const style = fields[0].t === 'hemi' ? 'lead' : 'trail';
   let found: { r: ParsedCoordinates; even: boolean; styled: boolean }[] = [];

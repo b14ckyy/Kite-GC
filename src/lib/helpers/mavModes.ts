@@ -1,19 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// MAVLink flight-mode tables for the vehicle-control panel (ArduPilot + PX4).
-//
-// `main`/`sub` are the firmware-specific custom_mode parts forwarded to MAV_CMD_DO_SET_MODE:
-//   - ArduPilot: `main` = the flat Mode::Number, `sub` = 0.
-//   - PX4: `main` = PX4_CUSTOM_MAIN_MODE_*, `sub` = PX4_CUSTOM_SUB_MODE_AUTO_* (0 if none).
-//
-// Numbers verified against ArduCopter mode.h, ArduPlane/Rover/Sub mode tables, and PX4 px4_custom_mode.h.
-// `stick` flags modes that need transmitter sticks to fly — locked unless an RC link is present
-// (a GCS-only switch into one of these without a TX is an instant crash). See docs/active/VEHICLE_CONTROL.md.
-//
-// ArduPilot 4.7+ also reports its own mode list (MAVLink AVAILABLE_MODES, read per vehicle by the
-// backend — `stores/fcModes`). With that list the FC decides WHICH modes exist; these tables still
-// decide label, order, stick lock and the Guided flag (`offeredModes`).
+// MAVLink flight-mode tables for the vehicle-control panel. `main`/`sub` are the custom_mode parts for
+// MAV_CMD_DO_SET_MODE (ArduPilot: Mode::Number + 0; PX4: PX4_CUSTOM_MAIN_MODE_* + SUB_MODE_AUTO_* or 0).
+// `stick` = needs transmitter sticks, locked without an RC link. With an ArduPilot 4.7+ AVAILABLE_MODES list
+// (stores/fcModes) the FC decides WHICH modes exist; the tables still give label, order, stick lock, Guided flag.
 
 import type { VehicleClass } from './arduCommandCatalog';
 import type { AutopilotSystem } from '$lib/stores/autopilotContext';
@@ -207,12 +198,9 @@ function unknownFcMode(m: FcMode): MavMode {
   return { key: `fc${n}`, name: m.name || `#${n}`, main: n, sub: 0, stick: true };
 }
 
-/**
- * The modes the panel offers. Without an FC list (PX4, ArduPilot before 4.7, list not read yet) the
- * static `modesFor`. With one (ArduPilot): the table's modes the FC lists as user-selectable, in the
- * table's order, then the FC's modes the table does not know. A table mode the FC does not list is not
- * offered; a never-offered table mode stays out even when the FC lists it as selectable.
- */
+/** The modes the panel offers: without an FC list, the static `modesFor`; with one, the table's modes the FC
+ *  lists as user-selectable (table order), then FC modes the table doesn't know. A never-offered table mode
+ *  stays out even when the FC lists it. */
 export function offeredModes(system: AutopilotSystem, cls: VehicleClass, fc: readonly FcMode[] | null | undefined): MavMode[] {
   if (system !== 'ardupilot' || !fc || fc.length === 0) return modesFor(system, cls);
   const selectable = new Map<number, FcMode>();

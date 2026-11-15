@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Per-panel UI view state (which tab is open, compact vs advanced size) — kept in a module-level
-// store so it survives switching between nav-rail panels (each panel is unmounted when inactive,
-// which would otherwise reset its local `$state`). Persisted to localStorage so it also survives a
-// restart, matching the behaviour of the Airspace panel's `compact` (which lives in `settings`).
-// This is UI view state, not data settings — hence its own lightweight store.
+// Per-panel UI view state (open tab, compact vs advanced) in a module-level store, so it survives panel
+// switches (inactive panels unmount) and, via localStorage, restarts.
 
 import { writable } from 'svelte/store';
 

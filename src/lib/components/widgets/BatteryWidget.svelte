@@ -3,10 +3,9 @@
   Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 -->
 
-<!-- Battery widget — voltage bar, voltage, current + power, mAh. Multi-battery aware (ArduPilot/PX4):
-     shows one monitor instance with an AUTO selector (highest current draw, with a low-battery safety
-     override) and manual pinning. Single-battery setups (INAV) show the one battery. See
-     docs/active/MULTI_BATTERY.md. -->
+<!-- Battery widget — voltage bar, voltage, current + power, mAh. Multi-battery (ArduPilot/PX4): one instance
+     with AUTO selection (highest draw, low-battery override) or manual pinning; INAV shows its one battery.
+     See docs/active/MULTI_BATTERY.md. -->
 <script lang="ts">
   import type { TelemetryData, BatteryInstance } from "$lib/stores/telemetry";
   import { settings } from "$lib/stores/settings";

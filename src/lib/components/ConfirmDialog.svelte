@@ -40,11 +40,8 @@
   /** State of the optional checkbox at the time the dialog was dismissed. */
   export function checkboxResult(): boolean { return checkboxChecked; }
 
-  /**
-   * Show the dialog and return a promise that resolves to the selected button value
-   * or null if cancelled / backdrop-clicked / Escape pressed.
-   * For info-only dialogs, pass no buttons — only OK + Cancel are shown.
-   */
+  /** Show the dialog; resolves to the selected button value, or null on Cancel / backdrop / Escape. With no
+   *  buttons (info-only) just OK + Cancel are shown. */
   export function show(opts: DialogOptions): Promise<string | null> {
     // A dialog still open is displaced: its caller gets null (cancelled) instead of waiting forever.
     resolver?.(null);

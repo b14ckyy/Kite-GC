@@ -3,11 +3,8 @@
   Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 -->
 
-<!-- CustomMapCoverageLayer.svelte
-     Coverage frames of the active custom map on the 2D map, one per covered area: a dashed ×4 "finder"
-     box while it fits the viewport (so a pyramid's detail stays findable on its own overview), the real
-     outline once it does not, a small ring when tiny. Non-interactive. Usage: <CustomMapCoverageLayer {map} />
--->
+<!-- CustomMapCoverageLayer — coverage frames of the active custom map, one per covered area: a dashed ×4
+     "finder" box while it fits the viewport, the real outline once it does not, a ring when tiny. Non-interactive. -->
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
   import L from 'leaflet';

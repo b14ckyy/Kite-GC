@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Startup update check: ask the backend for the release of the user's channel and, if it is newer and
-// not skipped, show a one-shot prompt with the release notes. Nothing is downloaded until "Update and
-// Restart" (commands/updater.rs). A failed check is logged and ignored; it never disrupts use.
-// A store installation keeps the notice, but with the store listing as its only way out.
+// Startup update check: if the backend's release for the user's channel is newer and not skipped, show a one-shot
+// prompt with the notes. Nothing downloads before "Update and Restart" (commands/updater.rs); a failed check is
+// logged and ignored. Store installations get the store listing as their only way out.
 
 import { writable, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';

@@ -4,9 +4,8 @@
 -->
 
 <script lang="ts">
-  // Telemetry Relay panel — drops down under the connection bar. Top: a basic LINK diagnostic (active
-  // protocol + RX/TX byte rate + msgs/s). Below: the configured relays (≈ a copy of the connect bar),
-  // each re-encoding the live telemetry into a wire protocol and emitting it out a second link. See
+  // Telemetry Relay panel (drops down under the connection bar): a LINK diagnostic (protocol, RX/TX rate, msgs/s)
+  // and the configured relays, each re-encoding live telemetry into a wire protocol out a second link. See
   // docs/active/TELEMETRY_FORWARDING.md.
   import { onMount } from 'svelte';
   import { t } from 'svelte-i18n';
@@ -33,10 +32,8 @@
     return () => stopBleDeviceListener();
   });
 
-  // Run our OWN BLE scan to populate the picker — but ONLY when connected via a non-BLE transport, so we
-  // never fight the main connection's BLE scan (while disconnected the user may be picking a BLE primary)
-  // or share the adapter with a BLE primary link. Refresh the serial list at the same time so both
-  // device pickers are self-sufficient (the relay panel no longer depends on the main bar having scanned).
+  // Our OWN BLE scan for the picker — ONLY when connected via a non-BLE transport, so we never fight the main
+  // connection's scan or share the adapter with a BLE primary. The serial list refreshes at the same time.
   $effect(() => {
     if (open && $connection.status === 'connected' && $connection.transportType !== 'ble') {
       void refreshSerialPorts(''); // return value (the auto-selected port) is irrelevant here
@@ -108,10 +105,8 @@
     settings.patch({ relays: next });
     void reconfigureRelays();
   }
-  // ── Port guards ──────────────────────────────────────────────────────────────
-  // TCP listen ports are local binds → must be unique (a duplicate makes the 2nd relay fail to bind).
-  // UDP targets must be a unique host:port pair (same port to different hosts is fine). We auto-bump to
-  // the next free port so a duplicate can't be configured.
+  // ── Port guards ── TCP listen ports are local binds and must be unique; UDP targets must be a unique
+  // host:port pair. A duplicate auto-bumps to the next free port.
   function nextFreeTcpPort(start: number, excludeId: string): number {
     let p = Math.max(1, Math.min(65535, start || 5760));
     const used = (port: number) =>

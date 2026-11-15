@@ -3,28 +3,9 @@
   Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 -->
 
-<!-- PhoneWidgetPanel — the full-height smoked-glass widget column on the phone's right edge
-     (Dev-Docs active/PHONE_UI.md D2/D6–D10). One slot = usable height / PHONE_GRID_ROWS; the packer
-     (helpers/phoneGridPacker.ts) turns the persisted positions into page/row/col placements, and
-     this component draws them: widgets edge to edge on the glass (their own card glass is switched
-     off here), two pages under a vertical snap scroll, page dots at the bottom. The panel is 1 or 2
-     slots wide as the packer decides and reports its width (`widthPx`).
-
-     Edit mode (D10): a long-press (500 ms, on Android's own haptic) on a widget arms it — every
-     widget shows a dashed frame and a corner resize button (one tap = next size state). In edit
-     mode a touch that HOLDS 250 ms picks the widget up and centres it under the finger (there is
-     no "grabbed at the top": every widget handles the same wherever it is touched), and while it
-     is dragged the OTHER widgets already show where the packer would settle them for that drop
-     (live preview = the same packer the commit uses). Nothing is stored before the drop: with the finger off the column and off
-     the bottom slots there is no target, every widget is back where it was, and letting go there
-     changes nothing. Holding the widget 30 % of its height past the column's top/bottom edge — or
-     the finger right at that edge — flips the page. A quicker flick flips the page instead of
-     grabbing. A tap anywhere outside the panel ends edit mode.
-
-     Edit mode and the drag session are SHARED with the bottom slots (stores/phoneEdit.svelte.ts,
-     Dev-Docs active/PHONE_BOTTOM_WIDGETS.md B6): a widget dragged out of the column can be dropped
-     on a bottom slot, a slotted widget dragged by PhoneBottomBar can land in a cell here — the
-     column previews that drop too. The ghost lives at the root (PhoneDragGhost). -->
+<!-- PhoneWidgetPanel — the full-height glass widget column on the phone's right edge (Dev-Docs
+     active/PHONE_UI.md D2/D6–D10): draws the packer's placements (helpers/phoneGridPacker.ts) on two snap
+     pages. Edit mode and drag session are shared with the bottom slots (stores/phoneEdit.svelte.ts, B6). -->
 <script lang="ts">
   import { t } from 'svelte-i18n';
   import { PHONE_GRID_ROWS, PHONE_GRID_PAGES, PHONE_GRID_PAD } from '$lib/config/phoneGrid';
@@ -285,11 +266,9 @@
       if (Math.hypot(clientX - pickX, clientY - pickY) <= DRAG_SLOP_PX) return;
       travelled = true;
     }
-    // A bottom slot under the finger wins; otherwise the cell under the centre of the widget's
-    // top-left slot — for a 1×1 tile the finger itself, for a wider / taller one half a slot up and
-    // left of it per extra slot (clamped to the grid — a finger just past the column's edge still
-    // targets the nearest cell). Further off the column there is NO target: the preview
-    // falls back to the stored layout and a release there drops nothing.
+    // A bottom slot under the finger wins; otherwise the cell under the centre of the widget's top-left slot
+    // (the finger for a 1×1, half a slot up-left per extra slot; clamped to the grid). Further off the column
+    // there is NO target: the preview shows the stored layout and a release drops nothing.
     const bottom = dragSlotAt(clientX, clientY);
     let c: PhoneDragTarget | null = bottom ? { kind: 'bottom', slot: bottom } : null;
     const rr = rootEl.getBoundingClientRect();
@@ -304,10 +283,9 @@
     if (!sameTarget(c, d.target)) d.target = c;
   }
 
-  // The page flips while the dragged widget hangs over the column's top/bottom edge (or the finger
-  // is at it) — only on its way through the column, never on its way to a bottom slot. Driven by
-  // the shared drag session, not by our own pointer stream: a widget picked up in a bottom slot
-  // (PhoneBottomBar owns that drag) turns the pages the same way.
+  // The page flips while the dragged widget hangs over the column's top/bottom edge (or the finger is at it),
+  // only on its way through the column. Driven by the shared drag session, so a widget picked up in a bottom
+  // slot turns the pages the same way.
   $effect(() => {
     const d = phoneEdit.drag;
     // (Not before the finger has travelled: a widget picked up at the column's edge and held still
@@ -352,10 +330,8 @@
       }
       if (flickY != null) return; // page flick in progress — decided on release
       if (pressId && Math.hypot(e.clientX - pressX, e.clientY - pressY) > DRAG_SLOP_PX) {
-        // Moved before the hold elapsed: not a pickup. In edit mode the cells block native
-        // scrolling (touch-action none), so the flick is ours to turn into a page change. A swipe
-        // that started on the swapped-in mini map is NOT one: it zooms that map (Map.svelte, the
-        // one-finger slide) — the page turns from any other tile.
+        // Moved before the hold elapsed: not a pickup. In edit mode the cells block native scrolling, so the flick
+        // becomes a page change — unless it started on the swapped-in mini map, where it zooms (Map.svelte).
         clearPress();
         if (editing) flickY = pressY;
       }
@@ -378,10 +354,9 @@
       flickY = null;
       if (phoneEdit.drag && ownDrag) endDrag(false);
     };
-    // Tap outside the panel → leave edit mode (capture, so a surface that stops propagation counts).
-    // A touch on the swapped-in mini map (a layer OVER one of our tiles, outside the panel's DOM)
-    // is relayed to that tile as a press, so a long-press there still enters edit mode; in edit
-    // mode the map layer is touch-free (html.phone-editing) and the tile gets the events itself.
+    // Tap outside the panel → leave edit mode (capture phase). A touch on the swapped-in mini map (a layer OVER
+    // a tile) is relayed to that tile as a press, so a long-press there still enters edit mode; in edit mode
+    // the map layer is touch-free and the tile gets the events itself.
     const onDown = (e: PointerEvent) => {
       const target = e.target as HTMLElement | null;
       if (!editing && e.pointerType !== 'mouse' && target?.closest('.layer-map.in-frame')) {
@@ -420,10 +395,9 @@
   style="--slot:{slot}px; --pad:{PAD}px; --cols:{cols}; --page-h:{pageH}px"
   oncontextmenu={(e) => e.preventDefault()}
 >
-  <!-- The glass is its OWN layer under the tiles, and it is the one that opts into the native
-       sink's hole (data-nv-clip). A clip-path also removes an element from hit-testing inside the
-       cut, so clipping the panel root would let touches on the video tile fall through to the map
-       below (edit mode died, double-tap never arrived); the tiles above stay unclipped. -->
+  <!-- The glass is its OWN layer under the tiles and opts into the native sink's hole (data-nv-clip): a
+       clip-path also removes an element from hit-testing inside the cut, so clipping the panel root would let
+       touches on the video tile fall through to the map. The tiles stay unclipped. -->
   <div class="glass" data-nv-clip></div>
   <div class="pages" class:dragging={!!dragId} bind:this={scroller} onscroll={onScroll}>
     {#each pages as p (p)}
