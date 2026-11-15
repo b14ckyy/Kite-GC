@@ -296,8 +296,11 @@ room for either the map or a widget, rarely both. Tablets keep the desktop layou
   cell when only small widgets are active. Widgets that no longer fit are switched off automatically,
   and **Settings → HUD widgets** tells you when the grid is full.
 - **Rearranging widgets**: **long-press** a widget to enter edit mode. Hold a widget briefly and drag
-  it to move it — the others shift live to show where they will settle; a quick flick still turns the
-  page. Tap the corner button to step through the sizes. Tap the map to leave edit mode.
+  it to move it: it sits centred under your finger and takes the row you hold it over, and the others
+  shift live to show where they will settle. Nothing is stored before you let go — let go beside the
+  column and every widget is back where it was. Hold the widget at the column's top or bottom edge to
+  turn the page; a quick flick still turns it too. Tap the corner button to step through the sizes.
+  Tap the map to leave edit mode. The docked video window moves out of the way while edit mode is on.
 - **Three widget slots on the bottom edge** of the map, centred: a larger one in the middle (30 % of
   the screen height, square — or 2:1 wide for Live AGL) and a smaller one on each side (20 %, square).
   In edit mode the three slots show as dashed frames; drag a widget from the column into a slot, or
