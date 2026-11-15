@@ -3,12 +3,9 @@
 
 // Radar — ADS-B receiver over MAVLink (Phase 2).
 //
-// A dedicated hardware ADS-B receiver (e.g. ADSBee, PicoADSB) streams MAVLink `ADSB_VEHICLE` (#246)
-// frames over serial USB, TCP or UDP (`radar::link`). This source opens the link, parses frames
-// (reusing the project's MavParser), maps #246 → TrackedVehicle, and pushes batches to the aggregator
-// (merged with the online ADS-B feeds by ICAO). Read-only: it never writes to the receiver, so a UDP
-// link is a pure listener. Runs on a dedicated thread; reconnects on a link error.
-// See docs/active/RADAR_TRACKING_CORE.md §7.1.
+// A hardware ADS-B receiver (e.g. ADSBee, PicoADSB) streams MAVLink `ADSB_VEHICLE` (#246) over
+// `radar::link`; this source maps them to TrackedVehicles for the aggregator (merged with the online
+// feeds by ICAO). Read-only — a UDP link is a pure listener. See docs/active/RADAR_TRACKING_CORE.md §7.1.
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::atomic::{AtomicBool, Ordering};

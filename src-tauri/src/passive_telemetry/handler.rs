@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Passive telemetry handler — a dedicated, strictly listen-only thread that owns the ByteTransport.
-//
-// It reads incoming bytes, captures them to file (Phase B), feeds the protocol detector and reports
-// framing stats to the Debug Monitor via the `debug-telemetry-stats` event. It NEVER writes to the
-// transport.
+// Passive telemetry handler: a strictly listen-only thread owning the ByteTransport — capture to file,
+// protocol detection, framing stats (`debug-telemetry-stats`). It NEVER writes to the transport.
 
 use std::collections::VecDeque;
 use std::sync::mpsc;
@@ -35,16 +32,9 @@ const FLUSH_INTERVAL: Duration = Duration::from_secs(2);
 /// sending housekeeping (RSSI, link-stats) after the FC drops, so "any data" never goes stale — this
 /// tracks FC-origin frames specifically.
 const FC_STALE_MS: u128 = 5000;
-/// Experimental MSP-over-SmartPort probe — the one deliberate exception to the listen-only rule. Tests
-/// whether the radio's BLE bridge forwards an inbound S.Port frame into the FC uplink (see `msp_probe`).
-/// Dev-only (release never writes to the transport).
-///
-/// STATUS (2026-06-17): kept ARMED but not yet working. On the FrSky X20RS the Ethos Bluetooth only does
-/// telemetry *forwarding* (downlink mirror) — injected writes to every writable characteristic
-/// (0xFFF3/0xFFF6) × all frame variants produced no FC reply, while the passive MSP reassembler decoded
-/// the radio's own polling cleanly. Pending the Ethos dev confirming whether a bidirectional/serial BT
-/// mode can forward the uplink; once it does, this fires automatically on reconnect. This whole feature
-/// is an isolated commit and can be reverted wholesale if the idea is abandoned.
+/// Experimental MSP-over-SmartPort probe — the one deliberate exception to listen-only, dev builds only:
+/// does the radio's BLE bridge forward an inbound S.Port frame to the FC (see `msp_probe`)? Not working
+/// yet (FrSky X20RS Ethos BT only forwards the downlink); an isolated, revertable feature.
 const MSP_PROBE_ENABLED: bool = cfg!(debug_assertions);
 /// How often to fire the MSP_API_VERSION probe request.
 const MSP_PROBE_INTERVAL: Duration = Duration::from_secs(1);

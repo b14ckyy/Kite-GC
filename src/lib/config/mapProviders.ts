@@ -183,11 +183,9 @@ export function parseCustomTileUrl(url: string): { map: string; z: number; x: nu
   return map ? { map, z, x, y } : null;
 }
 
-/** Build the provider entry of a custom map. No attribution (the user's own tiles). The 2D zoom range
- *  reaches the higher of 20 (like the built-in providers) and two map zooms above the one that shows
- *  the map's highest level natively; above that Leaflet scales the top level up (`maxNativeZoom`, see
- *  `customLayerZoom`). The 3D view stops at the highest level that exists (Cesium levels are file
- *  levels; the tile size goes to Cesium as `tileWidth`/`tileHeight`). */
+/** Provider entry of a custom map (no attribution). 2D zoom reaches the higher of 20 and two zooms above the
+ *  map's top native level (Leaflet scales the top level up, `maxNativeZoom`); 3D stops at the highest level
+ *  that exists (Cesium levels are file levels; the tile size goes in as `tileWidth`/`tileHeight`). */
 export function customProvider(spec: CustomMapSpec): MapProvider {
   return {
     id: `${CUSTOM_PROVIDER_PREFIX}${spec.name}`,
@@ -210,10 +208,9 @@ export function getCustomProviders(): MapProvider[] {
   return customProviders;
 }
 
-// ── User online maps (dynamic entries, all platforms) ───────────────────────────────────────────
-// Online tile sources the user added by URL template (Settings → Custom Online Provider), persisted in
-// `settings.userMapProviders` and mirrored into this registry by `stores/userMaps.ts`. Their tiles take
-// the normal online path (backend `fetch_tile` + IndexedDB cache) like the built-in providers.
+// ── User online maps (dynamic entries, all platforms) ── URL templates the user added (Settings → Custom
+// Online Provider), persisted in `settings.userMapProviders` and mirrored here by `stores/userMaps.ts`; tiles
+// take the normal online path (backend `fetch_tile` + IndexedDB cache).
 
 /** Provider-id prefix of a user online map: `user:<stable id>` (the id survives a rename). */
 export const USER_PROVIDER_PREFIX = "user:";

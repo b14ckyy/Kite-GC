@@ -1,32 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-//! The FC's own flight-mode list — MAVLink AVAILABLE_MODES (#435), ArduPilot 4.7.0 and later.
-//!
-//! The control panel's mode tables are fixed per vehicle type: modes compiled into the firmware but
-//! missing from a table are never offered, and modes a table lists may be absent from the connected
-//! build. ArduPilot 4.7+ reports which modes it has; the panel uses that list when it exists and keeps
-//! the static tables otherwise.
-//!
-//! - **The request is the feature check.** No version gate: one `MAV_CMD_REQUEST_MESSAGE` per index,
-//!   and a vehicle that has never answered and leaves [`MAX_UNANSWERED`] requests in a row unanswered is
-//!   not asked again (unless it comes back after a link stall — [`ModeEnumerator::restart`]). Once it
-//!   has answered, a lossy link gets [`MAX_UNANSWERED_AFTER_REPLY`] tries in a row before the read
-//!   stops. ArduPilot 4.1 – 4.6 answers with COMMAND_ACK FAILED and nothing else. The ACK
-//!   decides nothing: other 512 requests (AUTOPILOT_VERSION, HOME_POSITION) share the command id, so a
-//!   FAILED 512 can't be attributed.
-//! - **Index by index** (param2 = i from 1): the "all" request (param2 = 0) pushes one message and leaves
-//!   the rest to the SRn_PARAMS stream, whose default rate is 0 on Copter and Sub. One request in flight.
-//! - **Peripheral-proof.** The request is addressed to the vehicle's autopilot component (never
-//!   target_component 0, which ArduPilot forwards to every component behind it), and only replies from
-//!   that component are accepted ([`from_autopilot`]); everything is validated before it is stored.
-//! - **AVAILABLE_MODES_MONITOR** carries a sequence number the FC bumps when its mode set changes (4.7.x
-//!   streams it every 5 s after the first request): a different `seq` re-reads the list, an unchanged
-//!   one does nothing. A complete list is emitted once per read; a partial list never.
-//!
-//! Pure state machine with injected time: the handler loop asks [`ModeEnumerator::poll`] whether to send
-//! a request and feeds replies to [`ModeEnumerator::on_mode`] / [`ModeEnumerator::on_monitor`], and
-//! calls [`ModeEnumerator::restart`] when the vehicle is heard again after a stall.
+//! The FC's own flight-mode list (MAVLink AVAILABLE_MODES #435, ArduPilot 4.7+), used by the control
+//! panel instead of its static tables. Requested index by index from the AUTOPILOT component only (never
+//! target_component 0); the COMMAND_ACK decides nothing (other 512 requests share the command id).
 
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
@@ -271,11 +248,9 @@ impl ModeEnumerator {
         true
     }
 
-    /// Read the list again from scratch after [`START_DELAY`] — the vehicle came back after a link stall,
-    /// possibly rebooted with a different mode set (Q_ENABLE, Lua modes, GCSBLOCK) and no MONITOR to say
-    /// so. Also revives a reader that gave up. No-op (returns false) while a read is already running. The
-    /// previous complete list stays valid until the new one is complete; the MONITOR `seq` is forgotten
-    /// (a rebooted FC starts it again at 0).
+    /// Read the list again after [`START_DELAY`] — the vehicle came back after a stall, possibly rebooted
+    /// with another mode set. No-op (false) while a read runs; the old list stays valid until the new one
+    /// is complete, and the MONITOR `seq` is forgotten (a rebooted FC restarts it at 0).
     pub fn restart(&mut self, now: Instant) -> bool {
         if matches!(self.phase, Phase::Waiting { .. } | Phase::Collecting) {
             return false;

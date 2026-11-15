@@ -3,15 +3,9 @@
   Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 -->
 
-<!-- PhoneVideoDock — the phone's stand-in for the floating video window (Dev-Docs
-     active/PHONE_VIDEO.md D2–D4, D7). A chromeless frame docked to the bottom-right of the map
-     area (left of the corner controls, bottom-aligned with the chip row): no drag, no resize. One
-     toggle button above the corner controls parks it — the frame slides right, behind the widget
-     column and off the screen — and brings it back. Parked = unmounted: nothing renders, the
-     source stays open, so the return is instant. Double-tap = map ⇄ video swap, as everywhere.
-     The frame is the `floating` surface (store field, map location, native-sink id), so +page's
-     swap plumbing works unchanged; +page computes the rect (it also places the swapped map into
-     it) and passes it down. -->
+<!-- PhoneVideoDock — the phone's floating video window (Dev-Docs active/PHONE_VIDEO.md D2–D4, D7): a chromeless
+     frame docked bottom-right of the map area, parked/recalled by one toggle, double-tap = map ⇄ video. It is the
+     `floating` surface (store field, map location, native-sink id); +page computes its rect. -->
 <script lang="ts">
   import { t } from 'svelte-i18n';
   import { videoStream, videoState, bindVideoEl, setMapLocation, toggleFloating, setFloatingTransient, togglePhoneDockCompact, reportMjpegError, reportImgSize, fpsProbe } from '$lib/stores/video';
@@ -45,14 +39,9 @@
   const showButton = $derived(live && !widgetActive && !phoneEdit.editing);
   const open = $derived($videoState.floating && live && !widgetActive);
 
-  // Mounted once the frame has been opened while a source is live, and with the native sink it stays
-  // mounted while parked (class `parked`, off screen behind the widget column): the native layer then stays where it is,
-  // covered by the opaque map, and a park / recall is nothing but the hole leaving and returning.
-  // Hiding and showing the Android SurfaceView on every toggle re-cut the window's transparent
-  // region each time, and that blanked the map for a few frames (Marc, 2026-09-13). Only a source
-  // going away (or the widget taking the picture) unmounts. On open it mounts parked and un-parks a
-  // frame later so the slide-in animates. Parking with the map in the frame swaps the map back
-  // first — a parked frame must never hold the map.
+  // Mounted once opened while a source is live; with the native sink it stays mounted while parked — re-cutting
+  // the Android SurfaceView's transparent region per toggle blanked the map. Only a source going away (or the
+  // widget taking the picture) unmounts. A parked frame never holds the map (parking swaps it back first).
   let mounted = $state(false);
   let parked = $state(true);
   let frameEl = $state<HTMLDivElement | null>(null);
@@ -75,18 +64,15 @@
     }
   });
 
-  // The button parks / recalls the frame, whatever it holds. Video primary (the map in the frame):
-  // parking hides the mini map — +page moves its in-frame map layer out with the frame — and the
-  // button becomes a map icon in the corner the 2D/3D controls vacate (they are hidden while the
-  // map is a mini map). Double-tap the full-screen video to bring the map back to the main view.
+  // The button parks / recalls the frame, whatever it holds. With the map in the frame, parking hides the mini
+  // map (+page moves its layer with the frame) and the button becomes a map icon in the corner the 2D/3D controls
+  // vacate; double-tap the full-screen video to bring the map back.
   function toggle() {
     toggleFloating();
   }
 
-  // Widget edit mode clears the stage: the docked window (video or mini map) lies over the bottom
-  // slots on all but the widest screens, so it parks while the widgets are rearranged and comes
-  // back when edit mode ends — only if it was out, and not stored (a window the user parked stays
-  // parked).
+  // Widget edit mode parks the docked window (it covers the bottom slots on most screens) and brings it back
+  // afterwards — only if it was out, and not stored.
   let parkedForEdit = false;
   $effect(() => {
     const editing = phoneEdit.editing;
@@ -111,12 +97,9 @@
     bindVideoEl(videoEl, $videoStream);
   });
 
-  /** Where the native hole comes to rest (NativeSurfaceSpec.rest): the frame's box without the
-   *  slide transform — the layer is placed there before the frame moves (Marc, 2026-09-12: "the
-   *  video is already in position and does not move"), and the router cuts the hole once the frame
-   *  has arrived; during the slide the frame shows its own ground. The transform is on the frame,
-   *  the hole div only inherits it; the matrix is in the frame's layout px, the box in viewport px
-   *  (--ui-scale). */
+  /** Where the native hole comes to rest (NativeSurfaceSpec.rest): the frame's box without the slide
+   *  transform, so the video layer is in place before the frame moves; the hole is cut once it arrived.
+   *  The matrix is in the frame's layout px, the box in viewport px (--ui-scale). */
   function restRect(el: HTMLElement): DOMRect | null {
     const r = el.getBoundingClientRect();
     if (!frameEl) return r;
@@ -176,10 +159,8 @@
         use:doubleTap={() => setMapLocation('floating')}
       >
         {#if live && $videoState.nativeSink}
-          <!-- Nothing of its own: no placeholder ground, no text. Until the backend has armed the layer
-               the frame's ground (.dw-bg, opaque, no hole yet) covers the map; the moment the hole is
-               cut the picture is there. A placeholder that vanished at that moment was one more
-               layer change in the frame that blanked the map (Marc, 2026-09-13). -->
+          <!-- Nothing of its own: until the layer is armed the frame's opaque ground covers the map. A
+               placeholder vanishing at that moment was one more layer change that blanked the map. -->
           <div class="native-hole" use:nativeSurface={{ id: 'floating', rest: restRect }}></div>
         {:else if live && $videoState.mjpegUrl}
           {#if $canvasSink}
@@ -194,10 +175,8 @@
         {/if}
         <VideoReconnectOverlay />
       </div>
-      <!-- Size toggle: the grey corner marker (the desktop frame's resize-corner look, mirrored to
-           the top-left) with a diagonal double arrow — a tap flips the window between its normal
-           and its compact size. Video mode only: with the map in the frame its layer covers the
-           chrome, so +page draws the same corner above the map. -->
+      <!-- Size toggle (normal ⇄ compact), the desktop resize-corner look mirrored to the top-left. Video mode only:
+           with the map in the frame, +page draws the same corner above the map. -->
       <button class="dw-size" onclick={togglePhoneDockCompact} title={$t('video.dockSize')} aria-label={$t('video.dockSize')}>
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="M6 6l12 12M6 6h6M6 6v6M18 18h-6M18 18v-6" />

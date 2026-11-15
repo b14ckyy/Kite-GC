@@ -4,19 +4,9 @@
 -->
 
 <script lang="ts">
-  // Live AGL widget (2×1 wide) — a forward-looking terrain profile HUD.
-  //  • left 1/3 = recently flown terrain + flight history (scrolls out left)
-  //  • a small UAV icon sits at the "now" divider, at its current altitude
-  //  • right 2/3 = ESTIMATED terrain ahead along the current heading, with a
-  //    dashed flight line projected from the current vario (ground-intersect warn)
-  //
-  // The flown history is accumulated internally from the telemetry stream, so it
-  // works both on a live connection AND during Blackbox/flight-log replay (the
-  // shared liveTrack store is only filled while armed on a live link).
-  //
-  // Horizontal scale steps with UAV speed (300/900/1800/3600 m total, 1:2
-  // history:forward), with hysteresis. Visual language follows the Terrain
-  // Analysis panel (grid, ground gradient) inside a standard widget card.
+  // Live AGL widget (2×1) — forward-looking terrain profile HUD: left 1/3 flown terrain + history, UAV at the
+  // "now" divider, right 2/3 ESTIMATED terrain ahead with a projected vario line. History is accumulated here, so
+  // it works live AND in replay. Scale steps with speed (300/900/1800/3600 m, 1:2), with hysteresis.
   import { untrack } from 'svelte';
   import { get } from 'svelte/store';
   import { invoke } from '@tauri-apps/api/core';
@@ -76,13 +66,8 @@
     return [(f2 * 180) / Math.PI, (l2 * 180) / Math.PI];
   }
 
-  /**
-   * Total render distance step from speed (≈ speed · 120 s), with hysteresis.
-   * The dead-band sits at each *boundary*: once we've stepped up we only step
-   * back down when `need` drops to 70 % of the step below the current one — so
-   * cruising right on a boundary (e.g. ~54 km/h on the 1800↔3600 edge) doesn't
-   * flap between two scales.
-   */
+  /** Total render distance step from speed (≈ speed · 120 s). Hysteresis at each boundary: step down only when
+   *  `need` drops to 70 % of the step below, so cruising on a boundary doesn't flap. */
   const STEP_DOWN_HYST = 0.7;
   function nextStep(speed: number, current: number): number {
     const need = speed * 120; // unclamped, so a slow craft can return to the lowest step
@@ -110,12 +95,9 @@
     return yaw;
   }
 
-  // Glide-path slope (the FC's own vario / ground speed — differencing GPS-MSL over the sparse
-  // history points was coarse and made the forward angle snap in big steps), smoothed with a
-  // time-based PT1 low-pass: fc = 0.2 Hz → τ ≈ 0.8 s, ~2.5 s to settle. The raw ratio swung the
-  // projected line up and down on every vario/speed wobble. dt comes from the telemetry
-  // timestamps, so the filter is sample-rate independent; a discontinuity (new flight,
-  // scrub-back) resets it (see `accumulate`).
+  // Glide-path slope from the FC's own vario / ground speed (GPS-MSL differences were too coarse), smoothed with
+  // a time-based PT1 (fc = 0.2 Hz, τ ≈ 0.8 s); dt from telemetry timestamps, so sample-rate independent. A
+  // discontinuity resets it (see `accumulate`).
   const GLIDE_LPF_HZ = 0.2;
   const GLIDE_TAU_S = 1 / (2 * Math.PI * GLIDE_LPF_HZ);
   let slopeFilt: number | null = null;
@@ -161,11 +143,9 @@
   function accumulate(t: TelemetryData): void {
     const ts = t.lastUpdate || 0;
     const prev = histBuf[histBuf.length - 1];
-    // Reset on a discontinuity: time going backwards (scrub-back / new flight) OR a large
-    // position jump (loading a DIFFERENT log while the player stays open, or a big seek).
-    // Without the jump check the profiler would bridge the two sites — the next terrain
-    // sample would span thousands of km at 30 m spacing, flooding the backend and freezing
-    // the app until the next log change.
+    // Reset on a discontinuity: time going backwards OR a large position jump (another log, a big seek). Without
+    // the jump check the profiler bridges the two sites — one terrain sample spanning thousands of km at 30 m
+    // spacing floods the backend and freezes the app.
     const jumped = !!prev && haversineM(prev.lat, prev.lon, t.lat, t.lon) > HIST_RESET_DIST;
     if (ts < lastTs || jumped) {
       histBuf.length = 0;
@@ -274,20 +254,14 @@
     void telem.groundSpeed;
     void telem.altMsl;
     void telem.lastUpdate;
-    // runUpdate writes state it also reads (e.g. `step = nextStep(speed, step)`).
-    // Run it untracked so those self-reads don't become effect dependencies —
-    // otherwise the read+write loop trips Svelte's effect_update_depth_exceeded
-    // guard and hard-freezes the main thread.
+    // runUpdate writes state it also reads (e.g. `step = nextStep(speed, step)`): untracked, or the read+write loop
+    // trips effect_update_depth_exceeded and hard-freezes the main thread.
     untrack(() => void runUpdate());
   });
 
-  // ── Render geometry ────────────────────────────────────────────────
-  // Readout font size scales with the widget (like the other instrument widgets). Bounded by the
-  // WIDTH too: in the square size states (L/S) the two readouts share half the room they have in
-  // the wide tile, so the height-only rule made them collide.
-  // The AGL readout is left-aligned (not centred over the marker), so the two readouts split the
-  // width cleanly and the font can use it: 0.08 × width is the wide tile's old value and a readable
-  // size in the squares.
+  // ── Render geometry ── readout font scales with the widget, bounded by WIDTH too: in the square states the
+  // two readouts share half the room of the wide tile. The AGL readout is left-aligned, so the two split the
+  // width cleanly.
   const fsVal = $derived(Math.max(9, Math.min(30, height * 0.13, width * 0.08)));
   const fsLabel = $derived(fsVal * 0.72);
   const fsAxis = $derived(Math.round(Math.max(9, Math.min(13, fsVal * 0.8))));

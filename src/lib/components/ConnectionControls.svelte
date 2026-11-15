@@ -3,11 +3,9 @@
   Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 -->
 
-<!-- ConnectionControls — the protocol / transport / device selection + Connect button. One markup
-     for every place the connection is configured: the desktop Toolbar (inline in its right-hand
-     group, or on its floating second row) and the phone's Connection popout (`stacked`: row 1 =
-     protocol + transport, row 2 = the matching selection + Connect). Extracted from Toolbar.svelte
-     for the phone UI (Dev-Docs active/PHONE_UI.md D1). All selections are bindables owned by +page. -->
+<!-- ConnectionControls — protocol / transport / device selection + Connect, one markup for the desktop Toolbar
+     (inline or on its second row) and the phone's Connection popout (`stacked`, PHONE_UI.md D1). All selections
+     are bindables owned by +page. -->
 <script lang="ts">
   import { t } from 'svelte-i18n';
   import Button from '$lib/components/panel/Button.svelte';
@@ -77,9 +75,8 @@
   );
 
   // ── Serial ports held by a running radar source ────────────────────
-  // Shown disabled with the source's name. The current selection is never changed behind the pilot's
-  // back: a claimed selected port stays selected and shows the note — connecting is their call (the OS
-  // refuses the second open anyway).
+  // Shown disabled with the source's name. A claimed port that is already selected stays selected with
+  // the note — never changed behind the pilot's back.
   const radarClaims = $derived(serialPortClaims($settings.radar, { activeOnly: true }));
   function radarClaimNote(path: string): string | null {
     const owner = claimOf(radarClaims, path);
@@ -110,19 +107,11 @@
     editingBt = false;
   });
 
-  // ── Network port defaults ──────────────────────────────────────────
-  // The standard port depends on the protocol as well as the transport (see `defaultNetPort`):
-  // MAVLink is UDP 14550 or, over TCP, the SITL port 5760, while MSP over TCP is INAV SITL's 5761.
-  // The port used to follow the transport alone, so selecting MAVLink over TCP still offered the MSP
-  // port and the pilot had to know the right number.
-  //
-  // Whether the port may be moved is tracked in `portIsAuto` rather than guessed from the number.
-  // Guessing cannot work: 5760 is ArduPilot SITL's port *and* a perfectly deliberate choice for an
-  // MSP bridge, so a pilot who typed it would have had it silently rewritten on the next switch.
-  /** Hand the port back to Kite when the typed value is the standard one for the current selection.
-   *  Without this there is no way back once anything has been typed, where going by the number at
-   *  least had one, and an older profile stored on the previous transport-only default (MAVLink over
-   *  TCP on 5761) would lose the re-defaulting for good. */
+  // ── Network port defaults ── the standard port depends on protocol AND transport (`defaultNetPort`). Whether
+  // the port may be moved is tracked in `portIsAuto`, not guessed from the number: 5760 is ArduPilot SITL's port
+  // and a deliberate choice for an MSP bridge alike.
+  /** Hand the port back to Kite when the typed value is the standard one for the current selection — the way
+   *  back to auto, also for an older profile stored on a transport-only default. */
   function notePortEdit(typed: number) {
     portIsAuto = typed === defaultNetPort(selectedProtocol, selectedTransport);
   }

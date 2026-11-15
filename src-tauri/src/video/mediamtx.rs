@@ -1,29 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-//! MediaMTX — the RTSP→WebRTC engine (replaces go2rtc + its ffmpeg republish).
-//!
-//! go2rtc could not read UDP-only RTSP servers with its native client, so every such source (the
-//! UAV-Link Pi among them) went through a spawned ffmpeg that published **back into go2rtc over
-//! RTSP/TCP on loopback**. That publish leg was measured to stall in a near-constant ~316–334 ms
-//! class — reproduced independently on a second machine with a file source, located to the
-//! TCP publish direction (a `-re`-paced sender writing keyframe bursts), and gone the moment the
-//! same chain published over UDP. MediaMTX reads UDP-only servers natively, so the ffmpeg middleman
-//! disappears for the normal case entirely: one process pulls the source and serves WHEP.
-//! Measured against the same Pi, side by side with the old chain on the same afternoon: the old
-//! chain produced 3+ such stalls per minute once it tipped (17–59 min uptime), MediaMTX' output had
-//! a worst inter-frame gap of 47 ms over 50 minutes — and ~22 ms less end-to-end latency.
-//!
-//! ffmpeg remains as the *fallback reader* for quirky servers MediaMTX cannot pull (and as the
-//! future transcode hook): it reads the source and publishes into MediaMTX — **over UDP**, never
-//! TCP, for the reason above.
-//!
-//! Discovery/download mirror the `blackbox_decode`/ffmpeg model (`flightlog::decoder`): not
-//! bundled, found next to the app / on PATH / in the writable app-data `bin/` dir, fetched on
-//! demand from bluenviron/mediamtx releases. Unlike go2rtc the version is **pinned**: MediaMTX
-//! asset names carry the version (so `releases/latest/download/…` cannot work), and a pin is what
-//! we wanted anyway — an unknown config key fails the start hard, so config and binary must move
-//! together, and every user runs the build we tested.
+//! MediaMTX — the RTSP→WebRTC engine: pulls UDP-only RTSP servers natively and serves WHEP. ffmpeg is only
+//! the fallback reader, publishing into it over UDP — NEVER TCP (that loopback publish stalled ~320 ms at a
+//! time). The version is pinned: an unknown config key fails the start, so config and binary move together.
 
 use std::io::{BufRead, Read};
 use std::net::{SocketAddr, TcpStream};
@@ -137,10 +117,8 @@ fn manual_install_msg() -> String {
 
 /// Download the pinned MediaMTX into the app-data `bin/` dir. Returns the path.
 pub async fn download<F: FnMut(u8, &str)>(mut report: F) -> Result<PathBuf, String> {
-    // Both mobile systems forbid executing a downloaded binary (Android by W^X on writable app
-    // storage, iOS by codesigning), so the engine can never run there — refuse up front with the
-    // reason instead of downloading a file that then fails to spawn. Camera / capture sources need
-    // no engine and work; RTSP on mobile is the Phase E item (ANDROID_SUPPORT.md §5b).
+    // Both mobile systems forbid executing a downloaded binary, so the engine can never run there — refuse
+    // up front. Camera / capture sources need no engine (RTSP on mobile: ANDROID_SUPPORT.md §5b).
     if cfg!(any(target_os = "android", target_os = "ios")) {
         return Err("The RTSP video engine cannot run on this device: mobile systems forbid executing \
                     a downloaded binary. Camera and capture-device sources work without it."
@@ -254,8 +232,6 @@ fn extract_from_tar_gz(archive_bytes: &[u8], target: &Path) -> Result<(), String
     Err(format!("'{}' was not found inside the downloaded archive", want))
 }
 
-// ── Running instance ─────────────────────────────────────────────────
-
 /// What a running instance was started for. A `start()` with the same spec keeps the process; a
 /// different spec (URL/transport/reader changed) tears it down and starts fresh.
 #[derive(PartialEq, Eq, Clone)]
@@ -330,13 +306,9 @@ impl MediaMtx {
         // The RTSP server's UDP receive pair, used by the ffmpeg publisher below (RTP on the first,
         // RTCP on the second). Loopback — nothing outside the machine ever publishes into us.
         let (rtp_port, rtcp_port) = free_loopback_udp_pair()?;
-        // The single ICE mux port for WebRTC media, bound on every interface. NOT loopback, and
-        // that is deliberate: a browser never generates a `127.0.0.1` ICE candidate, and Windows
-        // drops loopback-addressed packets arriving from another interface — a loopback-only
-        // engine can never be paired with (measured on go2rtc: 23 STUN checks, 0 answers, and the
-        // session's entire video leaving the machine via NAT hairpin). MediaMTX advertises the
-        // real interface addresses (`webrtcIPsFromInterfaces`), the kernel routes them internally,
-        // and an empty ICE-server list keeps any STUN detour from coming back.
+        // The ICE mux port, bound on every interface — NOT loopback: browsers never generate a 127.0.0.1
+        // candidate, and Windows drops loopback-addressed packets from another interface. MediaMTX advertises the
+        // interface addresses; an empty ICE-server list keeps STUN detours away.
         let ice_port = free_webrtc_port()?;
 
         let dir = crate::flightlog::decoder::install_dir();
@@ -395,9 +367,8 @@ impl MediaMtx {
         }
 
         let mut child = cmd.spawn().map_err(|e| format!("Cannot start MediaMTX: {e}"))?;
-        // MediaMTX logs to STDOUT (not stderr like go2rtc did). At `warn` level these lines are the
-        // engine's account of why a source failed — drain them into our log file so a tester's
-        // Diagnostics export contains them. stderr carries config errors → same treatment.
+        // MediaMTX logs to STDOUT (config errors to stderr): both drained into our log, so a failed source is
+        // explained in the Diagnostics export.
         drain_into_log(child.stdout.take());
         drain_into_log(child.stderr.take());
 
@@ -407,22 +378,16 @@ impl MediaMtx {
             return Err("MediaMTX did not become ready on its API port".to_string());
         }
 
-        // The fallback reader: ffmpeg reads the source (NO forced input transport — the only mode
-        // quirky servers accept) and publishes into MediaMTX. The publish leg is **UDP with RTP
-        // packets under the MTU** — publishing over TCP is precisely the measured ~320 ms stall
-        // (a `-re`-class sender writing keyframe bursts into a loopback TCP socket), reproduced
-        // and bisected on an independent setup; the same chain over UDP was clean.
+        // The fallback reader: ffmpeg reads the source (NO forced input transport — the only mode quirky servers
+        // accept) and publishes via UDP with RTP under the MTU — TCP is exactly the ~320 ms stall.
         let publisher = if spec.use_ffmpeg {
             Some(spawn_publisher(&spec.url, rtsp_port)?)
         } else {
             None
         };
 
-        // Wait for the stream path to actually carry tracks. Covers the RTSP connect + probe to
-        // the source (LAN cameras: <2 s measured; the budget is for flaky links, not the happy
-        // path). Without this, the WHEP offer below would 404/blackhole on a source that never
-        // came up — the caller gets the error *here*, where "the source is unreachable" is
-        // distinguishable from "WebRTC failed".
+        // Wait for the path to carry tracks (the budget is for flaky links), so "the source is unreachable"
+        // surfaces here, distinct from a WebRTC failure.
         let deadline = Instant::now() + Duration::from_secs(8);
         loop {
             if path_ready_once(api_port) {
@@ -568,15 +533,9 @@ fn wait_port(port: u16, budget: Duration) -> bool {
     false
 }
 
-/// Kill ffmpeg publishers left over from a previous, no-longer-running engine instance (a hard app
-/// exit orphans them). They keep consuming the remote RTSP server — which has wedged the UAV-Link
-/// Pi's shared media before.
-///
-/// Publishers are identified by their publish target (`rtsp://127.0.0.1:<port>/kite`), which no
-/// other ffmpeg we spawn (MJPEG server, device probes) and no user ffmpeg ever has. The port tells
-/// us **whose** publisher it is: if something is still listening there, the owning engine is alive
-/// — a second Kite instance, or a dev build beside the installed one — and killing its reader would
-/// black out that instance's video. So: enumerate, and only kill publishers whose engine is gone.
+/// Kill ffmpeg publishers orphaned by a dead engine (they keep consuming the remote RTSP server). They are
+/// identified by their publish target `rtsp://127.0.0.1:<port>/kite`; if something still listens on that
+/// port its engine is alive (a second Kite instance) — never kill those.
 fn kill_stale_publishers() {
     let Some(listing) = list_ffmpeg_processes() else { return };
     for (pid, port) in parse_publisher_candidates(&listing) {
@@ -699,13 +658,9 @@ fn free_loopback_udp_pair() -> Result<(u16, u16), String> {
             .local_addr()
             .map_err(|e| format!("Cannot read allocated UDP port: {e}"))?
             .port();
-        // MediaMTX validates the RTP port as EVEN (RTP/RTCP convention: RTP even, RTCP =
-        // RTP+1) and EXITS otherwise — the API never comes up and the start fails as
-        // "did not become ready". Windows hands ephemeral ports out roughly sequentially
-        // (see free_webrtc_port), so one odd allocation used to wedge EVERY subsequent
-        // engine start on the next odd port: video dead until an app restart moved the
-        // cursor (field report 2026-09-01). Hold the odd socket so the cursor advances.
-        // `u16::MAX` is odd, so the +1 overflow case is covered by the same check.
+        // MediaMTX requires an EVEN RTP port (RTCP = RTP+1) and exits otherwise. Windows allocates ephemeral
+        // ports roughly sequentially, so hold the odd socket to move the cursor on (else every later start
+        // fails). `u16::MAX` is odd, so the +1 overflow is covered by the same check.
         if port % 2 != 0 {
             held.push(first);
             continue;
@@ -718,13 +673,9 @@ fn free_loopback_udp_pair() -> Result<(u16, u16), String> {
     Err(format!("Cannot find an adjacent free UDP port pair after {ATTEMPTS} attempts"))
 }
 
-/// Grab a port that is free for **both UDP and TCP** on all interfaces — the WebRTC ICE mux binds
-/// UDP there, and probing both keeps the port usable if a TCP mux is ever enabled. Every rejected
-/// socket is HELD until we are done: on Windows, Hyper-V/WSL/Docker reserve 100-port blocks of the
-/// dynamic range (bind fails with WSAEACCES 10013, a *permission* error), the allocator hands
-/// ports out roughly sequentially, and releasing a rejected socket immediately makes every retry
-/// come back from the same reserved block — which turned a busy default port into an instant,
-/// self-repeating reconnect loop before. Holding the sockets forces the cursor forward.
+/// A port free for BOTH UDP and TCP on all interfaces (the ICE mux binds UDP). Rejected sockets are HELD
+/// until done: Hyper-V/WSL/Docker reserve 100-port blocks (WSAEACCES) and the allocator is sequential, so
+/// releasing them makes every retry land in the same block.
 fn free_webrtc_port() -> Result<u16, String> {
     const ATTEMPTS: usize = 256;
     let mut held = Vec::with_capacity(ATTEMPTS);

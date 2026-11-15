@@ -4,10 +4,8 @@
 -->
 
 <script lang="ts">
-  // Radar panel (foreign-vehicle tracking) on the panel framework. Phase 0: dynamic per-system tabs
-  // on the left (settings field — source config tables land in a later phase) and the consolidated,
-  // grouped vehicle list on the right. A Compact button collapses the panel to the `info` variant
-  // (list only). See docs/active/RADAR_TRACKING_PANEL_AND_MAP.md.
+  // Radar panel (foreign-vehicle tracking): per-system tabs on the left, the grouped vehicle list on the right;
+  // Compact collapses to the `info` variant (list only). See docs/active/RADAR_TRACKING_PANEL_AND_MAP.md.
   import { t } from 'svelte-i18n';
   import { onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';

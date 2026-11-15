@@ -22,9 +22,8 @@ export function guidedClickArmed(): boolean {
   return get(guidedActive) || get(activeMode)?.guided === true;
 }
 
-/** The mission editors and the survey generator own map clicks while active — before, arming
- *  Guided was always an explicit button press, now it can be implicit (FC already in guided),
- *  so the Fly-Here click must step aside explicitly. */
+/** The mission editors and the survey generator own map clicks while active; Guided can be armed implicitly
+ *  (FC already in guided), so the Fly-Here click must step aside explicitly. */
 export function mapClickOwnedByEditor(): boolean {
   return get(editMode) || get(arduEditMode) || activeSurveyPattern.isActive;
 }

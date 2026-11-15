@@ -4,10 +4,9 @@
 -->
 
 <script lang="ts">
-  // Settings → Custom Online Provider: the list of the user's online tile sources (Add / Edit / Delete) and,
-  // in place of the list, the editor of one (UserMapEditor). A modal like LogFilePicker, so the
-  // crowded settings menu keeps a single row for the feature. A row shows the host only — the path
-  // and query may hold the user's API key.
+  // Settings → Custom Online Provider: the list of the user's online tile sources and, in its place, the editor
+  // of one (UserMapEditor) — a modal, so settings keeps one row. Rows show the host only: path and query may
+  // hold an API key.
   import { tick } from 'svelte';
   import { t } from 'svelte-i18n';
   import { settings } from '$lib/stores/settings';

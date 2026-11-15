@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// SQLite database for flight logging
-// Uses rusqlite with bundled SQLite — no external dependencies required.
-// Schema evolution via PRAGMA user_version + sequential migrations.
+// SQLite flight database (bundled rusqlite); schema evolution via PRAGMA user_version + sequential steps.
 
 use std::path::{Path, PathBuf};
 
@@ -33,10 +31,9 @@ const TELEMETRY_COLS: &str = "flight_id, timestamp_ms, lat, lon, alt_m, speed_ms
     nav_lat, nav_lon, nav_alt_m, mode_primary, mode_modifiers, link_snr, link_rssi_dbm, airspeed_ms, \
     throttle_pct, wall_ms";
 
-/// Full single-statement DDL for `telemetry_records` at the current field set. The main DB grows
-/// this table via the migration chain; the per-session temp DB (no migration history) creates it
-/// in one shot. The two MUST describe the same columns (the temp rows are copied into the main
-/// table on disarm). No FK here — the temp DB has no `flights` table.
+/// Single-statement DDL for `telemetry_records` at the current field set, for the per-session temp DB (no
+/// migration history). MUST describe the same columns as the migration chain builds — the temp rows are
+/// copied into the main table. No FK: the temp DB has no `flights` table.
 const TELEMETRY_RECORDS_DDL_FULL: &str = "CREATE TABLE IF NOT EXISTS telemetry_records (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     flight_id    INTEGER NOT NULL,
@@ -88,9 +85,8 @@ pub fn open_database(path: &Path) -> SqlResult<Connection> {
          PRAGMA foreign_keys = ON;",
     )?;
 
-    // Incremental auto-vacuum: freed pages (e.g. a deleted blackbox BLOB) go on a freelist and are
-    // handed back via `PRAGMA incremental_vacuum` in the background after a delete (`spawn_reclaim`) —
-    // cost ∝ freed pages, not the whole DB. (A full `VACUUM` rewrites the entire file, which is unusable once logs reach GBs.)
+    // Incremental auto-vacuum: freed pages go on a freelist and are handed back in the background after
+    // a delete (`spawn_reclaim`) — cost ∝ freed pages, not the whole multi-GB file.
     // The mode can only be set before tables exist on a fresh DB, or converted with one VACUUM on an
     // existing one — so do that one-time conversion here when the DB isn't already INCREMENTAL (2).
     let auto_vacuum: i64 = conn.query_row("PRAGMA auto_vacuum", [], |row| row.get(0))?;
@@ -100,11 +96,9 @@ pub fn open_database(path: &Path) -> SqlResult<Connection> {
         conn.execute_batch("VACUUM;")?;
     }
 
-    // Migration safety net (Dev-Docs active/DB_MIGRATIONS.md): when schema steps are pending on an
-    // EXISTING database, snapshot it first — flight archives are irreplaceable. Exactly ONE backup
-    // is kept (the file is multi-GB with blackbox blobs); each upgrade replaces the previous one.
-    // A fresh DB (v0) has nothing to lose and gets none. If the snapshot fails (disk full, …) the
-    // open fails too — migrating without the safety copy is not acceptable.
+    // Migration safety net (Dev-Docs active/DB_MIGRATIONS.md): with schema steps pending on an EXISTING DB,
+    // snapshot it first — exactly ONE backup is kept (multi-GB). If the snapshot fails the open fails:
+    // migrating without the safety copy is not acceptable.
     let version = get_user_version(&conn)?;
     let upgrade = version > 0 && version < CURRENT_SCHEMA_VERSION;
     if upgrade {
@@ -113,10 +107,8 @@ pub fn open_database(path: &Path) -> SqlResult<Connection> {
 
     migrate(&conn)?;
 
-    // A large freelist left behind — a schema step that dropped a table (v21: `blackbox_records`;
-    // the steps run in transactions and may not vacuum themselves), or a reclaim cut short by an app
-    // exit — is handed back to the file system in the background. One cheap pragma per open (this runs
-    // for every command connection); repeated triggers are harmless (`spawn_reclaim` is single-flight).
+    // A large freelist left behind (a schema step that dropped a table, a reclaim cut short by an app
+    // exit) is handed back in the background; repeated triggers are harmless (single flight).
     if freelist_pages(&conn)? > RECLAIM_ON_OPEN_PAGES {
         spawn_reclaim(&conn);
     }
@@ -127,15 +119,9 @@ pub fn open_database(path: &Path) -> SqlResult<Connection> {
 /// pages. Below that the next delete picks the pages up anyway; above it something big was left behind.
 const RECLAIM_ON_OPEN_PAGES: i64 = 4096;
 
-/// Pages per `PRAGMA incremental_vacuum(N)` call of the background reclaim. Each call is its own
-/// write transaction: a small chunk keeps the write lock short — a recording or import waits at most
-/// about one chunk, PROVIDED its write transaction takes the lock up front (`write_tx`; a deferred
-/// read→write upgrade fails instead of waiting) — and lets the WAL auto-checkpoint between chunks
-/// instead of growing by the whole freelist.
-/// Measured on copies of a 1.2 GB archive (113k free pages, 4 KiB pages): a 1024-page chunk takes tens
-/// of ms on an SSD (34 ms median / 46 ms p95 including the auto-checkpoint, ~4.2 s for the whole
-/// freelist, WAL peak 7 MB); on a 7200 rpm hard disk chunks take a few hundred ms (2048-page chunks:
-/// 0.39–0.53 s median, 22–29 s in total).
+/// Pages per `PRAGMA incremental_vacuum(N)` call of the background reclaim, each its own write
+/// transaction: a small chunk keeps the write lock short (tens of ms on an SSD, a few hundred on a hard
+/// disk) and lets the WAL checkpoint between chunks. Writers only wait if they lock up front (`write_tx`).
 const RECLAIM_CHUNK_PAGES: i64 = 1024;
 
 /// Pause of the background reclaim between two chunks. Writers waiting for the lock must get a real
@@ -161,10 +147,8 @@ pub(crate) fn exclude_from_reclaim(dir: &Path) {
     }
 }
 
-/// Whether the database file `db_file` (an absolute path, as `Connection::path` names it) lies in a
-/// directory registered with `exclude_from_reclaim`. Compared in canonical form: SQLite names the file
-/// with symlinks resolved (on macOS the temp folder sits behind `/var` → `/private/var`), which
-/// `std::path::absolute` does not do.
+/// Whether `db_file` lies in a directory registered with `exclude_from_reclaim`. Compared canonically:
+/// SQLite names the file with symlinks resolved (macOS `/var` → `/private/var`), `absolute` does not.
 fn reclaim_excluded(db_file: &Path) -> bool {
     let canonical = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
     let file = canonical(db_file);
@@ -179,11 +163,8 @@ fn reclaims_in_flight() -> std::sync::MutexGuard<'static, Vec<(PathBuf, bool)>> 
     RECLAIMS_IN_FLIGHT.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// Database files a "Compact Database" (full `VACUUM`, `compact_database`) is running on — single flight
-/// per file. While a file is listed, no background reclaim starts on it and a running one stops before
-/// its next chunk: the VACUUM empties the freelist anyway, and a reclaim chunk waiting for the write lock
-/// the VACUUM holds for minutes would only time out.
-///
+/// Database files a "Compact Database" (`compact_database`) is running on. No reclaim runs on a listed
+/// file: the VACUUM empties the freelist anyway, and a chunk waiting for its lock would only time out.
 /// Lock order: `RECLAIMS_IN_FLIGHT` → `COMPACTS_IN_FLIGHT`, never the reverse.
 static COMPACTS_IN_FLIGHT: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
 
@@ -215,13 +196,9 @@ struct ReclaimStats {
     longest: std::time::Duration,
 }
 
-/// Hand the whole freelist back to the file system (`auto_vacuum = INCREMENTAL`, see `open_database`),
-/// `chunk_pages` at a time, each chunk its own implicit transaction. `PRAGMA incremental_vacuum(N)`
-/// frees one page per result row it yields, so every call is stepped to the end (`execute_batch` steps
-/// once and frees exactly one page). Loops until `freelist_count` is 0, so pages freed by others while
-/// it runs go too; `pause` is slept before every chunk but the first. Synchronous — the app goes
-/// through `spawn_reclaim`. `stop` is asked before every chunk; once it says yes the run ends there and
-/// the rest stays on the freelist (a compact took the file over).
+/// Hand the whole freelist back to the file system, `chunk_pages` at a time, until `stop` says so.
+/// `PRAGMA incremental_vacuum(N)` frees one page per result row, so every call must be stepped to the
+/// end (`execute_batch` steps once and frees exactly one page). Synchronous; the app uses `spawn_reclaim`.
 fn reclaim_free_pages(
     conn: &Connection,
     chunk_pages: i64,
@@ -255,13 +232,9 @@ fn reclaim_free_pages(
     Ok(stats)
 }
 
-/// Reclaim the free pages of `conn`'s database file in a background thread, so a delete or an upgrade
-/// never blocks its (often main-thread) caller and never fails on the reclaim. The thread opens its own
-/// plain connection (no `open_database`: no migration, no backup). Single flight per file: a trigger
-/// while one runs makes it go round once more instead of starting a second one. Errors are logged
-/// only — whatever stays on the freelist is picked up by the next trigger. A connection without a
-/// file (in-memory, the tests) is reclaimed synchronously right here. No reclaim starts on a file a
-/// compact is running on (`COMPACTS_IN_FLIGHT`).
+/// Reclaim the free pages of `conn`'s database file in a background thread on its own plain connection
+/// (no `open_database`), so a delete or an upgrade never blocks or fails on it. Single flight per file;
+/// errors are only logged. In-memory connections are reclaimed synchronously right here.
 pub(crate) fn spawn_reclaim(conn: &Connection) {
     let path = match conn.path() {
         Some(p) if !p.is_empty() => PathBuf::from(p),
@@ -448,12 +421,9 @@ impl Drop for CompactGuard {
     }
 }
 
-/// Register a compact of `conn`'s database file (single flight: a second one gets
-/// `COMPACT_RUNNING_ERROR`) and wait until no background reclaim runs on it any more — a running one
-/// stops before its next chunk, new ones do not start while the guard lives (`spawn_reclaim`). This
-/// covers the reclaim the compact's own `open_database` starts on a large freelist as well. A
-/// connection without a file (in-memory) is unreachable for anyone else and needs no registration.
-/// Crate-visible for tests elsewhere that need a compact "running" on a file.
+/// Register a compact of `conn`'s database file (a second one gets `COMPACT_RUNNING_ERROR`) and wait
+/// until no background reclaim runs on it — including the one its own `open_database` may have started.
+/// No new reclaim starts while the guard lives.
 pub(crate) fn begin_compact(conn: &Connection) -> Result<CompactGuard, String> {
     let Some(path) = conn.path().filter(|p| !p.is_empty()).map(PathBuf::from) else {
         return Ok(CompactGuard { path: None });
@@ -484,12 +454,9 @@ pub(crate) fn begin_compact(conn: &Connection) -> Result<CompactGuard, String> {
     Ok(guard)
 }
 
-/// Full defragmenting VACUUM — rebuilds the whole DB file to squeeze out fragmentation. Expensive
-/// (cost ∝ DB size, minutes for a GB-sized archive on a hard disk or SD card); exposed only as the
-/// explicit "Compact Database" maintenance action. Routine deletes use incremental_vacuum instead (see
-/// `open_database`). Single flight per file, and no background reclaim runs on the file meanwhile
-/// (`begin_compact`). Sets `conn`'s busy timeout to `COMPACT_BUSY_TIMEOUT`. Returns the database
-/// size before and after.
+/// Full defragmenting VACUUM — cost ∝ DB size (minutes for a GB archive on a hard disk or SD card), so
+/// only the explicit "Compact Database" action; routine deletes use incremental_vacuum. Returns the
+/// database size before and after.
 pub fn compact_database(conn: &Connection) -> Result<CompactStats, String> {
     let _guard = begin_compact(conn)?;
     let size = |conn: &Connection| -> SqlResult<i64> {
@@ -525,15 +492,10 @@ pub struct CompactStats {
     pub size_after: i64,
 }
 
-/// Resolve the database file path based on settings.
-/// - Empty db_path + portable mode → <exe_dir>/data/flights.db
-/// - Empty db_path + normal mode → <AppData>/kite-gc/flights.db
-/// - Non-empty db_path → <db_path>/flights.db
+/// The database file: `<db_path>/flights.db`, else `<exe_dir>/data/` (portable) or `<AppData>/kite-gc/`.
 pub fn resolve_db_path(custom_path: &str, portable: bool) -> PathBuf {
-    // Android: a user-chosen location is a SAF tree URI, not a path. The database cannot live there
-    // (SQLite needs POSIX open/seek/lock for the journal), so the live DB stays on the platform
-    // default below and the session-end mirror copies a snapshot into the granted tree
-    // (user_file::mirror_session).
+    // Android: a user-chosen location is a SAF tree URI, where SQLite cannot live (no POSIX locks); the DB
+    // stays on the default and the session-end mirror copies a snapshot there (user_file::mirror_session).
     #[cfg(target_os = "android")]
     let custom_path = if custom_path.starts_with("content://") { "" } else { custom_path };
 
@@ -594,10 +556,8 @@ pub fn resolve_db_path(custom_path: &str, portable: bool) -> PathBuf {
     PathBuf::from("flights.db")
 }
 
-/// Resolve the **raw-log base directory** (where `raw_logs/` with .tlog / raw MSP files live). This is
-/// intentionally **separate from the database folder**: the DB defaults to AppData, but raw logs default
-/// to the user's Documents (`Documents/KiteGC`) where they are easy to find / hand to Mission Planner.
-/// `custom_path` (empty = use default) overrides it; both are configurable independently in Settings.
+/// The raw-log base directory — deliberately NOT the DB folder: raw logs default to `Documents/KiteGC`,
+/// easy to find and hand to Mission Planner. `custom_path` (empty = default) overrides it.
 pub fn resolve_raw_log_dir(custom_path: &str, portable: bool) -> PathBuf {
     // Android: same as resolve_db_path — a SAF tree URI cannot be written through std::fs, so the
     // writers stay in the app-private staging dir below and the mirror copies finished files out.
@@ -636,19 +596,12 @@ pub fn resolve_raw_log_dir(custom_path: &str, portable: bool) -> PathBuf {
     PathBuf::from(".")
 }
 
-/// Begin a write transaction (`BEGIN IMMEDIATE`). THE RULE for the flight database: every transaction
-/// that writes takes the write lock up front through this helper — never a DEFERRED one. A deferred
-/// transaction that reads first and writes later is upgraded to a writer at its first write, and that
-/// upgrade fails at once with SQLITE_BUSY — the busy timeout is NOT applied — whenever another
-/// connection holds the write lock or has committed since the read. The background reclaim
-/// (`spawn_reclaim`) holds the lock in back-to-back chunks, and recordings, imports and a second open
-/// write too. `BEGIN IMMEDIATE` waits under the busy timeout instead; for write-first transactions
-/// it costs nothing.
+/// Begin a write transaction (`BEGIN IMMEDIATE`). THE RULE: every writing transaction on the flight
+/// database goes through this, never a DEFERRED one — its read→write upgrade fails at once with
+/// SQLITE_BUSY (no busy timeout) while another connection, e.g. the background reclaim, writes.
 pub(crate) fn write_tx(conn: &Connection) -> SqlResult<rusqlite::Transaction<'_>> {
     rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)
 }
-
-// ── Schema migrations ────────────────────────────────────────────────
 
 fn get_user_version(conn: &Connection) -> SqlResult<u32> {
     conn.query_row("PRAGMA user_version", [], |row| row.get(0))
@@ -709,12 +662,9 @@ fn migrate(conn: &Connection) -> SqlResult<()> {
         return Err(db_newer_error(current));
     }
 
-    // Every step runs in its OWN transaction: its schema objects and its version stamp commit
-    // together or not at all. A failing step rolls back and leaves the DB cleanly on the last
-    // reached version (the stamps are literal per-step targets for the same reason — a historical
-    // stamp-to-CURRENT once produced a "newest version, missing objects" DB; the ensure_* block
-    // below still self-heals that legacy case). PRAGMA user_version is transactional in SQLite.
-    // None of the steps may contain VACUUM or its own BEGIN/COMMIT.
+    // Every step runs in its OWN transaction: its objects and version stamp commit together or not at all
+    // (user_version is transactional), and stamps are literal per-step targets. No step may contain VACUUM
+    // or its own BEGIN/COMMIT.
     for (target, step) in MIGRATION_STEPS {
         if current < target {
             let tx = write_tx(conn)?;
@@ -724,10 +674,8 @@ fn migrate(conn: &Connection) -> SqlResult<()> {
         }
     }
 
-    // Self-heal: ensure the latest schema actually exists even if a prior version bump left it
-    // incomplete. Legacy migrations call set_user_version(CURRENT), so a CURRENT bump can
-    // mark the DB as the newest version without the matching migration ever creating its
-    // objects. Idempotent, so a healthy DB is unaffected.
+    // Self-heal: legacy migrations stamped CURRENT without creating every object, so ensure the latest
+    // schema exists. Idempotent.
     ensure_v8_schema(conn)?;
     ensure_v9_schema(conn)?;
     ensure_v10_schema(conn)?;
@@ -860,9 +808,7 @@ fn migrate_v9_to_v10(conn: &Connection) -> SqlResult<()> {
     Ok(())
 }
 
-/// Idempotently add the mission launch/home columns (the planned takeoff reference — the
-/// base for REL waypoint altitudes + the 3D mission preview's height). Safe to call on every
-/// open; only adds what's missing.
+/// Idempotently add the mission launch/home columns (the REL-altitude base and 3D preview height).
 fn ensure_v11_schema(conn: &Connection) -> SqlResult<()> {
     if !column_exists(conn, "missions", "home_lat")? {
         conn.execute_batch("ALTER TABLE missions ADD COLUMN home_lat REAL;")?;
@@ -879,9 +825,8 @@ fn migrate_v10_to_v11(conn: &Connection) -> SqlResult<()> {
     Ok(())
 }
 
-/// v12: canonical flight-mode columns on telemetry_records (see docs/active/FLIGHT_MODE_UNIFIED.md).
-/// Additive + idempotent; old rows keep NULL (render as the `other` category on replay — acceptable
-/// in alpha). The raw `active_flight_mode_flags` column stays as a forensic field.
+/// v12: canonical flight-mode columns on telemetry_records (docs/active/FLIGHT_MODE_UNIFIED.md); old rows
+/// keep NULL. The raw `active_flight_mode_flags` stays as a forensic field.
 fn ensure_v12_schema(conn: &Connection) -> SqlResult<()> {
     if !column_exists(conn, "telemetry_records", "mode_primary")? {
         conn.execute_batch("ALTER TABLE telemetry_records ADD COLUMN mode_primary TEXT;")?;
@@ -914,9 +859,8 @@ fn migrate_v12_to_v13(conn: &Connection) -> SqlResult<()> {
     Ok(())
 }
 
-/// v14: live RC-link metrics on telemetry_records — `link_snr` (dB) + `link_rssi_dbm` (raw dBm) from
-/// the unified link-stats pipeline (CRSF 0x14 / INAV 9.1 MSP2_INAV_GET_LINK_STATS). `link_quality` (v3)
-/// is now also populated live (was Blackbox-only). Additive + idempotent; old rows keep NULL.
+/// v14: live RC-link metrics on telemetry_records — `link_snr` (dB), `link_rssi_dbm` (raw dBm).
+/// Additive + idempotent; old rows keep NULL.
 fn ensure_v14_schema(conn: &Connection) -> SqlResult<()> {
     if !column_exists(conn, "telemetry_records", "link_snr")? {
         conn.execute_batch("ALTER TABLE telemetry_records ADD COLUMN link_snr INTEGER;")?;
@@ -948,10 +892,9 @@ fn migrate_v14_to_v15(conn: &Connection) -> SqlResult<()> {
     Ok(())
 }
 
-/// v16: the vehicle library — a `vehicles` table holding the per-aircraft build sheet. Flights
-/// soft-linked by the existing `flights.craft_name` until v20 stored the link (`flights.vehicle_id`).
-/// Idempotent; only creates the table if missing. Records (max time/dist/alt) are derived from the
-/// linked flights, not stored here.
+/// v16: the vehicle library — a `vehicles` table holding the per-aircraft build sheet (flights linked
+/// by craft name until v20 stored `flights.vehicle_id`). Idempotent. Records (max time/dist/alt) are
+/// derived from the linked flights, not stored here.
 fn ensure_v16_schema(conn: &Connection) -> SqlResult<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS vehicles (
@@ -1071,13 +1014,10 @@ fn migrate_v18_to_v19(conn: &Connection) -> SqlResult<()> {
     Ok(())
 }
 
-/// v20: group flights (Dev-Docs active/GROUP_FLIGHTS.md §3.1) — `flight_groups` (the header that ties
-/// the member flights of a multi-vehicle flight together; no track, no telemetry), `flights.group_id`
-/// (deleting a group dissolves it: members stay as single flights), the per-flight event timeline
-/// `flight_events` (arm/disarm; the column set of INAV_PUSH_TELEMETRY §6.4) and a wall-clock stamp per
-/// telemetry row (`telemetry_records.wall_ms`, UTC epoch ms; NULL for imports and older rows), and the
-/// flight → library vehicle link `flights.vehicle_id` (Dev-Docs active/MULTI_VEHICLE.md §9.1; deleting a
-/// vehicle un-links its flights). Additive + idempotent.
+/// v20: group flights (Dev-Docs active/GROUP_FLIGHTS.md §3.1) — `flight_groups`, `flights.group_id`,
+/// the per-flight event timeline `flight_events`, `telemetry_records.wall_ms` (UTC epoch ms) — and the
+/// library vehicle link `flights.vehicle_id` (MULTI_VEHICLE.md §9.1). Deleting a group or a vehicle
+/// only un-links its flights. Additive + idempotent.
 fn ensure_v20_schema(conn: &Connection) -> SqlResult<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS flight_groups (
@@ -1120,10 +1060,8 @@ fn ensure_v20_schema(conn: &Connection) -> SqlResult<()> {
         conn.execute_batch("ALTER TABLE telemetry_records ADD COLUMN wall_ms INTEGER;")?;
     }
     if !column_exists(conn, "flights", "vehicle_id")? {
-        // The column and its one-time back-fill commit together: a savepoint nests inside the
-        // migration step's transaction and also covers the self-heal call (no transaction there). The
-        // back-fill runs only here, when the column is born — later opens never re-link a flight the
-        // user un-linked.
+        // Column and one-time back-fill commit together (the savepoint also covers the self-heal call).
+        // The back-fill runs only when the column is born — later opens never re-link an un-linked flight.
         conn.execute_batch("SAVEPOINT v20_vehicle_id;")?;
         let added = conn
             .execute_batch(
@@ -1145,11 +1083,8 @@ fn ensure_v20_schema(conn: &Connection) -> SqlResult<()> {
     Ok(())
 }
 
-/// Link every flight without a vehicle to the one the resolution rule names (`resolve_vehicle_id`:
-/// `fc_uid` first, craft name as the fallback, the newest vehicle on a tie). On a database without FC
-/// ids that is exactly what the logbook showed through its craft-name match before v20; a flight whose
-/// FC id matches a vehicle goes to that vehicle instead. Only touches `vehicle_id IS NULL` rows, so it
-/// is re-entrant. Returns the number of flights linked.
+/// Link every flight without a vehicle to the one `resolve_vehicle_id` names. Only touches
+/// `vehicle_id IS NULL` rows, so it is re-entrant. Returns the number of flights linked.
 fn backfill_flight_vehicle_ids(conn: &Connection) -> SqlResult<usize> {
     let has_vehicles: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM vehicles)", [], |r| r.get(0))?;
     if !has_vehicles {
@@ -1188,12 +1123,9 @@ pub(crate) fn table_exists(conn: &Connection, table: &str) -> SqlResult<bool> {
     )
 }
 
-/// v21: `blackbox_records` (the decoded CSV line of every kept INAV Blackbox row) is dropped — nothing
-/// read it: replay uses `telemetry_records`, hi-res replay re-decodes the archived original in
-/// `blackbox_files`. Its one use, the source restore when a live/log pair is unlinked, now reads
-/// `flights.source_before_link`: the flight's own source (`live` / `blackbox`) while `source` reads
-/// `both` for a linked pair, NULL for an unlinked flight. Idempotent; `open_database` starts the
-/// background reclaim of the freed pages after the upgrade.
+/// v21: `blackbox_records` is dropped — nothing read it (replay uses `telemetry_records`, hi-res replay
+/// re-decodes the archived original). Unlinking a pair restores the source from the new
+/// `flights.source_before_link` instead (the own source while `source` reads `both`). Idempotent.
 fn ensure_v21_schema(conn: &Connection) -> SqlResult<()> {
     if !column_exists(conn, "flights", "source_before_link")? {
         // Column and back-fill commit together, like `flights.vehicle_id` in v20 — and the back-fill
@@ -1223,10 +1155,8 @@ fn ensure_v21_schema(conn: &Connection) -> SqlResult<()> {
     Ok(())
 }
 
-/// SQL condition on a `flights` row: the flight was made by a log importer. Only they write these
-/// `protocol` values — `BLACKBOX` (blackbox.rs), `DATAFLASH` (ardupilot.rs), `ULOG` (ulog.rs); live
-/// recordings and raw-log imports write `MSP` / `MAVLink` / `Telemetry …`. A macro so `END_LINK_SET`
-/// can embed it at compile time.
+/// SQL condition on a `flights` row: made by a log importer — only they write these `protocol` values
+/// (`BLACKBOX`, `DATAFLASH`, `ULOG`). A macro so `END_LINK_SET` can embed it at compile time.
 macro_rules! log_protocol_sql {
     () => {
         "protocol IN ('BLACKBOX', 'DATAFLASH', 'ULOG')"
@@ -1414,8 +1344,6 @@ fn migrate_v1_to_v2(conn: &Connection) -> SqlResult<()> {
     set_user_version(conn, 2)?;
     Ok(())
 }
-
-// ── CRUD operations ─────────────────────────────────────────────────
 
 /// Insert a new flight, returns the row ID. Every flight insert goes through here (live commit,
 /// crash recovery, every importer, `.kflight` import): a flight without an explicit `vehicle_id` is
@@ -1631,10 +1559,8 @@ pub fn get_flight_battery_records(conn: &Connection, flight_id: i64) -> SqlResul
 
 // ── Live recording: per-session temp store (commit-on-disarm, ADR-040) ──────────────
 
-/// Open (creating its parent dir) a per-session temp SQLite file: the `telemetry_records` table
-/// (full current field set) plus a self-describing `session_meta` table so an orphaned `.ktmp`
-/// left by a crash can be interpreted on its own (crash recovery is a later phase). WAL +
-/// `synchronous = NORMAL`: the file is the durable buffer for the in-flight stream.
+/// Open a per-session temp SQLite file: `telemetry_records` plus a self-describing `session_meta`, so an
+/// orphaned `.ktmp` can be interpreted on its own. WAL + `synchronous = NORMAL`: the durable buffer.
 pub fn open_temp_session(path: &Path) -> SqlResult<Connection> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).ok();
@@ -1770,10 +1696,8 @@ pub fn update_session_meta_identity(
     Ok(())
 }
 
-/// Record who writes a temp session and whether it belongs to a group flight (GROUP_FLIGHTS.md §3.3):
-/// the recorder's vehicle key, its role (`single` | `member`), and — for a member — the group id and
-/// the file name of the group's `.kgrp` (it lives next to the `.ktmp`). Written at session start and
-/// whenever the membership changes.
+/// Record the temp session's writer and group membership (vehicle key, role `single` | `member`, group
+/// id, `.kgrp` file name); written at session start and on every membership change.
 pub fn update_session_meta_membership(
     conn: &Connection,
     vehicle_key: &str,
@@ -1931,16 +1855,9 @@ pub fn read_stats_samples(conn: &Connection) -> SqlResult<Vec<StatsSample>> {
     rows.collect()
 }
 
-/// Commit a finished temp session into the main DB atomically: insert the finalized `flights` row,
-/// ATTACH the temp file, copy its `telemetry_records` (rewriting `flight_id` to the new main id),
-/// then DETACH. Returns the new flight id. The main DB therefore only ever sees the flight as a
-/// finished whole. `ATTACH`/`DETACH` cannot run inside a transaction, so they bracket it.
-///
-/// Group flights (GROUP_FLIGHTS.md §3.4): the session's `session_events` become the flight's
-/// `flight_events`, and a group id in its `session_meta` (else `flight.group_id`) is written to
-/// `flights.group_id`. The group row must exist already (the caller commits it first); a missing one
-/// fails the commit instead of silently dropping the membership. A `.ktmp` from before these tables
-/// commits as before.
+/// Commit a finished temp session into the main DB atomically (ATTACH/DETACH bracket the transaction, as
+/// they cannot run inside one); returns the new flight id. The group row must exist already: a missing
+/// one fails the commit instead of silently dropping the membership.
 pub fn commit_session_to_main(
     conn: &Connection,
     temp_path: &Path,
@@ -2053,10 +1970,8 @@ pub fn remove_temp_session(temp_path: &Path) {
     }
 }
 
-/// Delete every temp `.ktmp` session in `dir` except the ones in `keep` (the live, pending,
-/// continue-on-reconnect, group-pending and suspended group-member sessions). Enforces the
-/// single-temp invariant whenever the user discards: stragglers from earlier crashes must not
-/// resurface one per launch. Returns the number removed.
+/// Delete every temp `.ktmp` in `dir` except `keep`, so stragglers from earlier crashes cannot resurface
+/// one per launch. Returns the number removed.
 pub fn sweep_temp_sessions(dir: &Path, keep: &[PathBuf]) -> usize {
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
@@ -2182,8 +2097,6 @@ pub fn get_flight(conn: &Connection, flight_id: i64) -> SqlResult<Option<Flight>
         None => Ok(None),
     }
 }
-
-// ── Mission library ─────────────────────────────────────────────────
 
 const MISSION_COLS: &str = "id, content_hash, name, format, waypoints_json, source_xml, \
     wp_count, total_distance_m, alt_diff_m, max_alt_m, min_alt_m, \
@@ -2379,9 +2292,8 @@ pub fn unlink_flight_mission(conn: &Connection, flight_id: i64) -> SqlResult<()>
     Ok(())
 }
 
-/// Delete a library mission, first unlinking any flights that reference it (those flights keep
-/// their telemetry and the Blackbox-header WP fallback). The FK has no ON DELETE, so a bare
-/// delete of a referenced mission would fail — hence the explicit unlink.
+/// Delete a library mission, unlinking the flights that reference it first (the FK has no ON DELETE).
+/// Those flights keep their telemetry and the Blackbox-header WP fallback.
 pub fn delete_mission(conn: &Connection, id: i64) -> SqlResult<()> {
     conn.execute(
         "UPDATE flights SET mission_id = NULL WHERE mission_id = ?1",
@@ -2426,8 +2338,6 @@ pub fn list_flights_for_mission(conn: &Connection, mission_id: i64) -> SqlResult
     rows.collect()
 }
 
-// ── Battery library ─────────────────────────────────────────────────
-
 const BATTERY_COLS: &str = "id, serial, label, manufacturer, model, chemistry, cell_count, \
     capacity_mah, c_rating_discharge, c_rating_charge, connector, in_service_date, status, \
     notes, created_at, base_flight_seconds, base_mah, base_cycles, base_charges";
@@ -2456,10 +2366,8 @@ fn row_to_battery(row: &rusqlite::Row) -> SqlResult<BatteryPack> {
     })
 }
 
-/// Canonical battery serial: ASCII alphanumerics only, upper-cased. The serial is the soft-link key,
-/// and free-form spaces/punctuation/case are a common source of links that silently fail to resolve
-/// (and hardware barcodes are upper alnum anyway). We hard-normalize at every store + lookup so the
-/// exact-match link is reliable; keep this identical to the frontend `normalizeSerial`.
+/// Canonical battery serial: ASCII alphanumerics, upper case — normalized at every store and lookup so
+/// the exact-match soft link resolves. Keep identical to the frontend `normalizeSerial`.
 pub fn normalize_serial(s: &str) -> String {
     s.chars()
         .filter(|c| c.is_ascii_alphanumeric())
@@ -2467,11 +2375,8 @@ pub fn normalize_serial(s: &str) -> String {
         .collect()
 }
 
-/// Canonical battery-serial *list*: a single flight may link several packs, stored comma-separated in
-/// the freetext `flights.battery_serial` column. Split on commas, normalize each token with
-/// `normalize_serial`, drop empties, de-duplicate (order-preserving), and rejoin with a plain comma
-/// (no spaces) — a canonical token list the `*_for_serial` lookups match exactly. Keep in sync with the
-/// frontend `normalizeSerialList`.
+/// Canonical serial list (`flights.battery_serial` may link several packs): normalized, de-duplicated
+/// tokens joined by a plain comma. Keep in sync with the frontend `normalizeSerialList`.
 pub fn normalize_serial_list(s: &str) -> String {
     let mut out: Vec<String> = Vec::new();
     for tok in s.split(',') {
@@ -2668,8 +2573,6 @@ pub fn set_flight_battery_serial(
     Ok(())
 }
 
-// ── Vehicle library ─────────────────────────────────────────────────
-
 const VEHICLE_COLS: &str = "id, name, craft_name, vehicle_type, status, image, notes, \
     model, wingspan_mm, length_mm, weight_auw_g, weight_dry_g, \
     motors, props, esc, recommended_cells, recommended_capacity_mah, \
@@ -2724,10 +2627,8 @@ fn row_to_vehicle(row: &rusqlite::Row) -> SqlResult<Vehicle> {
     })
 }
 
-/// Canonical craft name: trim leading/trailing whitespace, preserve case + inner content (it is a
-/// user-facing display string, unlike a battery serial). The flight↔vehicle match is done
-/// case-insensitively (`COLLATE NOCASE`) on the trimmed value. Keep identical to the frontend
-/// `normalizeCraftName`. Returns `None` for an empty/whitespace-only string.
+/// Canonical craft name: trimmed, case preserved (a display string); matched case-insensitively. Keep
+/// identical to the frontend `normalizeCraftName`. `None` for blank.
 pub fn normalize_craft_name(s: &str) -> Option<String> {
     let t = s.trim();
     if t.is_empty() {
@@ -2887,10 +2788,8 @@ fn vehicle_id_by_craft_name(conn: &Connection, craft: &str) -> SqlResult<Option<
     .optional()
 }
 
-/// Where a flight flown with `fc_uid` / `craft_name` points in the library: the vehicle storing the FC
-/// hardware id, else the newest vehicle carrying the craft name — then `conflict` is set when the flight
-/// has a hardware id and that vehicle stores a different one (FC swapped, or a second aircraft with the
-/// same craft name). Shared by `resolve_vehicle_id` and `resolve_vehicle`.
+/// Where a flight points in the library: the vehicle storing its FC hardware id, else the newest one
+/// carrying its craft name — with `conflict` set when that vehicle stores a different hardware id.
 fn vehicle_candidate(conn: &Connection, fc_uid: Option<&str>, craft_name: &str) -> SqlResult<Option<(i64, &'static str, bool)>> {
     let uid = fc_uid.and_then(hardware_uid);
     if let Some(u) = uid.as_deref() {
@@ -2911,12 +2810,9 @@ fn vehicle_candidate(conn: &Connection, fc_uid: Option<&str>, craft_name: &str) 
     Ok(Some((id, "craft", conflict)))
 }
 
-/// The library vehicle a flight flown with `fc_uid` / `craft_name` belongs to, for every automatic
-/// link (flight insert, the v20 back-fill, `.kflight` import): the vehicle storing the FC hardware id
-/// first, else the one carrying the craft name (vehicles and flights without a UID — 1.0 data, passive
-/// telemetry); the newest vehicle when several match. When unsure, unlinked (Marc, 2026-11-11): a
-/// flight with a hardware id never links by craft name to a vehicle that stores a DIFFERENT one — it
-/// stays unlinked until the user decides. `None` = not in the library.
+/// The library vehicle a flight belongs to, for every automatic link (see `vehicle_candidate`). When
+/// unsure, unlinked: a flight with a hardware id never links by craft name to a vehicle that stores a
+/// DIFFERENT one — the user decides. `None` = not in the library.
 pub fn resolve_vehicle_id(conn: &Connection, fc_uid: Option<&str>, craft_name: &str) -> SqlResult<Option<i64>> {
     Ok(match vehicle_candidate(conn, fc_uid, craft_name)? {
         Some((id, _, false)) => Some(id),
@@ -2970,11 +2866,9 @@ pub fn set_flight_vehicle(conn: &Connection, flight_id: i64, vehicle_id: Option<
     Ok(n > 0)
 }
 
-/// The flights a link-by-identity moves to vehicle `?1`: those flown with the craft name `?2` (trimmed,
-/// case-insensitive) or with the FC hardware id `?3`, not linked to that vehicle yet — with `?4`
-/// (only_unlinked), only flights without any vehicle. With an FC id key the craft-name arm never
-/// crosses a different FC id: a flight matches by name only when it has no hardware id of its own
-/// (none, empty, all zero or the INAV SITL constant `?5` — `msp::hardware_uid`) or the same one.
+/// The flights a link-by-identity moves to vehicle `?1`: craft name `?2` or FC hardware id `?3`, not
+/// linked to it yet (`?4`: only unlinked ones). The name arm never crosses a different FC id — it needs
+/// no real hardware id on the flight (none, zero or the SITL constant `?5`) or the same one.
 const LINKABLE_FLIGHTS_WHERE: &str = "((?2 IS NOT NULL AND TRIM(craft_name) = ?2 COLLATE NOCASE \
          AND (?3 IS NULL OR fc_uid IS NULL OR REPLACE(TRIM(fc_uid), '0', '') = '' \
               OR TRIM(fc_uid) = ?5 COLLATE NOCASE OR TRIM(fc_uid) = ?3 COLLATE NOCASE)) \
@@ -3200,11 +3094,9 @@ pub fn read_flight_track(
     flight_id: i64,
     fc_variant: Option<&str>,
 ) -> SqlResult<Vec<TelemetryRecord>> {
-    // Flights recorded before the unified flight-mode model (f8e5699, 2026-06-14) stored the raw
-    // mode flags but no canonical mode, and replay them as N/A. An import can be repeated, a live
-    // recording cannot, so the mode is derived here from the flags that are already in the row.
-    // `active_flight_mode_flags` holds INAV's bitmask or MAVLink's custom_mode depending on the
-    // source, which is what the variant selects between.
+    // Flights recorded before the unified flight-mode model stored raw flags but no canonical mode; derive
+    // it here (a live recording cannot be repeated). `active_flight_mode_flags` holds INAV's bitmask or
+    // MAVLink's custom_mode — the variant selects which.
     let mut stmt = conn.prepare(&format!(
         "SELECT id, {TELEMETRY_COLS} FROM telemetry_records          WHERE flight_id = ?1 ORDER BY timestamp_ms ASC"
     ))?;
@@ -3409,9 +3301,8 @@ pub fn delete_flight(conn: &Connection, flight_id: i64) -> SqlResult<bool> {
     Ok(deleted)
 }
 
-/// SQL expression on a `flights` row of a `both` flight: its own source (schema v21) — what it was
-/// before `link_flights`, or, without a stored value (an orphan `both`, or a pair whose value was
-/// lost), `blackbox` for a log importer's flight or one that holds an archived log, `live` otherwise.
+/// SQL expression on a `both` flight's row: its own source — the stored `source_before_link`, else
+/// derived (`blackbox` for a log importer's flight or one holding an archived log, else `live`).
 /// A macro so the consts below can embed it at compile time.
 macro_rules! own_source_sql {
     () => {
@@ -3710,11 +3601,8 @@ pub fn unlink_flight(conn: &Connection, flight_id: i64) -> SqlResult<()> {
     Ok(())
 }
 
-/// Find a live flight that could be linked to a blackbox import.
-/// Matches on craft_name and overlapping time window (±60 seconds).
-/// Duration-match tolerance (seconds) for the craft-name-less fallback (covers the recorder's arm/disarm
-/// grace + detection latency). Passive telemetry (FrSky/CRSF) carries no craft name, so a blackbox of the
-/// same flight can't match on name — fall back to a near-identical duration within the ±60 s start window.
+/// Duration tolerance (s) of the craft-name-less match: passive telemetry carries no craft name, so a
+/// blackbox of the same flight matches by a near-identical duration within the ±60 s start window.
 const DURATION_MATCH_TOLERANCE_SEC: i64 = 10;
 
 pub fn find_linkable_live_flight(
@@ -3767,9 +3655,7 @@ pub fn find_linkable_live_flight(
     Ok(result)
 }
 
-/// Retrieve the first blackbox file BLOB + original filename for a flight.
-/// Also checks the linked partner flight if no file is found directly.
-/// Returns None if no blackbox file is attached.
+/// The first blackbox file BLOB + original filename of a flight, else of its linked partner.
 pub fn get_blackbox_file(
     conn: &Connection,
     flight_id: i64,
@@ -3812,9 +3698,7 @@ pub fn get_blackbox_file(
     Ok(None)
 }
 
-/// Original blackbox file info (filename + size in bytes) stored for this flight (or its linked
-/// partner). Lightweight — does not load the BLOB. `None` if there's no stored original. Gates the
-/// export / delete-original buttons and supplies the size shown next to them.
+/// Original blackbox file info (filename, bytes) of this flight or its partner, without loading the BLOB.
 pub fn blackbox_file_info(conn: &Connection, flight_id: i64) -> SqlResult<Option<(String, i64)>> {
     let here: Option<(String, i64)> = conn
         .query_row(
@@ -3847,10 +3731,8 @@ pub fn blackbox_file_info(conn: &Connection, flight_id: i64) -> SqlResult<Option
     Ok(None)
 }
 
-/// Delete the stored original blackbox file BLOB for a flight (or its linked partner), keeping the
-/// flight row and its `telemetry_records` intact — replay still works from the DB; the "export
-/// original" capability and hi-res replay (which re-decodes the original) are lost. Returns the
-/// deleted file's original filename (None if there was nothing to delete).
+/// Delete the stored original blackbox file BLOB for a flight (or its linked partner). Replay keeps
+/// working; "export original" and hi-res replay are lost. Returns the deleted file's original name.
 pub fn delete_blackbox_file(conn: &Connection, flight_id: i64) -> SqlResult<Option<String>> {
     // Resolve which flight actually holds the file: this one, else its linked partner.
     let mut target: Option<i64> = None;
@@ -4033,8 +3915,7 @@ mod tests {
         remove_temp_session(&path);
     }
 
-    /// Full open/migrate pass over a COPY of a real flight database (Marc's RC2 archive,
-    /// F:\DEVELOPMENT\TEST_DATA\Kite-GC-testdata\flights-real.db — outside the repo).
+    /// Full open/migrate pass over a COPY of a real flight database (kept outside the repo).
     /// `KITE_TEST_DB=<path> cargo test migrates_the_real_database -- --ignored --nocapture`
     #[test]
     #[ignore]
@@ -4846,10 +4727,8 @@ mod tests {
         get_flight(conn, flight_id).unwrap().unwrap().vehicle_id
     }
 
-    /// The v19 → v20 step adds `flights.vehicle_id` + its index and links the existing flights the way
-    /// the craft-name display did, with the FC id first: UID beats craft name, the newest vehicle wins,
-    /// synthetic ids never match, unmatched flights stay NULL. The back-fill only runs when the column is
-    /// born — a later open never re-links a flight the user un-linked — and is itself re-entrant.
+    /// The v19 → v20 step adds `flights.vehicle_id` and back-fills it: UID beats craft name, the newest
+    /// vehicle wins, synthetic ids never match. A later open never re-links a flight the user un-linked.
     #[test]
     fn v20_backfills_flight_vehicle_ids() {
         let conn = Connection::open_in_memory().unwrap();
@@ -5037,9 +4916,7 @@ mod tests {
     }
 
     /// When unsure, unlinked: a flight with a hardware FC id does not link by craft name to a vehicle that
-    /// stores a different one — on insert, in the back-fill and on `.kflight` import (see exchange.rs) —
-    /// while the post-flight summary still reports that candidate with `uid_conflict`. Without an FC id
-    /// on the flight or on the vehicle the craft-name link still works.
+    /// stores a different one; the post-flight summary still reports it with `uid_conflict`.
     #[test]
     fn craft_name_fallback_never_crosses_a_different_fc_id() {
         let conn = test_db();
@@ -5298,9 +5175,7 @@ mod tests {
     }
 
     /// Link and unlink round-trip the sources of both flights — also for a log flight whose archived
-    /// original is gone (deleted by the user, or never stored), where the old "has decoded rows" check
-    /// and the fallback "has a file" check would both say `live`. Deleting one flight of a pair
-    /// restores the partner.
+    /// original is gone. Deleting one flight of a pair restores the partner.
     #[test]
     fn link_unlink_and_delete_restore_the_sources() {
         let conn = test_db();
@@ -5459,10 +5334,8 @@ mod tests {
         matches!(e, rusqlite::Error::SqliteFailure(f, _) if f.code == rusqlite::ErrorCode::DatabaseBusy)
     }
 
-    /// Why `write_tx` exists: a DEFERRED transaction that reads first cannot become a writer once
-    /// another connection has committed since its read, or while another connection holds the write
-    /// lock — SQLite answers SQLITE_BUSY at once, without the busy timeout. This is what made a flight
-    /// save fail while the background reclaim was running.
+    /// Why `write_tx` exists: a DEFERRED transaction that reads first cannot become a writer while
+    /// another connection writes — SQLite answers SQLITE_BUSY at once, without the busy timeout.
     #[test]
     fn deferred_read_then_write_fails_without_waiting() {
         let path = temp_db_path("deferred-busy");

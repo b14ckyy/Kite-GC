@@ -21,8 +21,6 @@ fn portable_mode() -> bool {
         .unwrap_or(false)
 }
 
-/// Resolve the database path and open a connection.
-/// Uses the provided custom path, or falls back to defaults.
 fn open_db(custom_path: &str) -> Result<rusqlite::Connection, String> {
     let path = db::resolve_db_path(custom_path, portable_mode());
     db::open_database(&path).map_err(|e| format!("Database error: {}", e))
@@ -112,21 +110,18 @@ fn resolve_flight_coords(
     Ok(None)
 }
 
-/// List all flights (summaries) for the logbook
 #[tauri::command]
 pub fn flightlog_list(db_path: Option<String>) -> Result<Vec<FlightSummary>, String> {
     let conn = open_db(&db_path.unwrap_or_default())?;
     db::list_flights(&conn).map_err(|e| format!("Query error: {}", e))
 }
 
-/// Get a single flight with full details
 #[tauri::command]
 pub fn flightlog_get(flight_id: i64, db_path: Option<String>) -> Result<Option<Flight>, String> {
     let conn = open_db(&db_path.unwrap_or_default())?;
     db::get_flight(&conn, flight_id).map_err(|e| format!("Query error: {}", e))
 }
 
-/// Get the GPS track / telemetry data for a flight
 #[tauri::command]
 pub fn flightlog_get_track(
     flight_id: i64,
@@ -147,8 +142,6 @@ pub fn flightlog_get_battery_records(
     db::get_flight_battery_records(&conn, flight_id).map_err(|e| format!("Query error: {}", e))
 }
 
-// ── Mission library ─────────────────────────────────────────────────
-
 /// Save a mission to the library (dedup by content hash). Returns the mission id.
 #[tauri::command]
 pub fn mission_db_save(mission: MissionInput, db_path: Option<String>) -> Result<i64, String> {
@@ -156,7 +149,6 @@ pub fn mission_db_save(mission: MissionInput, db_path: Option<String>) -> Result
     db::upsert_mission(&conn, &mission).map_err(|e| format!("Save error: {}", e))
 }
 
-/// Fetch a library mission by id.
 #[tauri::command]
 pub fn mission_db_get(id: i64, db_path: Option<String>) -> Result<Option<Mission>, String> {
     let conn = open_db(&db_path.unwrap_or_default())?;
@@ -260,8 +252,6 @@ pub fn flight_logged_wp_count(
     db::get_flight_logged_wp_count(&conn, flight_id).map_err(|e| format!("Query error: {}", e))
 }
 
-// ── Battery library ─────────────────────────────────────────────────
-
 /// Create a new battery pack (serial is UNIQUE; a duplicate surfaces as an error). Returns the id.
 #[tauri::command]
 pub fn battery_db_create(battery: BatteryPackInput, db_path: Option<String>) -> Result<i64, String> {
@@ -287,7 +277,6 @@ pub fn battery_db_list(db_path: Option<String>) -> Result<Vec<BatteryPack>, Stri
     db::list_batteries(&conn).map_err(|e| format!("Query error: {}", e))
 }
 
-/// Fetch a pack by id.
 #[tauri::command]
 pub fn battery_db_get(id: i64, db_path: Option<String>) -> Result<Option<BatteryPack>, String> {
     let conn = open_db(&db_path.unwrap_or_default())?;
@@ -393,16 +382,12 @@ pub fn battery_file_read(path: String) -> Result<BatteryFile, String> {
     Ok(file)
 }
 
-// ── Vehicle library ─────────────────────────────────────────────────
-
-/// Create a new vehicle. Returns the new id.
 #[tauri::command]
 pub fn vehicle_db_create(vehicle: VehicleInput, db_path: Option<String>) -> Result<i64, String> {
     let conn = open_db(&db_path.unwrap_or_default())?;
     db::create_vehicle(&conn, &vehicle).map_err(|e| format!("Create error: {}", e))
 }
 
-/// Update a vehicle's fields.
 #[tauri::command]
 pub fn vehicle_db_update(
     id: i64,
@@ -420,7 +405,6 @@ pub fn vehicle_db_list(db_path: Option<String>) -> Result<Vec<Vehicle>, String> 
     db::list_vehicles(&conn).map_err(|e| format!("Query error: {}", e))
 }
 
-/// Fetch a vehicle by id.
 #[tauri::command]
 pub fn vehicle_db_get(id: i64, db_path: Option<String>) -> Result<Option<Vehicle>, String> {
     let conn = open_db(&db_path.unwrap_or_default())?;
@@ -574,9 +558,8 @@ pub fn vehicle_file_read(path: String) -> Result<VehicleFile, String> {
     Ok(file)
 }
 
-/// Reverse-geocode a mission's location (bounding-box centroid) and store it, reusing the
-/// same Nominatim helper as the flight log. Skips the network call if the mission already has
-/// a location name (dedup means each mission is geocoded once). Returns the location name.
+/// Reverse-geocode a mission's location (bounding-box centroid) and store it; skipped when it already
+/// has a name, so each mission is geocoded once.
 #[tauri::command]
 pub async fn mission_db_geocode(
     id: i64,
@@ -618,14 +601,12 @@ pub async fn mission_db_geocode(
     Ok(location)
 }
 
-/// Delete a flight and its telemetry data
 #[tauri::command]
 pub fn flightlog_delete(flight_id: i64, db_path: Option<String>) -> Result<bool, String> {
     let conn = open_db(&db_path.unwrap_or_default())?;
     db::delete_flight(&conn, flight_id).map_err(|e| format!("Delete error: {}", e))
 }
 
-/// Update notes on a flight
 #[tauri::command]
 pub fn flightlog_update_notes(
     flight_id: i64,
@@ -679,7 +660,6 @@ pub fn flightlog_update_pilot(
     .map_err(|e| format!("Update error: {}", e))
 }
 
-/// Manually update weather data for a flight
 #[tauri::command]
 pub fn flightlog_update_weather(
     flight_id: i64,
@@ -697,7 +677,6 @@ pub fn flightlog_update_weather(
     Ok(())
 }
 
-/// Trigger reverse geocoding for a flight (async, fetches from Nominatim)
 #[tauri::command]
 pub async fn flightlog_geocode(
     flight_id: i64,
@@ -718,7 +697,6 @@ pub async fn flightlog_geocode(
     let location = crate::flightlog::geocode::reverse_geocode(lat, lon, lang_str).await;
 
     if let Some(ref name) = location {
-        // Update the flight record with the location name
         conn.execute(
             "UPDATE flights SET location_name = ?1 WHERE id = ?2",
             rusqlite::params![name, flight_id],
@@ -729,7 +707,6 @@ pub async fn flightlog_geocode(
     Ok(location)
 }
 
-/// Fetch weather data for a flight's start position
 #[tauri::command]
 pub async fn flightlog_fetch_weather(
     flight_id: i64,
@@ -761,7 +738,6 @@ pub async fn flightlog_fetch_weather(
     Ok(())
 }
 
-/// Get the default database path (for display in settings)
 #[tauri::command]
 pub fn flightlog_default_db_path() -> String {
     let portable = std::env::current_exe()
@@ -830,7 +806,6 @@ pub async fn flightlog_import_blackbox(
     .await
     .map_err(|e| format!("Blackbox import task failed: {}", e))??;
 
-    // Only enrich imported Blackbox flights immediately with location if import was successful
     if let BlackboxImportStatus::Success { flight_id, rows_imported } = &result {
         let conn = open_db(&db_path)?;
         if let Some(flight) = db::get_flight(&conn, *flight_id)
@@ -873,9 +848,8 @@ pub fn blackbox_legacy_mode() -> Result<bool, String> {
     Ok(crate::flightlog::blackbox::legacy_decoder_requested())
 }
 
-/// True when `blackbox_decode` is available (PATH, exe dir, or our download dir). In legacy mode
-/// (`blackbox_legacy_mode`) the frontend checks this before an INAV-blackbox import and offers an
-/// auto-download when it's missing.
+/// True when `blackbox_decode` is available (PATH, exe dir or our download dir); in legacy mode the
+/// frontend offers an auto-download otherwise.
 #[tauri::command]
 pub fn blackbox_decoder_available() -> bool {
     crate::flightlog::decoder::available()
@@ -888,9 +862,8 @@ pub fn blackbox_decoder_version() -> Option<String> {
     crate::flightlog::decoder::version()
 }
 
-/// Download `blackbox_decode` from the latest iNavFlight/blackbox-tools GitHub release and install it
-/// into the app-data `bin/` dir. Emits `flightlog-import-progress` so the existing import progress bar
-/// shows the download. Returns the installed path. Windows-only (other OS assets are .tar.zst).
+/// Download `blackbox_decode` from the latest blackbox-tools release into the app-data `bin/` dir
+/// (progress as `flightlog-import-progress`); returns the installed path.
 #[tauri::command]
 pub async fn download_blackbox_decode(app_handle: tauri::AppHandle) -> Result<String, String> {
     let report = |progress: u8, message: &str| {
@@ -940,8 +913,6 @@ pub async fn flightlog_import_raw(
     .map_err(|e| format!("Raw import task failed: {}", e))?
 }
 
-// ── Export / Import / Offline replay ────────────────────────────────
-
 /// Export a flight track as KMZ/KML/GPX/CSV (format detected from file extension)
 #[tauri::command]
 pub fn flightlog_export_track(
@@ -960,7 +931,6 @@ pub fn flightlog_export_track(
     })
 }
 
-/// Export the raw blackbox binary file for a flight
 #[tauri::command]
 pub fn flightlog_export_blackbox(
     flight_id: i64,
@@ -995,8 +965,7 @@ pub fn flightlog_blackbox_file_info(
     Ok(info.map(|(filename, size_bytes)| BlackboxFileInfo { filename, size_bytes }))
 }
 
-/// Delete the stored original blackbox file for a flight, keeping the parsed flight + replay data.
-/// Returns the deleted file's original filename (None if there was nothing to delete).
+/// Delete the stored original blackbox file, keeping the parsed flight; returns its original filename.
 #[tauri::command]
 pub fn flightlog_delete_blackbox_file(
     flight_id: i64,
@@ -1011,12 +980,9 @@ pub fn flightlog_delete_blackbox_file(
 const COMPACT_RECORDING_ERROR: &str =
     "compact-recording: a flight is being recorded — compact the database after the flight";
 
-/// Compact (defragment) the flight-log database with a full VACUUM. Routine deletes already reclaim
-/// space incrementally; this is the explicit on-demand "Compact Database" maintenance action. It runs
-/// off the main thread (minutes on a slow drive) and is single flight per database file
-/// (`db::compact_database`, `compact-running:` error). Refused while a flight is being recorded: the
-/// VACUUM holds the database for its whole duration and the recording's save would run into it.
-/// Returns the database size before and after, in bytes.
+/// Compact the flight-log database with a full VACUUM, off the main thread; returns the size before
+/// and after, in bytes. Refused while a flight is being recorded: the VACUUM holds the database for
+/// its whole duration and the recording's save would run into it.
 #[tauri::command]
 pub async fn flightlog_compact_db(
     db_path: Option<String>,
@@ -1045,7 +1011,6 @@ fn compact_refusal(state: &crate::state::AppState) -> Result<(), String> {
     Ok(())
 }
 
-/// Export selected flights to a .kflight file
 #[tauri::command]
 pub fn flightlog_export(
     flight_ids: Vec<i64>,
@@ -1058,7 +1023,6 @@ pub fn flightlog_export(
     })
 }
 
-/// Import flights from a .kflight file into the main database
 #[tauri::command]
 pub fn flightlog_import_kflight(
     file_path: String,
@@ -1068,13 +1032,11 @@ pub fn flightlog_import_kflight(
     crate::user_file::with_read_path(&file_path, |p| exchange::import_flights(&conn, p))
 }
 
-/// List flights contained in a .kflight file (for preview / offline replay)
 #[tauri::command]
 pub fn flightlog_kflight_list(file_path: String) -> Result<Vec<FlightSummary>, String> {
     exchange::list_flights_in_file(std::path::Path::new(&file_path))
 }
 
-/// Get a single flight from a .kflight file (offline replay)
 #[tauri::command]
 pub fn flightlog_kflight_get(
     file_path: String,
@@ -1083,7 +1045,6 @@ pub fn flightlog_kflight_get(
     exchange::get_flight_from_file(std::path::Path::new(&file_path), flight_id)
 }
 
-/// Get telemetry track from a .kflight file (offline replay)
 #[tauri::command]
 pub fn flightlog_kflight_track(
     file_path: String,
@@ -1092,14 +1053,10 @@ pub fn flightlog_kflight_track(
     exchange::get_track_from_file(std::path::Path::new(&file_path), flight_id)
 }
 
-// ─── ArduPilot DataFlash commands ────────────────────────────────────────────
-
 use crate::flightlog::ardupilot;
 use serde::Serialize;
 
-/// Inventory the FMT records in an ArduPilot .bin file.
-/// Returns the list of registered message type names so the frontend can
-/// display what data is available before committing to a full import.
+/// Inventory the FMT records of an ArduPilot .bin — what data is there before a full import.
 #[tauri::command]
 pub fn flightlog_probe_ardupilot(file_path: String) -> Result<Vec<ArdupilotMsgTypeInfo>, String> {
     let data = std::fs::read(&file_path)
@@ -1126,8 +1083,7 @@ pub struct ArdupilotMsgTypeInfo {
     pub columns: Vec<String>,
 }
 
-/// Decode an ArduPilot .bin file and write a normalized CSV to `out_csv_path`.
-/// Returns a summary of what was decoded for verification.
+/// Decode an ArduPilot .bin into a normalized CSV at `out_csv_path`; returns a summary for verification.
 #[tauri::command]
 pub fn flightlog_decode_ardupilot_csv(
     file_path: String,
@@ -1164,8 +1120,7 @@ pub struct ArdupilotDecodeStats {
     pub message_type_counts: std::collections::HashMap<String, usize>,
 }
 
-/// Import an ArduPilot DataFlash .bin file into the logbook database.
-/// Emits `flightlog-import-progress` events during processing.
+/// Import an ArduPilot DataFlash .bin; emits `flightlog-import-progress`.
 #[tauri::command]
 pub async fn flightlog_import_ardupilot(
     file_path: String,
@@ -1201,7 +1156,6 @@ pub async fn flightlog_import_ardupilot(
     .await
     .map_err(|e| format!("ArduPilot import task failed: {}", e))??;
 
-    // Auto-geocode on successful import
     if let BlackboxImportStatus::Success { flight_id, rows_imported } = &result {
         let conn = open_db(&db_path)?;
         if let Some(flight) = db::get_flight(&conn, *flight_id)
@@ -1238,7 +1192,6 @@ pub async fn flightlog_import_ardupilot(
     Ok(result)
 }
 
-/// Import a PX4 ULog .ulg flash log (native decoder: `flightlog::ulog`).
 #[tauri::command]
 pub async fn flightlog_import_ulog(
     file_path: String,
@@ -1274,8 +1227,7 @@ pub async fn flightlog_import_ulog(
     .await
     .map_err(|e| format!("ULog import task failed: {}", e))??;
 
-    // Auto-geocode on successful import + offer linking against a live MAVLink recording
-    // (same post-processing as the ArduPilot import).
+    // Same post-processing as the ArduPilot import: geocode + offer linking against a live recording.
     if let BlackboxImportStatus::Success { flight_id, rows_imported } = &result {
         let conn = open_db(&db_path)?;
         if let Some(flight) = db::get_flight(&conn, *flight_id)
@@ -1310,10 +1262,7 @@ pub async fn flightlog_import_ulog(
     Ok(result)
 }
 
-// --- Flight Linking Commands -------------------------------------------------
-
-/// Link two flights together (live recording ? blackbox import).
-/// Both flights get `linked_flight_id` pointing at each other, source becomes "both".
+/// Link two flights (live recording ↔ blackbox import): each points at the other, source becomes "both".
 #[tauri::command]
 pub fn flightlog_link_flights(
     flight_a: i64,
@@ -1352,12 +1301,9 @@ pub fn flightlog_find_linkable(
 
 // ── Deferred-commit: resolve the pending live-recording session (ADR-041) ──────────────
 
-/// Commit the pending live-recording session into the main DB (the End-Flight dialog's **Save**).
-/// Returns the new flight id so the frontend can link the flown mission + battery/notes.
-/// `vehicle_id` names the vehicle whose session it is (the `vehicleId` of its `flight-recording-*`
-/// event); without it the only pending session is taken (an error when there are several). A failed
-/// commit puts the session back into its vehicle's slot (Save can be retried) and keeps its temp file
-/// protected.
+/// Commit the pending live-recording session into the main DB (the End-Flight dialog's **Save**) and
+/// return the new flight id. `vehicle_id` picks that vehicle's session (else the only one pending). A
+/// failed commit puts the session back (Save can be retried) and keeps its temp file protected.
 #[tauri::command]
 pub fn flightlog_commit_pending_session(
     vehicle_id: Option<String>,
@@ -1402,9 +1348,8 @@ pub fn flightlog_discard_pending_session(
     Ok(())
 }
 
-/// Continue-on-reconnect for a session interrupted by a disconnect while armed (ADR-042): move the
-/// pending session into the resume queue so the next connection's recorder resumes/finalizes it.
-/// `vehicle_id` as for the commit. Returns whether a session was queued (`false`: nothing pending).
+/// Continue-on-reconnect (ADR-042): move the pending session into the resume queue for the next
+/// connection's recorder. Returns whether a session was queued.
 #[tauri::command]
 pub fn flightlog_continue_pending_session(
     vehicle_id: Option<String>,
@@ -1431,7 +1376,6 @@ pub struct OrphanInfo {
     pub sample_count: i64,
 }
 
-/// Resolve the main DB path (custom dir or default/portable).
 fn resolve_main_db_path(custom: &str) -> std::path::PathBuf {
     let portable = std::env::current_exe()
         .ok()
@@ -1548,11 +1492,7 @@ pub fn flightlog_hires_cleanup(db_path: Option<String>) {
 }
 
 // ── Scratch store: open a log WITHOUT importing it (Dev-Docs active/OPEN_LOG_WITHOUT_IMPORT.md) ──
-//
-// `<db_dir>/scratch/` is a throwaway flight-DB directory. The frontend hands it to the ordinary
-// importers as their `db_path`, so an opened file becomes a normal flight there (10 Hz track,
-// archived blob, its own `hires-cache/`) and every logbook/replay command works unchanged. It is
-// wiped before each open, on close, and at app start (crash leftovers) — nothing in it is precious.
+// A throwaway flight DB under `<db_dir>/scratch/`, wiped before each open, on close and at app start.
 
 fn scratch_dir(custom: &str) -> std::path::PathBuf {
     let dir = resolve_main_db_path(custom)
@@ -1582,26 +1522,19 @@ pub fn flightlog_scratch_clear(db_path: Option<String>) {
     }
 }
 
-/// Temp sessions that belong to a live workflow in this process — every file a recorder (primary or
-/// secondary, any link) is writing, every pending (awaiting Save/Discard or the re-arm grace) one,
-/// every continue-on-reconnect one, every group-member one (finalized, awaiting its group's store
-/// prompt, or suspended while its link is gone), and every one whose commit failed in this run (kept
-/// for the next start). The orphan scan and the discard sweeps must never touch these.
+/// Temp sessions that belong to a live workflow in this process — being recorded, pending, continued,
+/// group members, or a failed commit kept for the next start. The orphan scan and the discard sweeps
+/// must never touch these.
 fn protected_temp_paths(state: &crate::state::AppState) -> Vec<std::path::PathBuf> {
     state.sessions.protected_paths()
 }
 
-/// An empty temp session younger than this is not a leftover: a previous instance of the app may
-/// still be shutting down and filling it (Windows keeps the process alive for a few seconds after
-/// the window closes, and a second instance can already be up by then).
+/// An empty temp session younger than this is not a leftover: a previous instance may still be
+/// shutting down and filling it.
 const EMPTY_TEMP_GRACE: std::time::Duration = std::time::Duration::from_secs(60);
 
-/// Scan `<db_dir>/sessions/*.ktmp` for an orphan session left by a crash/close. Sessions that are
-/// live in this process (recording / pending / continue-on-reconnect / group-pending / suspended group
-/// member) are skipped; stale empty temp files (no telemetry) are deleted in passing; the newest
-/// non-empty one is returned for the recovery prompt. The frontend scans again after Save /
-/// Continue, and Discard sweeps every leftover, so a pile of stragglers is settled in one launch
-/// instead of resurfacing one per start.
+/// Scan `<db_dir>/sessions/*.ktmp` for an orphan session left by a crash/close: sessions live in this
+/// process are skipped, stale empty ones deleted in passing, the newest non-empty one returned.
 #[tauri::command]
 pub fn flightlog_scan_orphan_sessions(
     db_path: Option<String>,
@@ -1682,9 +1615,8 @@ pub fn flightlog_scan_orphan_sessions(
     Ok(best)
 }
 
-/// Recovery prompt → **Discard**: delete the orphan temp file AND every other leftover in the
-/// sessions dir (live/pending/resume sessions excepted) — "discard" means no temp log remains,
-/// so a pile of stragglers cannot come back one per launch. Nothing reaches the main DB.
+/// Recovery prompt → **Discard**: delete the orphan AND every other leftover in the sessions dir (live
+/// sessions excepted), so stragglers cannot come back one per launch.
 #[tauri::command]
 pub fn flightlog_recover_discard(
     temp_path: String,
@@ -1703,9 +1635,8 @@ pub fn flightlog_recover_discard(
     Ok(())
 }
 
-/// Recovery prompt → **Save Incomplete**: reconstruct the flight from the orphan and commit it to
-/// the main DB (finalized with `end_time` = last sample). Returns the new flight id. On failure the
-/// temp file is kept (no sweep of this run deletes it; the orphan scan skips it until the next start).
+/// Recovery prompt → **Save Incomplete**: commit the orphan (`end_time` = last sample) and return the
+/// new flight id. On failure the temp file is kept for the next start.
 #[tauri::command]
 pub fn flightlog_recover_save_incomplete(
     temp_path: String,
@@ -1750,9 +1681,7 @@ mod tests {
     use super::*;
 
     /// Without a recording a compact may start, and the refusal text carries the marker the frontend
-    /// matches. (The refusing side — `has_live_session` true while a recorder writes — is covered in
-    /// `recorder::tests::has_live_session_follows_every_recorder`; a live session cannot be registered
-    /// from here without a recorder.)
+    /// matches. The refusing side is covered in `recorder::tests::has_live_session_follows_every_recorder`.
     #[test]
     fn compact_allowed_without_recording_and_refusal_has_marker() {
         let state = crate::state::AppState::new();

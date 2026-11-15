@@ -151,25 +151,9 @@ pub fn is_portable() -> bool {
         .unwrap_or(false)
 }
 
-/// Log which of the GStreamer elements WebKitGTK depends on are actually installed.
-///
-/// WebKitGTK implements neither WebRTC nor video decoding itself — it delegates both to GStreamer.
-/// When `webrtcbin` is missing, `RTCPeerConnection` simply never appears: no error, no warning, and
-/// RTSP silently degrades to the far more expensive MJPEG transcode. Two different WebKit builds on the
-/// same Raspberry Pi produced the identical failure, which is the signature of a host-side plugin gap
-/// rather than a WebKit one — but confirming that meant asking the tester to run `gst-inspect-1.0` by
-/// hand and copy the output back, which on a remote-desktop session is genuinely awkward. The app can
-/// just say it.
-///
-/// These plugins are **necessary, not sufficient**, and the message says so: WebRTC is a compile-time
-/// option of WebKitGTK (`-DENABLE_WEB_RTC=ON`) and plenty of distributions build without it, where no
-/// package on earth will bring `RTCPeerConnection` back. Verified on Debian 13's 2.52.5 — every plugin
-/// below present, the library linking no `gstwebrtc` and carrying none of the implementation, and the
-/// API absent in a WebView whose setting was applied before its first load. Reading the old wording as
-/// a shopping list cost exactly that measurement to disprove, so it no longer reads like one.
-///
-/// Runs on a background thread (each `gst-inspect` call costs ~100 ms) and reports at warn level, since
-/// a missing element is a real, actionable degradation.
+/// Log which GStreamer elements WebKitGTK needs are installed: without `webrtcbin`, `RTCPeerConnection`
+/// silently never appears. Necessary, not sufficient — WebRTC is also a WebKitGTK build option many
+/// distributions leave off. Background thread (~100 ms per gst-inspect), warn level.
 #[cfg(target_os = "linux")]
 fn probe_gstreamer_support() {
     std::thread::spawn(|| {
@@ -208,10 +192,8 @@ fn probe_gstreamer_support() {
         let dtls = run(&["dtlssrtpenc"]);
         let srtp = run(&["srtpenc"]);
         let rtp = run(&["rtpbin"]);
-        // Software (libav/openh264) plus the hardware decoders that matter in practice: V4L2 (Raspberry
-        // Pi 4, Rockchip), and Intel VA under both its plugin generations — `vah264dec` from the current
-        // `va` plugin and `vaapih264dec` from the older gstreamer-vaapi. Which of the two a distribution
-        // ships decides whether an Intel laptop decodes in hardware or silently on the CPU.
+        // Software decoders plus the hardware ones that matter: V4L2 (Pi 4, Rockchip) and Intel VA in both plugin
+        // generations (`vah264dec`, older `vaapih264dec`) — which one a distro ships decides HW vs CPU decode.
         let decoders: Vec<&str> = [
             "avdec_h264",
             "openh264dec",
@@ -234,16 +216,9 @@ fn probe_gstreamer_support() {
     });
 }
 
-/// Raspberry Pi workaround: force the WebKit framebuffer to be reallocated once the UI is up.
-///
-/// With GPU acceleration enabled, the Pi's **first** framebuffer allocation is reliably broken — the
-/// window shows garbage until something makes WebKit allocate a new one. Any change of the drawing
-/// surface does that, so we perform the smallest one available for the window's current state and
-/// immediately undo it. The same workaround is in use on the maintainer's Pi dashboard project.
-///
-/// One nudge per run, triggered by `PageLoadEvent::Finished` (the DOM being ready is the earliest
-/// point at which there is a real frame to fix), plus a short settle delay because "document loaded"
-/// is not yet "first frame composited".
+/// Raspberry Pi: force one WebKit framebuffer reallocation once the UI is up — with GPU acceleration the
+/// Pi's FIRST framebuffer shows garbage until a surface change rebuilds it. One nudge per run, on
+/// `PageLoadEvent::Finished` plus a settle delay (loaded is not yet composited).
 #[cfg(target_os = "linux")]
 fn nudge_framebuffer_on_pi(window: tauri::Window) {
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -288,18 +263,8 @@ fn nudge_framebuffer_on_pi(window: tauri::Window) {
     });
 }
 
-/// Detect portable mode: if a `.portable` marker file exists next to the
-/// executable, redirect all application data into a `data/` folder beside
-/// the exe.  Must be called **before** `run()` so the WebView picks up the
-/// environment variables.
-/// Look for GStreamer plugin **files** when `gst-inspect-1.0` isn't installed. Returns
-/// `(webrtc present, names of the WebRTC transport plugins found, names of the H.264-capable
-/// plugins found)`.
-///
-/// Plugins live in `<libdir>/gstreamer-1.0/libgst<name>.so`; the multiarch libdir differs per
-/// architecture, and `GST_PLUGIN_PATH` can add more. This can't tell whether a plugin actually
-/// *registers* its elements (a broken driver may still fail), so it is reported as "by plugin file" —
-/// weaker evidence than `gst-inspect`, but the difference between an answer and none at all.
+/// Look for GStreamer plugin FILES when `gst-inspect-1.0` is missing: `(webrtc present, WebRTC transport
+/// plugins, H.264 plugins)`. Weaker evidence than gst-inspect (a file may fail to register), reported so.
 #[cfg(target_os = "linux")]
 fn probe_gstreamer_plugin_files() -> (bool, Vec<&'static str>, Vec<&'static str>) {
     // The _1_0/SYSTEM variants matter inside the AppImage: linuxdeploy's gstreamer hook points
@@ -357,6 +322,8 @@ fn probe_gstreamer_plugin_files() -> (bool, Vec<&'static str>, Vec<&'static str>
     (has("libgstwebrtc.so"), transport, decoders)
 }
 
+/// Portable mode (a `.portable` marker beside the executable): all app data goes to `data/` next to the
+/// exe. Must be called BEFORE `run()`, so the WebView picks up the environment variables.
 pub fn setup_portable_mode() {
     let exe_dir = match std::env::current_exe()
         .ok()
@@ -373,10 +340,8 @@ pub fn setup_portable_mode() {
     let data_dir = exe_dir.join("data");
     std::fs::create_dir_all(&data_dir).ok();
 
-    // Underscore-prefixed: consumed only by the Windows/Linux branches below. macOS has no env-based
-    // WebView redirect (WKWebView uses WKWebsiteDataStore, set programmatically), so portable-mode
-    // WebView state is not redirected there — the DB/logs/terrain still go to `<exe>/data` via the
-    // path resolvers.
+    // Consumed only by the Windows/Linux branches: macOS has no env-based WebView redirect, so portable-mode
+    // WebView state stays unredirected there (DB/logs/terrain still go to `<exe>/data`).
     let _data_str = data_dir.to_string_lossy().to_string();
 
     // Windows: redirect WebView2 user-data folder
@@ -402,17 +367,13 @@ pub fn run() {
         debug_mode::set(true);
     }
 
-    // Install the file logger before anything else so startup + connection diagnostics are captured.
-    // Default Warning so early failures are recorded without flooding the file in normal operation; a
-    // `--debug` start raises it to Debug. The frontend re-applies the persisted level on startup (and
-    // keeps Debug when in debug mode).
+    // The file logger first, so startup diagnostics are captured: Warning by default, Debug with `--debug`;
+    // the frontend re-applies the persisted level on startup.
     let log_level = if debug_flag { log::LevelFilter::Debug } else { log::LevelFilter::Warn };
     logging::init(log_level, is_portable());
 
-    // `--fleet` / `KITE_FLEET` turns on the multi-vehicle features (default on in a debug build, off in a
-    // release build — `--debug` does not change that; see fleet_mode). Group recording needs the
-    // KITE_FLEET_RECORDING developer opt-in on top. Logged at the default level so a tester's log shows
-    // which mode ran.
+    // Multi-vehicle features and group recording (see fleet_mode), logged at the default level so
+    // every log shows which mode ran.
     let fleet_flag = fleet_mode::flag_present();
     if fleet_flag {
         fleet_mode::set(true);
@@ -426,14 +387,9 @@ pub fn run() {
         );
     }
 
-    // Linux: the GStreamer decode sink renders through gtkglsink, whose GL context is GDK's — and
-    // GTK3 creates a DESKTOP GL context by default (measured on a Pi 5: OpenGL 3.1, legacy). Such a
-    // context has no direct DMABuf import (`GL_OES_EGL_image_external`), so a hardware decoder's
-    // tiled output — the Pi 5 HEVC block's `NV12_128C8` — goes down gst-gl's per-plane path and
-    // ABORTS the process in `gst_gl_format_from_video_info` ("code should not be reached", twice in
-    // the field on 2026-09-04). A GLES context imports it directly (measured there: zero-copy at
-    // 60 fps). Nothing else in the process uses GDK's GL — WebKitGTK renders through its own EGL,
-    // wry/tao draw nothing — so ask GTK for GLES before it initializes; a user-set value wins.
+    // Linux: ask GTK for a GLES context (a user-set value wins). GTK3's default desktop GL context has no
+    // direct DMABuf import, so the Pi 5 HEVC decoder's tiled `NV12_128C8` output ABORTS the process in gst-gl;
+    // GLES imports it zero-copy. Nothing else uses GDK's GL (WebKitGTK renders through its own EGL).
     #[cfg(target_os = "linux")]
     if std::env::var_os("GDK_GL").is_none() {
         std::env::set_var("GDK_GL", "gles");
@@ -464,20 +420,14 @@ pub fn run() {
         builder = builder.plugin(tauri_plugin_geolocation::init());
     }
 
-    // Persist + restore the main window's size/position/maximized state across launches.
-    // The plugin saves to the OS app-config dir, which portable mode cannot redirect on
-    // Windows (Known-Folder API, not env-driven) — so only enable it in installed mode.
-    // Portable builds trade window-geometry persistence for a clean, system-path-free runtime.
-    // Desktop only: there is no free-floating window to persist on mobile.
+    // Window-state persistence, installed mode only: the plugin saves to the OS app-config dir, which
+    // portable mode cannot redirect on Windows. Desktop only.
     #[cfg(desktop)]
     if !is_portable() {
         use tauri_plugin_window_state::StateFlags;
-        // Persist everything EXCEPT the decorations flag: we run with a custom titlebar
-        // (`decorations: false` in tauri.conf.json), and the state plugin would otherwise
-        // restore a previously-saved `decorations: true` and re-add the native title bar.
-        // The detached video window is on the denylist: its box is ours (video prefs), because the
-        // plugin restores a SIZE even when the saved position lands on a monitor that is gone —
-        // which is exactly the case D13 has to survive (VIDEO_MULTISINK_WINDOW.md §5.5).
+        // Persist everything EXCEPT decorations (custom titlebar; a saved `decorations: true` would bring the
+        // native one back). The detached video window is denylisted: the plugin restores sizes onto vanished
+        // monitors (VIDEO_MULTISINK_WINDOW.md §5.5).
         builder = builder.plugin(
             tauri_plugin_window_state::Builder::default()
                 .with_state_flags(StateFlags::all() & !StateFlags::DECORATIONS)
@@ -537,13 +487,9 @@ pub fn run() {
                             }
                         });
 
-                        // (2) The touchpad PINCH is a *separate* visual zoom driven by a private
-                        // GtkGestureZoom that bypasses `zoom-level` (and JS) entirely — so (1) cannot
-                        // catch it. The only known way to disable it is to destroy the signal handlers
-                        // WebKit attached to that gesture. Private API (`wk-view-zoom-gesture` qdata),
-                        // GTK3-only (tao 0.34 uses GTK3); a no-op if the key is absent. We only DESTROY
-                        // handlers — we do NOT free the gesture data (that path is known to segfault).
-                        // Ref: tauri-apps/wry#544 (upstream has no setting; confirmed by WebKit devs).
+                        // (2) The touchpad PINCH is a separate visual zoom (private GtkGestureZoom) bypassing `zoom-level` and
+                        // JS: destroy the signal handlers WebKit attached to it (private `wk-view-zoom-gesture` qdata, GTK3;
+                        // no-op if absent). Only the handlers — freeing the gesture data segfaults. Ref: tauri-apps/wry#544.
                         unsafe {
                             if let Some(gesture) =
                                 wv.data::<gobject_ffi::GObject>("wk-view-zoom-gesture")
@@ -552,40 +498,14 @@ pub fn run() {
                             }
                         }
 
-                        // (3) Permissions + media. WebKitGTK ships with getUserMedia
-                        // (`enable-media-stream`) OFF by default, and leaves permission requests to a
-                        // default that varies by distro/WebKit version — so the integrated camera and the
-                        // GCS geolocation both silently fail on some builds (e.g. Zorin OS) while working
-                        // on others (Debian). Enable the media engine and grant geolocation + camera/mic
-                        // requests ourselves; the real gate stays the OS-level Location/Camera toggle the
-                        // user controls. (`settings()` returns `Option<WebKitSettings>` in this binding.)
+                        // (3) WebKitGTK ships getUserMedia off and leaves permission requests to a distro-dependent default, so
+                        // camera and GCS geolocation fail on some builds. Enable media and grant geolocation + camera/mic here;
+                        // the real gate stays the OS-level toggle.
                         if let Some(settings) = WebViewExt::settings(&wv) {
                             settings.set_enable_media_stream(true);
-                            // WebRTC is a SEPARATE switch and it is **off by default** in WebKitGTK
-                            // ≥ 2.38 — without it `RTCPeerConnection` is undefined, the RTSP source
-                            // silently degrades to the MJPEG fallback, and that fallback then depends
-                            // on an ffmpeg transcode (and on the WebView rendering multipart images at
-                            // all). Set by NAME rather than through `set_enable_webrtc()`: that setter
-                            // sits behind the crate's `v2_38` feature, which would raise our build-time
-                            // WebKitGTK requirement (CI deliberately builds against ubuntu-22.04). By
-                            // name it is simply a no-op on older runtimes that lack the property.
-                            //
-                            // Logged in full: a Pi field test showed `webrtc=false` in the frontend
-                            // even with this in place, and "property missing", "set but ignored" and
-                            // "set but GStreamer can't back it" are three different problems that look
-                            // identical from the outside. The runtime WebKitGTK version comes along
-                            // because it decides which of them is even possible — and because a Linux
-                            // bug report is worth little without it.
-                            //
-                            // Note what the read-back does NOT prove: the setter only writes a
-                            // WebPreferences bool, so it reads back `true` even where WebKitGTK was
-                            // built without `ENABLE_WEB_RTC` and no implementation exists behind it.
-                            // Measured on Debian 13's 2.52.5: `RTCPeerConnection` stays undefined in a
-                            // freshly created WebView with the setting applied *before* the first load,
-                            // and the library links no gstwebrtc and carries none of the implementation
-                            // (`createOffer`, `addIceCandidate`, `setLocalDescription`). Only the
-                            // frontend's own `typeof RTCPeerConnection` is the verdict — which is why
-                            // there is no "reload once to expose it" repair here any more.
+                            // WebRTC is a SEPARATE switch, off by default in WebKitGTK ≥ 2.38. Set by NAME (the typed setter needs the
+                            // crate's `v2_38` feature and a newer build-time WebKitGTK); a no-op where the property is missing. The
+                            // read-back proves nothing (WebKit may be built without WebRTC): only the frontend's check decides.
                             let (major, minor, micro) = unsafe {
                                 (
                                     webkit2gtk::ffi::webkit_get_major_version(),
@@ -619,10 +539,8 @@ pub fn run() {
                 }
                 probe_gstreamer_support();
             }
-            // macOS: start CoreLocation for the GCS marker. Kicked off here rather than lazily so
-            // the authorisation prompt lands once, at launch, instead of mid-flight. A denial or
-            // disabled Location Services just logs and leaves the marker on its vehicle-GPS
-            // fallback, so this can never block start-up.
+            // macOS: start CoreLocation at launch, so the authorisation prompt comes once and never mid-flight; a
+            // denial only logs (the GCS marker falls back to vehicle GPS).
             #[cfg(target_os = "macos")]
             location::start(_app.handle());
             Ok(())
@@ -901,21 +819,17 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while running Kite Ground Control")
         .run(|app, event| {
-            // Tauri tears the process down without dropping managed state, so the video helpers must
-            // be stopped here. A surviving engine (or its ffmpeg publisher) keeps the RTSP session on
-            // the remote server alive indefinitely (this is what wedged the UAV-Link Pi's shared
-            // media), and a surviving capture ffmpeg keeps holding the camera.
+            // Tauri exits without dropping managed state: stop the video helpers here, or a surviving engine keeps
+            // the remote RTSP session alive indefinitely and a capture ffmpeg keeps the camera.
             if matches!(event, tauri::RunEvent::Exit) {
                 use tauri::Manager;
                 app.state::<std::sync::Arc<MediaMtx>>().stop();
                 app.state::<MjpegServer>().stop();
                 app.state::<video::rtsp_native::NativeRtsp>().stop();
             }
-            // The detached video window keeps the app alive on its own (Tauri exits when the LAST
-            // window closes), so closing Kite would leave a naked video frame on the desktop. It
-            // goes with the main window — and after it, so the main window's JS is already gone and
-            // its "the user docked the picture back" handler cannot clear the detached pref.
-            // Desktop only: there is no second window on mobile, and `destroy` does not exist there.
+            // The detached video window would keep the app alive alone (Tauri exits with the LAST window): close it
+            // with — and after — the main window, so the main window's "docked back" handler cannot clear the
+            // detached pref. Desktop only.
             #[cfg(desktop)]
             if let tauri::RunEvent::WindowEvent {
                 label,

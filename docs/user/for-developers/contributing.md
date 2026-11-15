@@ -102,6 +102,12 @@ in the release notes, so this one line saves the archaeology at release time.
 
 - Keep changes focused; propose unrelated refactors separately.
 - Match the surrounding code's style and comment density.
+- **Comments are short and say why**: one to three lines on the constraint, invariant or pitfall the
+  code does not show by itself. This holds for module and file headers, doc comments and inline
+  comments alike.
+- **No history in comments**: how a bug was found, what the code used to do, test reports, names
+  and dates belong in the commit message and the pull request, not in the source.
+- Don't restate what the code plainly does, and don't add comments to code you did not change.
 
 ## Internationalisation
 

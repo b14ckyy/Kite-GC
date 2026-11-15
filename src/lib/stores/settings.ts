@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Persistent application settings
-// Stores user preferences in localStorage, survives between sessions
+// Persistent application settings (localStorage).
 
 import { writable } from 'svelte/store';
 import { currentProviderId } from '$lib/config/mapProviders';
@@ -311,9 +310,8 @@ export const DEFAULT_TELEMETRY_API: TelemetryApiSettings = {
 };
 
 // ── Connection ─────────────────────────────────────────────────────────────────────────────────────
-/** Which protocol the connection bar starts on. `last` restores the last-used one, which is the
- *  historic behaviour and stays the default; a fixed value overrides that stored choice on every
- *  launch, for a pilot who always flies the same link and does not want a stray session to decide. */
+/** Which protocol the connection bar starts on: `last` (default) restores the last-used one; a fixed value
+ *  overrides that stored choice on every launch. */
 export type DefaultProtocol = 'last' | 'msp' | 'mavlink' | 'telemetry';
 
 // ── Update check (GitHub releases — see controllers/updateCheck.ts) ─────────────────────────────────

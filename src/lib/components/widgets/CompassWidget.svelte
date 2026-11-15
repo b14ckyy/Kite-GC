@@ -76,10 +76,8 @@
       <text x="48" y="104" text-anchor="middle" dominant-baseline="middle"
             fill="white" font-size="22" font-weight="600" opacity="0.8" font-family="sans-serif">{$t('compass.w')}</text>
 
-      <!-- Course-over-ground track bug: rides the rose rim at the COG bearing. Nested inside the rose
-           (rotation = −yaw) and rotated by course, it lands at screen angle course−yaw; the gap to the
-           fixed heading pointer at the top is the crab angle. Inward-pointing amber triangle on the rim,
-           clear of the centre heading value. -->
+      <!-- Course-over-ground track bug on the rose rim: nested in the rose (rotation −yaw) and rotated by course, it
+           lands at course−yaw, so its gap to the fixed heading pointer is the crab angle. Amber, pointing inward. -->
       {#if cogShown}
         <g transform="rotate({telem.course}, 100, 100)">
           <polygon points="100,24 92,8 108,8" fill="#f5a623" opacity="0.85" />

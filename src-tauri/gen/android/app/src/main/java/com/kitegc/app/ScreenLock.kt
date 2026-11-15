@@ -6,13 +6,9 @@ package com.kitegc.app
 import android.view.WindowManager
 
 /**
- * Keeps the display on while there is something to watch — nav-app behaviour.
- *
- * Driven from Rust (`link_presence`, which holds the rule) over JNI: on while the vehicle is armed,
- * while a link cannot tell whether it is, during a continuous raw recording, or always when the
- * user asked for it in the settings; otherwise the normal OS screen timeout applies.
- * `FLAG_KEEP_SCREEN_ON` is scoped to this window and released automatically when
- * the app leaves the foreground: no WAKE_LOCK permission, nothing kept awake in the background.
+ * Keeps the display on while there is something to watch — nav-app behaviour. Driven from Rust
+ * over JNI (`link_presence` holds the rule). `FLAG_KEEP_SCREEN_ON` is scoped to this window and
+ * released when the app leaves the foreground: no WAKE_LOCK, nothing kept awake in the background.
  */
 object ScreenLock {
     private lateinit var activity: MainActivity

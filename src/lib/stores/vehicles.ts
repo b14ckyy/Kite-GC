@@ -1,13 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Vehicle registry mirror — which vehicles the backend currently knows and which one the singleton UI
-// (widgets, control panel, untargeted commands) follows. Fed by the backend's `vehicle-discovered` /
-// `vehicle-lost` / `active-vehicle-changed` events; see docs/02-design/features/multi-vehicle.design.md §6.
-//
-// Phase A: the `telemetry` store still holds ONE vehicle — the active one. Every telemetry listener
-// runs its payload through `isActive()` so a second vehicle on the same link (or a second link) can't
-// bleed into the widgets. Phase B turns the store into a per-vehicle map behind the same API.
+// Vehicle registry mirror: which vehicles the backend knows and which one the singleton UI follows (from
+// `vehicle-discovered` / `vehicle-lost` / `active-vehicle-changed`; multi-vehicle.design.md §6). The `telemetry`
+// store holds ONE vehicle, so every telemetry listener filters its payload through `isActive()`.
 
 import { writable, derived, get } from 'svelte/store';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
@@ -69,11 +65,9 @@ export const activeVehicle = derived([vehicles, activeVehicleId], ([$vehicles, $
 let activeKey: string | null = null;
 activeVehicleId.subscribe((v) => { activeKey = v; });
 
-/** Whether an event payload belongs to the active vehicle.
- *  - No `vehicleId` on the payload (an event that isn't per-vehicle) → true.
- *  - No active vehicle yet → true: a link's first events (home, EKF type one-shots) arrive before the
- *    connect call returns, and dropping them would lose those one-shots. The backend announces the
- *    active vehicle as soon as it registers the link, so this window is a few milliseconds. */
+/** Whether an event payload belongs to the active vehicle: true without a `vehicleId`, and true while no vehicle
+ *  is active yet — a link's first one-shot events (home, EKF type) arrive before connect returns; the backend
+ *  announces the active vehicle within milliseconds. */
 export function isActive(payload: unknown): boolean {
   if (activeKey == null) return true;
   if (payload == null || typeof payload !== 'object') return true;

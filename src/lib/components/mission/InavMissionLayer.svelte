@@ -3,10 +3,7 @@
   Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 -->
 
-<!-- InavMissionLayer.svelte
-     Renders INAV mission waypoints on the Leaflet map.
-     Usage: <InavMissionLayer {map} />
--->
+<!-- InavMissionLayer — INAV mission waypoints on the Leaflet map. -->
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import L from 'leaflet';
@@ -622,10 +619,8 @@
               // ignoring the panels/widgets overlapping the edges — which dumps the WP at the
               // edge (worse at higher UI scale). We pan it into the visible area ourselves.
               popupOptions: { autoPan: false },
-              // Center the freshly selected WP in the visible area: biased right (clears the
-              // mission panel on the left) and below centre (the editor popup opens upward, so
-              // this leaves it roughly centred, above the player/widgets at the bottom). The
-              // map is unzoomed, so this pixel math is independent of the global UI scale.
+              // Centre the selected WP in the visible area: biased right (clears the mission panel) and below centre (the
+              // popup opens upward). The map is unzoomed, so this pixel math is independent of the UI scale.
               onCreate: (_popup, ll) => {
                 const size = map.getSize();
                 const wpPt = map.latLngToContainerPoint(ll);
@@ -690,10 +685,8 @@
     }
 
     if (fpPositions.length > 1) {
-      // Split the path into runs at greyed-state changes AND at FBH breaks (home
-      // detours), so each contiguous run is one polyline. Active→greyed transitions
-      // without a break are bridged (seeded with the previous point) for visual
-      // continuity; a break is not bridged (the dashed FBH legs cover the gap).
+      // Split the path into runs at greyed-state changes AND at FBH breaks; each run is one polyline. Greyed
+      // transitions without a break are bridged (seeded with the previous point); breaks are not (FBH legs cover them).
       const runs: { pts: L.LatLng[]; greyed: boolean }[] = [];
       let cur: { pts: L.LatLng[]; greyed: boolean } | null = null;
       for (let s = 0; s < fpPositions.length; s++) {

@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Flight ↔ library vehicle link decisions that need the user's word (Dev-Docs active/MULTI_VEHICLE.md
-// §9 item 1). A flight is linked by its stored `vehicle_id`, resolved when it is stored (FC id first,
-// craft name as the fallback). Everything that would re-link EXISTING flights is offered, never done
-// silently: after a vehicle gets a craft name / FC id, and after the End-Flight save. No UI here — the
-// caller passes its dialog (`ConfirmDialog.show`).
+// Flight ↔ library vehicle link decisions that need the user's word (Dev-Docs active/MULTI_VEHICLE.md §9.1).
+// Flights link by `vehicle_id` (FC id first, craft name as fallback); re-linking EXISTING flights is always
+// offered, never silent. No UI here — the caller passes its dialog.
 
 import { get } from 'svelte/store';
 import { t } from 'svelte-i18n';
@@ -87,18 +85,10 @@ export interface EndFlightVehicle {
   chosen: Vehicle | null;
 }
 
-/** Apply the post-flight vehicle choice to the committed flight, then ask what the choice implies:
- *  - matched by FC id → linked, nothing to ask;
- *  - the vehicle stores no FC id but the flight has one (craft-name match or a hand pick) → linked, and
- *    offer to store the FC id in the vehicle and link the existing flights flown with it / the vehicle's
- *    craft name;
- *  - the vehicle stores a different FC id (`uid_conflict`, or a hand pick) → FC swapped (replace the
- *    vehicle's FC id, link), a second aircraft (create a new vehicle), or leave the flight unassigned —
- *    when unsure, unlinked (the automatic link at commit already left such a flight unlinked);
- *  - no vehicle matched and none picked → offer to create one.
- *  An FC id belongs to one vehicle: storing it on the chosen vehicle takes it off the vehicle that holds
- *  it now, and the question says so. Returns the create pre-fill when the user wants a new vehicle (the
- *  caller opens the Manager). */
+/** Apply the post-flight vehicle choice to the committed flight, then ask what it implies: FC id match → done;
+ *  vehicle without FC id → offer to store it + link existing flights; different FC id → FC swapped / second
+ *  aircraft / unassigned (unsure → unlinked); nothing matched → offer to create. Storing an FC id takes it off
+ *  its current vehicle. Returns the create pre-fill when the user wants a new vehicle. */
 export async function settleEndFlightVehicle(
   ask: AskFn,
   c: EndFlightVehicle,

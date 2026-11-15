@@ -3,10 +3,9 @@
   Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 -->
 
-<!-- WidgetPanel — a panel strip (horizontal or vertical) that holds widgets with drag-and-drop reordering.
-     Edit mode is entered by a LONG-PRESS on a widget (mouse or finger — the phone grid's gesture,
-     PhoneWidgetPanel), which also picks that widget up; a press outside the docks or Escape leaves it.
-     The flag is bindable: both docks share one edit mode (+page owns the state). -->
+<!-- WidgetPanel — a horizontal or vertical strip of widgets with drag-and-drop reordering. A LONG-PRESS on a
+     widget enters edit mode and picks it up; a press outside the docks or Escape leaves it. Both docks share
+     the bindable edit flag (+page owns it). -->
 <script lang="ts">
   import { t } from 'svelte-i18n';
   import type { TelemetryData } from "$lib/stores/telemetry";
@@ -101,10 +100,8 @@
     };
   });
 
-  // Pointer-based DnD (independent from HTML5 drag events). Pointer events, not mouse events, on
-  // purpose: a finger never fires mousemove/mouseup, so the mouse-only version could start a drag
-  // on touch (mousedown is synthesised from a tap) and then never move or drop it — the widgets
-  // simply refused to move on a tablet. Pointer events cover mouse, pen and touch with one path.
+  // Pointer-based DnD (not HTML5 drag, not mouse events): a finger never fires mousemove/mouseup, so a
+  // mouse-only drag would start on touch and never move or drop.
   $effect(() => {
     // This panel's own drag visuals (index highlight, insert marker, ghost) — never the global
     // payload, which belongs to whichever panel consumes the drop.
@@ -159,10 +156,9 @@
         return;
       }
 
-      // Released outside this panel. Our visuals end with the pointer either way — the ghost must
-      // not outlive the finger (on touch nothing else would ever clear it). Only the global payload
-      // is kept alive, and only while another widget panel sits under the pointer and will consume
-      // it in its own listener (cross-panel move); over anything else the drag is cancelled.
+      // Released outside this panel: the ghost ends with the pointer (on touch nothing else would clear it). The
+      // payload survives only while another widget panel under the pointer will consume it (cross-panel move);
+      // otherwise the drag is cancelled.
       if (payload.panelId === panelId) {
         resetLocalDrag();
         const el = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
@@ -174,10 +170,8 @@
       }
     };
 
-    // pointercancel matters on touch specifically: Android fires it when the system takes the
-    // gesture over (a back swipe, a notification pull, the WebView deciding it is a scroll after
-    // all). Without it the payload and the ghost would be left behind and the panel would look
-    // permanently mid-drag.
+    // pointercancel: Android fires it when the system takes the gesture over (back swipe, notification pull,
+    // WebView scroll decision); without it the payload and ghost stay behind, permanently mid-drag.
     const onWindowPointerCancel = () => {
       clearPress();
       if (!getGlobalDragPayload()) return;
@@ -186,11 +180,9 @@
       resetLocalDrag();
     };
 
-    // Capture phase: (a) the map swapped into the video widget's tile is a top-level layer OVER the
-    // tile, so a press on it is relayed to the slot beneath — a long-press there still opens edit
-    // mode (in edit mode +page makes that layer click-through, and the tile gets the pointer itself);
-    // (b) in edit mode a press outside every dock leaves it (the docks share one flag, so either
-    // panel's listener may clear it).
+    // Capture phase: (a) the map swapped into the video tile is a layer OVER the tile, so a press there is
+    // relayed to the slot beneath (long-press still opens edit mode); (b) in edit mode a press outside every
+    // dock leaves it (either panel's listener may clear the shared flag).
     const onWindowPointerDown = (e: PointerEvent) => {
       const target = e.target as HTMLElement | null;
       if (!editing) {
@@ -293,11 +285,9 @@
     };
   });
 
-  // ── Size model (Dev-Docs active/WIDGET_OVERHAUL.md) ──
-  // Every widget has a size STATE (S / L / W, from `sizes` or its registry default). The state
-  // decides its main-axis "units" (a large square = 1) and its cross-axis fill: S = 0.6 (× smallBoost),
-  // L and W fill the cross axis; W is 2:1 along the dock's main axis (2 units in the horizontal dock,
-  // 0.5 in the vertical one). The aspect ratio never changes — a widget is only rescaled by height.
+  // ── Size model (Dev-Docs active/WIDGET_OVERHAUL.md) ── a size STATE (S / L / W) decides main-axis units (a
+  // large square = 1) and cross-axis fill: S = 0.6 (× smallBoost), L and W fill; W is 2:1 along the main axis
+  // (2 units horizontal, 0.5 vertical). The aspect ratio never changes — only height rescales.
   const smallRatio = SMALL_BASE_VMIN / LARGE_BASE_VMIN; // 0.6
 
   function unitsFor(state: WidgetSize): number {
@@ -395,12 +385,9 @@
     }
   }
 
-  // ── Long-press → edit mode ──
-  // Hold a widget LONG_PRESS_MS without moving (mouse or finger) → edit mode, and the widget is
-  // picked up right away, so "hold, then drag" is one motion. Movement or release before that
-  // cancels: a click stays a click, a widget's own buttons keep working. Android's long-press
-  // haptic fires at ~500 ms — arming exactly there reads as "press until the buzz" on a tablet.
-  // In edit mode a press picks up immediately (no pages to flick here, unlike the phone grid).
+  // ── Long-press → edit mode ── hold LONG_PRESS_MS without moving → edit mode with the widget picked up, so
+  // "hold, then drag" is one motion; earlier movement or release keeps a click a click. 500 ms matches Android's
+  // long-press haptic. In edit mode a press picks up immediately.
   const LONG_PRESS_MS = 500;
   const PRESS_SLOP_PX = 8;
   let pressTimer: ReturnType<typeof setTimeout> | null = null;

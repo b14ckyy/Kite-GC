@@ -3,11 +3,8 @@
   Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 -->
 
-<!-- MissionPreviewMap.svelte
-     A small, non-interactive Leaflet preview of a library mission on the current map provider:
-     the mission path as a theme-accent polyline, fit to its bounds. Used in the Mission Manager
-     detail. Read-only (all interaction disabled).
--->
+<!-- MissionPreviewMap — small non-interactive Leaflet preview of a library mission (accent polyline, fit to
+     bounds) for the Mission Manager detail. -->
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import L from 'leaflet';

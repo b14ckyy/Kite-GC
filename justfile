@@ -1,10 +1,5 @@
-# Kite Ground Control - Task Runner (just)
-#
-# Recommended task runner for this project.
-# Install just: https://github.com/casey/just#installation
-#
-# On Windows this justfile is configured to use PowerShell.
-# Make sure Git Bash / sh is NOT required.
+# Kite Ground Control task runner — install just: https://github.com/casey/just#installation
+# On Windows the recipes run in PowerShell; Git Bash / sh is NOT required.
 
 set windows-shell := ["powershell.exe", "-NoProfile", "-Command"]
 
@@ -12,17 +7,9 @@ set windows-shell := ["powershell.exe", "-NoProfile", "-Command"]
 default:
     @just --list
 
-# =============================================================================
-# Development
-# =============================================================================
-
 # Start development mode with hot-reload
 dev:
     npm run tauri dev
-
-# =============================================================================
-# Building
-# =============================================================================
 
 # Build for the current platform (then collect outputs into release/)
 [windows]
@@ -47,22 +34,20 @@ build-linux:
 build-macos:
     @bash scripts/build-macos.sh
 
-# Sign + notarize the built macOS bundle for distribution (macOS only; needs an Apple
-# Developer account — reads creds from your env / keychain profile, see scripts/notarize-macos.sh)
+# Needs an Apple Developer account — reads creds from your env / keychain profile (see scripts/notarize-macos.sh)
+# Sign + notarize the built macOS bundle for distribution (macOS only)
 notarize-macos:
     @bash scripts/notarize-macos.sh
 
-# Sign the collected release artifacts + write release/latest.json for the in-app updater (maintainer
-# only; needs TAURI_SIGNING_PRIVATE_KEY_PATH → Dev-Docs/keys/kite-updater.key). Run before `gh release create`.
+# Maintainer only; needs TAURI_SIGNING_PRIVATE_KEY_PATH → Dev-Docs/keys/kite-updater.key. Run before `gh release create`.
+# Sign the collected release artifacts + write release/latest.json for the in-app updater
 update-manifest tag="":
     @bash scripts/make-update-manifest.sh {{tag}}
 
-# Needs ANDROID_HOME + NDK_HOME (see the Build Guide); prefer the "Android" GitHub Actions
-# workflow, which needs nothing installed locally. The APK lands in release/ under the unified name
-# (KiteGC_Android_<abi>_<version>_installer.apk). `-AndroidOnly` / `--android-only` keeps whatever
-# desktop outputs are already in release/ and collects NOTHING but the Android files: an earlier desktop
-# build's binaries still sit in target/release, and collecting them here would republish a stale
-# one under the current version number.
+# Needs ANDROID_HOME + NDK_HOME (see the Build Guide); the "Android" GitHub Actions workflow needs nothing
+# installed locally. The APK lands in release/ as KiteGC_Android_<abi>_<version>_installer.apk.
+# `-AndroidOnly` / `--android-only` collects ONLY the Android files: a stale desktop binary still in
+# target/release would otherwise be republished under the current version number.
 # Android APK, arm64 (EXPERIMENTAL)
 [windows]
 build-android:
@@ -74,12 +59,10 @@ build-android:
     npm run tauri android build -- --apk --target aarch64
     @bash scripts/collect-release.sh --android-only
 
-# Local only — the store upload is a maintainer step and needs the release key
-# (`src-tauri/gen/android/app/key.properties`, see the Build Guide); without it the bundle is
-# debug-signed and Play refuses it. Lands in release/ as KiteGC_Android_<abi>_<version>_playstore.aab;
-# the versionCode comes from the version name (`playVersionCode` in app/build.gradle.kts), plus the
-# digit in KITE_ANDROID_BUILD (default 0) for a second upload of the same version. The bundle
-# is for the Play Console only: take it out of release/ before `gh release create … release/*`.
+# Local only: needs the release key (`src-tauri/gen/android/app/key.properties`, see the Build Guide), else
+# the bundle is debug-signed and Play refuses it. Lands in release/ as KiteGC_Android_<abi>_<version>_playstore.aab.
+# versionCode = `playVersionCode` in app/build.gradle.kts; KITE_ANDROID_BUILD=1..9 re-uploads the same version.
+# The bundle is for the Play Console only: take it out of release/ before `gh release create … release/*`.
 # Android App Bundle for Google Play, arm64 (maintainer)
 [windows]
 build-android-aab:
@@ -94,10 +77,6 @@ build-android-aab:
 # Android dev build on a connected device / emulator, with hot reload
 dev-android:
     npm run tauri android dev
-
-# =============================================================================
-# Quality Checks
-# =============================================================================
 
 # Run frontend + backend static checks (Windows)
 [windows]
@@ -115,13 +94,10 @@ check:
     @echo '→ Running cargo check...'
     cargo check --manifest-path src-tauri/Cargo.toml --quiet
 
-# Type-check the Rust backend for Android without a full Gradle build. Catches cfg mistakes in the
-# mobile-specific code (transport/serial_android.rs, android/jvm.rs) in seconds.
-#
-# Needs `rustup target add aarch64-linux-android`, plus the NDK's compiler pointed out explicitly —
-# cc-rs looks for an `aarch64-linux-android-clang` that the NDK does not ship (its compilers are
-# API-versioned), and without it the C dependencies fail to configure. `tauri android build` does this
-# itself, which is why only the bare check needs it.
+# Needs `rustup target add aarch64-linux-android`, plus the NDK's compiler pointed out explicitly — cc-rs
+# looks for an `aarch64-linux-android-clang` the NDK does not ship (its compilers are API-versioned).
+# `tauri android build` does this itself; only the bare check needs it.
+# Type-check the Rust backend for Android in seconds, without a Gradle build (catches mobile cfg mistakes)
 check-android:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -134,10 +110,6 @@ check-android:
 # Frontend check in watch mode
 check-watch:
     npm run check:watch
-
-# =============================================================================
-# Maintenance
-# =============================================================================
 
 # Install npm dependencies
 install:

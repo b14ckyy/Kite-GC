@@ -1,20 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// ArduPilot Passthrough ("Yaapu") decoder — the AP-specific telemetry layer carried over either FrSky
-// S.Port (DIY appIDs 0x5000–0x500D) or CRSF (AP_CUSTOM_TELEM frame 0x80/0x7F). Both carriers transport
-// the SAME bit-packed `{appID:u16, data:u32}` packets, so this one decoder is fed from both (see
-// docs/active/RADIO_TELEMETRY.md "ArduPilot Passthrough").
-//
-// It is a level-2 sub-decoder: the FrSky/CRSF host decoder parses the carrier framing and routes the
-// passthrough packets here, while continuing to decode the standard sensors/frames itself. This decoder
-// therefore emits ONLY the AP-unique data that the native path can't provide — flight mode (real AP
-// modes via classify_ardupilot), armed, EKF health, and status-text messages — leaving GPS / battery /
-// attitude to the native decoder (no overlap, no field fights).
-//
-// v1 scope: AP_STATUS (0x5001), TEXT (0x5000 S.Port chunked + CRSF 0xF1 status-text sub-frame), PARAM
-// (0x5007 → vehicle variant, bonus), WAYPOINT (0x500D number). The metric fields that use ArduPilot's
-// `prep_number` compact encoding (HDOP, home distance, speeds, rangefinder, terrain, …) are a v2.
+// ArduPilot Passthrough ("Yaapu") decoder: the same `{appID:u16, data:u32}` packets over FrSky S.Port
+// (0x5000–0x500D) or CRSF (0x80/0x7F), fed by both host decoders. Emits ONLY the AP-unique data (mode,
+// armed, EKF, status text, variant, WP); GPS / battery / attitude stay with the native decoder.
 
 use crate::vehicle_registry::emitter::VehicleEmitter;
 
@@ -232,8 +221,7 @@ impl ApPassthroughDecoder {
 mod tests {
     use super::*;
 
-    /// Rover, boat and sub frame types used to fall through to the Copter table (Rover Hold showed
-    /// as "Guided", Sub Manual as "Avoid ADSB").
+    /// Rover, boat and sub frame types must not use the Copter table (Rover Hold ≠ "Guided", Sub Manual ≠ "Avoid ADSB").
     #[test]
     fn surface_and_sub_frame_types_select_their_mode_tables() {
         assert_eq!(classify_ardupilot(4, variant_from_frame_type(10)).primary, "rover_hold");

@@ -161,10 +161,8 @@
     batteryListOpen = true;
   }
 
-  // The map mission can be linked only if it is a "real" mission (has a provenance flag);
-  // a pure unsaved scratch mission can't. DB → link directly; FILE/FC → save-to-DB-then-link.
-  // ArduPilot/PX4 has no provenance flags yet (Phase 2) → any loaded AP mission is linkable
-  // (it is saved to the library on link if not already there).
+  // Only a "real" map mission (with a provenance flag) can be linked: DB → directly, FILE/FC → save, then link.
+  // ArduPilot/PX4 have no provenance flags yet → any loaded AP mission is linkable (saved to the library on link).
   let canLink = $derived(
     $autopilotSystem === 'inav'
       ? ($mission.waypoints.length > 0 && ($missionFlags.db || $missionFlags.file || $missionFlags.fc))
@@ -337,10 +335,9 @@
     void loadVehicles();
   });
 
-  // The library changed elsewhere (Vehicle Manager save / delete, UAV Info save): refresh the names and
-  // re-read this flight's link (a vehicle created from this flight links it; a delete un-links it). The
-  // run on mount reads it too: the `flight` prop is only reloaded when a flight is selected, so after a
-  // remount (Vehicle Manager and back, tab switch) it may predate a link change made since.
+  // The library changed elsewhere (Vehicle Manager / UAV Info save or delete): refresh names and re-read this
+  // flight's link. Also on mount — the `flight` prop reloads only on selection, so after a remount it may
+  // predate a link change.
   let seenLibraryChange = -1;
   $effect(() => {
     const n = $vehicleLibraryChanged;

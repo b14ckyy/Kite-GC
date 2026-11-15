@@ -1,19 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-//! Vehicle / link registry — the multi-vehicle replacement for the single `protocol` slot.
-//!
-//! A **link** is one open transport running one protocol handler (MSP scheduler, MAVLink handler or the
-//! passive listener). A **vehicle** is one flight controller reachable through a link; MAVLink links can
-//! carry several (one per system id), MSP and passive links exactly one. Vehicles are addressed by a
-//! string key `"L{link}:S{sysid}"` (`sysid` 0 for the non-MAVLink protocols, where MAVLink reserves 0
-//! for broadcast) so the frontend never has to understand the structure.
-//!
-//! One vehicle is **active**: every command that does not name a target and every legacy singleton
-//! consumer (link status, relay hub, …) works on it. Telemetry events carry their vehicle id via
-//! [`emitter::VehicleEmitter`], so the frontend can filter or fan out per vehicle.
-//!
-//! See docs/02-design/features/multi-vehicle.design.md (fork Dev-Docs).
+//! Vehicle / link registry: a link = one transport + protocol handler; a vehicle = one FC behind it, keyed
+//! `"L{link}:S{sysid}"` (sysid 0 for non-MAVLink). One vehicle is ACTIVE — the target of every untargeted
+//! command and singleton consumer; telemetry events carry their vehicle id ([`emitter::VehicleEmitter`]).
 
 pub mod emitter;
 
@@ -318,10 +308,8 @@ mod tests {
     }
 }
 
-/// Whether a stamped event payload (JSON text, see `emitter`) belongs to the active vehicle. Payloads
-/// without a `vehicleId` (events that are not per-vehicle) pass. Used by the backend taps (relay hub,
-/// Telemetry API) so their single caches follow the vehicle the operator selected instead of mixing
-/// every aircraft on the link. Cheap: a substring scan, no JSON parse.
+/// Whether a stamped event payload belongs to the active vehicle (payloads without `vehicleId` pass), so
+/// the backend taps' single caches follow the selected vehicle. A substring scan, no JSON parse.
 pub fn payload_is_active(app: &tauri::AppHandle, payload: &str) -> bool {
     use tauri::Manager;
     let Some(start) = payload.find("\"vehicleId\":\"") else { return true };

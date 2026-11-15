@@ -3,13 +3,9 @@
   Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 -->
 
-<!-- StatusTextToasts.svelte
-     FC system messages (MAVLink STATUSTEXT) as a single compact banner at the top edge: one line per
-     message, colour-coded by severity, newest at the bottom; the field scrolls to the latest. Each
-     message expires individually 20 s after it arrived (the store drops lines one by one); the banner
-     disappears once the last line is gone. Verbosity is controlled by settings.systemMessages; audio
-     cue is played in the store.
--->
+<!-- StatusTextToasts — FC system messages (MAVLink STATUSTEXT) as one compact top-edge banner: a line per
+     message, colour-coded, newest at the bottom; lines expire individually (the store drops them). Verbosity:
+     settings.systemMessages; the audio cue plays in the store. -->
 <script lang="ts">
   import { fade } from 'svelte/transition';
   import { statusTexts, type StatusTextLevel } from '$lib/stores/statusText';
@@ -47,10 +43,8 @@
   .msg-banner {
     position: absolute;
     top: 56px;
-    /* Centre within the area to the RIGHT of any open left-docked panel (issue #10). --toast-dock-inset
-       is the panel's viewport right edge (0 when none); left + right + margin:auto centres the
-       fixed-width banner in that band, and the max-width cap keeps it inside the band on narrow screens
-       so it can never slide back over the panel. */
+    /* Centre to the RIGHT of an open left-docked panel: --toast-dock-inset is its viewport right edge (0 when
+       none); left + right + margin:auto centre the banner in that band, max-width keeps it off the panel. */
     left: calc(var(--toast-dock-inset, 0px) + 8px);
     right: 8px;
     margin-inline: auto;
@@ -68,18 +62,14 @@
     font-family: 'Segoe UI', Tahoma, sans-serif;
   }
 
-  /* Mobile: the phone toolbar wraps onto several rows while disconnected/expanded, so a fixed 56px
-     lands *inside* it and the messages cover the connection banner. Track the live bar height instead —
-     the same --toolbar-h the map layer and nav-rail follow. The parent .app-toasts layer is already
-     offset by --safe-top and --toolbar-h includes that same inset (the toolbar pads itself down into
-     the visible strip), so subtract it here or the status-bar strip is counted twice. */
+  /* Mobile: the wrapping toolbar's height varies, so track --toolbar-h; .app-toasts is already offset by
+     --safe-top, which --toolbar-h includes too — subtract it to not count the status-bar strip twice. */
   :global(html.is-mobile) .msg-banner {
     top: calc(var(--toolbar-h, 53px) - var(--safe-top, 0px) + 8px);
   }
-  /* Phone: the parent .app-toasts IS the band between the corner buttons and already sits at
-     --safe-top, so start in the buttons' row and let the band — not the viewport — cap the width.
-     --toast-dock-inset is a viewport x; the band's own left edge (--toast-band-left) comes off it
-     first, so a banner beside an open panel still centres in what is left of the band. */
+  /* Phone: the parent .app-toasts IS the band between the corner buttons (at --safe-top), so the band caps the
+     width. --toast-dock-inset is a viewport x: subtract the band's left edge (--toast-band-left) first, so a
+     banner beside an open panel centres in what is left. */
   :global(html.is-phone) .msg-banner {
     top: 8px;
     left: calc(max(var(--toast-dock-inset, 0px) - var(--toast-band-left, 0px), 0px) + 8px);

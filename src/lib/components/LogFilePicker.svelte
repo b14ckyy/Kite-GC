@@ -18,12 +18,9 @@
 </script>
 
 <script lang="ts">
-  // Picker behind the mobile "Share log file" button (Settings → Diagnostics). The log folder is
-  // app-private on Android — no file manager or MTP connection reaches it — so the system share sheet
-  // is the only way a log leaves the device, and after a restart the file a tester needs is
-  // yesterday's, not the active one. One row per day-file, newest first; a tap hands the path to
-  // `onPick`. Markup and colours follow ConfirmDialog; rows are finger-sized (≥ 44 px) and the list
-  // scrolls inside a 60vh cap so the dialog fits a 5.5" landscape phone.
+  // Picker behind the mobile "Share log file" button: the Android log folder is app-private, so the share
+  // sheet is the only way out, and the needed file is often yesterday's. One finger-sized row per
+  // day-file, newest first; the list scrolls inside a 60vh cap so it fits a 5.5" landscape phone.
   import { t } from 'svelte-i18n';
 
   let {
@@ -32,8 +29,8 @@
     onClose,
   }: { files: LogFileInfo[]; onPick: (path: string) => void; onClose: () => void } = $props();
 
-  /** `kite-gc-2026-09-16.log` → `2026-09-16`, the day's overflow file `kite-gc-2026-09-16-2.log` →
-   *  `2026-09-16 (2)`; a name outside the scheme is shown as it is. */
+  /** `kite-gc-YYYY-MM-DD.log` → `YYYY-MM-DD`, the overflow file `…-2.log` → `YYYY-MM-DD (2)`; a name
+   *  outside the scheme is shown as it is. */
   function dateOf(name: string): string {
     const m = /^kite-gc-(\d{4}-\d{2}-\d{2})(-2)?\.log$/.exec(name);
     if (!m) return name;

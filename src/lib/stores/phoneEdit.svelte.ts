@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Phone widget edit mode + the drag session, shared by the widget column (PhoneWidgetPanel) and
-// the bottom slots (PhoneBottomBar) — Dev-Docs active/PHONE_BOTTOM_WIDGETS.md B6. One edit mode
-// for both surfaces, one drag at a time; whoever picked the widget up owns the pointer stream and
-// resolves the drop target, the other surface previews it (and the column turns its pages for
-// either one's drag). The ghost is drawn at the root (PhoneDragGhost) because the column clips its
-// own overflow.
+// Phone widget edit mode + drag session, shared by the column and the bottom slots (Dev-Docs
+// PHONE_BOTTOM_WIDGETS.md B6): one drag at a time; whoever picked the widget up owns the pointer stream and the
+// drop target, the other surface previews it. The ghost is drawn at the root (the column clips its overflow).
 
 import type { PhoneBottomSlot } from '$lib/controllers/phoneWidgetController';
 
@@ -37,13 +34,9 @@ export const phoneHitTests: {
   column: ((x: number, y: number) => { page: number; row: number; col: number } | null) | null;
 } = { column: null };
 
-/** A drag takes the touch it started from away from the browser. The long-press that ARMS edit
- *  mode begins as an ordinary touch (the column's page scroller is touch-action pan-y, a bottom
- *  tile has none set — the value is fixed at touch start, edit mode's `none` comes too late for
- *  it): the first move after the pickup would be read as a native scroll, the browser then cancels
- *  the pointer and the widget snaps back. The listener sits on the touch's OWN target: touch events
- *  keep arriving there, and only there, once the preview has taken that element out of the
- *  document — a listener on the window stops hearing them at exactly that moment. */
+/** A drag takes its touch away from the browser: touch-action is fixed at touch start, so the first move after
+ *  the pickup would be read as a native scroll and cancel the pointer. The listener sits on the touch's OWN
+ *  target — once the preview removes it from the document, touch events still arrive only there. */
 export function claimTouch(target: EventTarget | null): void {
   if (!target) return;
   let warned = false;
@@ -64,12 +57,9 @@ export function claimTouch(target: EventTarget | null): void {
   target.addEventListener('touchcancel', done);
 }
 
-/** The bottom slot under a viewport point for the running drag — looks THROUGH layers above it (the
- *  docked video window may cover a slot; the drag ghost is pointer-transparent). A slot stays the
- *  target while the finger is inside the box it had when it was hit: the preview of that very drop
- *  can change the column's width, the bar moves with it and the tile slides out from under a finger
- *  that did not move — without the memory the target would flip between the slot and nothing on
- *  every move. The memory belongs to one drag session. */
+/** The bottom slot under a viewport point for the running drag, looking THROUGH layers above it. A slot stays
+ *  the target while the finger is inside its box at hit time — the drop preview can move the bar under a still
+ *  finger, which would otherwise flip the target every move. The memory is per drag session. */
 let heldSlot: { slot: PhoneBottomSlot; box: DOMRect; drag: PhoneDragSession | null } | null = null;
 export function dragSlotAt(x: number, y: number): PhoneBottomSlot | null {
   const el = document.elementsFromPoint(x, y).find((e) => (e as HTMLElement).dataset?.bottomSlot) as

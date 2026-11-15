@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Lightweight host-OS detection for platform-specific UI (e.g. macOS traffic-light window controls on
-// the LEFT vs the Windows/Linux control cluster on the RIGHT). We read the WebView user-agent rather
-// than pulling in @tauri-apps/plugin-os: the string is stable per platform (WKWebView reports
-// "Macintosh", WebView2 "Windows", WebKitGTK "Linux") and this only drives cosmetic layout, so a sync
-// value with no extra dependency / async round-trip is preferable.
+// Lightweight host-OS detection for platform-specific UI, from the WebView user-agent rather than
+// @tauri-apps/plugin-os: the string is stable per platform (WKWebView "Macintosh", WebView2 "Windows",
+// WebKitGTK "Linux") and a sync value needs no dependency or async round-trip.
 
 const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
 
@@ -22,10 +20,8 @@ export const isIOS = /iPad|iPhone|iPod/i.test(ua) || (/Macintosh|Mac OS X/i.test
  *  below excludes Android explicitly). */
 export const isAndroid = /Android/i.test(ua);
 
-/** True on any mobile build — iOS/iPadOS or Android. This drives the FORM-FACTOR tier only (touch
- *  layout, safe areas, on-screen sticks, mobile connection defaults). It must never gate a
- *  capability: what a platform can do is a separate question — see the `has*` flags below — because
- *  the two mobile OSes differ (Android has USB serial; iOS has none). */
+/** True on any mobile build (iOS/iPadOS or Android). FORM-FACTOR tier only (touch layout, safe areas,
+ *  mobile defaults) — never gate a capability on it: use the `has*` flags (Android has USB serial, iOS none). */
 export const isMobile = isIOS || isAndroid;
 
 /** True on a phone: iPhone/iPod, or Android carrying the "Mobile" UA token (Chromium sets it on
@@ -45,10 +41,9 @@ export const hasSerialPorts = !isIOS;
 /** Video sources exist. Not on iPhone: on iOS video is iPad-only (RTSP_APPLE.md). */
 export const hasVideo = !(isIOS && isPhone);
 
-/** "Compact Database" (a full VACUUM) is offered: desktop only. On Android SQLite keeps the VACUUM's
- *  working copy of the whole database in memory (no usable temp folder), which a large database on a
- *  small tablet may not survive; and a mobile database holds no log blobs — deleting flights already
- *  gives its pages back. The backend refuses the command on mobile too. */
+/** "Compact Database" (full VACUUM): desktop only. On Android SQLite keeps the VACUUM's working copy in memory,
+ *  which a large DB on a small tablet may not survive, and a mobile DB holds no log blobs anyway. The backend
+ *  refuses it on mobile too. */
 export const hasDbCompact = !isMobile;
 
 /** Custom (offline) maps from a local tile folder: desktop only. On Android and iOS the app cannot
@@ -56,10 +51,8 @@ export const hasDbCompact = !isMobile;
  *  Settings row and the coverage frames are hidden there; the backend refuses the commands too. */
 export const hasCustomMaps = !isMobile;
 
-/** RC control (the RC tool and its Settings switch) is offered: desktop only. A phone or tablet has no
- *  joystick, and the on-screen touch sticks are too easy to hit by accident for something that steers
- *  an aircraft; there is also no way to configure the channels there (Marc, 2026-11-12 for phones,
- *  2026-11-13 for tablets). Planned to come back on mobile with an external controller, not before 2.1. */
+/** RC control (the RC tool and its Settings switch) is desktop only: no joystick on a phone or tablet,
+ *  touch sticks are too easy to hit by accident, and the channels cannot be configured there. */
 export const hasRcControl = !isMobile;
 
 /** True when running inside the macOS WebView (WKWebView) — used to mirror native window-control
@@ -73,34 +66,19 @@ export const isWindows = /Windows/i.test(ua);
 /** True on the Linux WebView (WebKitGTK; excludes Android) — drives the native-capture backend (V4L2). */
 export const isLinux = /Linux/i.test(ua) && !/Android/i.test(ua);
 
-/** True on WebKitGTK specifically — the Linux WebView, as opposed to macOS's WKWebView (a different
- *  WebKit port on Core Animation) or Chromium-based WebView2.
- *
- *  Drives the hard-blink indicator mode. On WebKitGTK a looping CSS animation makes the compositor
- *  rebuild the entire window every frame: the cost is per frame produced, not per pixel changed, so a
- *  single 6-pixel dot measured ~46 % of a core. It is unaffected by the element's size, by
- *  `will-change`, by `steps()` (which quantises the value, not the frame production), and even by
- *  whether the element is on screen at all — a marker panned to the other side of the world costs
- *  exactly the same. Only producing fewer frames helps: 5 Hz → 23 %, 2 Hz → 14 %, 1 Hz → 6 %.
- *
- *  Neither WebView2 nor macOS shows this, so both keep the smooth animations. */
+/** True on WebKitGTK. Drives the hard-blink indicator mode: there a looping CSS animation makes the compositor
+ *  rebuild the whole window every frame (~46 % of a core for one 6-px dot, regardless of size, will-change,
+ *  steps() or visibility); only fewer frames help (1 Hz → 6 %). WebView2 and macOS keep smooth animations. */
 export const isWebKitGtk = isLinux;
 
-/** True on any WebKit-based WebView — WebKitGTK on Linux and WKWebView on macOS and iOS, which are different
- *  ports of the same WebCore and so share its resource loader.
- *
- *  Drives the `?raw=1` request of the off-thread MJPEG reader. WebKit handles
- *  `multipart/x-mixed-replace` inside that loader and never exposes it to `fetch`: measured on
- *  WebKitGTK 2.52.5 from a `tauri://localhost` page, the response headers arrive and the first
- *  `reader.read()` fails with `Load failed` at zero bytes — main thread and worker alike, which is
- *  what silently pushed Linux back onto the `<img>` sink. The identical bytes under another content
- *  type stream perfectly. WebView2 reads multipart directly and is deliberately left untouched. */
+/** True on any WebKit WebView (WebKitGTK, WKWebView on macOS/iOS — one shared resource loader). Drives the
+ *  MJPEG reader's `?raw=1` request: WebKit handles `multipart/x-mixed-replace` in that loader and the first
+ *  `fetch` read fails at zero bytes; the same bytes under another content type stream fine. */
 export const isWebKit = isLinux || isMacOS || isIOS;
 
-// Tag the document root on mobile so global CSS can add bottom breathing room. The bottom edge is
-// crowded there: the on-screen RC sticks, the map zoom/compass buttons, the Leaflet attribution label
-// and the iPad home indicator all fight for the same strip. `--safe-bottom` exposes the device safe
-// area (needs viewport-fit=cover in the viewport meta) for those bottom-anchored overlays to lift by.
+// Tag the document root on mobile so global CSS can add bottom breathing room (RC sticks, map buttons,
+// attribution and the home indicator share the strip). `--safe-bottom` exposes the safe area (needs
+// viewport-fit=cover).
 if (typeof document !== 'undefined' && isMobile) {
   document.documentElement.classList.add('is-mobile');
   // Separate iPhone tag so iPhone-only rules (that must not touch iPad) can key off it in any orientation.
@@ -111,19 +89,15 @@ if (typeof document !== 'undefined' && isMobile) {
   // `--safe-top` covers the status bar / notch strip so the toolbar and top-anchored map layers
   // are not overlaid by the iOS status bar (clock, battery). Same viewport-fit=cover requirement.
   document.documentElement.style.setProperty('--safe-top', 'env(safe-area-inset-top, 0px)');
-  // In landscape the notch / Dynamic Island sits on a side edge, over the left-anchored nav rail and
-  // panels. `--safe-left` / `--safe-right` let those shift clear of it (both 0 in portrait).
-  // Android reports a camera punch-hole as a left inset too (52 css px on a 21:9 phone) — for a
-  // few millimetres of hole the whole rail moved right and the row lost that width. Ignored on
-  // Android for now (Marc, 2026-09-12); the hidden-bar insets top/right stay (AX12, PR #159).
+  // In landscape the notch / Dynamic Island sits on a side edge: `--safe-left` / `--safe-right` move the
+  // rail and panels clear of it. Ignored on Android, which reports a small punch-hole as a full left
+  // inset (52 css px); the hidden-bar insets top/right stay.
   document.documentElement.style.setProperty('--safe-left', isAndroid ? '0px' : 'env(safe-area-inset-left, 0px)');
   document.documentElement.style.setProperty('--safe-right', 'env(safe-area-inset-right, 0px)');
 }
 
-// Replay player width — one variable read by LogPlayer (panel, hover zone, compact strip) and the
-// stick overlay that anchors to the panel's right edge. The phone's map area is ~760 css px, so
-// the panel must stay narrow there; on the desktop the same width squeezed the controls (Marc).
-// +page reads the number too: on a phone too narrow for it, the widget column slides aside.
+// Replay player width, read by LogPlayer, the stick overlay and +page (a phone too narrow for it slides
+// the widget column aside). Narrow on the phone (~760 css px map), wider on the desktop.
 export const logPlayerWidth = isPhone ? 480 : 640;
 if (typeof document !== 'undefined') {
   document.documentElement.style.setProperty('--log-player-w', `${logPlayerWidth}px`);

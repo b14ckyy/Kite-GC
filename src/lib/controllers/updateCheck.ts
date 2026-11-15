@@ -1,17 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Startup update check. On launch we ask the backend for the release relevant to the user's channel
-// (stable, patch-only for the running minor, or incl. pre-releases), compare it to the running version,
-// and — if it's newer and not a version the user chose to skip — surface a one-shot prompt with the
-// release notes. Nothing is downloaded until the user picks "Update and Restart"; that hands the accepted
-// release to the backend (commands/updater.rs), which installs it and relaunches. The only persisted
-// state is the skipped version, honoured until a *higher* version appears. A failed check is logged and
-// ignored; it never disrupts use.
-//
-// A store installation (Google Play, the App Store) is updated by its store. It keeps the notice, as
-// the one place that shows the release notes before the store installs the version, but with an on/off
-// switch instead of the channel choice, and with the store listing as its only way out.
+// Startup update check: if the backend's release for the user's channel is newer and not skipped, show a one-shot
+// prompt with the notes. Nothing downloads before "Update and Restart" (commands/updater.rs); a failed check is
+// logged and ignored. Store installations get the store listing as their only way out.
 
 import { writable, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
@@ -33,8 +25,7 @@ export interface UpdateInfo {
   body: string;
 }
 
-/** How the running copy can be updated (Rust `UpdateKind`): installed package, portable binary, a
- *  mobile build its store updates, or an Android APK installed by hand (GitHub release page). */
+/** How the running copy can be updated (Rust `UpdateKind`). */
 export type UpdateKind = 'installer' | 'portable' | 'store' | 'sideload';
 
 /** Rust `UpdateProgress`, emitted as `update-progress` during the install. */
@@ -61,8 +52,7 @@ export const updateKind = writable<UpdateKind>('installer');
 
 let kindQuery: Promise<void> | null = null;
 
-/** Ask the backend once how this copy is updated. Called at startup, because Settings shows a different
- *  control for a store installation. */
+/** Ask the backend once how this copy is updated (at startup: Settings differs for a store installation). */
 export function resolveUpdateKind(): Promise<void> {
   kindQuery ??= invoke<UpdateKind>('update_kind')
     .then((kind) => updateKind.set(kind))
@@ -91,8 +81,7 @@ export async function runUpdateCheck(): Promise<void> {
   if (!updatesSupported || cfg.mode === 'disabled') return;
 
   await resolveUpdateKind();
-  // A store offers one version, so the channel choice does not apply there: stable releases, and
-  // pre-releases only for a copy that is one itself (a build from the store's test track).
+  // A store offers one version: stable, or pre-releases for a copy from the store's test track.
   const channel = get(updateKind) === 'store'
     ? (APP_VERSION.includes('-') ? 'prerelease' : 'release')
     : cfg.mode;
@@ -124,8 +113,7 @@ export async function openReleasePage(): Promise<void> {
   pendingUpdate.set(null);
 }
 
-/** The store listing for a store installation, or null when none exists yet (the dialog then offers
- *  the release page instead). */
+/** The store listing, or null when none exists yet (the dialog then offers the release page). */
 export function storeUrl(): string | null {
   if (isAndroid && PLAY_STORE_URL) return PLAY_STORE_URL;
   if (isIOS && APP_STORE_URL) return APP_STORE_URL;

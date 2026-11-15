@@ -26,10 +26,8 @@ const LOG_START_MARKER: &[u8] = b"H Product:Blackbox flight data recorder";
 /// A log's header lines never reach this far, so only this much of a block is decoded to text.
 const HEADER_SCAN_BYTES: usize = 64 * 1024;
 
-/// INAV writes the RTC into `Log start datetime`, and the RTC comes from GPS. Without a fix the
-/// driver default `0000-01-01T00:00:00` is logged, and HITL targets log a synthetic far-future date;
-/// both are stored verbatim today and would fix the flight to a nonsense date. Outside this range the
-/// timestamp counts as absent.
+/// The INAV header RTC comes from GPS: without a fix `0000-01-01` is logged, HITL targets log far-future
+/// dates. Outside this range the timestamp counts as absent.
 const MIN_PLAUSIBLE_YEAR: i32 = 2010;
 const MAX_PLAUSIBLE_YEAR: i32 = 2040;
 
@@ -103,11 +101,8 @@ where
     let (start_time, start_time_from_header) = resolve_start_time(&header, file_path);
     eprintln!("[BBX-HEADER] craft={:?}, header_start_time={:?}, resolved_start_time={}", craft_name, header.start_time, start_time.to_rfc3339());
 
-    // NOTE: the duplicate check runs *after* decode + the UTC correction below, not here. The stored
-    // start_time is the true-UTC value (header local time minus the location offset, ADR-048), and the
-    // offset is only known once the GPS start position has been decoded — so a header-only early check
-    // would compare an uncorrected time against the corrected stored one and miss every duplicate of a
-    // log whose header carries a non-UTC local time. See the post-correction check below.
+    // The duplicate check runs AFTER decode + the UTC correction below: the stored start_time is true UTC
+    // (ADR-048), and the offset needs the decoded GPS start position.
 
     // A flash download imports log by log; an error says which one failed.
     let numbered = |e: String| match log_index {
@@ -181,7 +176,6 @@ where
             max_mah = Some(max_mah.map_or(mah, |current: u32| current.max(mah)));
         }
 
-        // Accumulate total distance and max distance from home
         if let (Some(lat), Some(lon)) = (row.telemetry.lat, row.telemetry.lon) {
             if is_valid_gps_coord(lat, lon) {
                 if let (Some(plat), Some(plon)) = (prev_lat, prev_lon) {
@@ -207,10 +201,8 @@ where
     // Capture before constructing Flight (which moves other header fields out).
     let logged_wp_count = header.logged_wp_count;
 
-    // INAV Blackbox stores the pilot's LOCAL time in the header (it lands in `start_time`'s UTC
-    // components without conversion). Resolve the flight-location offset from the start coordinates,
-    // then back-compute the true-UTC start so `start_time` is a real absolute instant (ADR-048). This
-    // also repairs the 3D real-lighting sun for these imports (it reads `start_time` as true UTC).
+    // INAV Blackbox stores the pilot's LOCAL time in the header: resolve the location's offset and back-
+    // compute the true-UTC start (ADR-048); the 3D sun lighting reads `start_time` as true UTC.
     let utc_offset_min = match (start_lat, start_lon) {
         (Some(la), Some(lo)) => super::timezone::offset_min_at(la, lo, start_time),
         _ => None,
@@ -309,9 +301,8 @@ where
         .map_err(|e| format!("Failed to store imported Blackbox telemetry: {}", e))?;
 
     report(96, "archive", "Archiving original Blackbox file...");
-    // Only this log's bytes: a flash download holds every flight, so archiving the whole file per log
-    // would store it once per flight. The slice is a valid standalone log — it is cut exactly where
-    // blackbox_decode splits — so exporting a flight hands back just that flight.
+    // Only this log's bytes (a flash download holds every flight); the slice is cut exactly where
+    // blackbox_decode splits, so it is a valid standalone log.
     db::insert_blackbox_file(
         conn,
         flight_id,
@@ -331,10 +322,9 @@ where
     })
 }
 
-/// Full-rate telemetry rows for the hi-res replay cache (Dev-Docs active/HIRES_REPLAY.md): decode an
-/// archived log slice like the importer, but with no 10 Hz decimation. `scratch_path` is used only
-/// by the legacy path (`KITE_BLACKBOX_LEGACY=1`): blackbox_decode is an external process and can
-/// only read a real file, so the blob is spilled there first and removed before returning.
+/// Full-rate telemetry rows for the hi-res replay cache: an archived log slice decoded like the
+/// importer, without the 10 Hz decimation. `scratch_path` is only for the legacy path, whose external
+/// blackbox_decode can only read a real file.
 pub fn hires_telemetry_rows(
     file_data: &[u8],
     scratch_path: &Path,
@@ -360,11 +350,9 @@ pub fn hires_telemetry_rows(
     result
 }
 
-/// Fallback while the native decoder proves itself in the release-candidate phase (Dev-Docs
-/// active/NATIVE_BLACKBOX_DECODER.md): `KITE_BLACKBOX_LEGACY=1`, in any build, sends the importer and
-/// the hi-res parse through the external blackbox_decode and its CSV parser instead of the native
-/// decoder (`Compat::Native`, the default). The frontend asks for it (`blackbox_legacy_mode`) to
-/// decide whether to check for, offer or show the tool at all. Read once.
+/// `KITE_BLACKBOX_LEGACY=1` (any build, read once): the importer and the hi-res parse use the external
+/// blackbox_decode instead of the native decoder — a fallback while the native one proves itself
+/// (Dev-Docs active/NATIVE_BLACKBOX_DECODER.md).
 pub(crate) fn legacy_decoder_requested() -> bool {
     static LEGACY: OnceLock<bool> = OnceLock::new();
     *LEGACY.get_or_init(|| {
@@ -430,11 +418,9 @@ pub(super) fn parse_csv_rows(csv_output: &str, target_interval_us: i64) -> Resul
         .map_err(|e| format!("Failed to read Blackbox CSV header: {}", e))?
         .clone();
 
-    // Pre-build column index map and resolve column positions — done once per file.
     let index_map = build_index_map(headers.iter());
     let cols = ColumnIndices::from_map(&index_map);
 
-    // Debug: log resolved column indices for GPS
     eprintln!("[BBX-COLS] lat={:?}, lon={:?}, alt={:?}, speed={:?}, time={:?}", cols.lat, cols.lon, cols.alt, cols.speed, cols.time);
 
     let mut collector = RowCollector::new(target_interval_us);
@@ -446,7 +432,6 @@ pub(super) fn parse_csv_rows(csv_output: &str, target_interval_us: i64) -> Resul
             continue;
         }
 
-        // Debug: log first 5 GPS values to verify parsing
         if gps_debug_count < 5 {
             let telemetry = &collector.rows[collector.rows.len() - 1].telemetry;
             let raw_lat = cols.lat.and_then(|i| record.get(i)).unwrap_or("<none>");
@@ -546,10 +531,8 @@ impl RowCollector {
     pub(super) fn offer<R: CellReader + ?Sized>(&mut self, cols: &ColumnIndices, row: &R) -> bool {
         self.raw_rows += 1;
 
-        // Extract timestamp cheaply for time-based downsampling decision
         let source_time_us = cols.time.and_then(|i| row.i64_at(i)).unwrap_or(self.raw_rows as i64);
 
-        // Keep first row always, then only if ≥ target_interval has elapsed
         if !self.rows.is_empty() && (source_time_us - self.last_kept_us) < self.target_interval_us {
             return false;
         }
@@ -566,7 +549,6 @@ impl RowCollector {
     }
 }
 
-/// Resolve the first matching column index from a list of candidate names.
 #[inline]
 fn resolve_col(index_map: &HashMap<String, usize>, names: &[&str]) -> Option<usize> {
     for name in names {
@@ -712,17 +694,9 @@ fn read_u8<R: CellReader + ?Sized>(cols: Option<usize>, record: &R) -> Option<u8
     read_f64(cols, record).map(|v| v.round() as u8)
 }
 
-/// Normalized FLIGHT_MODE bits from `blackbox_decode`'s decoded box names ("ARM|ANGLE|MIXERPROFILE").
-///
-/// Used only for logs predating `activeFlightModeFlags` (INAV 8 and older), whose sole mode signal is
-/// `flightModeFlags` = `rcModeActivationMask`. The raw value there is a `boxId_e` **enum ordinal**
-/// mask, and those ordinals shift between releases — ordinal 53 is MIXERPROFILE in a 9.0 log but the
-/// permanent id the live path maps is NAVCRUISE — so the names the decoder already resolved are the
-/// version-robust way in. Names that are not flight modes (ARM, LIGHTS, MIXERPROFILE, …) contribute
-/// nothing, which is what leaves an armed craft with no mode box as acro.
-///
-/// Caveat this cannot fix: a box mask says which mode the pilot *selected*, not which one the FC
-/// actually entered — a NAV box without a GPS fix never engages, yet shows here.
+/// FLIGHT_MODE bits from the decoded box names, for logs before `activeFlightModeFlags` (INAV 8 and
+/// older): the raw `flightModeFlags` is a `boxId_e` ordinal mask whose ordinals shift between releases.
+/// It says which mode was SELECTED, not entered (a NAV box without a fix shows here too).
 fn flight_mode_bits_from_names(names: &str) -> u32 {
     let mut bits = 0u32;
     for name in names.split('|') {
@@ -751,12 +725,8 @@ fn flight_mode_bits_from_names(names: &str) -> u32 {
     bits
 }
 
-/// INAV `stateFlags_t` bits from `blackbox_decode`'s decoded names ("GPS_FIX_HOME|GPS_FIX|…").
-///
-/// The decoder renders this field as names by default, so the numeric read always failed and every
-/// imported row stored a null — the column was write-only in practice. Bit positions are
-/// `runtime_config.h`, confirmed against 574k decoded rows by pairing the name output with the same
-/// logs decoded under `--unit-flags raw` (zero disagreements).
+/// INAV `stateFlags_t` bits from the decoded names (the decoder renders this field as names, so a numeric
+/// read never resolves). Bit positions per `runtime_config.h`, verified against `--unit-flags raw`.
 fn state_flag_bits_from_names(names: &str) -> u32 {
     let mut bits = 0u32;
     for name in names.split('|') {
@@ -928,9 +898,6 @@ fn build_telemetry_record_indexed<R: CellReader + ?Sized>(
     }
 }
 
-/// Parse `H looptime:<us>` and `H P interval:1/<N>` from the raw log file header,
-/// then compute the effective interval between logged samples in microseconds.
-///
 pub(super) fn parse_loose_i64(raw: &str) -> Option<i64> {
     let cleaned: String = raw
         .chars()
@@ -970,23 +937,17 @@ pub(super) fn log_start_offsets(file_data: &[u8]) -> Vec<usize> {
     offsets
 }
 
-/// How many flight logs a Blackbox file holds. A Configurator flash download contains one per
-/// arm/disarm cycle, and a decode only ever covers one of them, so the importer has to walk them by
-/// index. Files without the marker report 1 and import as a single log (which the native decoder
-/// then refuses as "not a Blackbox log").
+/// How many flight logs a Blackbox file holds (a flash download has one per arm/disarm cycle, and a
+/// decode covers only one). Files without the marker report 1.
 pub fn count_logs(file_path: &Path) -> Result<u32, String> {
     let file_data = fs::read(file_path)
         .map_err(|e| format!("Failed to read Blackbox file {}: {}", file_path.display(), e))?;
     Ok(log_start_offsets(&file_data).len().max(1) as u32)
 }
 
-/// Byte range of the log an import reads the header of, decodes and archives: the native decoder's
-/// own choice (`inav::select_log`) — from the log's product banner to the next banner or the end of
-/// the file. Splitting on the banner rather than on "lines starting with `H `" matters because the
-/// data between headers is binary and can produce such a line by chance. Bytes before the first
-/// banner belong to no log and are dropped; an index beyond the last log, or no index on a file
-/// with several, is an error. Only a file without any banner is taken whole, and only by the legacy
-/// path, which leaves the verdict on it to blackbox_decode as before.
+/// Byte range of the log an import decodes and archives, as `inav::select_log` picks it: product
+/// banner to the next banner. Not split on "`H ` lines" — binary data can produce one by chance. Only
+/// the legacy path takes a file without any banner whole.
 fn log_byte_range(file_data: &[u8], log_index: Option<u32>) -> Result<std::ops::Range<usize>, String> {
     match select_log(file_data, log_index) {
         Err(_) if legacy_decoder_requested() && log_start_offsets(file_data).is_empty() => {
@@ -1017,14 +978,9 @@ fn extract_header_metadata(log: &[u8]) -> HeaderMetadata {
     }
 }
 
-/// Platform type for INAV blackbox: there is no explicit platform header, but the navigation PID
-/// fields are logged under mutually exclusive conditions (blackbox.c):
-///   `fwAlt*`/`fwPos*` → `STATE(FIXED_WING_LEGACY) && BLACKBOX_FEATURE_NAV_PID`
-///   `mcPos*`/`mcVel*`/`mcSurface*` → `!STATE(FIXED_WING_LEGACY) && BLACKBOX_FEATURE_NAV_PID`
-/// so either group settles it outright. With nav-PID logging switched off neither appears and the
-/// motor/servo shape is all that is left — a weak signal, because a fixed wing may well run several
-/// motors (differential thrust, twin): counting motors alone declared every such log a multirotor.
-/// Returns 0 = multirotor (default / unknown), 1 = airplane. Display-only; no functional impact.
+/// INAV platform type from the header: the nav-PID field groups are mutually exclusive (`fwAlt*`/`fwPos*`
+/// fixed wing, `mcPos*`/`mcVel*` multirotor); without nav-PID logging only the motor/servo shape is left
+/// (weak: fixed wings may run several motors). 0 = multirotor/unknown, 1 = airplane; display only.
 fn parse_platform_type(text: &str) -> u8 {
     const FIXED_WING_NAV_FIELDS: [&str; 2] = ["fwAlt", "fwPos"];
     const MULTIROTOR_NAV_FIELDS: [&str; 3] = ["mcPos", "mcVel", "mcSurface"];

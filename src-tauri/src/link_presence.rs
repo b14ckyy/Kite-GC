@@ -1,28 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-//! What the host OS is told about the link: that one is active, and whether the display has to
-//! stay awake for it.
-//!
-//! Android: run the foreground service with the notification for the life of the link (Dev-Docs
-//! active/BACKGROUND_TELEMETRY.md). Screen-off is not held open — a Doze-dropped link is an
-//! ordinary lost link. Desktop: nothing.
-//!
-//! Android + iOS: keep the display awake while there is something to watch (`wants_awake`) — the
-//! vehicle is armed, or the link cannot tell (a telemetry feed without an arming flag), or the
-//! continuous raw recording runs, or the user asked for it in the settings. A connected but
-//! disarmed vehicle leaves the display to the OS timeout. Android: the window flag
-//! FLAG_KEEP_SCREEN_ON (no WAKE_LOCK); iOS: `UIApplication.idleTimerDisabled`. Both keep the display
-//! on AND undimmed — neither system offers "on, but may dim" — and both end with the foreground.
-//! Neither switches a display back ON: a screen that went dark while disarmed stays dark at arming.
-//!
-//! The raw-recording rule exists for iOS, which cannot record with the display off (Android can,
-//! through its foreground service); it applies to both so that a phone and an iPad behave alike
-//! (Marc, 2026-11-15) — do not drop it on Android as redundant.
-//!
-//! "Active" = a transport is open, bytes or not. `link_up` on every connect; `link_down` on the
-//! user's disconnect of the last link and on a lost MSP link (a lost MAVLink link arrives through
-//! the frontend's disconnect).
+//! What the host OS is told about the link: that one is active (Android foreground service) and whether
+//! the display stays awake (`wants_awake`). The raw-recording rule exists for iOS but deliberately
+//! applies to Android too — do not drop it there as redundant.
 //!
 //! GATE(fleet): ONE state for all links. With several vehicles the last status wins and a second
 //! connect replaces the first link's `raw_always`; per-link state needs the link id in
@@ -39,9 +20,8 @@ struct Awake {
     link: bool,
     /// The last status of this link said "armed".
     armed: bool,
-    /// This link has delivered a status at all. A passive telemetry feed only produces one once the
-    /// frame that carries the arming state has arrived (CRSF flight mode, FrSky modes sensor, LTM
-    /// S-frame, ArduPilot passthrough 0x5001) — a feed without that frame never does.
+    /// This link has delivered a status at all — a passive feed only does once a frame with the arming
+    /// state arrived, and a feed without such a frame never does.
     status_seen: bool,
     /// The link records the raw stream continuously (not per flight).
     raw_always: bool,
@@ -60,10 +40,9 @@ static AWAKE: Mutex<(Awake, bool)> = Mutex::new((
     false,
 ));
 
-/// Change the inputs and tell the OS when the outcome changed — or in any case with `force` (a
-/// fresh window does not carry the flag of the one before it). The OS is told while the lock is
-/// held, so two updates cannot reach it in the wrong order; neither platform call takes this lock
-/// or blocks (both post to the main thread).
+/// Change the inputs and tell the OS when the outcome changed, or always with `force` (a fresh window
+/// does not carry the old one's flag). Told under the lock so updates cannot arrive out of order;
+/// neither platform call takes this lock or blocks.
 fn update(force: bool, change: impl FnOnce(&mut Awake)) {
     let mut g = AWAKE.lock().unwrap_or_else(|p| p.into_inner());
     change(&mut g.0);

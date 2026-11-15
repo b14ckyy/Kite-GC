@@ -1,13 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Custom (offline) maps from a local tile folder — desktop only (`hasCustomMaps`).
-//
-// The backend lists the maps under the configured folder (`settings.customMapsPath`, '' = default
-// `<app data>/custom_maps`); each becomes a provider `custom:<folder>` in the map-provider registry
-// (`config/mapProviders.ts`), so every map view resolves it through `getProviderById` like a built-in
-// one. The coverage (the covered areas behind the frames and "Show map area") is loaded per map on demand; the
-// backend keeps it as an index file next to the tiles.
+// Custom (offline) maps from a local tile folder — desktop only (`hasCustomMaps`). Each map under the folder
+// becomes a `custom:<folder>` provider in the registry (config/mapProviders.ts), resolved like a built-in;
+// its coverage (index file next to the tiles) loads per map on demand.
 
 import { writable, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
@@ -206,12 +202,9 @@ function providerKey(p: MapProvider, revision: number): string {
   return isUserProviderId(p.id) ? `${p.id}|${p.maxZoom}|${p.tileSize}|${p.attribution}|${p.url}` : p.id;
 }
 
-/**
- * Follow the provider the map views should show (`settings.mapProvider`, resolved against the
- * custom-map and user-map registry). Calls `apply` immediately for a built-in provider and whenever the
- * resolved provider changes — NOT on the many other settings writes. A persisted custom id waits for
- * the first listing; a custom or user map that no longer exists resolves to the built-in fallback.
- */
+/** Follow the provider the map views should show (`settings.mapProvider`, resolved against the custom/user
+ *  registries): `apply` runs immediately for a built-in and whenever the resolved provider changes. A persisted
+ *  custom id waits for the first listing; a vanished custom/user map resolves to the built-in fallback. */
 export function watchMapProvider(apply: (p: MapProvider) => void): () => void {
   let id: string | null = null;
   let userList: UserMapSpec[] | null = null;
@@ -310,10 +303,8 @@ function distToBounds(lat: number, lon: number, b: GeoBounds): number {
   return (dLon * k) ** 2 + dLat ** 2;
 }
 
-/** "Show map area": ask the map views to fit the covered area nearest to the current 2D view
- *  centre (stores/mapFocus). `empty` = the map has no tiles; `error` = its coverage could not be read;
- *  `cancelled` = the folder was re-listed meanwhile (the answer may belong to the previous folder —
- *  nothing to say). */
+/** "Show map area": fit the covered area nearest to the 2D view centre (stores/mapFocus). `empty` = no tiles;
+ *  `error` = coverage unreadable; `cancelled` = the folder was re-listed meanwhile. */
 export async function focusCustomMap(name: string): Promise<'ok' | 'empty' | 'error' | 'cancelled'> {
   const gen = listingGen;
   const cov = await loadCustomMapCoverage(name);

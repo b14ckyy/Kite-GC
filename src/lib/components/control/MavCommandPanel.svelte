@@ -4,10 +4,8 @@
 -->
 
 <script module lang="ts">
-  // Persisted across panel close/reopen: the module scope outlives the component instance, so the
-  // last-entered command values (guided altitude, speed, loiter radius, heading, takeoff altitude)
-  // stick like every other panel's state instead of resetting to their defaults each reopen. So does
-  // the fold state of the RC modes.
+  // Module scope outlives the component, so the last-entered command values and the RC-modes fold state
+  // survive a panel close/reopen.
   const savedInputs = { takeoffAlt: 50, changeAlt: 50, changeSpeed: 10, loiterRad: 80, heading: 0, rcModesOpen: false };
 </script>
 
@@ -40,11 +38,9 @@
   const safeModes = $derived(allModes.filter((m) => !m.stick));
   const stickModes = $derived(allModes.filter((m) => m.stick));
 
-  // Modes with their own dedicated control (Guided toggle, RTL/Land hold buttons, Takeoff command,
-  // PX4 mission mode) are not repeated as quick mode buttons. The Guided toggle's mode is matched by
-  // its flag, not its key: PX4's Hold is that mode, ArduRover's Hold is an ordinary mode with no other button.
-  // ArduPlane's return / land modes (QRTL, QLand, Loiter QLand, AutoLand) sit beside RTL, ArduSub's Surface
-  // takes the place of RTL / Land — see `landModes`.
+  // Modes with a dedicated control (Guided toggle, RTL/Land, Takeoff, PX4 mission) get no quick mode button. The
+  // Guided mode is matched by its flag, not its key (PX4's Hold is it, ArduRover's Hold is ordinary). ArduPlane's
+  // return/land modes and ArduSub's Surface sit beside RTL — see `landModes`.
   const DEDICATED = new Set(['guided', 'rtl', 'return', 'land', 'takeoff', 'mission', 'qrtl', 'qland', 'loiterqland', 'autoland', 'surface']);
   // Hold-to-confirm modes (return / land) go last, as one block under the ordinary flight modes.
   const quickModes = $derived.by(() => {
@@ -65,11 +61,9 @@
   // (mode 13 of another vehicle type is something else — Copter SPORT).
   const planeTakeoffMode = $derived(sys === 'ardupilot' && cls === 'plane' && $modeTableMatchesVehicle
     ? allModes.find((m) => m.key === 'takeoff') : undefined);
-  // ArduPlane returns and lands through modes, and they have their place beside RTL instead of the mode
-  // grid: a QuadPlane pairs RTL with QRTL and gets Loiter QLand + QLand below; a plain plane gets AutoLand
-  // (ArduPilot 4.7+, refused on a QuadPlane). Driven by what is offered, so a QuadPlane whose class was not
-  // detected still gets its buttons from the FC's list. Empty while a vehicle switch has not caught up.
-  // ArduSub has neither RTL nor Land: Surface is its way up and the only button of the row.
+  // ArduPlane return/land modes beside RTL: QuadPlane → QRTL + Loiter QLand + QLand; plain plane → AutoLand
+  // (4.7+). Driven by the FC's offered list, so an undetected QuadPlane still gets them; empty while a vehicle
+  // switch hasn't caught up. ArduSub: Surface is the only button.
   const landModes = $derived.by(() => {
     if (sys !== 'ardupilot' || !$modeTableMatchesVehicle) return { qrtl: undefined, qland: undefined, loiterQland: undefined, autoland: undefined, surface: undefined };
     const by = (key: string) => allModes.find((m) => m.key === key);
@@ -78,10 +72,8 @@
   // The Guided toggle's mode; with the FC's mode list only when the FC offers GUIDED.
   const guidedMode = $derived(guidedModeFor(sys, cls, $activeFcModesChecked));
 
-  // Vehicle-capability gates for the active-flight adjustments. Fixed-wing covers ArduPlane and PX4
-  // fixed-wing/VTOL alike (the vehicle class comes from MAV_TYPE for PX4, fc_variant for ArduPilot) —
-  // loiter radius + landing go-around are fixed-wing concepts on both firmwares (the loiter-radius
-  // parameter name differs; the controller picks it). Copter/Rover don't get these.
+  // Fixed-wing (ArduPlane and PX4 fixed-wing/VTOL alike) gets loiter radius + landing go-around; the
+  // controller picks the firmware's parameter name. Copter/Rover don't.
   const isFixedWing = $derived(cls === 'plane' || cls === 'quadplane');
   const hasAltitude = $derived(sys === 'px4' || cls === 'copter' || cls === 'quadplane' || cls === 'plane');
   // Plain ArduPlane fixed-wing has no land-now command (landing = AUTO sequence / RTL) → hide Land.
@@ -109,9 +101,8 @@
     savedInputs.heading = headingVal;
     savedInputs.rcModesOpen = rcModesOpen;
   });
-  // Set Heading is Copter-only (CONDITION_YAW). The fixed-wing GUIDED_CHANGE_HEADING path is removed:
-  // ArduPlane's guided heading slew is buggy — it locks heading + bypasses waypoint nav and isn't
-  // cleared by reposition (it even rejects descent), so it's unsafe to expose. PX4 has no equivalent.
+  // Set Heading is Copter-only (CONDITION_YAW): ArduPlane's GUIDED_CHANGE_HEADING locks heading, bypasses WP nav
+  // and isn't cleared by reposition — unsafe to expose. PX4 has no equivalent.
   const canSetHeading = $derived(sys === 'ardupilot' && cls === 'copter' && inGuided);
 
   const activeKey = $derived($activeMode?.key ?? '');

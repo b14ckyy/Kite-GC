@@ -21,7 +21,6 @@ struct CurrentWeather {
     weathercode: i32,
 }
 
-/// Weather snapshot at a location
 #[derive(Debug, Clone)]
 pub struct WeatherData {
     pub temp_c: f64,
@@ -30,8 +29,7 @@ pub struct WeatherData {
     pub description: String,
 }
 
-/// Fetch current weather for a GPS position.
-/// Returns None on error — never blocks the recorder.
+/// Current weather for a GPS position; `None` on error — never blocks the recorder.
 pub async fn fetch_weather(lat: f64, lon: f64) -> Option<WeatherData> {
     let client = reqwest::Client::builder()
         .user_agent(crate::user_agent::user_agent("weather"))

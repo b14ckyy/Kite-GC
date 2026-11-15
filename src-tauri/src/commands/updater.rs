@@ -1,24 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-//! "Update and Restart" — the install half of the update check. `update_check.rs` decides WHICH release
-//! the user is told about; this module installs the one the user accepted and relaunches Kite.
-//!
-//! Two install paths, chosen by how the running copy was deployed:
-//!
-//! * **Installed** (NSIS on Windows, the `.app` bundle on macOS, `.deb` / `.rpm` / AppImage on Linux)
-//!   → the Tauri updater plugin. It is pointed at the accepted release's `latest.json` manifest (not at
-//!   `releases/latest`), so the release the dialog shows and the release the plugin installs can never
-//!   differ — channel, patch-only and "skip" are decided in one place. The manifest's `.sig` entries are
-//!   verified against the `pubkey` in tauri.conf.json; the private key lives in the Dev-Docs repo.
-//! * **Portable** (the `.portable` marker beside the executable) → our own path: download the portable
-//!   ZIP of the release, take the binary out of it and swap it for the running one. Windows cannot
-//!   overwrite a running executable but allows renaming it, so the old one is moved to `<exe>.old`
-//!   first and removed on the next start (`remove_stale_executable`). Linux overwrites in place.
-//!
-//! Mobile has no in-app updating on either platform. A store installation (Google Play, the App Store)
-//! is updated by its store, so the dialog links to the listing there; an Android APK installed by hand
-//! gets the GitHub release page.
+//! "Update and Restart": installed copies go through the Tauri updater, pointed at the accepted release's
+//! own `latest.json` so the release shown and the one installed can never differ; portable copies swap
+//! their binary (Windows can only rename a running exe → `<exe>.old`). Mobile has no in-app updating.
 
 use serde::Serialize;
 use tauri::AppHandle;
@@ -59,8 +44,7 @@ pub fn update_kind() -> UpdateKind {
     }
     #[cfg(target_os = "android")]
     {
-        // A failed lookup counts as an APK: that keeps the notice working, at the price of the release
-        // page instead of the store listing.
+        // A failed lookup counts as an APK: the notice keeps working, with the release page.
         let play = crate::android::install_source::is_play_store().unwrap_or_else(|e| {
             log::warn!("Update: install source lookup failed, treating as APK: {e}");
             false
@@ -82,10 +66,8 @@ pub fn update_kind() -> UpdateKind {
     }
 }
 
-/// Install release `tag` (version `version`, without the `v`) and relaunch. Does not return on success:
-/// the Tauri updater exits the process itself on Windows (the installer relaunches Kite), everywhere
-/// else `AppHandle::restart` takes over once the swap is done. Errors come back as plain text for the
-/// dialog.
+/// Install release `tag` and relaunch; does not return on success (Windows: the installer relaunches,
+/// elsewhere `AppHandle::restart`). Errors come back as plain text for the dialog.
 #[tauri::command(async)]
 pub async fn install_update(app: AppHandle, tag: String, version: String) -> Result<(), String> {
     #[cfg(mobile)]

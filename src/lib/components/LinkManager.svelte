@@ -3,11 +3,9 @@
   Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 -->
 
-<!-- LinkManager — the multi-vehicle surface in the toolbar: a "Links" toggle (shown while connected)
-     that drops down a panel listing every known vehicle (click = make it the one the widgets and the
-     control panel follow), every open link (with a per-link close), and an "Add link" form that opens
-     an additional connection without touching the existing ones. Reuses ConnectionControls in its
-     stacked layout for the form. See docs/02-design/features/multi-vehicle.design.md §6.5 / §6.6. -->
+<!-- LinkManager — the toolbar's "Links" drop-down (while connected): every known vehicle (click = follow it),
+     every open link (close per link) and an "Add link" form (ConnectionControls, stacked) that leaves existing
+     links alone. See docs/02-design/features/multi-vehicle.design.md §6.5 / §6.6. -->
 <script lang="ts">
   import { t } from 'svelte-i18n';
   import Button from '$lib/components/panel/Button.svelte';
