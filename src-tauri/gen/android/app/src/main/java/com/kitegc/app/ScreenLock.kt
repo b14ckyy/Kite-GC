@@ -6,11 +6,12 @@ package com.kitegc.app
 import android.view.WindowManager
 
 /**
- * Keeps the display on while a telemetry link is active — nav-app behaviour.
+ * Keeps the display on while there is something to watch — nav-app behaviour.
  *
- * Driven from Rust (`link_presence::link_active`) over JNI: set on every connect, cleared on the
- * user's disconnect and on a lost link, so the normal OS screen timeout applies whenever there is
- * nothing to watch. `FLAG_KEEP_SCREEN_ON` is scoped to this window and released automatically when
+ * Driven from Rust (`link_presence`, which holds the rule) over JNI: on while the vehicle is armed,
+ * while a link cannot tell whether it is, during a continuous raw recording, or always when the
+ * user asked for it in the settings; otherwise the normal OS screen timeout applies.
+ * `FLAG_KEEP_SCREEN_ON` is scoped to this window and released automatically when
  * the app leaves the foreground: no WAKE_LOCK permission, nothing kept awake in the background.
  */
 object ScreenLock {

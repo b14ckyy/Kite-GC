@@ -1163,6 +1163,8 @@
     "rateHint": "Rate changes take effect on next connect.",
     "language": "Language",
     "uiScale": "UI Scale",
+    "stayAwake": "Stay awake without connection",
+    "stayAwakeHint": "Kite keeps the screen on while the aircraft is armed. Connected but disarmed, the screen timeout of the device applies — except during a continuous raw recording, or when the telemetry feed does not report whether the aircraft is armed: then the screen stays on for the whole connection. Switch this on to keep the screen on whenever Kite is open, also without a connection.",
     "interface": "Interface",
     "tabData": "Data",
     "groupUi": "UI",

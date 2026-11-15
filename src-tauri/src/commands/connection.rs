@@ -389,7 +389,13 @@ pub async fn connect(
         let mut reg = state.links.lock().map_err(|e| e.to_string())?;
         reg.insert(entry)
     };
-    crate::link_presence::link_up(&opened.fc_info, opened.protocol_name);
+    // This link records the raw stream continuously (the display then stays awake, link_presence):
+    // what `FlightRecorder::start_continuous_log` goes by — `raw_always` alone, with the flight log
+    // on. A passive telemetry link never records raw data.
+    let raw_always = opened.protocol_name != "Telemetry"
+        && flight_log_enabled.unwrap_or(false)
+        && flight_log_raw_always.unwrap_or(false);
+    crate::link_presence::link_up(&opened.fc_info, opened.protocol_name, raw_always);
     let _ = app_handle.emit("vehicle-discovered", &discovered);
     if activated {
         state.retarget_rc(Some(&primary));

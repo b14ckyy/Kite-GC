@@ -671,6 +671,7 @@ pub fn run() {
             is_fleet_mode,
             is_fleet_group_recording,
             link_status::telemetry_track_since,
+            link_presence::set_stay_awake,
             set_log_level,
             get_log_path,
             list_log_files,
