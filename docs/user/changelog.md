@@ -403,7 +403,7 @@ inside the box of the feature release they belong to, so the notes for one relea
 
     ---
 
-    **1.0.2**{ .kite-patch } *unreleased*{ .kite-badge }
+    **1.0.2**{ .kite-patch } *2026-11-15*{ .kite-badge }
 
     **Fixed**
 
