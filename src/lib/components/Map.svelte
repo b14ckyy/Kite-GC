@@ -153,7 +153,7 @@
   } = $props();
 
   // ── UAV model marker (top-down canvas render of the same .glb used in 3D) ── a persistent <canvas>, so
-  // there is no toDataURL/setIcon churn; redrawn only on a changed attitude (see modelDrawnKey).
+  // there is no toDataURL/setIcon churn; redrawn only on a changed tilt (see modelDrawn).
   let uavMesh: UavMesh | null = null;       // geometry for the current model kind
   let uavMeshToken = 0;                       // guards out-of-order async loads
   const MODEL_REAL_SPAN_M = 14;              // real-world span the model represents (zoom-scaled)
@@ -207,14 +207,20 @@
   function onZoomEnd() {
     const lat = followCurrent?.lat ?? 0;
     for (const mk of [uavMarker, playbackMarker]) mk?.setIcon(makeModelIcon(modelSizePx(lat)));
-    modelDrawnKey = ''; // new canvas → the cached "already drawn" state is stale
+    modelDrawn = null; // new canvas
     applyFollowFrame();
     updateFleet(); // fleet model markers are zoom-sized too
   }
 
-  // The model is redrawn only when the attitude changed by a whole degree; position and centre glide
-  // every frame without it.
-  let modelDrawnKey = '';
+  // A redraw is the one paint of a follow frame, so the model is drawn nose-up and redrawn only when the
+  // tilt moved by a step; the heading is a rotation of the finished canvas, which costs no paint.
+  const MODEL_TILT_STEP_DEG = 5;
+  let modelDrawn: { marker: L.Marker; color: string; pitch: number; roll: number } | null = null;
+  function turnModel(marker: L.Marker, heading: number) {
+    const cv = marker.getElement()?.querySelector('canvas');
+    const turn = `rotate(${heading.toFixed(1)}deg)`;
+    if (cv && cv.style.transform !== turn) cv.style.transform = turn;
+  }
 
   const ARMING_FLAG_ARMED = 2;
   const MIN_TRAIL_DIST = 1; // meters — don't add trail point if moved less
@@ -1803,13 +1809,15 @@
     if (activeFollowMarker) {
       activeFollowMarker.setLatLng(ll);
       const t = followTarget ?? followCurrent;
-      // Whole degrees: a redraw is the one paint of a follow frame, and attitude noise would force it every frame.
-      const q = Math.round;
-      const key = `${q(t.heading)}|${q(t.pitch)}|${q(t.roll)}|${activeColor}|${activeFollowMarker === uavMarker}`;
-      if (key !== modelDrawnKey) {
-        modelDrawnKey = key;
-        drawModel(activeFollowMarker, t.heading, t.pitch, t.roll, activeColor);
+      const d = modelDrawn;
+      if (
+        !d || d.marker !== activeFollowMarker || d.color !== activeColor ||
+        Math.abs(t.pitch - d.pitch) >= MODEL_TILT_STEP_DEG || Math.abs(t.roll - d.roll) >= MODEL_TILT_STEP_DEG
+      ) {
+        modelDrawn = { marker: activeFollowMarker, color: activeColor, pitch: t.pitch, roll: t.roll };
+        drawModel(activeFollowMarker, 0, t.pitch, t.roll, activeColor);
       }
+      turnModel(activeFollowMarker, t.heading);
     }
     redrawDirLines();
     // The rotation is independent of Leaflet's view, so it keeps turning through a zoom or a pinch.
@@ -3151,6 +3159,10 @@
   /* Exception — the UAV model is drawn with its heading; the map rotation is what makes it point up. */
   :global(.map.heading-up .uav-model-icon) {
     --kite-upright: 0deg;
+  }
+  /* Its own layer: the heading turns the canvas per frame (turnModel), and without one that repaints. */
+  :global(.uav-model-canvas) {
+    will-change: transform;
   }
   /* Radar contacts: the icon stands upright (callsign label readable, below the symbol), but the
      silhouette itself points along the contact's track, so it turns back with the map. */
