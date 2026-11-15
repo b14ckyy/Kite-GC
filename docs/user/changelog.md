@@ -258,6 +258,9 @@ inside the box of the feature release they belong to, so the notes for one relea
       version in place. [#162]
     - **Patch releases only** — an update channel that offers bug-fix releases of the running
       version only (2.0.0 → 2.0.1, never 2.1.0). [#162]
+    - **The computer stays awake while armed** — on Windows, macOS and Linux the screen stays on and
+      the computer does not go to sleep by itself while the aircraft is armed, by the same rule as on
+      phones and tablets; **Stay awake without connection** is in the settings there too. [#292]
     - **Slovak interface language**, contributed by Sebastian Kumor. [#222]
     - **Spanish interface language.** [#225]
 
@@ -615,6 +618,7 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#274]: https://github.com/b14ckyy/Kite-GC/pull/274
 [#285]: https://github.com/b14ckyy/Kite-GC/pull/285
 [#288]: https://github.com/b14ckyy/Kite-GC/pull/288
+[#292]: https://github.com/b14ckyy/Kite-GC/pull/292
 [#259]: https://github.com/b14ckyy/Kite-GC/pull/259
 [#143]: https://github.com/b14ckyy/Kite-GC/pull/143
 [#145]: https://github.com/b14ckyy/Kite-GC/pull/145
