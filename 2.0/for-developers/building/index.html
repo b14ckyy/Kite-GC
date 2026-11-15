@@ -1,0 +1,2635 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="User documentation for Kite Ground Control — an INAV / ArduPilot / PX4 ground control station.">
+      
+      
+      
+        <link rel="canonical" href="https://b14ckyy.github.io/Kite-GC/2.0/for-developers/building/">
+      
+      
+        <link rel="prev" href="../architecture/">
+      
+      
+        <link rel="next" href="../ui-framework/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/branding/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+    
+    
+      
+        <title>Building from source - Kite Ground Control</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/branding/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="blue" data-md-color-accent="light-blue">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#building-from-source" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+        <aside class="md-banner">
+          <div class="md-banner__inner md-grid md-typeset">
+            
+              <button class="md-banner__button md-icon" aria-label="Don't show this again">
+                
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+              </button>
+            
+            
+  <strong>Kite Ground Control 1.0 is released.</strong> Your
+  <a href="https://github.com/b14ckyy/Kite-GC/issues">feedback &amp; bug reports</a> are very welcome.
+
+          </div>
+          
+            <script>var el=document.querySelector("[data-md-component=announce]");if(el){var content=el.querySelector(".md-typeset");__md_hash(content.innerHTML)===__md_get("__announce")&&(el.hidden=!0)}</script>
+          
+        </aside>
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+          <aside class="md-banner md-banner--warning">
+            <div class="md-banner__inner md-grid md-typeset">
+              
+  You are not reading the documentation for the latest release.
+  <a href="../../..">
+    <strong>Switch to the latest release.</strong>
+  </a>
+
+            </div>
+            <script>var el=document.querySelector("[data-md-component=outdated]"),base=new URL("../.."),outdated=__md_get("__outdated",sessionStorage,base);!0===outdated&&el&&(el.hidden=!1)</script>
+          </aside>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Kite Ground Control" class="md-header__button md-logo" aria-label="Kite Ground Control" data-md-component="logo">
+      
+  <img src="../../assets/branding/kitegc-icon-white.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Kite Ground Control
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Building from source
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="blue" data-md-color-accent="light-blue"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="light-blue"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        
+<a href="https://discord.gg/3FM7EWhkg9" title="Kite community on Discord" class="md-source kite-header-discord" target="_blank" rel="noopener">
+  <div class="md-source__icon md-icon">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M492.5 69.8c-.2-.3-.4-.6-.8-.7-38.1-17.5-78.4-30-119.7-37.1-.4-.1-.8 0-1.1.1s-.6.4-.8.8c-5.5 9.9-10.5 20.2-14.9 30.6-44.6-6.8-89.9-6.8-134.4 0-4.5-10.5-9.5-20.7-15.1-30.6-.2-.3-.5-.6-.8-.8s-.7-.2-1.1-.2C162.5 39 122.2 51.5 84.1 69c-.3.1-.6.4-.8.7C7.1 183.5-13.8 294.6-3.6 404.2c0 .3.1.5.2.8s.3.4.5.6c44.4 32.9 94 58 146.8 74.2.4.1.8.1 1.1 0s.7-.4.9-.7c11.3-15.4 21.4-31.8 30-48.8.1-.2.2-.5.2-.8s0-.5-.1-.8-.2-.5-.4-.6-.4-.3-.7-.4c-15.8-6.1-31.2-13.4-45.9-21.9-.3-.2-.5-.4-.7-.6s-.3-.6-.3-.9 0-.6.2-.9.3-.5.6-.7c3.1-2.3 6.2-4.7 9.1-7.1.3-.2.6-.4.9-.4s.7 0 1 .1c96.2 43.9 200.4 43.9 295.5 0 .3-.1.7-.2 1-.2s.7.2.9.4c2.9 2.4 6 4.9 9.1 7.2.2.2.4.4.6.7s.2.6.2.9-.1.6-.3.9-.4.5-.6.6c-14.7 8.6-30 15.9-45.9 21.8-.2.1-.5.2-.7.4s-.3.4-.4.7-.1.5-.1.8.1.5.2.8c8.8 17 18.8 33.3 30 48.8.2.3.6.6.9.7s.8.1 1.1 0c52.9-16.2 102.6-41.3 147.1-74.2.2-.2.4-.4.5-.6s.2-.5.2-.8c12.3-126.8-20.5-236.9-86.9-334.5zm-302 267.7c-29 0-52.8-26.6-52.8-59.2s23.4-59.2 52.8-59.2c29.7 0 53.3 26.8 52.8 59.2 0 32.7-23.4 59.2-52.8 59.2m195.4 0c-29 0-52.8-26.6-52.8-59.2s23.4-59.2 52.8-59.2c29.7 0 53.3 26.8 52.8 59.2 0 32.7-23.2 59.2-52.8 59.2"/></svg>
+  </div>
+</a>
+
+<a href="https://github.com/b14ckyy/Kite-GC" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    b14ckyy/Kite-GC
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Kite Ground Control" class="md-nav__button md-logo" aria-label="Kite Ground Control" data-md-component="logo">
+      
+  <img src="../../assets/branding/kitegc-icon-white.svg" alt="logo">
+
+    </a>
+    Kite Ground Control
+  </label>
+  
+    <div class="md-nav__source">
+      
+<a href="https://discord.gg/3FM7EWhkg9" title="Kite community on Discord" class="md-source kite-header-discord" target="_blank" rel="noopener">
+  <div class="md-source__icon md-icon">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M492.5 69.8c-.2-.3-.4-.6-.8-.7-38.1-17.5-78.4-30-119.7-37.1-.4-.1-.8 0-1.1.1s-.6.4-.8.8c-5.5 9.9-10.5 20.2-14.9 30.6-44.6-6.8-89.9-6.8-134.4 0-4.5-10.5-9.5-20.7-15.1-30.6-.2-.3-.5-.6-.8-.8s-.7-.2-1.1-.2C162.5 39 122.2 51.5 84.1 69c-.3.1-.6.4-.8.7C7.1 183.5-13.8 294.6-3.6 404.2c0 .3.1.5.2.8s.3.4.5.6c44.4 32.9 94 58 146.8 74.2.4.1.8.1 1.1 0s.7-.4.9-.7c11.3-15.4 21.4-31.8 30-48.8.1-.2.2-.5.2-.8s0-.5-.1-.8-.2-.5-.4-.6-.4-.3-.7-.4c-15.8-6.1-31.2-13.4-45.9-21.9-.3-.2-.5-.4-.7-.6s-.3-.6-.3-.9 0-.6.2-.9.3-.5.6-.7c3.1-2.3 6.2-4.7 9.1-7.1.3-.2.6-.4.9-.4s.7 0 1 .1c96.2 43.9 200.4 43.9 295.5 0 .3-.1.7-.2 1-.2s.7.2.9.4c2.9 2.4 6 4.9 9.1 7.2.2.2.4.4.6.7s.2.6.2.9-.1.6-.3.9-.4.5-.6.6c-14.7 8.6-30 15.9-45.9 21.8-.2.1-.5.2-.7.4s-.3.4-.4.7-.1.5-.1.8.1.5.2.8c8.8 17 18.8 33.3 30 48.8.2.3.6.6.9.7s.8.1 1.1 0c52.9-16.2 102.6-41.3 147.1-74.2.2-.2.4-.4.5-.6s.2-.5.2-.8c12.3-126.8-20.5-236.9-86.9-334.5zm-302 267.7c-29 0-52.8-26.6-52.8-59.2s23.4-59.2 52.8-59.2c29.7 0 53.3 26.8 52.8 59.2 0 32.7-23.4 59.2-52.8 59.2m195.4 0c-29 0-52.8-26.6-52.8-59.2s23.4-59.2 52.8-59.2c29.7 0 53.3 26.8 52.8 59.2 0 32.7-23.2 59.2-52.8 59.2"/></svg>
+  </div>
+</a>
+
+<a href="https://github.com/b14ckyy/Kite-GC" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    b14ckyy/Kite-GC
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/first-connection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    First connection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/quick-tour/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick tour
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/mobile/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Android, iPhone & iPad
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/connecting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connecting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/telemetry-and-display/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Telemetry & display
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/missions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Missions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/vehicle-control/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Vehicle control
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/rc-control/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    RC control
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_6" id="__nav_3_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Logbook
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Logbook
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/logbook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Flight logbook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/vehicles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Vehicles
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/batteries/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Batteries
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/video/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Video
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/terrain-analysis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Terrain & RF analysis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/safety/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Safety
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/radar-and-adsb/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Radar & ADS-B
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/airspace/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Airspace Manager
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/map-3d/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    3D map
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/custom-maps/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Your own maps
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/relay-and-forwarding/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Relay & forwarding
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/settings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Settings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/telemetry-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Telemetry API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/file-formats/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    File formats
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Troubleshooting
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../troubleshooting/connection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../troubleshooting/rc-control/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    RC control
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../troubleshooting/video/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Video
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../troubleshooting/reporting-issues/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reporting a problem
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../release-support/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release support
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../privacy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Privacy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_10" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_10" id="__nav_10_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    For developers
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_10_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_10">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    For developers
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Building from source
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Building from source
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Prerequisites">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#all-platforms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        All platforms
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#windows-primary-platform" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Windows (primary platform)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#linux-debian-ubuntu-based" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Linux (Debian / Ubuntu based)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#macos" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        macOS
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#android" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Android
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Android">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#getting-an-apk-without-building-one" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Getting an APK without building one
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#signing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Signing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#version-code-and-the-play-bundle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Version code and the Play bundle
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#building-locally" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Building locally
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-does-not-work-yet-on-android" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What does not work yet on Android
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workflow
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Workflow">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#build-outputs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Build outputs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#quality-checks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quality checks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#linux-runtime-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Linux runtime notes
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ui-framework/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    UI framework & theme
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Prerequisites">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#all-platforms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        All platforms
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#windows-primary-platform" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Windows (primary platform)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#linux-debian-ubuntu-based" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Linux (Debian / Ubuntu based)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#macos" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        macOS
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#android" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Android
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Android">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#getting-an-apk-without-building-one" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Getting an APK without building one
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#signing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Signing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#version-code-and-the-play-bundle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Version code and the Play bundle
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#building-locally" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Building locally
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-does-not-work-yet-on-android" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What does not work yet on Android
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workflow
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Workflow">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#build-outputs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Build outputs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#quality-checks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quality checks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#linux-runtime-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Linux runtime notes
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/b14ckyy/Kite-GC/edit/master/docs/user/for-developers/building.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="building-from-source">Building from source<a class="headerlink" href="#building-from-source" title="Permanent link">&para;</a></h1>
+<p>How to set up a development environment and build Kite Ground Control yourself. The project uses
+<strong><a href="https://github.com/casey/just">just</a></strong> as its task runner for a consistent interface across Windows,
+Linux and macOS.</p>
+<div class="admonition note">
+<p class="admonition-title">Heavy system dependencies are manual</p>
+<p>The toolchains and system libraries below must be installed <strong>manually</strong> — they need administrative
+rights and significant system changes, so there are no automated scripts for them.</p>
+</div>
+<h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
+<h3 id="all-platforms">All platforms<a class="headerlink" href="#all-platforms" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong><a href="https://nodejs.org/">Node.js</a></strong> LTS (v20 or v24)</li>
+<li><strong>npm 11+</strong> — keep it in sync across your dev machines. Older npm (10.x) rewrites <code>package-lock.json</code>
+  on every install by stripping the <code>libc</code> fields of the optional native deps, so mixing versions makes
+  the lockfile flip-flop. Upgrade with <code>npm install -g npm@latest</code> (Node 22.9+ / 24 already bundle 11).</li>
+<li><strong><a href="https://rustup.rs/">Rust</a></strong> (via rustup)</li>
+<li><strong><a href="https://github.com/casey/just">just</a></strong> — strongly recommended</li>
+</ul>
+<h3 id="windows-primary-platform">Windows (primary platform)<a class="headerlink" href="#windows-primary-platform" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Visual Studio Build Tools 2022</strong> with the <strong>"Desktop development with C++"</strong> workload (the MSVC
+   compiler/linker that Rust needs).</li>
+<li><strong>WebView2 Runtime</strong> — usually already present on Windows 10/11; otherwise from Microsoft.</li>
+</ol>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="n">winget</span> <span class="n">install</span> <span class="n">OpenJS</span><span class="p">.</span><span class="n">NodeJS</span><span class="p">.</span><span class="n">LTS</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="n">winget</span> <span class="n">install</span> <span class="n">Casey</span><span class="p">.</span><span class="n">Just</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="n">winget</span> <span class="n">install</span> <span class="n">Rustlang</span><span class="p">.</span><span class="n">Rustup</span>    <span class="c"># or the installer from https://rustup.rs/</span>
+</code></pre></div>
+<div class="admonition warning">
+<p class="admonition-title">Restart your terminal</p>
+<p>After installing any of these, <strong>fully restart your terminal and editor</strong> so the new PATH entries
+are picked up. A blank terminal that "can't find just/cargo/node" is almost always this.</p>
+</div>
+<h3 id="linux-debian-ubuntu-based">Linux (Debian / Ubuntu based)<a class="headerlink" href="#linux-debian-ubuntu-based" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>sudo<span class="w"> </span>apt<span class="w"> </span>update
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>sudo<span class="w"> </span>apt<span class="w"> </span>install<span class="w"> </span>-y<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span>build-essential<span class="w"> </span>pkg-config<span class="w"> </span>curl<span class="w"> </span>wget<span class="w"> </span>file<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">    </span>libssl-dev<span class="w"> </span>libgtk-3-dev<span class="w"> </span>libwebkit2gtk-4.1-dev<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">    </span>libayatana-appindicator3-dev<span class="w"> </span>librsvg2-dev<span class="w"> </span>libxdo-dev<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">    </span>libgstreamer1.0-dev<span class="w"> </span>libgstreamer-plugins-base1.0-dev
+</code></pre></div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p><code>libwebkit2gtk-4.1-dev</code> is the Tauri 2 / WebKitGTK 4.1 package — you need a distro new enough to
+ship 4.1 (Ubuntu 22.04+ / Debian 12+). The two GStreamer dev packages are required by the native
+RTSP video sink (the app links the system GStreamer at build time). Install Node.js, Rust and just
+via their official methods.</p>
+</div>
+<div class="admonition warning">
+<p class="admonition-title">Build on the oldest system you want to support</p>
+<p>Two things follow from the build host, and both reach the user.</p>
+<p><strong>glibc is never bundled</strong> — not even in the AppImage — so the highest <code>GLIBC_*</code> symbol in the
+binary becomes a hard minimum for everyone running it. Building on Debian 13 produces something
+that will not start on Ubuntu 22.04.</p>
+<p><strong>The AppImage bundles the build host's WebKitGTK</strong> (linuxdeploy takes what is installed), so the
+build machine decides the browser engine every AppImage user gets. Avoid the <strong>2.50 series</strong>:
+stopping a video stream can leave it spinning on a full CPU core until the app exits. 2.52 is
+clean. That is why the release workflow builds on Ubuntu 24.04 rather than an older base — the
+<code>.deb</code> and <code>.rpm</code> use the <em>system</em> engine and are unaffected either way, but they share the job.</p>
+</div>
+<h3 id="macos">macOS<a class="headerlink" href="#macos" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Xcode Command Line Tools</strong> — <code>xcode-select --install</code> (compiler / linker + SDK).</li>
+<li>Node.js, Rust and just via their official installers (e.g. <code>brew install node just</code>, Rust from rustup).</li>
+</ol>
+<p>The macOS build is <strong>universal</strong> (arm64 + x86_64). <code>just build-macos</code> adds both Rust targets and fetches
+the bundled ffmpeg for you, then builds the <code>.app</code> + <code>.dmg</code>. The result is <strong>unsigned</strong> unless you
+export a signing identity first.</p>
+<p>For a distributable build, signing happens during the build and notarizing after it, in that order.
+The <code>.dmg</code> has to wrap an already-signed <code>.app</code>, because Apple inspects the app inside the image:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">APPLE_SIGNING_IDENTITY</span><span class="o">=</span><span class="s2">"Developer ID Application: Your Name (TEAMID)"</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>just<span class="w"> </span>build-macos<span class="w">      </span><span class="c1"># the bundler signs the .app, then builds the .dmg around it</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>just<span class="w"> </span>notarize-macos<span class="w">   </span><span class="c1"># notarize + staple, so there is no Gatekeeper prompt</span>
+</code></pre></div>
+<p>Both steps need an Apple Developer account, and specifically a <strong>Developer ID Application</strong>
+certificate: an "Apple Development" certificate cannot notarize. Credentials are read from your
+environment / keychain and never committed. List your identities with
+<code>security find-identity -v -p codesigning</code>.</p>
+<p>A release needs all three files from <code>release/</code>: the <code>.dmg</code>, the standalone <code>.zip</code> and the updater
+<code>_update.tar.gz</code>. <code>just notarize-macos</code> staples the ticket to the disk image and to the app in the other two, so a first
+launch works without a network connection. <code>scripts/make-update-manifest.sh</code> refuses an updater
+archive without that ticket, which keeps the unsigned CI build out of the in-app updater.</p>
+<h3 id="android">Android<a class="headerlink" href="#android" title="Permanent link">&para;</a></h3>
+<p>Mobile is <strong>not part of the 1.0 line</strong> — nothing mobile builds on <code>release/1.0.x</code>, and both mobile ports
+target a release after 1.0. The iOS / iPadOS port lives on <code>development</code> (see the iOS notes above);
+Android is described here.</p>
+<p>Android runs the full app: tablets use the desktop layout, phones a dedicated landscape layout
+(widget column, connection pop-out, docked video). Links: <strong>USB serial</strong> (OTG), <strong>Bluetooth LE</strong>
+and <strong>UDP / TCP</strong>. While a link is up a foreground service keeps the process alive in the
+background (<code>TelemetryService.kt</code>, driven from <code>link_presence</code> over JNI).</p>
+<p>USB serial goes through the Android USB Host API, so the driver lives in Kotlin
+(<code>gen/android/app/src/main/java/com/kitegc/app/UsbSerial.kt</code>) with a JNI shim in front of it
+(<code>src-tauri/src/transport/serial_android.rs</code>). Two device families are driven:</p>
+<table>
+<thead>
+<tr>
+<th>Family</th>
+<th>Covers</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>CDC-ACM</strong></td>
+<td>INAV / Betaflight / ArduPilot flight controllers over USB, ESP32-S2/S3/C3 native USB</td>
+</tr>
+<tr>
+<td><strong>CP210x</strong></td>
+<td>Silicon Labs bridges — most SiK telemetry radios</td>
+</tr>
+</tbody>
+</table>
+<p>FTDI (RFD900) and CH340 are <strong>not</strong> driven yet; both slot in as another <code>SerialDriver</code> in that Kotlin
+file. Android grants USB access per device and per session: plugging the cable in and picking Kite
+from the system dialog grants it up front, otherwise the first connect raises the permission prompt.</p>
+<p>Bluetooth LE follows the same shape on the platform's own GATT stack (<code>BleSerial.kt</code> with
+<code>src-tauri/src/transport/ble_android.rs</code> in front of it) — the desktop's <code>btleplug</code> has no usable
+Android backend without a companion Java library. The known BLE-serial profiles (CC2541 / HM-10,
+Nordic UART, SpeedyBee) live in <code>src-tauri/src/transport/ble_profiles.rs</code>, shared with the desktop
+backend, so a new adapter family is a one-line Rust change. The first scan raises the system's
+"nearby devices" permission prompt (Android 12+; location before that).</p>
+<h4 id="getting-an-apk-without-building-one">Getting an APK without building one<a class="headerlink" href="#getting-an-apk-without-building-one" title="Permanent link">&para;</a></h4>
+<p>The <strong>Android</strong> workflow in GitHub Actions builds the APK and uploads it as a run artifact — Actions →
+Android → <em>Run workflow</em>. That is the recommended route: the runner already has the SDK, the JDK and
+<code>sdkmanager</code>, so nothing has to be installed locally.</p>
+<h4 id="signing">Signing<a class="headerlink" href="#signing" title="Permanent link">&para;</a></h4>
+<p>Release builds are signed with the <strong>debug</strong> keystore unless you supply a real one, because an APK
+with no signature at all cannot be installed — Android rejects it as an invalid package. That is
+enough to sideload, and not enough to publish.</p>
+<p>⚠️ <strong>The debug keystore is generated per machine, and a CI runner is a fresh machine every run.</strong> So
+consecutive CI builds have <em>different</em> signatures, and Android refuses to install one over the other
+("package conflicts with an existing package"). Updating then means uninstalling — which erases the
+flight database. Supply a real key and the problem disappears for good.</p>
+<p><strong>For CI</strong>, add four repository secrets and the workflow signs every build with the same key:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>keytool<span class="w"> </span>-genkey<span class="w"> </span>-v<span class="w"> </span>-keystore<span class="w"> </span>kite.jks<span class="w"> </span>-alias<span class="w"> </span>kite<span class="w"> </span>-keyalg<span class="w"> </span>RSA<span class="w"> </span>-keysize<span class="w"> </span><span class="m">2048</span><span class="w"> </span>-validity<span class="w"> </span><span class="m">10000</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>base64<span class="w"> </span>-w0<span class="w"> </span>kite.jks<span class="w">     </span><span class="c1"># → KEYSTORE_B64</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Secret</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>KEYSTORE_B64</code></td>
+<td>base64 of the <code>.jks</code></td>
+</tr>
+<tr>
+<td><code>KEYSTORE_PASSWORD</code></td>
+<td>store password</td>
+</tr>
+<tr>
+<td><code>KEY_ALIAS</code></td>
+<td>key alias (<code>kite</code> above)</td>
+</tr>
+<tr>
+<td><code>KEY_PASSWORD</code></td>
+<td>key password</td>
+</tr>
+</tbody>
+</table>
+<p>With none set the build still succeeds — it just warns and uses the throwaway key. Keep the <code>.jks</code>
+and its passwords somewhere safe: lose them and you can never update an installed app again, only
+replace it.</p>
+<p>To sign with a real key, drop a <code>key.properties</code> next to <code>gen/android/app/build.gradle.kts</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="na">storeFile</span><span class="o">=</span><span class="s">/absolute/path/to/keystore.jks</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="na">storePassword</span><span class="o">=</span><span class="s">…</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="na">keyAlias</span><span class="o">=</span><span class="s">…</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="na">keyPassword</span><span class="o">=</span><span class="s">…</span>
+</code></pre></div>
+<p>It is gitignored, so the key never lands in the repository.</p>
+<h4 id="version-code-and-the-play-bundle">Version code and the Play bundle<a class="headerlink" href="#version-code-and-the-play-bundle" title="Permanent link">&para;</a></h4>
+<p>Android orders builds by an integer <code>versionCode</code>, and Google Play accepts an upload only with a higher
+one than before. <code>app/build.gradle.kts</code> derives it from the version name in <code>package.json</code>
+(<code>playVersionCode</code>):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>major * 1_000_000 + minor * 10_000 + patch * 100 + stage
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>stage: -bN = N (1–39) · -rcN = 40 + N (N 1–39) · final = 99 · -dev = 0
+</code></pre></div>
+<p>So <code>2.0.0-b1</code> is 2000001, <code>2.0.0-rc1</code> 2000041, <code>2.0.0</code> 2000099 and <code>2.0.1</code> 2000199. A version name
+outside this pattern — another suffix, a beta (<code>-bN</code>) or rc number above 39 — stops the build with a message.
+Two uploads need two version names.</p>
+<p>The <strong>App Bundle</strong> that Google Play takes is built locally only — the GitHub workflow keeps building the
+APK:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>just<span class="w"> </span>build-android-aab<span class="w">    </span><span class="c1"># release/KiteGC_Android_&lt;abi&gt;_&lt;version&gt;_playstore.aab</span>
+</code></pre></div>
+<p>Without <code>key.properties</code> the bundle is debug-signed, and Play refuses it. The bundle is for the Play
+Console only; it does not belong on the GitHub release.</p>
+<h4 id="building-locally">Building locally<a class="headerlink" href="#building-locally" title="Permanent link">&para;</a></h4>
+<ol>
+<li><strong>JDK 17</strong> — <code>sudo apt install openjdk-17-jdk</code> (or Temurin on Windows/macOS).</li>
+<li><strong>Android SDK</strong> — Android Studio, or just the command-line tools. Set <code>ANDROID_HOME</code>.</li>
+<li><strong>NDK r27</strong> — <code>sdkmanager --install "ndk;27.2.12479018"</code>, then point <code>NDK_HOME</code> at it.</li>
+<li><strong>Rust targets</strong> — <code>rustup target add aarch64-linux-android</code> (add <code>armv7-linux-androideabi</code>,
+   <code>i686-linux-android</code>, <code>x86_64-linux-android</code> only if you need those ABIs; arm64 covers every
+   Android phone and tablet made in the last decade).</li>
+</ol>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>npm<span class="w"> </span>ci
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>npm<span class="w"> </span>run<span class="w"> </span>tauri<span class="w"> </span>android<span class="w"> </span>build<span class="w"> </span>--<span class="w"> </span>--apk<span class="w"> </span>--target<span class="w"> </span>aarch64<span class="w">   </span><span class="c1"># APK in src-tauri/gen/android/app/build/outputs/apk</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>npm<span class="w"> </span>run<span class="w"> </span>tauri<span class="w"> </span>android<span class="w"> </span>dev<span class="w">                               </span><span class="c1"># on-device dev build with hot reload</span>
+</code></pre></div>
+<p><code>src-tauri/gen/android</code> is <strong>committed</strong> — it is the Android app project (manifest, Gradle build,
+icons, the Rust Gradle plugin), edited by hand. Do <strong>not</strong> run <code>tauri android init</code>: it would
+regenerate the project and overwrite the manifest's permissions and the landscape orientation.</p>
+<p>To type-check the Rust side for Android without a full Gradle build, use <code>just check-android</code>, or by
+hand:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nv">BIN</span><span class="o">=</span><span class="s2">"</span><span class="nv">$NDK_HOME</span><span class="s2">/toolchains/llvm/prebuilt/linux-x86_64/bin"</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">CC_aarch64_linux_android</span><span class="o">=</span><span class="s2">"</span><span class="nv">$BIN</span><span class="s2">/aarch64-linux-android24-clang"</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">AR_aarch64_linux_android</span><span class="o">=</span><span class="s2">"</span><span class="nv">$BIN</span><span class="s2">/llvm-ar"</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="nb">export</span><span class="w"> </span><span class="nv">CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER</span><span class="o">=</span><span class="s2">"</span><span class="nv">$CC_aarch64_linux_android</span><span class="s2">"</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>cargo<span class="w"> </span>check<span class="w"> </span>--manifest-path<span class="w"> </span>src-tauri/Cargo.toml<span class="w"> </span>--target<span class="w"> </span>aarch64-linux-android<span class="w"> </span>--lib
+</code></pre></div>
+<p>Those variables are not optional: <code>cc-rs</code> looks for an <code>aarch64-linux-android-clang</code> that the NDK does
+not ship — its compilers are API-versioned (<code>…android24-clang</code>, matching <code>minSdk</code>) — so without them
+the C dependencies (<code>ring</code>, bundled SQLite, <code>zstd</code>) fail to configure. <code>tauri android build</code> sets this
+up itself, so only the bare <code>cargo check</code> needs it. (On Windows the prebuilt directory is
+<code>windows-x86_64</code> and the compilers are <code>.cmd</code> wrappers.)</p>
+<h4 id="what-does-not-work-yet-on-android">What does not work yet on Android<a class="headerlink" href="#what-does-not-work-yet-on-android" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>State</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>UDP / TCP links</td>
+<td>✅ works</td>
+<td>Plain sockets.</td>
+</tr>
+<tr>
+<td>USB serial (CDC-ACM, CP210x)</td>
+<td>✅ works</td>
+<td>Android USB Host API, driver in <code>UsbSerial.kt</code>. Needs an OTG cable.</td>
+</tr>
+<tr>
+<td>USB serial (FTDI, CH340)</td>
+<td>❌ not implemented</td>
+<td>Those two chips need their own driver; the devices are not listed as ports.</td>
+</tr>
+<tr>
+<td>Flight log, missions, fleet &amp; battery manager</td>
+<td>✅ works</td>
+<td>SQLite in app-private storage (<code>android::app_data_dir</code>).</td>
+</tr>
+<tr>
+<td>Maps, terrain, weather</td>
+<td>✅ works</td>
+<td>Network + the same tile cache as desktop.</td>
+</tr>
+<tr>
+<td>Widget layout editing by touch</td>
+<td>✅ works</td>
+<td>Drag widgets between the docks with a finger in edit mode, same as with a mouse on desktop.</td>
+</tr>
+<tr>
+<td>Screen stays on while connected</td>
+<td>✅ works</td>
+<td>Like a navigation app: the display does not time out while a telemetry link is active; disconnected, the normal OS timeout applies.</td>
+</tr>
+<tr>
+<td>Bluetooth LE</td>
+<td>✅ works</td>
+<td>Native GATT via <code>BleSerial.kt</code>; the same serial profiles as desktop. Listen-only mode (the GATT dump) is not implemented yet.</td>
+</tr>
+<tr>
+<td>Joystick / HID RC control</td>
+<td>❌ not implemented</td>
+<td>The backend is per-OS (WGI / evdev / IOKit); Android has none, so no device is ever listed.</td>
+</tr>
+<tr>
+<td>Log import (.kflight / .rawmsp / .tlog)</td>
+<td>✅ works</td>
+<td>Parsed in-process. A <code>.kflight</code> brings the flight, its track and its records; the archived original log files inside it (INAV blackbox, ArduPilot dataflash) are left behind — the mobile database never stores originals. ArduPilot <code>.bin</code> and PX4 <code>.ulg</code> import are desktop-only.</td>
+</tr>
+<tr>
+<td>Blackbox import (.txt / .bbl / .bfl)</td>
+<td>❌ desktop-only</td>
+<td>Not offered, like ArduPilot <code>.bin</code> and PX4 <code>.ulg</code> — the mobile database keeps no original log files. Import on a desktop and bring flights over as <code>.kflight</code>.</td>
+</tr>
+<tr>
+<td>Video: camera / OTG capture device</td>
+<td>✅ works (tablets)</td>
+<td>The WebView's own capture path (<code>getUserMedia</code>), no helper involved. Hidden on phones until the phone UI decides.</td>
+</tr>
+<tr>
+<td>Video: RTSP (MJPEG / H.264 / HEVC)</td>
+<td>✅ works</td>
+<td>Runs entirely on Kite's built-in RTSP client — no engine helpers (an Android app cannot spawn them, so the desktop engines are not offered). H.264/HEVC decode in device hardware onto a native surface below the WebView; MJPEG rides the multipart path. Native capture (ffmpeg) is not offered — the OS's own capture devices arrive through the camera kind.</td>
+</tr>
+<tr>
+<td>Custom database / raw-log folder</td>
+<td>✅ mirror</td>
+<td>Browse grants ONE folder via the system picker (scoped storage — no permission). The app keeps working app-private (SQLite and the raw writers need real paths, which a SAF grant cannot provide) and <strong>mirrors into the folder at session end</strong>: raw logs as files, the database as an atomic snapshot. That copy survives an uninstall.</td>
+</tr>
+<tr>
+<td>Exports to <code>Documents/</code></td>
+<td>⚠️ different</td>
+<td>Scoped storage makes Documents a MediaStore collection, not a path — exports go through the system share/save dialog instead.</td>
+</tr>
+</tbody>
+</table>
+<p>Where a feature is missing the backend returns a clear message rather than failing to build, so the
+rest of the app is unaffected.</p>
+<h2 id="workflow">Workflow<a class="headerlink" href="#workflow" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>just<span class="w"> </span>install<span class="w">      </span><span class="c1"># install frontend dependencies (npm install)</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>just<span class="w"> </span>dev<span class="w">          </span><span class="c1"># start development mode with hot reload</span>
+</code></pre></div>
+<p>Other useful commands:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>just<span class="w"> </span>--list<span class="w">          </span><span class="c1"># list all commands</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>just<span class="w"> </span>check<span class="w">           </span><span class="c1"># svelte-check + cargo check</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>just<span class="w"> </span>build<span class="w">           </span><span class="c1"># production build for the current platform</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>just<span class="w"> </span>build-windows<span class="w">   </span><span class="c1"># explicit Windows release build</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>just<span class="w"> </span>build-linux<span class="w">     </span><span class="c1"># explicit Linux release build</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>just<span class="w"> </span>build-macos<span class="w">     </span><span class="c1"># explicit macOS universal build (unsigned; adds mac targets + ffmpeg)</span>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>just<span class="w"> </span>clean<span class="w">           </span><span class="c1"># clean build artifacts</span>
+</code></pre></div>
+<p>The classic commands still work too (<code>npm install</code>, <code>npm run tauri dev</code>, <code>npm run tauri build</code>).</p>
+<h3 id="build-outputs">Build outputs<a class="headerlink" href="#build-outputs" title="Permanent link">&para;</a></h3>
+<p>Every build (<code>just build</code> / <code>build-windows</code> / <code>build-linux</code> / <code>build-macos</code>) gathers its final artifacts
+into a <strong><code>release/</code></strong> folder at the repo root, renamed to a unified scheme so local builds match the CI
+release builds:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>KiteGC_&lt;OS&gt;_&lt;arch&gt;_&lt;version&gt;_&lt;type&gt;.&lt;ext&gt;
+</code></pre></div>
+<ul>
+<li><strong>Type</strong> = <code>installer</code> (<code>.exe</code> / <code>.deb</code> / <code>.rpm</code> / <code>.dmg</code>, and the Android <code>.apk</code>), <code>standalone</code>
+  (<code>.AppImage</code>, or the macOS <code>.app</code> zipped), <code>portable</code> (the bare executable zipped <strong>with an empty
+  <code>.portable</code> marker</strong>), or <code>update</code> (macOS only: the <code>.app</code> as <code>.tar.gz</code>, what the in-app updater
+  downloads).</li>
+<li><strong>In-app updates</strong> (<em>Update and Restart</em> in the update notice) need a <code>.sig</code> beside each installer
+  and a <code>latest.json</code> manifest on the GitHub release. Both are produced by the maintainer over the
+  collected <code>release/</code> folder (<code>just update-manifest</code>, i.e. <code>scripts/make-update-manifest.sh</code>) with a
+  signing key that is not in the repository — a local build works without it, it just cannot be
+  offered as an update.</li>
+<li>The naming logic lives in <code>scripts/collect-release.*</code> and is shared by local builds and the GitHub
+  release workflow (<code>.github/workflows/release.yml</code>), so filenames match everywhere.</li>
+<li><code>just build-android</code> drops its APK into the same folder as <code>KiteGC_Android_&lt;abi&gt;_&lt;version&gt;_installer.apk</code>
+  (one file per ABI folder Gradle produced, e.g. <code>arm64</code> or <code>universal</code>). It collects <strong>only</strong> the APK and
+  leaves the desktop outputs already in <code>release/</code> alone — an earlier desktop build's binaries still sit in
+  <code>target/release/</code>, and collecting those here would republish a stale one under the current version number.
+  A desktop build, in turn, also picks up any Android release APK still lying in the Gradle outputs.</li>
+</ul>
+<p>The folder is refreshed on each desktop build and is git-ignored (local to your machine). The raw
+desktop outputs also remain in <code>src-tauri/target/release/</code> (and its <code>bundle/</code> subfolders) as usual; the
+consumed installer bundles and APKs are removed so a stale file can never be re-collected under a newer
+version.</p>
+<h2 id="quality-checks">Quality checks<a class="headerlink" href="#quality-checks" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>just<span class="w"> </span>check
+</code></pre></div>
+<p>runs <code>npm run check</code> (svelte-check + TypeScript) and <code>cargo check</code>. <code>just check</code> / <code>just clean</code> have
+platform-specific variants (via just's <code>[windows]</code> / <code>[unix]</code> attributes) and pick the right one
+automatically. CI runs the same checks (plus clippy) on every push and pull request; full release builds
+are not run in CI.</p>
+<h2 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h2>
+<details class="question">
+<summary><code>just</code> is not recognized</summary>
+<p>Restart your terminal/editor completely; verify with <code>where.exe just</code> (Windows). winget installs it
+for the current user.</p>
+</details>
+<details class="question">
+<summary>Editor terminal can't find just / cargo / node</summary>
+<p>Very common on Windows — fully close and reopen the editor (or reload the window).</p>
+</details>
+<details class="question">
+<summary>Linker errors during cargo check / build (Windows)</summary>
+<p>You're missing the C++ build tools — install <strong>"Desktop development with C++"</strong> via the Visual Studio
+Installer.</p>
+</details>
+<h2 id="linux-runtime-notes">Linux runtime notes<a class="headerlink" href="#linux-runtime-notes" title="Permanent link">&para;</a></h2>
+<p>These are things to know when <strong>running</strong> the packaged Linux app (not build errors):</p>
+<ul>
+<li><strong>Two helpers are fetched at runtime, not bundled</strong>: <code>ffmpeg</code> (the classic video image path) and
+  <code>mediamtx</code> (the classic RTSP → WebRTC engine) — the native RTSP client needs neither. Kite looks for
+  each next to the executable, then in its own app-data <code>bin/</code> directory, then on <code>PATH</code>, and offers to
+  download it on first use. Each failure is local to its feature. On macOS <code>ffmpeg</code> is bundled as a
+  universal sidecar instead; <code>mediamtx</code> is fetched the same way as everywhere else. INAV Blackbox logs
+  are decoded in-process — no helper.</li>
+<li><strong>Serial permissions:</strong> add yourself to the <code>dialout</code> group (<code>sudo usermod -aG dialout "$USER"</code>, then
+  log out/in). Some distros use <code>uucp</code>.</li>
+<li><strong>Blank 3D globe / WebView (WebKitGTK):</strong> the 3D map runs in WebKitGTK, which is more fragile than
+  Windows' WebView2 (notably on some Nvidia setups). Try launching with the DMA-BUF renderer disabled:
+  <div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="nv">WEBKIT_DISABLE_DMABUF_RENDERER</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>./kite-gc<span class="w">      </span><span class="c1"># most common fix</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="nv">WEBKIT_DISABLE_COMPOSITING_MODE</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>./kite-gc<span class="w">     </span><span class="c1"># if compositing misbehaves</span>
+</code></pre></div></li>
+<li><strong>Which package to test:</strong> <code>tauri build</code> produces <code>.deb</code>, <code>.AppImage</code> and <code>.rpm</code> in
+  <code>src-tauri/target/release/bundle/</code>. The <code>.deb</code> (or the raw binary in <code>…/release/</code>) is usually the most
+  reliable first smoke test; AppImage adds its own FUSE/sandbox layer — and <strong>video does not work
+  inside the AppImage at all</strong> (its launcher environment hides the system GStreamer plugins; see the
+  user guide's platform notes).</li>
+<li><strong>Data locations:</strong> installed mode stores the flight DB + terrain cache under <code>~/.local/share/kite-gc/</code>.
+  A <strong>portable</strong> build (a <code>.portable</code> marker file next to the binary) keeps everything in a <code>data/</code> folder
+  beside the binary.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; Marc Hoffmann (b14ckyy) — GPL-3.0-or-later
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+    <a href="https://github.com/b14ckyy/Kite-GC" target="_blank" rel="noopener" title="Kite on GitHub" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+    
+    
+    
+    
+    <a href="https://discord.gg/3FM7EWhkg9" target="_blank" rel="noopener" title="Kite community on Discord" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M492.5 69.8c-.2-.3-.4-.6-.8-.7-38.1-17.5-78.4-30-119.7-37.1-.4-.1-.8 0-1.1.1s-.6.4-.8.8c-5.5 9.9-10.5 20.2-14.9 30.6-44.6-6.8-89.9-6.8-134.4 0-4.5-10.5-9.5-20.7-15.1-30.6-.2-.3-.5-.6-.8-.8s-.7-.2-1.1-.2C162.5 39 122.2 51.5 84.1 69c-.3.1-.6.4-.8.7C7.1 183.5-13.8 294.6-3.6 404.2c0 .3.1.5.2.8s.3.4.5.6c44.4 32.9 94 58 146.8 74.2.4.1.8.1 1.1 0s.7-.4.9-.7c11.3-15.4 21.4-31.8 30-48.8.1-.2.2-.5.2-.8s0-.5-.1-.8-.2-.5-.4-.6-.4-.3-.7-.4c-15.8-6.1-31.2-13.4-45.9-21.9-.3-.2-.5-.4-.7-.6s-.3-.6-.3-.9 0-.6.2-.9.3-.5.6-.7c3.1-2.3 6.2-4.7 9.1-7.1.3-.2.6-.4.9-.4s.7 0 1 .1c96.2 43.9 200.4 43.9 295.5 0 .3-.1.7-.2 1-.2s.7.2.9.4c2.9 2.4 6 4.9 9.1 7.2.2.2.4.4.6.7s.2.6.2.9-.1.6-.3.9-.4.5-.6.6c-14.7 8.6-30 15.9-45.9 21.8-.2.1-.5.2-.7.4s-.3.4-.4.7-.1.5-.1.8.1.5.2.8c8.8 17 18.8 33.3 30 48.8.2.3.6.6.9.7s.8.1 1.1 0c52.9-16.2 102.6-41.3 147.1-74.2.2-.2.4-.4.5-.6s.2-.5.2-.8c12.3-126.8-20.5-236.9-86.9-334.5zm-302 267.7c-29 0-52.8-26.6-52.8-59.2s23.4-59.2 52.8-59.2c29.7 0 53.3 26.8 52.8 59.2 0 32.7-23.4 59.2-52.8 59.2m195.4 0c-29 0-52.8-26.6-52.8-59.2s23.4-59.2 52.8-59.2c29.7 0 53.3 26.8 52.8 59.2 0 32.7-23.2 59.2-52.8 59.2"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["announce.dismiss", "navigation.top", "navigation.instant", "navigation.tracking", "toc.follow", "search.suggest", "search.highlight", "content.code.copy", "content.action.edit"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.a5f9d56c.min.js"></script>
+      
+        <script src="../../assets/nav.js"></script>
+      
+    
+  </body>
+</html>

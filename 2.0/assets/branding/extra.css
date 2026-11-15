@@ -1,0 +1,85 @@
+/* Kite Ground Control — brand colours for the docs site.
+   Pins the exact app accent (#37a8db) as the primary, with the brand orange
+   (#f5a623) as the interactive accent (link hover / active nav) — the blue+orange
+   pairing from the logo. Applied to both the light (default) and dark (slate) schemes. */
+
+:root,
+[data-md-color-scheme="default"],
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color:        #37a8db;
+  --md-primary-fg-color--light: #5cbbe5;
+  --md-primary-fg-color--dark:  #2e96c5;
+  --md-accent-fg-color:         #f5a623;
+  --md-accent-fg-color--transparent: rgba(245, 166, 35, 0.1);
+}
+
+/* ── Sidebar navigation ─────────────────────────────────────────────────────────────────
+   Sections are collapsible (no navigation.sections); the JS in assets/nav.js keeps the first one
+   ("Getting started") open. Section labels read as headers, their pages are indented under a
+   thin guide line. Desktop sidebar only — the mobile drawer keeps Material's slide-in layout. */
+@media screen and (min-width: 76.25em) {
+  .md-nav--primary > .md-nav__list > .md-nav__item--nested > .md-nav__link {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--md-default-fg-color);
+    margin-top: 0.9em;
+  }
+  .md-nav--primary > .md-nav__list > .md-nav__item--nested > .md-nav__link:hover {
+    color: var(--md-accent-fg-color);
+  }
+  .md-nav--primary .md-nav__item--nested > .md-nav > .md-nav__list {
+    margin-left: 0.35rem;
+    padding-left: 0.85rem;
+    border-left: 1px solid var(--md-default-fg-color--lightest);
+  }
+  /* Nested sections (e.g. Guides → Logbook) stay at page size, just bold. */
+  .md-nav--primary .md-nav__item--nested .md-nav__item--nested > .md-nav__link {
+    font-weight: 700;
+  }
+}
+
+/* Changelog: a patch release is a sub-segment inside its feature release's box. `.kite-patch` is
+   the patch version label, `.kite-badge` the status pill next to it ("in development" until the
+   patch ships, then replaced by the release date). Both are attr_list classes on inline text. */
+.kite-patch {
+  font-size: 1.15em;
+}
+.kite-badge {
+  display: inline-block;
+  margin-left: 0.35em;
+  padding: 0.05em 0.6em;
+  border-radius: 1em;
+  background: var(--md-accent-fg-color);
+  color: var(--md-accent-bg-color);
+  font-size: 0.68em;
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: 0.15em;
+}
+
+/* ── Header: Discord icon in front of the repository link ──────────────────────────────────────
+   overrides/partials/source.html adds a second link into the header's source box, so on desktop the
+   box becomes a row: the icon keeps Material's 2rem icon cell, the repository link takes the rest,
+   and the box grows by the icon's width so the repo name is not cut. Material hides the box below
+   60em and shows the same partial in the drawer instead; there the icon is dropped (the footer has
+   it) so the drawer keeps its stock layout. */
+@media screen and (min-width: 60em) {
+  .md-header__source {
+    display: flex;
+    align-items: center;
+    width: 13.7rem;
+    max-width: 13.7rem;
+  }
+  .md-header__source .kite-header-discord {
+    flex: 0 0 auto;
+  }
+  .md-header__source .md-source[data-md-component="source"] {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+}
+.md-nav__source .kite-header-discord {
+  display: none;
+}
