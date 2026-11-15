@@ -1983,6 +1983,10 @@ stays <em>Stable releases</em>. <a href="https://github.com/b14ckyy/Kite-GC/pull
   visibly changes, not on every position update. <a href="https://github.com/b14ckyy/Kite-GC/pull/174">#174</a></li>
 <li><strong>Location names for the logbook</strong> — requests to OpenStreetMap's Nominatim are at least a
   second apart, and flights from the same field reuse the name instead of asking again. <a href="https://github.com/b14ckyy/Kite-GC/pull/255">#255</a></li>
+<li><strong>Following an aircraft on the 2D map costs much less.</strong> The aircraft model is turned
+  instead of redrawn on every heading change, and in heading-up mode turning the map no
+  longer restyles every tile and line on it — smoother panels and gestures while following,
+  on every platform. <a href="https://github.com/b14ckyy/Kite-GC/pull/288">#288</a></li>
 </ul>
 <p><em>Logbook and replay</em></p>
 <ul>
