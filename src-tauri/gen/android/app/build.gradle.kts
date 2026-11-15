@@ -94,6 +94,15 @@ android {
     }
     buildTypes {
         getByName("debug") {
+            // KITE_ANDROID_DEV_ID=1 gives the debug build its own application id: it then installs
+            // BESIDE the copy from Google Play instead of being refused for its different signature,
+            // and keeps its own data. Opt-in, because `tauri android dev` starts the app by the id in
+            // tauri.conf.json — with the suffix that is the OTHER copy, and whoever sets the variable
+            // has to start `com.kitegc.app.dev` (tools/helpers/phone-emu.ps1 -Device -Beside does).
+            // Every debug build is called "Kite Dev" (src/debug/res/values/strings.xml).
+            if (providers.environmentVariable("KITE_ANDROID_DEV_ID").orNull?.trim() == "1") {
+                applicationIdSuffix = ".dev"
+            }
             manifestPlaceholders["usesCleartextTraffic"] = "true"
             isDebuggable = true
             isJniDebuggable = true

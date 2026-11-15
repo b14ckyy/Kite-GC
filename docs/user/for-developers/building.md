@@ -216,6 +216,13 @@ npm run tauri android build -- --apk --target aarch64   # APK in src-tauri/gen/a
 npm run tauri android dev                               # on-device dev build with hot reload
 ```
 
+A debug build is signed with your local debug key, so Android refuses to install it over a copy that
+came from Google Play. Set `KITE_ANDROID_DEV_ID=1` for the build and it gets its own application id
+(`com.kitegc.app.dev`, shown as "Kite Dev") and installs **beside** the Play copy, with its own
+data. `tauri android dev` then starts the app by the id in `tauri.conf.json` — the Play copy — so
+start the dev copy yourself (`adb shell am start -n com.kitegc.app.dev/com.kitegc.app.MainActivity`);
+on Windows `tools/helpers/phone-emu.ps1 -Device -Beside` does both.
+
 `src-tauri/gen/android` is **committed** — it is the Android app project (manifest, Gradle build,
 icons, the Rust Gradle plugin), edited by hand. Do **not** run `tauri android init`: it would
 regenerate the project and overwrite the manifest's permissions and the landscape orientation.

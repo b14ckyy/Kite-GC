@@ -29,6 +29,7 @@ saved `.svelte` file shows up on the device about a second later — no APK, no 
 .\tools\helpers\phone-emu.ps1                # list the AVDs
 .\tools\helpers\phone-emu.ps1 Kite_21x9      # boot that AVD + tauri android dev on it
 .\tools\helpers\phone-emu.ps1 -Device        # skip the emulator: dev on the USB device
+.\tools\helpers\phone-emu.ps1 -Device -Beside   # as "Kite Dev", beside a copy installed from Google Play
 .\tools\helpers\phone-emu.ps1 -Shot          # screenshot of the running app (via phone-devtools.mjs)
 ```
 
