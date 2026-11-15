@@ -2356,6 +2356,12 @@ Console only; it does not belong on the GitHub release.</p>
 <a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>npm<span class="w"> </span>run<span class="w"> </span>tauri<span class="w"> </span>android<span class="w"> </span>build<span class="w"> </span>--<span class="w"> </span>--apk<span class="w"> </span>--target<span class="w"> </span>aarch64<span class="w">   </span><span class="c1"># APK in src-tauri/gen/android/app/build/outputs/apk</span>
 <a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>npm<span class="w"> </span>run<span class="w"> </span>tauri<span class="w"> </span>android<span class="w"> </span>dev<span class="w">                               </span><span class="c1"># on-device dev build with hot reload</span>
 </code></pre></div>
+<p>A debug build is signed with your local debug key, so Android refuses to install it over a copy that
+came from Google Play. Set <code>KITE_ANDROID_DEV_ID=1</code> for the build and it gets its own application id
+(<code>com.kitegc.app.dev</code>, shown as "Kite Dev") and installs <strong>beside</strong> the Play copy, with its own
+data. <code>tauri android dev</code> then starts the app by the id in <code>tauri.conf.json</code> — the Play copy — so
+start the dev copy yourself (<code>adb shell am start -n com.kitegc.app.dev/com.kitegc.app.MainActivity</code>);
+on Windows <code>tools/helpers/phone-emu.ps1 -Device -Beside</code> does both.</p>
 <p><code>src-tauri/gen/android</code> is <strong>committed</strong> — it is the Android app project (manifest, Gradle build,
 icons, the Rust Gradle plugin), edited by hand. Do <strong>not</strong> run <code>tauri android init</code>: it would
 regenerate the project and overwrite the manifest's permissions and the landscape orientation.</p>
