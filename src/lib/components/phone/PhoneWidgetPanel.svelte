@@ -12,11 +12,14 @@
 
      Edit mode (D10): a long-press (500 ms, on Android's own haptic) on a widget arms it — every
      widget shows a dashed frame and a corner resize button (one tap = next size state). In edit
-     mode a touch that HOLDS 250 ms picks the widget up (the slot under the finger stays under the
-     finger — consistent for 2×2 wherever it is grabbed), and while it is dragged the OTHER widgets
-     already show where the packer would settle them for that drop (live preview = the same packer
-     the commit uses); holding near the panel's top/bottom edge flips the page. A quicker flick
-     flips the page instead of grabbing. A tap anywhere outside the panel ends edit mode.
+     mode a touch that HOLDS 250 ms picks the widget up and centres it under the finger (there is
+     no "grabbed at the top": every widget handles the same wherever it is touched), and while it
+     is dragged the OTHER widgets already show where the packer would settle them for that drop
+     (live preview = the same packer the commit uses). Nothing is stored before the drop: with the finger off the column and off
+     the bottom slots there is no target, every widget is back where it was, and letting go there
+     changes nothing. Holding the widget 30 % of its height past the column's top/bottom edge — or
+     the finger right at that edge — flips the page. A quicker flick flips the page instead of
+     grabbing. A tap anywhere outside the panel ends edit mode.
 
      Edit mode and the drag session are SHARED with the bottom slots (stores/phoneEdit.svelte.ts,
      Dev-Docs active/PHONE_BOTTOM_WIDGETS.md B6): a widget dragged out of the column can be dropped
@@ -32,7 +35,7 @@
     type PhoneBottomSlot,
     type PhoneWidgetsConfig,
   } from '$lib/controllers/phoneWidgetController';
-  import { phoneEdit, phoneHitTests, bottomSlotAt, sameTarget, type PhoneDragTarget } from '$lib/stores/phoneEdit.svelte';
+  import { phoneEdit, phoneHitTests, dragSlotAt, claimTouch, sameTarget, type PhoneDragTarget } from '$lib/stores/phoneEdit.svelte';
   import WidgetRenderer from '$lib/components/WidgetRenderer.svelte';
   import type { TelemetryData } from '$lib/stores/telemetry';
   import type { InterfaceSettings } from '$lib/stores/settings';
@@ -71,6 +74,12 @@
   const FLICK_PX = 40;
   const EDGE_FLIP_PX = 24;
   const EDGE_FLIP_MS = 500;
+  /** The dragged widget flips the page when this share of its height hangs over the column's top or
+   *  bottom edge. The finger alone is no measure: it holds the widget's centre, and a tall widget
+   *  is half out of the column long before the finger reaches the edge. */
+  const EDGE_OVERHANG = 0.3;
+  /** How far (in slots) beside the column the finger still means the column. */
+  const COLUMN_REACH = 0.5;
 
   let heightPx = $state(0);
   // Bounded by the VIEWPORT height, never by the measured box alone: the box must not be able to
@@ -85,14 +94,18 @@
   const dragId = $derived(phoneEdit.drag?.id ?? null);
   const dragTarget = $derived(phoneEdit.drag?.target ?? null);
   const ownDrag = $derived(phoneEdit.drag?.owner === 'column');
-  /** Offset from the widget's top-left to the finger, so the ghost doesn't jump on pickup. */
+  /** Offset from the ghost's top-left to the finger: half its size — the widget is centred under
+   *  the finger on pickup, wherever it was touched. */
   let grabDx = 0;
   let grabDy = 0;
-  /** Which slot of the widget the finger holds (row/col within the span): the drop target keeps
-   *  THAT slot under the finger, so a 2×2 grabbed at its bottom-right lands where the finger is
-   *  minus one row and one column — consistent wherever you grab it. */
-  let grabSlotRow = 0;
-  let grabSlotCol = 0;
+  /** Where the finger picked the widget up, and its last position. Until it has travelled the drag
+   *  slop the target stays the widget's own place: centring a 2×2 under a finger that touched its
+   *  upper or lower edge would otherwise move it a row at once, without any drag. */
+  let pickX = 0;
+  let pickY = 0;
+  let lastX = 0;
+  let lastY = 0;
+  let travelled = false;
 
   // The layout on screen: the committed config, or — mid-drag — the preview of the hovered drop
   // (a drop on a bottom slot previews the column WITHOUT the widget; the same controller calls the
@@ -122,6 +135,16 @@
   function onScroll() {
     if (!scroller || pageH <= 0) return;
     page = Math.round(scroller.scrollTop / pageH);
+    // The pages moved under a finger that may be holding still (edge flip): the cell under it is
+    // another one now.
+    const d = phoneEdit.drag;
+    if (d && ownDrag) updateDrag(lastX, lastY);
+    else if (d?.target?.kind === 'column') {
+      // The bar's drag: its ghost is centred under the finger too.
+      const cell = phoneHitTests.column?.(d.x + d.w / 2, d.y + d.h / 2);
+      const c: PhoneDragTarget | null = cell ? { kind: 'column', ...cell } : null;
+      if (c && !sameTarget(c, d.target)) d.target = c;
+    }
   }
   function flipTo(p: number) {
     if (!scroller) return;
@@ -154,7 +177,8 @@
   $effect(() => {
     phoneHitTests.column = (x, y) => {
       const r = rootEl?.getBoundingClientRect();
-      if (!r || x < r.left || x > r.right || y < r.top || y > r.bottom) return null;
+      const reach = slot * COLUMN_REACH;
+      if (!r || x < r.left - reach || x > r.right + reach || y < r.top || y > r.bottom) return null;
       return cellAt(x, y);
     };
     return () => {
@@ -225,21 +249,23 @@
   }
 
   function startDrag(e: PointerEvent, id: string) {
-    const cell = (e.target as HTMLElement).closest<HTMLElement>('.cell') ?? cellElAt(e.clientX, e.clientY);
-    const r = cell?.getBoundingClientRect();
-    grabDx = r ? e.clientX - r.left : 0;
-    grabDy = r ? e.clientY - r.top : 0;
-    grabSlotCol = slot > 0 ? Math.max(0, Math.floor(grabDx / slot)) : 0;
-    grabSlotRow = slot > 0 ? Math.max(0, Math.floor(grabDy / slot)) : 0;
+    if (e.pointerType === 'touch') claimTouch(e.target);
     const pl = packed.placements.find((p) => p.id === id);
+    const w = (pl?.w ?? 1) * slot;
+    const h = (pl?.h ?? 1) * slot;
+    grabDx = w / 2;
+    grabDy = h / 2;
+    pickX = e.clientX;
+    pickY = e.clientY;
+    travelled = false;
     phoneEdit.drag = {
       id,
       owner: 'column',
-      target: null,
+      target: pl ? { kind: 'column', page: pl.page, row: pl.row, col: pl.col } : null,
       x: e.clientX - grabDx,
       y: e.clientY - grabDy,
-      w: (pl?.w ?? 1) * slot,
-      h: (pl?.h ?? 1) * slot,
+      w,
+      h,
     };
     console.log('[phoneGrid] drag start', id, Math.round(e.clientX), Math.round(e.clientY));
     updateDrag(e.clientX, e.clientY);
@@ -253,36 +279,62 @@
     if (!rootEl || !scroller || !d) return;
     d.x = clientX - grabDx;
     d.y = clientY - grabDy;
-    // A bottom slot under the finger wins; otherwise the cell under the FINGER minus the slot the
-    // finger grabbed within the widget (clamped to the grid — a finger just past the column's
-    // edge still targets the nearest cell).
-    const bottom = bottomSlotAt(clientX, clientY);
+    lastX = clientX;
+    lastY = clientY;
+    if (!travelled) {
+      if (Math.hypot(clientX - pickX, clientY - pickY) <= DRAG_SLOP_PX) return;
+      travelled = true;
+    }
+    // A bottom slot under the finger wins; otherwise the cell under the centre of the widget's
+    // top-left slot — for a 1×1 tile the finger itself, for a wider / taller one half a slot up and
+    // left of it per extra slot (clamped to the grid — a finger just past the column's edge still
+    // targets the nearest cell). Further off the column there is NO target: the preview
+    // falls back to the stored layout and a release there drops nothing.
+    const bottom = dragSlotAt(clientX, clientY);
     let c: PhoneDragTarget | null = bottom ? { kind: 'bottom', slot: bottom } : null;
-    if (!c) {
-      const under = cellAt(clientX, clientY);
-      c = under
-        ? { kind: 'column', page: under.page, row: Math.max(0, under.row - grabSlotRow), col: Math.max(0, under.col - grabSlotCol) }
-        : null;
+    const rr = rootEl.getBoundingClientRect();
+    const reach = slot * COLUMN_REACH;
+    if (!c && clientX >= rr.left - reach && clientX <= rr.right + reach) {
+      const under = cellAt(clientX - (d.w - slot) / 2, clientY - (d.h - slot) / 2);
+      // The page is the FINGER's: a tall widget held at the top of page 2 has its upper half on
+      // page 1, and stays a drop on page 2's first row.
+      const finger = cellAt(clientX, clientY);
+      c = under && finger ? { kind: 'column', page: finger.page, row: under.page < finger.page ? 0 : under.row, col: under.col } : null;
     }
-    if (c && !sameTarget(c, d.target)) d.target = c;
-    // Edge hover flips the page.
-    const sr = scroller.getBoundingClientRect();
-    const dir = clientY < sr.top + EDGE_FLIP_PX ? -1 : clientY > sr.bottom - EDGE_FLIP_PX ? 1 : 0;
-    if (dir !== edgeDir) {
-      clearEdge();
-      edgeDir = dir;
-      if (dir !== 0) {
-        edgeTimer = setTimeout(() => {
-          flipTo(page + dir);
-          edgeTimer = null;
-          edgeDir = 0;
-        }, EDGE_FLIP_MS);
-      }
-    }
+    if (!sameTarget(c, d.target)) d.target = c;
   }
 
-  function endDrag(commit: boolean) {
+  // The page flips while the dragged widget hangs over the column's top/bottom edge (or the finger
+  // is at it) — only on its way through the column, never on its way to a bottom slot. Driven by
+  // the shared drag session, not by our own pointer stream: a widget picked up in a bottom slot
+  // (PhoneBottomBar owns that drag) turns the pages the same way.
+  $effect(() => {
+    const d = phoneEdit.drag;
+    // (Not before the finger has travelled: a widget picked up at the column's edge and held still
+    // is not on its way anywhere.)
+    if (!d || !scroller || d.target?.kind !== 'column' || (d.owner === 'column' && !travelled)) {
+      clearEdge();
+      return;
+    }
+    const sr = scroller.getBoundingClientRect();
+    const fingerY = d.y + d.h / 2; // the widget is centred under the finger on both surfaces
+    const over = d.h * EDGE_OVERHANG;
+    const up = fingerY < sr.top + EDGE_FLIP_PX || sr.top - d.y > over;
+    const down = fingerY > sr.bottom - EDGE_FLIP_PX || d.y + d.h - sr.bottom > over;
+    const dir = up ? -1 : down ? 1 : 0;
+    if (dir === edgeDir) return;
     clearEdge();
+    edgeDir = dir;
+    if (dir !== 0) {
+      edgeTimer = setTimeout(() => {
+        flipTo(page + dir);
+        edgeTimer = null;
+        edgeDir = 0;
+      }, EDGE_FLIP_MS);
+    }
+  });
+
+  function endDrag(commit: boolean) {
     const d = phoneEdit.drag;
     console.log('[phoneGrid] drop', d?.id, $state.snapshot(d?.target), commit ? 'commit' : 'cancel');
     if (d?.target && commit) {

@@ -2030,6 +2030,12 @@ export function toggleFloating(): void {
   savePrefs();
 }
 
+/** Park / recall the floating window for the moment, without storing it: the phone's widget edit
+ *  mode moves the docked window out of the way and brings it back (PhoneVideoDock). */
+export function setFloatingTransient(floating: boolean): void {
+  if (get(videoState).floating !== floating) patch({ floating });
+}
+
 export function setFloatSnapped(floatSnapped: boolean): void {
   patch({ floatSnapped });
   savePrefs();

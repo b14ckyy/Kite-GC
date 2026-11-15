@@ -14,10 +14,12 @@
      it) and passes it down. -->
 <script lang="ts">
   import { t } from 'svelte-i18n';
-  import { videoStream, videoState, bindVideoEl, setMapLocation, toggleFloating, togglePhoneDockCompact, reportMjpegError, reportImgSize, fpsProbe } from '$lib/stores/video';
+  import { videoStream, videoState, bindVideoEl, setMapLocation, toggleFloating, setFloatingTransient, togglePhoneDockCompact, reportMjpegError, reportImgSize, fpsProbe } from '$lib/stores/video';
   import { canvasSink, mjpegSink } from '$lib/controllers/mjpegSink';
   import { nativeSurface, activeNativeSurfaces } from '$lib/controllers/nativeVideo';
   import { doubleTap, mouseDoubleClick } from '$lib/helpers/doubleTap';
+  import { phoneEdit } from '$lib/stores/phoneEdit.svelte';
+  import { untrack } from 'svelte';
   import VideoReconnectOverlay from '$lib/components/video/VideoReconnectOverlay.svelte';
 
   let {
@@ -38,7 +40,9 @@
   const live = $derived($videoState.status === 'live');
   /** The map sits in this frame (swapped) — +page renders it top-level, the body is omitted. */
   const mapHere = $derived($videoState.mapLocation === 'floating');
-  const showButton = $derived(live && !widgetActive);
+  // Not in widget edit mode: the window is parked for it (below), and a tap on the button would
+  // first end edit mode — which recalls the window — and then toggle it away again, stored.
+  const showButton = $derived(live && !widgetActive && !phoneEdit.editing);
   const open = $derived($videoState.floating && live && !widgetActive);
 
   // Mounted once the frame has been opened while a source is live, and with the native sink it stays
@@ -78,6 +82,24 @@
   function toggle() {
     toggleFloating();
   }
+
+  // Widget edit mode clears the stage: the docked window (video or mini map) lies over the bottom
+  // slots on all but the widest screens, so it parks while the widgets are rearranged and comes
+  // back when edit mode ends — only if it was out, and not stored (a window the user parked stays
+  // parked).
+  let parkedForEdit = false;
+  $effect(() => {
+    const editing = phoneEdit.editing;
+    untrack(() => {
+      if (editing && $videoState.floating) {
+        parkedForEdit = true;
+        setFloatingTransient(false);
+      } else if (!editing && parkedForEdit) {
+        parkedForEdit = false;
+        setFloatingTransient(true);
+      }
+    });
+  });
   const label = $derived(
     mapHere
       ? ($videoState.floating ? $t('video.dockMapHide') : $t('video.dockMapShow'))

@@ -19,6 +19,13 @@
 // A widget that is (re)activated has no position yet: it is appended at the END (last page, last
 // row) and therefore ends up in the earliest free slot — "wo wieder Platz ist".
 //
+// A MOVE (`packPhoneMove`) puts one widget on a position another one holds, and the processing
+// order decides who keeps it (`PackMove`): ahead of the widgets that start on its row, the moved one
+// takes the slot and they give way; behind every widget that starts on one of its span's rows, they
+// first rise into the hole it left and it lands below them. The second is what a move DOWN needs —
+// taken first, the moved widget would rise straight back into its own hole (rule 3). A 1×1 tile
+// dropped on another 1×1 tile is a plain swap.
+//
 // Geometry (rows / max cols / pages) is a parameter — the caller passes config/phoneGrid.ts. The
 // raster may change to 5 × 2; nothing here assumes 4 rows.
 
@@ -62,6 +69,14 @@ export interface PackResult {
   settled: PhoneWidgetEntry[];
 }
 
+/** The widget a drop just put on its position, and its place in the processing order: ahead of the
+ *  widgets that start on its row, or (`late`) behind every widget that starts on one of the rows of
+ *  its span (any column). */
+export interface PackMove {
+  id: string;
+  late: boolean;
+}
+
 /** Slot span of a size state: S 1×1, L 2×2, W 2×1. */
 export function spanOf(size: WidgetSize): { w: number; h: number } {
   if (size === 'L') return { w: 2, h: 2 };
@@ -77,7 +92,7 @@ export function columnsFor(entries: PhoneWidgetEntry[], geom: PhoneGridGeometry)
   return geom.maxCols;
 }
 
-export function packPhoneGrid(entries: PhoneWidgetEntry[], geom: PhoneGridGeometry): PackResult {
+export function packPhoneGrid(entries: PhoneWidgetEntry[], geom: PhoneGridGeometry, moved?: PackMove): PackResult {
   const cols = columnsFor(entries, geom);
   const occ: boolean[][][] = Array.from({ length: geom.pages }, () =>
     Array.from({ length: geom.rows }, () => Array.from({ length: cols }, () => false)),
@@ -94,10 +109,15 @@ export function packPhoneGrid(entries: PhoneWidgetEntry[], geom: PhoneGridGeomet
   // Rule 1: top-down processing; entries without a position come last (append at the end).
   const END = geom.pages * geom.rows;
   const linear = (e: PhoneWidgetEntry) => (e.page == null || e.row == null ? END : e.page * geom.rows + e.row);
+  const key = (e: PhoneWidgetEntry) => {
+    const at = linear(e);
+    if (!moved || e.id !== moved.id || at === END) return at;
+    return moved.late ? at + spanOf(e.size).h - 0.5 : at - 0.5;
+  };
   const order = entries
     .map((e, i) => ({ e, i }))
     .filter(({ e }) => e.active)
-    .sort((a, b) => linear(a.e) - linear(b.e) || a.e.col - b.e.col || a.i - b.i);
+    .sort((a, b) => key(a.e) - key(b.e) || a.e.col - b.e.col || a.i - b.i);
 
   const placements: Placement[] = [];
   const overflow: string[] = [];
@@ -151,6 +171,60 @@ export function packPhoneGrid(entries: PhoneWidgetEntry[], geom: PhoneGridGeomet
     return p ? { ...e, page: p.page, row: p.row, col: p.col } : e;
   });
   return { placements, cols, overflow, settled };
+}
+
+/** A drop: put the widget `id` on (page, row, col) and settle the grid around it. Returns the
+ *  entries with the settled positions; what found no slot is deactivated.
+ *
+ *  The dropped widget gets the row it was dropped on wherever the grid allows it, and what sat
+ *  there gives way — up into the hole the moved widget left when there is one, else down. Two
+ *  processing orders can produce that (`PackMove`); the one that leaves the widget on the dropped
+ *  row is taken, and the first that keeps every widget on the grid when neither does (a drop on
+ *  the lower half of a 2×2, or under free slots: gravity decides). A 1×1 tile dropped exactly on another 1×1 tile trades places with it,
+ *  whichever row, column or page each is on. */
+export function packPhoneMove(
+  entries: PhoneWidgetEntry[],
+  geom: PhoneGridGeometry,
+  id: string,
+  page: number,
+  row: number,
+  col: number,
+): PhoneWidgetEntry[] {
+  const cur = entries.find((e) => e.id === id);
+  if (!cur) return entries;
+  const before = packPhoneGrid(entries, geom);
+  const span = spanOf(cur.size);
+  // A span never crosses the page end: a tall widget dropped on the last row sits one row higher.
+  const p = Math.max(0, Math.min(geom.pages - 1, page));
+  const r = Math.max(0, Math.min(geom.rows - span.h, row));
+  const c = span.w > 1 ? 0 : Math.max(0, Math.min(geom.maxCols - 1, col));
+  const own = before.placements.find((x) => x.id === id);
+  const there =
+    own && own.w === 1 && own.h === 1
+      ? before.placements.find(
+          (x) => x.id !== id && x.w === 1 && x.h === 1 && x.page === p && x.row === r && x.col === Math.min(c, before.cols - 1),
+        )
+      : undefined;
+  const next = entries.map((e) => {
+    if (e.id === id) return { ...e, active: true, page: p, row: r, col: c };
+    if (own && there && e.id === there.id) return { ...e, page: own.page, row: own.row, col: own.col };
+    return e;
+  });
+  const landed = (res: PackResult) => res.placements.some((x) => x.id === id && x.page === p && x.row === r);
+  const fits = (res: PackResult) => res.overflow.length === 0;
+  // A move never costs a widget its place: an order that leaves one without a slot (a 1×1 dropped
+  // onto a page of 2×2 tiles would push one out) is not taken while another order keeps them all.
+  // The last one is the plain order without the swap — what a move was before there were orders —
+  // and the answer when none of them fits.
+  const tries = [
+    packPhoneGrid(next, geom, { id, late: false }),
+    packPhoneGrid(next, geom, { id, late: true }),
+    packPhoneGrid(next, geom),
+    packPhoneGrid(entries.map((e) => (e.id === id ? { ...e, active: true, page: p, row: r, col: c } : e)), geom),
+  ];
+  const res = tries.find((t) => fits(t) && landed(t)) ?? tries.find(fits) ?? tries[3];
+  const overflow = new Set(res.overflow);
+  return res.settled.map((e) => (e.active && overflow.has(e.id) ? { ...e, active: false } : e));
 }
 
 /** Would `id` (with `size`, `col`) find a slot if activated (appended at the end)? */
