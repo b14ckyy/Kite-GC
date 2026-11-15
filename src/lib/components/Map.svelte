@@ -1777,8 +1777,6 @@
     map.setView(target, zoom, options);
   }
 
-  /** Apply the eased frame: move + redraw the active marker always, recenter (+rotate) the map
-   *  only while following. */
   /** 3D → 2D: resume from the newest target without gliding in from a minutes-old position. */
   $effect(() => {
     if (mapViewMode !== '2d' || !followParked) return;
@@ -1787,6 +1785,18 @@
     followCurrent = { ...followTarget };
     applyFollowFrame();
   });
+
+  /** Rotates the map container (`null` = north-up). The variable goes only to the panes that hold
+   *  upright elements: on the container it would restyle every tile and path on each follow frame. */
+  function setMapRotation(deg: number | null): void {
+    if (!mapContainer) return;
+    const value = `${deg ?? 0}deg`;
+    mapContainer.style.transform = deg === null ? '' : `rotate(${value})`;
+    const panes = mapContainer.querySelectorAll<HTMLElement>(
+      '.leaflet-map-pane > .leaflet-pane:not(.leaflet-tile-pane):not(.leaflet-overlay-pane), .leaflet-control-container',
+    );
+    for (const el of panes) el.style.setProperty('--map-rotation', value);
+  }
 
   function applyFollowFrame() {
     if (!map || !followCurrent) return;
@@ -1801,12 +1811,10 @@
       }
     }
     redrawDirLines();
-    // Heading-up rotation is a CSS variable on the container, independent of Leaflet's view: it
-    // keeps turning through a zoom animation or a pinch (a frozen heading jumped by the turn's
-    // worth when the gesture ended).
+    // The rotation is independent of Leaflet's view, so it keeps turning through a zoom or a pinch.
     if (viewMode === 'heading-follow') {
       mapHeading = followCurrent.heading;
-      mapContainer?.style.setProperty('--map-rotation', `${-mapHeading}deg`);
+      setMapRotation(-mapHeading);
     }
     // Don't fight an in-progress zoom animation (would snap mid-zoom; the animation itself heads for
     // the aircraft, see the zoomanim hook in onMount). A pinch in flight is anchored instead of panned.
@@ -2674,7 +2682,7 @@
       applyFollowFrame();
     } else if (mode === 'follow') {
       mapHeading = 0;
-      mapContainer?.style.setProperty('--map-rotation', '0deg');
+      setMapRotation(null);
       applyHeadingUpSize(false);
       map.dragging.disable();
       setZoomAnchor('center');
@@ -2682,7 +2690,7 @@
     } else if (mode === 'fleet') {
       // Fleet: north-up, pan/zoom allowed (a drag hands the camera back to free), auto-fit the fleet.
       mapHeading = 0;
-      mapContainer?.style.setProperty('--map-rotation', '0deg');
+      setMapRotation(null);
       applyHeadingUpSize(false);
       map.dragging.enable();
       setZoomAnchor('cursor');
@@ -2690,7 +2698,7 @@
       fitFleet(true);
     } else {
       mapHeading = 0;
-      mapContainer?.style.setProperty('--map-rotation', '0deg');
+      setMapRotation(null);
       applyHeadingUpSize(false);
       map.dragging.enable();
       setZoomAnchor('cursor');
@@ -2928,7 +2936,7 @@
 </script>
 
 <div class="map-wrapper" style="--map-inset-right: {centerInsetRight}px">
-  <div bind:this={mapContainer} class="map" class:tile-overlap={isWebKitGtk} class:tile-snap={isAndroid} class:mini={miniControls} style="--map-rotation: 0deg"></div>
+  <div bind:this={mapContainer} class="map" class:tile-overlap={isWebKitGtk} class:tile-snap={isAndroid} class:mini={miniControls}></div>
 
   <div class="map-controls-corner">
     {#if !miniControls}
@@ -3082,6 +3090,9 @@
     mix-blend-mode: normal;
     width: 257px !important;
     height: 257px !important;
+    /* Without it a heading-up map exceeds the WebView's tile memory and the compositor drops other layers.
+       Observed effect: Chromium then rasters img tiles at image size instead of device pixels. */
+    will-change: transform;
   }
   /* The same full-pixel stretch for a custom online provider or offline map with 512 / 128 px tiles
      (see the tile-overlap counterparts above). */
@@ -3094,11 +3105,9 @@
     height: 129px !important;
   }
 
-  /* Heading-up: container size via inline styles (JS), CSS only rotates. will-change: the rotation is
-     written per follow frame, and without its own compositor layer every step repaints the whole
-     oversized square — enough raster tasks to saturate the GPU thread on a phone. */
+  /* Heading-up: size and rotation are inline (JS). will-change: without its own compositor layer every
+     rotation step repaints the whole oversized square. */
   :global(.map.heading-up) {
-    transform: rotate(var(--map-rotation, 0deg));
     transform-origin: center center;
     will-change: transform;
   }
@@ -3133,9 +3142,9 @@
     transform: rotate(calc(-1 * var(--map-rotation, 0deg)));
   }
 
-  /* Heading-up: everything drawn on the map stays upright via `rotate(var(--kite-upright))` in its inline
-     transform (leafletUpright.ts), so a heading change is one CSS-variable write; unset outside heading-up. */
-  :global(.map.heading-up) {
+  /* Heading-up: what is drawn on the map stays upright via `rotate(var(--kite-upright))` in its inline
+     transform (leafletUpright.ts). Per pane, not on the container — see setMapRotation. */
+  :global(.map.heading-up .leaflet-map-pane > .leaflet-pane) {
     --kite-upright: calc(-1 * var(--map-rotation, 0deg));
   }
   /* Exception — the UAV model is drawn with its heading; the map rotation is what makes it point up. */
