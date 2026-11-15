@@ -1163,6 +1163,8 @@
     "rateHint": "Ratenänderungen gelten ab nächster Verbindung.",
     "language": "Sprache",
     "uiScale": "UI-Skalierung",
+    "stayAwake": "Ohne Verbindung wach bleiben",
+    "stayAwakeHint": "Kite hält den Bildschirm an, solange das Fluggerät gearmt ist. Verbunden, aber nicht gearmt, gilt der Bildschirm-Timeout des Geräts – außer bei durchgehender Raw-Aufzeichnung oder wenn der Telemetrie-Feed nicht meldet, ob das Fluggerät gearmt ist: Dann bleibt der Bildschirm für die ganze Verbindung an. Mit diesem Schalter bleibt der Bildschirm immer an, solange Kite geöffnet ist, auch ohne Verbindung.",
     "interface": "Interface",
     "tabData": "Daten",
     "groupUi": "UI",

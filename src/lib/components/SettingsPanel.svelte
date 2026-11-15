@@ -43,6 +43,7 @@
   let {
     localeValue = 'en',
     uiScale = 1,
+    stayAwake = false,
     mapProvider = 'osm',
     mapCacheMaxMB = 200,
     cacheStats = { usedBytes: 0, maxBytes: 0, tileCount: 0 },
@@ -98,6 +99,7 @@
   }: {
     localeValue?: string;
     uiScale?: number;
+    stayAwake?: boolean;
     mapProvider?: string;
     mapCacheMaxMB?: number;
     cacheStats?: TileCacheStats;
@@ -610,6 +612,13 @@
           <option value={1.5}>150%</option>
         </select>
       </div>
+      <!-- Phone / tablet only: the desktop has no display timeout of ours to hold. -->
+      {#if isMobile}
+        <div class="s-row" title={$t('settings.stayAwakeHint')}>
+          <label class="s-label" for="stay-awake">{$t('settings.stayAwake')}</label>
+          <Toggle checked={stayAwake} id="stay-awake" onchange={(c) => onPatch({ stayAwake: c })} />
+        </div>
+      {/if}
       <!-- Which protocol the connection bar starts on. "Last used" is the historic behaviour and
            stays the default; a fixed choice overrides the stored one on every launch. -->
       <div class="s-row" title={$t('settings.defaultProtocolHint')}>

@@ -119,15 +119,18 @@ pub fn on_link_down() {
 
 pub fn on_status(d: &StatusData) {
     let armed = d.arming_flags & ARMED_FLAG != 0;
-    let mut s = lock();
-    if armed && !s.armed {
-        // Arm edge = new flight; the FC sets home at launch, so a known home is stale.
-        s.track.clear();
-        s.flight_start_ms = now_ms();
-        s.home = None;
-        s.home_from_fc = false;
+    {
+        let mut s = lock();
+        if armed && !s.armed {
+            // Arm edge = new flight; the FC sets home at launch, so a known home is stale.
+            s.track.clear();
+            s.flight_start_ms = now_ms();
+            s.home = None;
+            s.home_from_fc = false;
+        }
+        s.armed = armed;
     }
-    s.armed = armed;
+    crate::link_presence::on_status(armed);
 }
 
 pub fn on_flightmode(fm: &FlightModeState) {

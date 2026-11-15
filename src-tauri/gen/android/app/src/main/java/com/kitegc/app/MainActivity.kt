@@ -84,9 +84,9 @@ class MainActivity : TauriActivity() {
       ViewCompat.onApplyWindowInsets(v, stripped)
     }
 
-    // The display stays on only while a telemetry link is active — nav-app behaviour, driven from
-    // Rust through ScreenLock on connect / disconnect / lost link. Unconnected, the normal screen
-    // timeout applies.
+    // The display stays on only while there is something to watch (armed, a link that cannot tell,
+    // a continuous raw recording, or the user's setting) — driven from Rust through ScreenLock, the
+    // rule is in link_presence.rs. Otherwise the normal screen timeout applies.
 
     // Require a deliberate double-press to leave. The default back behaviour finishes the activity
     // immediately, which on a gesture-navigation device means an edge swipe — easy to trigger by

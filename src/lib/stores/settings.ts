@@ -426,6 +426,9 @@ export interface AppSettings {
   locale: string;
   /** Global UI scale factor (1 = 100%, up to 2 = 200%); zooms the chrome, not the map. */
   uiScale: number;
+  /** Phone / tablet: keep the display awake all the time, also without a connection. Off = only
+   *  while the vehicle is armed (the backend holds the rule, link_presence.rs). */
+  stayAwake: boolean;
   // 3D Map
   cesiumIonToken: string;
   /** User chose "don't remind me" on the missing-Cesium-key prompt → never auto-show it again. */
@@ -523,6 +526,7 @@ const defaults: AppSettings = {
   phoneWidgets: DEFAULT_PHONE_WIDGETS,
   locale: 'en',
   uiScale: 1,
+  stayAwake: false,
   cesiumIonToken: '',
   cesiumKeyPromptDismissed: false,
   lowPower3D: 'auto',

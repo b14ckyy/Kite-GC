@@ -1115,6 +1115,8 @@
   defaultPhTimeSec = saved.defaultPhTimeSec;
   warnAltitudeM = saved.warnAltitudeM;
   systemMessages = saved.systemMessages ?? 'warning';
+  // Display timeout (phone / tablet): the backend decides by link state, this is the user's override.
+  void invoke('set_stay_awake', { enabled: saved.stayAwake ?? false }).catch(() => {});
   // Apply the persisted diagnostic log level to the backend logger (it starts at Warning by default).
   // When the app runs in debug mode (release `--debug` or any debug build) surface the Debug Monitor
   // and force the log to Debug regardless of the saved level.
@@ -1438,6 +1440,7 @@
       void invoke('set_log_level', { level: patch.logLevel }).catch(() => {});
     }
     if (patch.uiScale != null) uiScale = patch.uiScale;
+    if (patch.stayAwake != null) void invoke('set_stay_awake', { enabled: patch.stayAwake }).catch(() => {});
     if (patch.interface != null) {
       interfaceSettings = { ...interfaceSettings, ...patch.interface };
       if (selectedFlight) {
@@ -4284,6 +4287,7 @@
           <SettingsPanel
             localeValue={$locale ?? 'en'}
             {uiScale}
+            stayAwake={$settings.stayAwake}
             {mapProvider}
             {mapCacheMaxMB}
             {cacheStats}

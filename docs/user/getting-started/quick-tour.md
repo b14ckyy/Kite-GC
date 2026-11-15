@@ -330,6 +330,12 @@ room for either the map or a widget, rarely both. Tablets keep the desktop layou
   The **video widget** works as on the desktop (double-tap swaps there too); while it is active, the
   docked window and its button stay hidden. Whatever is off-screen — a parked window, a widget on the
   other page — is not rendered, but the stream keeps running, so it is back instantly.
+- **The screen stays on while the aircraft is armed** (on a tablet too). Connected but disarmed, the
+  screen timeout of the device applies, so the phone can go dark while you wait on the ground. A
+  continuous raw recording, or a telemetry feed that does not report arming, keeps the screen on for
+  the whole connection. Arming does not switch a dark screen back on — wake the phone before
+  take-off, or keep the screen on whenever Kite is open with **Settings → Interface → UI → Stay
+  awake without connection**.
 - **Not on the phone**: the detached video window, the raw-telemetry popup, and the stick overlay
   beside the replay player.
 
