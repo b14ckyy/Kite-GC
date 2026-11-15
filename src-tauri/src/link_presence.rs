@@ -2,8 +2,8 @@
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
 //! What the host OS is told about the link: that one is active (Android foreground service) and whether
-//! the display stays awake (`wants_awake`). The raw-recording rule exists for iOS but deliberately
-//! applies to Android too — do not drop it there as redundant.
+//! the display stays awake (`wants_awake`, every platform). The raw-recording rule exists for iOS but
+//! deliberately applies to Android too — do not drop it there as redundant.
 //!
 //! GATE(fleet): ONE state for all links. With several vehicles the last status wins and a second
 //! connect replaces the first link's `raw_always`; per-link state needs the link id in
@@ -42,7 +42,7 @@ static AWAKE: Mutex<(Awake, bool)> = Mutex::new((
 
 /// Change the inputs and tell the OS when the outcome changed, or always with `force` (a fresh window
 /// does not carry the old one's flag). Told under the lock so updates cannot arrive out of order;
-/// neither platform call takes this lock or blocks.
+/// no platform call takes this lock or blocks.
 fn update(force: bool, change: impl FnOnce(&mut Awake)) {
     let mut g = AWAKE.lock().unwrap_or_else(|p| p.into_inner());
     change(&mut g.0);
@@ -86,12 +86,61 @@ fn keep_awake(on: bool) {
     }
 }
 
+/// Desktop: one thread owns the inhibitor for the life of the process. Windows binds the request to the
+/// thread that made it (`SetThreadExecutionState`), and callers here come and go with their links.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-fn keep_awake(_on: bool) {}
+fn keep_awake(on: bool) {
+    use std::sync::{mpsc, OnceLock};
+    static KEEPER: OnceLock<Option<mpsc::Sender<bool>>> = OnceLock::new();
+    let keeper = KEEPER.get_or_init(|| {
+        let (tx, rx) = mpsc::channel::<bool>();
+        let spawned = std::thread::Builder::new().name("keep-awake".into()).spawn(move || {
+            let request = |idle: bool| {
+                keepawake::Builder::default()
+                    .display(true)
+                    .idle(idle)
+                    .reason("Flight monitoring")
+                    .app_name("Kite Ground Control")
+                    .app_reverse_domain("com.kitegc.app")
+                    .create()
+            };
+            let mut held: Option<keepawake::KeepAwake> = None;
+            for on in rx {
+                if !on {
+                    // The crate's Linux release unwraps its D-Bus reply; a panic here would end the thread.
+                    let old = held.take();
+                    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || drop(old))).is_err() {
+                        log::warn!("[screen] releasing keep awake failed");
+                    }
+                } else if held.is_none() {
+                    // Linux takes the display and the idle inhibit from two services and gives up both
+                    // when one is missing — the display alone is what the rule is about.
+                    held = request(true)
+                        .or_else(|_| request(false))
+                        .map_err(|e| log::warn!("[screen] keep awake failed: {e}"))
+                        .ok();
+                }
+                log::info!("[screen] keep awake: {}", held.is_some());
+            }
+        });
+        match spawned {
+            Ok(_) => Some(tx),
+            Err(e) => {
+                log::warn!("[screen] no keep-awake thread: {e}");
+                None
+            }
+        }
+    });
+    if let Some(tx) = keeper {
+        if tx.send(on).is_err() {
+            log::warn!("[screen] keep-awake thread gone");
+        }
+    }
+}
 
 /// Settings → "Stay awake without connection". The frontend sends it at startup and on every
 /// change — the startup call also re-applies the current outcome to a window that was created
-/// while the process lived on. Desktop builds accept it and do nothing.
+/// while the process lived on.
 #[tauri::command]
 pub fn set_stay_awake(enabled: bool, app: tauri::AppHandle) -> Result<(), String> {
     #[cfg(target_os = "ios")]

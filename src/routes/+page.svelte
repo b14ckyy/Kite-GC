@@ -1033,7 +1033,7 @@
   defaultPhTimeSec = saved.defaultPhTimeSec;
   warnAltitudeM = saved.warnAltitudeM;
   systemMessages = saved.systemMessages ?? 'warning';
-  // Display timeout (phone / tablet): the backend decides by link state, this is the user's override.
+  // Display timeout: the backend decides by link state, this is the user's override.
   void invoke('set_stay_awake', { enabled: saved.stayAwake ?? false }).catch(() => {});
   // Apply the persisted diagnostic log level to the backend logger (it starts at Warning by default).
   // When the app runs in debug mode (release `--debug` or any debug build) surface the Debug Monitor
