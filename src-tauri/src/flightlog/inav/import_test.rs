@@ -1,15 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-//! The Blackbox importer end to end on the native decoder — no external binary: a synthetic INAV
-//! log is written to a temp file, imported into a temp database, and the flight row, the stored
-//! telemetry, the archived blob and the progress reports are checked; the hi-res parse of the
-//! archived blob returns the full-rate rows.
-//!
-//! The log is built with fixed values (not the random ones of `coverage_test`), so every mapped
-//! value can be predicted: I frames only (I interval 1, 50 Hz), one S and one H frame at the start,
-//! a G frame every 10th iteration carrying the iteration's own time (so it merges into that row),
-//! and INAV's `End of log` event.
+//! The Blackbox importer end to end on the native decoder, no external binary: a synthetic INAV log
+//! is imported into a temp database and the flight row, telemetry, archived blob and hi-res parse are
+//! checked. Fixed values (not `coverage_test`'s random ones), so every mapped value can be predicted.
 
 use std::path::{Path, PathBuf};
 

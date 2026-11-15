@@ -420,8 +420,8 @@ async function applyActiveVehicle(vehicleId: string, linkList: LinkSummary[] = g
   }
 }
 
-/** Diagnostics of the link recovery go to the app log (a tester's log must show why the UI and the
- *  backend disagreed). */
+/** Diagnostics of the link recovery go to the app log, which must show why the UI and the backend
+ *  disagreed. */
 function recoveryLog(level: 'info' | 'warn', message: string): void {
   void invoke('log_frontend', { level, area: 'ui', message }).catch(() => {});
 }

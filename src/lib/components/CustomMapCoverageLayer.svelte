@@ -4,15 +4,9 @@
 -->
 
 <!-- CustomMapCoverageLayer.svelte
-     Coverage frames of the active custom map on the 2D map, one per covered area (from the backend's
-     coverage index), always shown while the map is active:
-       * while the "finder" — the area's box ×4 per side around its centre — fits the map's viewport
-         (size, not position): that finder as a dashed rectangle, so the detail of a pyramid stays
-         findable on top of its own low-res overview;
-       * once the finder would be larger than the viewport in either direction: the real footprint
-         outline, solid — exactly where the best tiles are;
-       * a finder smaller than a few pixels becomes a small ring.
-     Accent colour, non-interactive. Usage: <CustomMapCoverageLayer {map} />
+     Coverage frames of the active custom map on the 2D map, one per covered area: a dashed ×4 "finder"
+     box while it fits the viewport (so a pyramid's detail stays findable on its own overview), the real
+     outline once it does not, a small ring when tiny. Non-interactive. Usage: <CustomMapCoverageLayer {map} />
 -->
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';

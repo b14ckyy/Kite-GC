@@ -18,7 +18,6 @@ pub fn read_image_size(path: &Path) -> Option<(u32, u32)> {
     image_size(&mut io::BufReader::new(file))
 }
 
-/// Pixel size (width, height) of a PNG / JPEG / WebP image from its header.
 pub fn image_size<R: Read + Seek>(r: &mut R) -> Option<(u32, u32)> {
     let mut buf = [0u8; 30];
     let n = read_up_to(r, &mut buf).ok()?;

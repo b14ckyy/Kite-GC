@@ -77,9 +77,8 @@
   );
 
   // ── Serial ports held by a running radar source ────────────────────
-  // Shown disabled with the source's name. The current selection is never changed behind the pilot's
-  // back: a claimed selected port stays selected and shows the note — connecting is their call (the OS
-  // refuses the second open anyway).
+  // Shown disabled with the source's name. A claimed port that is already selected stays selected with
+  // the note — never changed behind the pilot's back.
   const radarClaims = $derived(serialPortClaims($settings.radar, { activeOnly: true }));
   function radarClaimNote(path: string): string | null {
     const owner = claimOf(radarClaims, path);

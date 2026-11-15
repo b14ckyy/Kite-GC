@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Flight data exchange — export/import complete flight records as .kflight files.
-// A .kflight file is a self-contained SQLite database with the same schema as the
-// main flights database, containing one or more flights with all their data:
-// metadata, telemetry records, battery samples, and archived blackbox files.
+// Flight data exchange: `.kflight` files are self-contained SQLite databases with the main schema,
+// holding one or more flights with all their data.
 
 use std::fmt::Write;
 use std::path::Path;
@@ -20,10 +18,6 @@ const KFLIGHT_SCHEMA_VERSION: u32 = 2;
 /// Application identifier stored in the export header
 const KFLIGHT_APP_ID: &str = "KiteGC";
 
-// ── Export ───────────────────────────────────────────────────────────
-
-/// Export one or more flights (by ID) from the main database into a .kflight file.
-/// The output file is a self-contained SQLite database.
 pub fn export_flights(
     source_conn: &Connection,
     flight_ids: &[i64],
@@ -39,7 +33,6 @@ pub fn export_flights(
             .map_err(|e| format!("Failed to remove existing file: {}", e))?;
     }
 
-    // Create the export database with full schema
     let out = create_export_db(output_path)?;
 
     // Copy each flight, tracking old→new ID mapping for linked_flight_id remapping
@@ -61,7 +54,6 @@ pub fn export_flights(
         }
     }
 
-    // Remap linked_flight_id references using the old→new ID mapping
     for (&old_id, &new_id) in &id_map {
         let old_linked: Option<i64> = source_conn
             .query_row(
@@ -81,7 +73,6 @@ pub fn export_flights(
     }
 
     if exported == 0 {
-        // Clean up the empty file
         drop(out);
         std::fs::remove_file(output_path).ok();
         return Err("No flights could be exported".into());
@@ -109,7 +100,6 @@ pub fn export_flights(
     )
     .map_err(|e| format!("Failed to write the blackbox_records markers: {}", e))?;
 
-    // Store export metadata
     out.execute_batch(&format!(
         "CREATE TABLE IF NOT EXISTS _kflight_meta (key TEXT PRIMARY KEY, value TEXT);
          INSERT OR REPLACE INTO _kflight_meta VALUES ('app', '{}');
@@ -120,12 +110,10 @@ pub fn export_flights(
     ))
     .map_err(|e| format!("Failed to write export metadata: {}", e))?;
 
-    // Compact the file
     out.execute_batch("VACUUM;")
         .map_err(|e| format!("VACUUM failed: {}", e))?;
 
-    // Export a human-readable summary sidecar next to the .kflight file.
-    // Example: flights_export.kflight -> flights_export.txt
+    // A human-readable summary sidecar next to the .kflight file (flights_export.txt).
     write_export_info_sidecar(output_path, &exported_flights)?;
 
     log::info!(
@@ -196,7 +184,6 @@ fn write_export_info_sidecar(output_path: &Path, flights: &[Flight]) -> Result<(
     Ok(())
 }
 
-/// Create a new SQLite database with the full flight log schema.
 fn create_export_db(path: &Path) -> Result<Connection, String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).ok();
@@ -211,12 +198,9 @@ fn create_export_db(path: &Path) -> Result<Connection, String> {
     )
     .map_err(|e| format!("Pragma error: {}", e))?;
 
-    // The flight-data tables of the main DB schema (flights, telemetry, battery samples, archived
-    // files; not the libraries, groups or events). `flights.vehicle_id` stays NULL in an export: the
-    // vehicle library is local, an import resolves the flight again (`copy_flight`).
-    // `blackbox_records` is gone from the main DB since v21, but the file keeps the table: the importer
-    // of Kite 1.0 reads it for every flight and fails the flight when it is missing. It holds only one
-    // empty marker row per log flight (`export_flights`), never decoded rows.
+    // The flight-data tables of the main DB schema; `flights.vehicle_id` stays NULL (the library is local).
+    // `blackbox_records` must stay in the file although the main DB dropped it (v21): Kite 1.0's importer
+    // fails a flight without it. It only holds one empty marker row per log flight.
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS flights (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -349,17 +333,14 @@ fn create_export_db(path: &Path) -> Result<Connection, String> {
     Ok(conn)
 }
 
-/// Copy a single flight with all related data from source to destination DB. Always across databases
-/// (export: main → `.kflight`, `resolve_vehicle` false; import: `.kflight` → main, true). The source's
-/// `vehicle_id` names a vehicle of the source library, so it never travels: an export stores none, an
-/// import resolves the flight against the target's library (`db::insert_flight`).
+/// Copy a single flight with all related data from source to destination DB. `vehicle_id` never travels
+/// (it names a vehicle of the source library); an import resolves it against the target's library.
 fn copy_flight(
     src: &Connection,
     dst: &Connection,
     flight_id: i64,
     resolve_vehicle: bool,
 ) -> Result<i64, String> {
-    // 1. Read the flight row
     let mut flight = db::get_flight(src, flight_id)
         .map_err(|e| format!("Read flight: {}", e))?
         .ok_or_else(|| format!("Flight {} not found", flight_id))?;
@@ -370,7 +351,6 @@ fn copy_flight(
     flight.vehicle_id = None;
     let before_link = source_before_link(src, flight_id, &flight)?;
 
-    // 2. Insert into destination (gets a new ID)
     let inserted = if resolve_vehicle {
         db::insert_flight(dst, &flight)
     } else {
@@ -406,7 +386,6 @@ fn copy_flight(
     )
     .map_err(|e| format!("Finalize exported flight: {}", e))?;
 
-    // 3. Copy telemetry records
     let track = db::get_flight_track(src, flight_id)
         .map_err(|e| format!("Read telemetry: {}", e))?;
     if !track.is_empty() {
@@ -421,7 +400,6 @@ fn copy_flight(
             .map_err(|e| format!("Insert telemetry: {}", e))?;
     }
 
-    // 3b. Copy per-instance battery samples (multi-battery)
     let bat = db::get_flight_battery_records(src, flight_id)
         .map_err(|e| format!("Read battery records: {}", e))?;
     if !bat.is_empty() {
@@ -436,11 +414,8 @@ fn copy_flight(
             .map_err(|e| format!("Insert battery records: {}", e))?;
     }
 
-    // 4. Copy blackbox files (BLOBs) — the archived originals (INAV blackbox logs, ArduPilot
-    //    dataflash). Not on mobile: the mobile database never archives originals (ANDROID_SUPPORT.md
-    //    §4 — nothing there could decode them, and dataflash alone runs to hundreds of megabytes), so
-    //    an imported .kflight brings the flight, its track and its records and leaves the blobs
-    //    behind. The desktop copy it came from still has them.
+    // 4. Copy the archived original logs (BLOBs) — not on mobile, whose database never archives
+    //    originals (ANDROID_SUPPORT.md §4); the desktop copy it came from still has them.
     if cfg!(any(target_os = "android", target_os = "ios")) {
         log::info!("Import: flight {flight_id} — archived original log files are not stored on mobile");
     } else {
@@ -450,12 +425,9 @@ fn copy_flight(
     Ok(new_id)
 }
 
-/// The flight's own source behind a `both` (`flights.source_before_link`, schema v21), read from `src`
-/// — the main DB on export, the file on import. A `.kflight` written before v21 has no such column
-/// (`add_missing_columns` deliberately does not add it): there it is derived for a `both` flight the
-/// way the v21 back-fill does — `blackbox` when a log importer made it (`protocol`), or the file holds
-/// rows in `blackbox_records` (decoded rows up to v20, or the marker of a newer export) or an archived
-/// log for it, `live` otherwise.
+/// The flight's own source behind a `both` (`flights.source_before_link`), read from `src`. A `.kflight`
+/// from before v21 lacks the column (deliberately not added by `add_missing_columns`): there it is
+/// derived like the v21 back-fill, `blackbox_records` marker rows included.
 fn source_before_link(src: &Connection, flight_id: i64, flight: &Flight) -> Result<Option<String>, String> {
     let has_rows = |table: &str| -> rusqlite::Result<bool> {
         // `table` is always a hardcoded literal here, so the format! is injection-safe.
@@ -523,9 +495,6 @@ fn copy_blackbox_files(
     Ok(())
 }
 
-// ── Import ──────────────────────────────────────────────────────────
-
-/// Result of importing flights from a .kflight file
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ImportResult {
     pub imported: usize,
@@ -533,8 +502,7 @@ pub struct ImportResult {
     pub errors: Vec<String>,
 }
 
-/// Import flights from a .kflight file into the main database.
-/// Skips duplicates (same craft_name + start_time ±10s).
+/// Import flights from a .kflight file; duplicates (same craft_name + start_time ±10s) are skipped.
 pub fn import_flights(
     target_conn: &Connection,
     kflight_path: &Path,
@@ -551,7 +519,6 @@ fn import_from(
     src: &Connection,
     kflight_path: &Path,
 ) -> Result<ImportResult, String> {
-    // Verify it's a valid kflight file
     let _has_meta: bool = src
         .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='_kflight_meta'")
         .and_then(|mut s| s.exists([]))
@@ -567,13 +534,11 @@ fn import_from(
     }
     add_missing_columns(src);
 
-    // List all flights in the source file
     let src_flights = db::list_flights(src)
         .map_err(|e| format!("Failed to list flights in .kflight: {}", e))?;
 
-    // Snapshot target flights BEFORE import starts.
-    // Duplicate detection must only compare against pre-existing flights,
-    // otherwise linked pairs inside the same .kflight will self-conflict.
+    // Duplicates are checked only against the flights present BEFORE the import, or linked pairs inside
+    // the same file would conflict with themselves.
     let baseline_target_flights = db::list_flights(target_conn)
         .map_err(|e| format!("Failed to list existing target flights: {}", e))?;
 
@@ -588,7 +553,6 @@ fn import_from(
     };
 
     for summary in &src_flights {
-        // Check duplicate only against baseline target flights.
         if let Some(existing_id) = find_duplicate_in_summaries(&baseline_target_flights, summary) {
             result.skipped += 1;
             id_map.insert(summary.id, existing_id);
@@ -609,9 +573,7 @@ fn import_from(
         }
     }
 
-    // Restore linked relationships from source file using old->target ID mapping.
-    // This also supports mixed cases where one side was skipped as duplicate and
-    // mapped to an existing target flight.
+    // Restore the file's links via the old → target id map (also when one side matched an existing duplicate).
     let mut linked_pairs_done: std::collections::HashSet<(i64, i64)> = std::collections::HashSet::new();
     for summary in &src_flights {
         let Some(old_linked_id) = summary.linked_flight_id else {
@@ -671,10 +633,8 @@ fn import_from(
     Ok(result)
 }
 
-/// Run `f` on a private working copy of the `.kflight` at `path` (in the app's temp dir, deleted
-/// afterwards). The callers back-fill missing columns (`add_missing_columns`) and SQLite may create
-/// `-wal`/`-shm` files next to the database, so the user's file — possibly read-only or on a share —
-/// is never opened itself and never modified.
+/// Run `f` on a private working copy of the `.kflight` (deleted afterwards): the user's file — maybe
+/// read-only or on a share — is never opened itself (columns get back-filled, `-wal`/`-shm` created).
 fn with_kflight_copy<T>(
     path: &Path,
     f: impl FnOnce(&Connection) -> Result<T, String>,
@@ -703,10 +663,9 @@ fn with_kflight_copy<T>(
     result
 }
 
-/// A `.kflight` written by an older Kite lacks the columns added since (flights `fc_uid` v19,
-/// `group_id` + `vehicle_id` v20; telemetry `wall_ms` v20). Add them so the shared row readers apply.
-/// `flights.source_before_link` (v21) is NOT added: its absence is what marks a file whose value has
-/// to be derived (`source_before_link`).
+/// A `.kflight` written by an older Kite lacks the columns added since; add them so the shared row
+/// readers apply. `flights.source_before_link` (v21) is NOT added: its absence marks a file whose value
+/// has to be derived (`source_before_link`).
 fn add_missing_columns(conn: &Connection) {
     for (table, column, ddl) in [
         ("flights", "fc_uid", "ALTER TABLE flights ADD COLUMN fc_uid TEXT;"),
@@ -741,9 +700,6 @@ fn find_duplicate_in_summaries(
         .map(|f| f.id)
 }
 
-// ── Read from .kflight (for offline replay) ─────────────────────────
-
-/// List flights in a .kflight file (for offline replay / preview)
 pub fn list_flights_in_file(path: &Path) -> Result<Vec<FlightSummary>, String> {
     with_kflight_copy(path, |conn| {
         add_missing_columns(conn);
@@ -751,7 +707,6 @@ pub fn list_flights_in_file(path: &Path) -> Result<Vec<FlightSummary>, String> {
     })
 }
 
-/// Get a single flight from a .kflight file
 pub fn get_flight_from_file(path: &Path, flight_id: i64) -> Result<Option<Flight>, String> {
     with_kflight_copy(path, |conn| {
         add_missing_columns(conn);
@@ -759,7 +714,6 @@ pub fn get_flight_from_file(path: &Path, flight_id: i64) -> Result<Option<Flight
     })
 }
 
-/// Get the telemetry track from a .kflight file
 pub fn get_track_from_file(path: &Path, flight_id: i64) -> Result<Vec<TelemetryRecord>, String> {
     with_kflight_copy(path, |conn| {
         add_missing_columns(conn);
@@ -917,11 +871,9 @@ mod tests {
             .unwrap()
     }
 
-    /// Two linked pairs exported in one `.kflight`: pair 1's log flight has an archived original, pair
-    /// 2's has none (an import whose original was deleted). The file carries `source_before_link` and
-    /// one empty marker row in `blackbox_records` per log flight (for Kite 1.0's unlink); the import
-    /// keeps both values, never copies the markers, and an unlink in the target restores each flight's
-    /// own source.
+    /// Two linked pairs in one `.kflight`, one log flight with and one without an archived original: the
+    /// import keeps `source_before_link`, never copies the marker rows, and an unlink in the target
+    /// restores each flight's own source.
     #[test]
     fn kflight_round_trip_keeps_source_before_link() {
         let dir = temp_dir("source-before-link");
@@ -1003,11 +955,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// A `.kflight` from before v21 has no `source_before_link` column: the import derives it for the
-    /// `both` flights from the FILE — a log importer's protocol, rows in its `blackbox_records` (real
-    /// decoded rows and a marker row alike) or an archived log mean `blackbox` — and never copies those
-    /// rows into the main database. A `both` flight that arrives without its partner (such a file
-    /// exported one flight of a pair alone) is imported as the single flight it was.
+    /// A `.kflight` from before v21: the import derives `source_before_link` for the `both` flights from
+    /// the FILE and never copies its `blackbox_records` rows. A `both` flight without its partner is
+    /// imported as the single flight it was.
     #[test]
     fn old_kflight_import_derives_source_before_link() {
         let dir = temp_dir("old-source");

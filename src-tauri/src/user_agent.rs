@@ -1,13 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-//! The HTTP `User-Agent` of Kite's outgoing requests to third-party services.
-//!
-//! One shape for every client: `Kite-GC/<app version> <purpose> (+<project URL>)`. Community
-//! services (OSM tiles, Nominatim, the ADS-B aggregators) ask for an identifying, stable user agent
-//! with a way to reach the author; the purpose token tells the requests apart. The version is the
-//! app version from `package.json` (baked in by `build.rs` as `KITE_APP_VERSION`), not the crate
-//! version in `Cargo.toml`. Never put user or device data in here.
+//! HTTP `User-Agent` of Kite's requests to third-party services: `Kite-GC/<app version> <purpose>
+//! (+<project URL>)` — community services ask for an identifying, stable one. Version from `package.json`.
+//! Never put user or device data in here.
 
 const PRODUCT: &str = "Kite-GC";
 const CONTACT_URL: &str = "https://github.com/b14ckyy/Kite-GC";

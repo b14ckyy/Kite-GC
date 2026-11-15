@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-//! On-startup update check — query the GitHub Releases API for a newer published version. This command
-//! only decides WHICH release is relevant for the user's channel; the frontend owns the version
-//! comparison, the per-version "skip" state and the prompt, and `commands::updater` does the install
-//! when the user asks for it. Mirrors the GitHub-fetch style of `flightlog::decoder`.
+//! On-startup update check: which GitHub release is relevant for the user's channel. Version
+//! comparison, "skip" and the prompt live in the frontend, the install in `commands::updater`.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -25,7 +23,6 @@ pub enum UpdateChannel {
     Prerelease,
 }
 
-/// A published release as the frontend needs it.
 #[derive(Serialize)]
 pub struct UpdateInfo {
     /// Release tag with any leading `v` stripped (e.g. `1.1.0` or `1.0.0-b2`) — compared frontend-side.
@@ -36,7 +33,6 @@ pub struct UpdateInfo {
     pub url: String,
     /// Release title (falls back to the tag).
     pub name: String,
-    /// Whether GitHub flagged it a pre-release.
     pub prerelease: bool,
     /// The release notes as written on GitHub (markdown; rendered inside the update dialog).
     pub body: String,
@@ -78,10 +74,8 @@ enum PreChunk {
     Text(String),
 }
 
-/// Sort key of a release tag, the same order as the frontend's `compareVersions` (utils/version.ts):
-/// numeric MAJOR.MINOR.PATCH, then a stable version above every pre-release of the same core, then
-/// the pre-release suffix compared naturally. A leading `v` is ignored; missing or unreadable numbers
-/// count as 0.
+/// Sort key of a release tag — must keep the order of the frontend's `compareVersions`
+/// (utils/version.ts): a stable version sorts above every pre-release of the same core.
 fn version_key(tag: &str) -> ([u64; 3], bool, Vec<PreChunk>) {
     let s = tag.trim().trim_start_matches(['v', 'V']);
     let (core, pre) = s.split_once('-').unwrap_or((s, ""));
@@ -101,10 +95,8 @@ fn version_key(tag: &str) -> ([u64; 3], bool, Vec<PreChunk>) {
     (nums, pre.is_empty(), chunks)
 }
 
-/// Pick the release the channel wants out of GitHub's list: the HIGHEST version among the published
-/// entries the channel accepts. GitHub documents no order for the list, and a patch of an older line
-/// published after a beta of the next version can stand in front of it, so the first matching entry
-/// is not the one to compare against. Pure — unit-tested.
+/// The HIGHEST published version the channel accepts — not the first match: GitHub documents no
+/// order for the list, and an older line's patch can stand in front of the next version's beta.
 fn pick<'a>(releases: &'a [Value], channel: UpdateChannel, current: &str) -> Option<&'a Value> {
     let running = major_minor(current);
     releases
@@ -124,10 +116,8 @@ fn pick<'a>(releases: &'a [Value], channel: UpdateChannel, current: &str) -> Opt
         .map(|(_, r)| r)
 }
 
-/// Fetch the release to compare against. Returns `Ok(None)` when there's nothing to compare (e.g. no
-/// stable release exists yet → the `/latest` endpoint 404s; no patch of the running minor published).
-/// Any network/parse failure is an `Err` the frontend logs and ignores — an update check never
-/// disrupts use.
+/// Fetch the release to compare against; `Ok(None)` when there is none (no stable release yet → 404,
+/// no patch of the running minor). Failures are logged and ignored by the frontend.
 #[tauri::command(async)]
 pub async fn check_for_update(app: tauri::AppHandle, channel: UpdateChannel) -> Result<Option<UpdateInfo>, String> {
     let current = app.package_info().version.to_string();

@@ -1,21 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-//! Coverage index of a custom map: per zoom level the tile count and the footprint (stored only as a
-//! count of merged tile-range rectangles), plus the covered AREAS derived from the footprints. An area
-//! is found top-down (see [`areas`]) and carries its highest tile level `top`, its footprint outline
-//! and a tight box. The 2D map frames every area (a ×4 finder box while that fits the view, the real
-//! outline beyond), "Show map area" fits the view to its box.
+//! Coverage index of a custom map: per zoom level the tile count and footprint, plus the covered AREAS
+//! found top-down from them (see [`areas`]) — what the 2D map frames and "Show map area" fits to.
 //!
-//! The scan reads directory listings only and never opens a tile file. Its result is stored as a small
-//! JSON index inside the map's folder (`.kite-coverage.json`; in the app data folder when the map
-//! folder is not writable) and reused while the folder signature — the zoom and X folders with their
-//! modification times — is unchanged. Adding or removing tiles touches the X folder's mtime, adding a
-//! column touches the zoom folder's, so both invalidate the index; the Settings row has a Rescan too.
-//!
-//! Every per-level footprint is capped at [`CELL_LIMIT`] cells: a level with more tiles is coarsened
-//! (each cell stands for a 2^k x 2^k block of tiles) until it fits. Everything derived from it is an
-//! outline aid, so that loss of detail is fine — the tiles themselves are never decided from it.
+//! The scan reads directory listings only, never a tile file. The result is cached as
+//! `.kite-coverage.json` in the map folder (app data folder when read-only) and reused while the
+//! folder [`signature`] is unchanged. Footprints are capped at [`CELL_LIMIT`] cells by coarsening —
+//! fine, as everything derived is an outline aid; tiles are never decided from it.
 
 use super::{parse_index, parse_tile_file_name, MAX_LEVEL};
 use serde::{Deserialize, Serialize};
@@ -25,7 +17,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::UNIX_EPOCH;
 
-/// Index file name inside a map folder.
 pub const INDEX_FILE: &str = ".kite-coverage.json";
 /// Bump when the index layout or the derivation changes — an old index is then rebuilt.
 pub const INDEX_VERSION: u32 = 4;
@@ -103,8 +94,6 @@ struct IndexFile {
     coverage: Coverage,
 }
 
-// ── Scan ──────────────────────────────────────────────────────────────────────────────
-
 fn is_dir_entry(entry: &std::fs::DirEntry) -> bool {
     match entry.file_type() {
         Ok(t) if t.is_dir() => true,
@@ -164,8 +153,6 @@ pub fn scan_levels(map_dir: &Path) -> io::Result<Vec<LevelTiles>> {
     }
     Ok(levels)
 }
-
-// ── Cell-set helpers ──────────────────────────────────────────────────────────────────
 
 fn project(cells: &CellSet, k: u8) -> CellSet {
     if k == 0 {
@@ -388,15 +375,10 @@ fn outline_segments(cells: &CellSet, level: u8) -> Vec<[f64; 4]> {
         .collect()
 }
 
-/// The covered areas, found top-down: the highest level's connected components are areas with
-/// `top` = that level; each lower level adds areas only from its footprint OUTSIDE the areas found so
-/// far (`top` = that lower level). A pyramid with a low overview (z0–18 for one airfield) therefore
-/// yields ONE area — the airfield with top 18 — not the world, and a sparse set with separate patches
-/// keeps one area per patch with its own top. A lower-level component whose box lies completely
-/// inside the box of a higher area AND that touches that area (see [`touches`]) is a hole or an edge
-/// notch in the area's top level (a downloader that skipped blank tiles) and is dropped — no frame
-/// inside a frame. A detached field that merely sits inside the box of, say, a diagonal corridor keeps
-/// its own area. Bounded by [`AREA_LIMIT`] (the flag reports a cut); highest `top` first.
+/// The covered areas, found top-down: each level adds areas only from its footprint OUTSIDE the areas
+/// found so far, so a pyramid with a low overview yields one area (the airfield), not the world. A
+/// lower component inside a higher area's box AND touching it is a hole in that area's top level
+/// (skipped blank tiles) and is dropped. Bounded by [`AREA_LIMIT`]; highest `top` first.
 fn areas(fps: &[Footprint]) -> (Vec<Area>, bool) {
     let mut order: Vec<&Footprint> = fps.iter().collect();
     order.sort_by(|a, b| b.z.cmp(&a.z));
@@ -491,7 +473,6 @@ fn norm_box(b: [u32; 4], level: u8) -> [f64; 4] {
     [b[0] as f64 / n, b[1] as f64 / n, (b[2] as f64 + 1.0) / n, (b[3] as f64 + 1.0) / n]
 }
 
-/// Build the coverage (index content + what the frontend gets) from a scan.
 pub fn build(levels: &[LevelTiles]) -> Coverage {
     let mut fps = Vec::new();
     let mut summaries = Vec::new();
@@ -511,8 +492,6 @@ pub fn build(levels: &[LevelTiles]) -> Coverage {
         scan_ms: 0,
     }
 }
-
-// ── Signature + index file ────────────────────────────────────────────────────────────
 
 /// FNV-1a — stable across builds (std's `DefaultHasher` is not guaranteed to be).
 struct Fnv(u64);
@@ -539,10 +518,8 @@ fn mtime_nanos(path: &Path) -> u128 {
         .unwrap_or(0)
 }
 
-/// Folder signature: every zoom folder and every X folder with its mtime. Listing + one stat per
-/// folder (no tile files) — far cheaper than the scan, which is what makes the index worth keeping.
-/// A file system that does not update folder mtimes when files change (some network shares) cannot
-/// be tracked this way; Settings → Rescan is the way there.
+/// Folder signature: every zoom and X folder with its mtime — far cheaper than the scan. A file system
+/// that does not update folder mtimes (some network shares) cannot be tracked; Settings → Rescan can.
 pub fn signature(map_dir: &Path) -> io::Result<String> {
     let mut h = Fnv::new();
     for (z, zentry) in numeric_dirs(map_dir)? {

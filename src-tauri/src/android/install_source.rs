@@ -2,8 +2,6 @@
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
 //! JNI bridge to the Kotlin `InstallSource` lookup: was this copy installed by the Google Play Store?
-//! Decides what the update notice offers (`commands/updater.rs`): the store listing for a Play
-//! installation, the GitHub release page for an APK installed by hand.
 
 use super::jvm;
 

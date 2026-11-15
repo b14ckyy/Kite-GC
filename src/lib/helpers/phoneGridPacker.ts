@@ -1,33 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Phone widget grid packer (Dev-Docs active/PHONE_UI.md §3) — pure, deterministic, UI-free, and
-// free of runtime imports so `node --experimental-strip-types` can run a check script against it.
-//
-// POSITIONAL model: every active widget carries the position the user last gave it (page, row,
-// col). Packing "settles" the grid:
-//   1. Widgets are processed top-down (page, row, col). Each takes its own position if free.
-//   2. If not (a size change, a foreign drop, a smaller raster), it slides DOWN to the first fit at
-//      or below its position (next pages included); with nothing below, it takes the first fit
-//      anywhere (top-down); with nothing at all it overflows (the caller deactivates it).
-//   3. Gravity — from where it landed it RISES while every slot directly above its span is free.
-//      Nothing rises through an occupied slot, so an S under a W stays under the W even if the W
-//      left a hole beside it (Marc's example); no gap ever sits directly above a widget; no zig-zag.
-//   4. A span never crosses the page boundary; rising stops at the page top.
-//   5. The panel is 1 column wide iff no 2-wide widget is active and the 1×1 tiles fit on the
-//      pages; else maxCols. Columns are ignored while 1 column wide.
-// A widget that is (re)activated has no position yet: it is appended at the END (last page, last
-// row) and therefore ends up in the earliest free slot — "wo wieder Platz ist".
-//
-// A MOVE (`packPhoneMove`) puts one widget on a position another one holds, and the processing
-// order decides who keeps it (`PackMove`): ahead of the widgets that start on its row, the moved one
-// takes the slot and they give way; behind every widget that starts on one of its span's rows, they
-// first rise into the hole it left and it lands below them. The second is what a move DOWN needs —
-// taken first, the moved widget would rise straight back into its own hole (rule 3). A 1×1 tile
-// dropped on another 1×1 tile is a plain swap.
-//
-// Geometry (rows / max cols / pages) is a parameter — the caller passes config/phoneGrid.ts. The
-// raster may change to 5 × 2; nothing here assumes 4 rows.
+// Phone widget grid packer (Dev-Docs active/PHONE_UI.md §3) — pure and free of runtime imports, so
+// `node --experimental-strip-types` can run a check script against it. Widgets keep their last position;
+// packing settles the grid. Rules (referenced below): 1 top-down order, unpositioned last; 2 own slot,
+// else the first fit below, else anywhere; 3 gravity — rise while the slot above the span is free; 4 a
+// span never crosses a page; 5 one column iff no 2-wide widget is active and the 1×1 tiles fit.
 
 import type { WidgetSize } from '../config/widgetRegistry';
 
@@ -173,15 +151,9 @@ export function packPhoneGrid(entries: PhoneWidgetEntry[], geom: PhoneGridGeomet
   return { placements, cols, overflow, settled };
 }
 
-/** A drop: put the widget `id` on (page, row, col) and settle the grid around it. Returns the
- *  entries with the settled positions; what found no slot is deactivated.
- *
- *  The dropped widget gets the row it was dropped on wherever the grid allows it, and what sat
- *  there gives way — up into the hole the moved widget left when there is one, else down. Two
- *  processing orders can produce that (`PackMove`); the one that leaves the widget on the dropped
- *  row is taken, and the first that keeps every widget on the grid when neither does (a drop on
- *  the lower half of a 2×2, or under free slots: gravity decides). A 1×1 tile dropped exactly on another 1×1 tile trades places with it,
- *  whichever row, column or page each is on. */
+/** A drop: put widget `id` on (page, row, col) and settle the grid; what finds no slot is deactivated. The
+ *  widget keeps the dropped row wherever possible and the occupant gives way (up into the hole, else
+ *  down); of the two processing orders (`PackMove`) the one achieving that wins. A 1×1 on a 1×1 swaps. */
 export function packPhoneMove(
   entries: PhoneWidgetEntry[],
   geom: PhoneGridGeometry,

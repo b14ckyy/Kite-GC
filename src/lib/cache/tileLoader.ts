@@ -22,9 +22,8 @@ const FALLBACK_TIMEOUT_MS = 15_000;
  * concurrency per layer, so a multi-layer provider (ESRI Hybrid) isn't throttled by
  * its own overlays while single-layer community providers stay conservatively capped.
  *
- * A custom map's pseudo URL (`custom://<map>/<z>/<x>/<y>`) is read from the local tile folder by
- * the backend instead — exact level only, rejecting when the tile does not exist (no network
- * fallback: there is nothing to fetch).
+ * A custom map's `custom://<map>/<z>/<x>/<y>` is read from the local tile folder instead (exact level
+ * only, rejects a missing tile, no network fallback).
  */
 export async function loadTileBytes(url: string, layer: string): Promise<ArrayBuffer> {
   if (isCustomTileUrl(url)) {

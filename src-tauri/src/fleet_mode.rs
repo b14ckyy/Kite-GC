@@ -1,32 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-//! Multi-vehicle ("fleet") feature gate — a launch flag, modelled on `debug_mode` — plus the separate
-//! switch for group-flight RECORDING.
-//!
-//! **Fleet features.** Off, Kite is the single-vehicle GCS: a second system id on a link never becomes a
-//! vehicle (no discovery, no fleet markers or STATUSTEXT tags), a second link is refused, commands only
-//! reach a link's primary vehicle, and the frontend hides the link manager, Fleet tab and group commands
-//! (Dev-Docs active/GROUP_FLIGHTS.md §5e, Marc 2026-10-02: no setting, a launch flag).
-//!
-//! Default: ON in a debug build (`tauri dev` needs no flag), OFF in a release build unless the launch
-//! asks for it — the `--fleet` CLI argument or the `KITE_FLEET` environment variable (any value, so the
-//! portable build can use it too). `--debug` on a release build does NOT turn it on: a tester collecting
-//! diagnostics must not get a half-finished feature. Mobile has no command line: compiling with
-//! `KITE_FLEET` set bakes it in (`KITE_FLEET=1 tauri android build`), like `KITE_DEBUG_UI` for debug
-//! mode — release or not. In a debug build the Debug Monitor can flip it at runtime
-//! (`set_fleet_enabled`); a release build refuses that.
-//!
-//! **Group recording** (temporary — until the group-flight end screen exists, GROUP_FLIGHTS.md steps
-//! 7–8): with the fleet features on, a group flight's member recordings could not be stored yet. So by
-//! default only the FIRST link's primary vehicle records, as an ordinary single flight: no recorder for
-//! a vehicle discovered beside it or for the primary of a further link, and the group coordinator never
-//! forms a group (no `.kgrp`, no member files, no `group_id`). Nobody can wreck a flight database by
-//! trying `--fleet`. A developer opts in with the `KITE_FLEET_RECORDING` environment variable (any value;
-//! no CLI flag, no setting, no UI toggle) — and only together with the fleet features.
-//!
-//! Both flags are shared `AtomicBool`s; the group coordinator gets the recording one as an `Arc`
-//! (`group_recording_handle`) so its tests can give each coordinator a flag of its own.
+//! Multi-vehicle ("fleet") feature gate — a launch flag (`--fleet` / `KITE_FLEET`), not a setting; on in
+//! debug builds, and `--debug` must NOT turn it on. Separately, group-flight RECORDING (temporary): only
+//! with `KITE_FLEET_RECORDING`, else just the first link's primary records, so `--fleet` cannot wreck a DB.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock};

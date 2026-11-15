@@ -217,11 +217,9 @@
     updateFleet(); // fleet model markers are zoom-sized too
   }
 
-  // The model is rasterised in software (uavTopDown.ts) — the one expensive step of a follow frame.
-  // It runs at the ATTITUDE DATA rate, not the display rate: the marker position and the map
-  // centre keep gliding every frame (cheap Leaflet calls), but the drawing only changes when the
-  // telemetry attitude changed, so the raster is skipped while the eased position catches up.
-  // Marc, 2026-09-08: no smoothing on the 2D model — a real update, a real redraw, nothing else.
+  // The model is rasterised in software (uavTopDown.ts), the one expensive step of a follow frame: only
+  // when the telemetry attitude changed, while position and centre glide every frame. No smoothing on the
+  // 2D model — a real update, a real redraw, nothing else.
   let modelDrawnKey = '';
 
   const ARMING_FLAG_ARMED = 2;
@@ -1585,12 +1583,9 @@
   }
 
   // ── Guided "fly here" (vehicle control) ──────────────────────────────────
-  // When the Guided toggle is on (MAVLink ArduPilot/PX4), a map click opens a small popup with the
-  // target coordinates + vehicle-aware params (Copter/VTOL: alt + heading · Plane: alt + loiter
-  // radius) and a "Fly Here" button that sends MAV_CMD_DO_REPOSITION. Last values persist for the
-  // next click. See docs/active/VEHICLE_CONTROL.md.
-  // The arming rule, the editor guard, the form variant and the send re-check are shared with the 3D
-  // map (controllers/guidedClick).
+  // When the Guided toggle is on (MAVLink ArduPilot/PX4), a map click opens a "Fly Here" popup that
+  // sends MAV_CMD_DO_REPOSITION (docs/active/VEHICLE_CONTROL.md). The rules shared with the 3D map
+  // live in controllers/guidedClick.
   let guidedPopup: L.Popup | undefined;
   let guidedForm: ReturnType<typeof mount> | undefined;
 
@@ -1689,12 +1684,9 @@
   let activeColor = '#37a8db';
   let followRaf: number | null = null;
   let followLastT = 0;
-  // The 2D map stays mounted under the 3D view (the live track lives in its Leaflet layers). Its
-  // follow loop must NOT: every frame it software-rasterises the UAV model into the marker canvas
-  // and re-centres the hidden Leaflet map (tile requests included) — measured at 3–10 % of the main
-  // thread while 3D was on screen (Sony XQ-CT54, 2026-09-08). While 3D shows, targets are still
-  // recorded (turn rate, last position); the loop parks, and the switch back snaps to the newest
-  // target. The trail append is a separate path and keeps running — the track must never be lost.
+  // The 2D map stays mounted under the 3D view (it holds the live track), but its follow loop must NOT run
+  // there: rasterising the model and re-centring the hidden map cost 3–10 % of the main thread. Targets are
+  // still recorded and the switch back snaps to the newest; the trail append keeps running.
   let followParked = false;
   // True only while applyFollowFrame() drives a programmatic recenter. Leaflet fires `moveend`
   // SYNCHRONOUSLY inside setView, so saveMapState would otherwise persist the UAV-locked centre
@@ -1906,15 +1898,9 @@
     (map as unknown as MapInternals)._move(c, zoom, { pinch: true, round: false });
   }
 
-  /** The per-frame follow recentre: a raw pan that puts `ll` at the visual centre — never setView.
-   *  setView(ll, map.getZoom(), {animate:false}) looked equivalent, but while a pinch is in flight
-   *  the map's zoom is fractional and setView snaps it to zoomSnap first — a zoom "change" it
-   *  cannot animate with animate:false, so it fell through to _resetView, and the tile layer answers
-   *  that ('viewprereset') by throwing EVERY tile away. Sixty times a second for the whole pinch:
-   *  the map stayed grey through the gesture and for seconds after it, while the ~1000 re-requested
-   *  tiles drained through the cache queue (Sony, 2026-09-12: 600 tiles removed, 1152 re-created by
-   *  one pinch in follow mode). panBy is exactly what setView does when the zoom is unchanged, minus
-   *  that trap; a jump larger than the viewport (a snap to a far target) still resets, as it should. */
+  /** The per-frame follow recentre: a raw pan, never setView — mid-pinch the zoom is fractional and setView
+   *  snaps it, falls through to _resetView, and the tile layer throws EVERY tile away, sixty times a second
+   *  (grey map for seconds). A jump larger than the viewport still resets, as it should. */
   function panToVisualCentre(ll: L.LatLngExpression) {
     if (!map) return;
     const size = map.getSize();
@@ -2327,11 +2313,8 @@
     for (const ol of currentOverlays) map.removeLayer(ol);
     currentOverlays = [];
 
-    // Add base layer
-    // updateWhenIdle: Leaflet's default is TRUE on mobile — tiles for a dragged map load only once
-    // the finger lets go (moveend), the map looks sluggish while it is pulled along (Marc, 2026-09-13).
-    // The desktop default is false: tiles load during the drag, throttled to updateInterval (200 ms).
-    // With the tile cache in front of the network the mobile saving is not worth the feel.
+    // updateWhenIdle false also on mobile (Leaflet's mobile default is true: tiles load only when the finger
+    // lets go, which feels sluggish); with the tile cache in front of the network the saving is not worth it.
     currentBase = cachedTileLayer(provider.url, {
       attribution: provider.attribution,
       maxZoom: provider.maxZoom,
@@ -2418,9 +2401,8 @@
       zoomControl: false,
       attributionControl: true,
     });
-    // Only the tile provider's credit (its licence asks for it). Leaflet's own prefix — a link with
-    // a flag since 1.9 — is a courtesy the BSD licence does not require; a GCS carries no third-party
-    // statements (Marc, PHONE_VIDEO.md D8).
+    // Only the tile provider's credit (its licence asks for it); Leaflet's own prefix is a courtesy the BSD
+    // licence does not require, and a GCS carries no third-party statements (PHONE_VIDEO.md D8).
     map.attributionControl.setPrefix(false);
     installBoxSelect();
 
@@ -2519,9 +2501,8 @@
       mapResizeObs = new ResizeObserver(() => {
         if (viewMode === 'heading-follow') applyHeadingUpSize(true);
         map?.invalidateSize();
-        // A follow target is re-centred only by the next follow frame — a static one (the GCS with
-        // no UAV, a paused replay) never sends one, and after a swap into a small frame the target
-        // sat wherever the old size had put it (Marc: "the anchor is off to the north-west").
+        // A follow target is re-centred only by the next follow frame — a static one (a GCS without UAV, a
+        // paused replay) never sends one, so re-centre here after the size change.
         if (viewMode !== 'free') applyFollowFrame();
       });
       mapResizeObs.observe(mapContainer.parentElement);
@@ -2590,10 +2571,8 @@
       prevConnStatus = c.status;
     });
 
-    // Jump requests (stores/mapFocus) — the custom map's "Show map area" and the map search. An
-    // explicit request, so a follow / fleet camera hands over to free pan first (else its next frame
-    // undoes the jump), and a pending go-to-UAV jump is dropped, like frameMission does. Not in the
-    // swapped-in mini map: its view mode belongs to the parent.
+    // Jump requests (stores/mapFocus): a follow / fleet camera hands over to free pan first (else its
+    // next frame undoes the jump) and a pending go-to-UAV jump is dropped. Not in the swapped-in mini map.
     unsubCustomFocus = onMapFocus((f) => {
       if (!map || miniControls) return;
       pendingUavJump = false;
@@ -2650,10 +2629,8 @@
       mapContainer.style.left = '';
       mapContainer.classList.remove('heading-up');
     }
-    // Leaflet must recalculate the container size — NOW, before the follow frame that follows this
-    // call recentres: with the stale size it centred the aircraft in the old box, one frame of
-    // visible offset on every heading-up ⇄ north-up switch (Marc, 2026-09-10, the mini map's tap
-    // toggle). The delayed pass catches a layout that is still settling (column transition).
+    // Recalculate the container size NOW, before the follow frame recentres — with the stale size every
+    // heading-up ⇄ north-up switch showed one frame of offset. The delayed pass catches a settling layout.
     map?.invalidateSize({ animate: false });
     setTimeout(() => map?.invalidateSize(), 50);
   }
@@ -2665,22 +2642,12 @@
     void centerInsetBottom;
     if (map && viewMode === 'heading-follow') applyHeadingUpSize(true);
   });
-  // Mini map (the widget tile everywhere, the docked frame on the phone — `miniControls`): ZOOM
-  // only. Wheel and pinch reach Leaflet as before; every click / double-click / context menu /
-  // single-pointer press is swallowed in the CAPTURE phase on the container, before Leaflet, the
-  // mission layers (add / drag a waypoint), the GCS context menu or the geozone handles see it
-  // (Marc, 2026-09-04: the widget map placed and moved waypoints). Dragging is already off in
-  // the follow modes; Leaflet's double-click zoom goes too — a double-tap is the swap gesture on
-  // the surfaces around the frame, and the phone relays touches to the tile underneath.
-  // Two gestures of its own (Marc, 2026-09-09/10), read from the same pointer stream before it is
-  // swallowed: a TAP toggles heading-up ⇄ north-up (the frame stays follow-locked either way — no
-  // free mode, no panning), and a one-finger SLIDE up / down zooms in / out — the phone has no zoom
-  // buttons and a pinch needs room the little frame does not have. A second finger hands over to
-  // Leaflet's pinch; the mouse keeps wheel + buttons and only taps. The slide steps through WHOLE
-  // levels with Leaflet's normal zoom animation, exactly like the +/- buttons: an unanimated
-  // setZoom is a hard reset that throws the old tiles away before the new ones exist (Marc,
-  // 2026-09-10: a dark-grey flash on every step), the animation scales them until then. Leaflet
-  // drops a setZoom that arrives mid-animation, so the target is kept and re-issued on zoomend.
+  // Mini map (widget tile, the phone's docked frame — `miniControls`): ZOOM only. Every click / dblclick /
+  // context menu / single-pointer press is swallowed in the CAPTURE phase before Leaflet, the mission
+  // layers and the context menu see it (the widget map must never place or move waypoints). Own gestures
+  // from the same pointer stream: a TAP toggles heading-up ⇄ north-up, a one-finger SLIDE zooms by WHOLE
+  // levels with the normal animation (an unanimated setZoom flashes dark grey); a second finger hands over
+  // to Leaflet's pinch. Leaflet drops a setZoom mid-animation, so the target is re-issued on zoomend.
   const MINI_TAP_MS = 350;
   const MINI_TAP_PX = 8;
   const MINI_SLIDE_PX_PER_LEVEL = 60;
@@ -3157,10 +3124,8 @@
        SUM of both tiles: a bright hairline along every tile edge. WebKitGTK needs none of that. */
     mix-blend-mode: normal;
   }
-  /* A custom online provider or offline map with 512 / 128 px tiles (layer class from userLayerZoom /
-     customLayerZoom; offline-map tiles are canvases): the same
-     half-pixel stretch at its own size — the 256.5 above would crop / gap its tiles. Higher
-     specificity (one class more) wins over the 256 rule, both being !important. */
+  /* 512 / 128 px custom or user maps: the same half-pixel stretch at their own size (256.5 would crop /
+     gap them). One class more of specificity wins over the 256 rule, both being !important. */
   :global(.map.tile-overlap .kite-tiles-512 img.leaflet-tile),
   :global(.map.tile-overlap .kite-tiles-512 canvas.leaflet-tile) {
     width: 512.5px !important;
@@ -3178,17 +3143,10 @@
     mix-blend-mode: plus-lighter;
   }
 
-  /* Android (Chromium WebView): every tile is its own composited layer and cc snaps each layer's
-     origin to whole device pixels. At a fractional device pixel ratio (1.67 on a 1280×720 / 267 dpi
-     screen: a 256px tile is 427.26 device px) the shared edge of two tiles therefore rounds UP at one
-     boundary — a 1px gap, dark hairline — and DOWN at the next — a 1px overlap. Leaflet's own remedy
-     for Chromium, `mix-blend-mode: plus-lighter` on every tile, turns that overlap into a BRIGHT
-     hairline (the sum of both tiles), which is also why the WebKitGTK half-pixel stretch above made
-     the phone worse. Fix: a full-pixel stretch so neighbours always overlap, drawn with normal
-     blending so the overlap is simply the upper tile. Covers the over-zoom placeholder tiles (div)
-     too. Reproduced + verified on the API 28 emulator at 1280×720 / 267 dpi (2026-09-10); the Sony
-     at DPR 2.625 only showed it while the map moved. Windows (WebView2) at 125 % scaling is the same
-     engine and untested. */
+  /* Android (Chromium WebView): cc snaps every tile layer to whole device pixels, so at a fractional DPR
+     tile edges alternate between a 1px gap and a 1px overlap, and Leaflet's `plus-lighter` turns the
+     overlap into a BRIGHT hairline. Fix: a full-pixel stretch so neighbours always overlap, with normal
+     blending. Covers the over-zoom placeholder tiles (div) too; WebView2 at 125 % is untested. */
   :global(.map.tile-snap .leaflet-tile) {
     mix-blend-mode: normal;
     width: 257px !important;
@@ -3205,13 +3163,9 @@
     height: 129px !important;
   }
 
-  /* Heading-up: container size set via inline styles (JS), CSS handles only rotation.
-     will-change: the rotation is driven per frame from JS (a CSS-variable write per follow frame),
-     and without its own compositor layer every step is a repaint of the whole oversized square —
-     hundreds of (empty, solid-colour) raster tasks per second that saturated the GPU thread on the
-     phone (Chromium trace on the Sony, 2026-09-12). With the layer the rotation is a compositor-only
-     transform update; the container paints nothing but its background, so the layer costs no
-     texture. */
+  /* Heading-up: container size via inline styles (JS), CSS only rotates. will-change: the rotation is
+     written per follow frame, and without its own compositor layer every step repaints the whole
+     oversized square — enough raster tasks to saturate the GPU thread on a phone. */
   :global(.map.heading-up) {
     transform: rotate(var(--map-rotation, 0deg));
     transform-origin: center center;
@@ -3232,10 +3186,9 @@
     transform: scale(var(--marker-scale));
     transform-origin: 50% 50%;
   }
-  /* Mission waypoint icons (INAV + ArduPilot layers): the SVG child is scaled — Leaflet's own
-     positioning transform on the marker root stays untouched — by the UI scale × a global 0.85
-     (a touch smaller everywhere, Marc 2026-09-04) × the map's --marker-scale. transform-origin
-     keeps the on-coordinate anchor fixed (teardrops anchor bottom-centre, circles centre). */
+  /* Mission waypoint icons (INAV + ArduPilot layers): the SVG child is scaled (Leaflet's transform on the
+     marker root stays untouched) by UI scale × 0.85 × --marker-scale; transform-origin keeps the anchor
+     fixed (teardrops bottom-centre, circles centre). */
   :global(.mission-wp-icon > svg),
   :global(.mission-fbh-icon > svg) {
     transform: scale(calc(var(--ui-scale, 1) * 0.85 * var(--marker-scale, 1)));
@@ -3279,9 +3232,8 @@
   }
 
   /* On mobile the provider credit moves to the bottom-left (below), so the button cluster can sit in
-     the corner like on the desktop and like the 3D map's cluster — clear of the iPad home indicator.
-     It used to be lifted 34 px above the credit as well; on a tablet that pushed the top button under
-     the right dock's lowest widget and left a gap below. */
+     the corner like on the desktop — clear of the iPad home indicator. Lifting it above the credit
+     pushes the top button under the right dock's lowest widget on a tablet. */
   :global(html.is-mobile) .map-controls-corner {
     bottom: calc(8px + var(--safe-bottom, 0px));
   }
@@ -3310,10 +3262,8 @@
     bottom: calc(8px + var(--safe-bottom, 0px));
     transition: right 0.3s ease;
   }
-  /* In the floating frame / widget tile (+page's .layer-map.in-frame): no zoom buttons — wheel,
-     touchpad, pinch and the mini map's one-finger slide cover it, and four buttons did not fit a
-     small frame (the top one stuck out of it, Marc 2026-09-10 on the tablet). The mobile lift
-     above clears the attribution, which the frame hides — back to the plain 8 px there. */
+  /* In the floating frame / widget tile: no zoom buttons — wheel, touchpad, pinch and the mini map's slide
+     cover it, and four buttons do not fit a small frame. Back to the plain 8 px (no attribution there). */
   :global(.layer-map.in-frame) .map-zoom-btn {
     display: none;
   }

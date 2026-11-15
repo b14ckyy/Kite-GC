@@ -541,13 +541,9 @@ function patch(p: Partial<VideoState>): void {
   videoState.update((s) => ({ ...s, ...p }));
 }
 
-/** Mirror a video-pipeline event into the **backend log file** (and the console).
- *
- *  The whole source router — including the RTSP reconnect loop and its stall detection — runs here in
- *  the frontend, so until now the answer to "why did the stream drop?" existed only as a `console.warn`
- *  in DevTools. A tester on a Raspberry Pi has neither: a release build has no console, and the log file
- *  the Diagnostics page hands out never saw a word of it. Stream aborts go in at **warn**, so they show
- *  up at the default log level; routine lifecycle detail is `info` (captured at Debug). */
+/** Mirror a video-pipeline event into the backend log file (and the console): the source router and its
+ *  reconnect loop run here, and a release build has no console. Stream aborts at warn (default level),
+ *  routine lifecycle detail at info. */
 function logVideo(level: 'warn' | 'info' | 'debug', message: string): void {
   if (level === 'warn') console.warn(`[video] ${message}`);
   else console.log(`[video] ${message}`);
@@ -1170,15 +1166,8 @@ async function negotiateWebrtc(url: string, transport: RtspTransport, useFfmpeg:
 }
 
 // ── ICE diagnostics ──────────────────────────────────────────────────────────────────────────────
-// Everything about the engine is logged; about our own peer connection, nothing was. When a stream came
-// up black with `peer connection failed` and no inbound-rtp, there was no way to tell whether the
-// browser had even produced a candidate able to reach the engine's address — the failure looked
-// identical from outside whatever the cause.
-//
-// Level split: the per-negotiation lines are `debug` (one pair of them on every stream start would
-// otherwise fill a tester's log for a feed that is working), while the failure dump repeats them at
-// `warn`. So normal operation stays quiet and a broken connection still reports itself in full,
-// without anyone having to reproduce it under `--debug` first.
+// The per-negotiation lines are debug (a working feed stays quiet); the failure dump repeats them at warn,
+// so a broken connection reports itself in full without a `--debug` reproduction.
 
 /** Candidate summaries of the negotiation in progress, replayed by `logIceOutcome` when it fails. */
 let lastIce: { local: string[]; remote: string[] } = { local: [], remote: [] };
@@ -1265,12 +1254,9 @@ let rtspMjpegFailures = 0;
  *  decoded frame: the *software* transcode delivering pictures says nothing about the hardware path.
  *  Cleared only by a deliberate (re)start. */
 let rtspHwVetoed = false;
-/** The backend's marker for "the hardware is what failed", kept in sync with `HW_FAILURE_PREFIX` in
- *  `mjpeg_server.rs`. Deliberately not a match on ffmpeg's own prose: on a lossy source the decoder's
- *  per-frame complaints reach the caller ahead of the real cause, so the identical VAAPI failure came
- *  back with two different first lines on two consecutive attempts (Debian 13 / Intel, 2026-08-18) —
- *  the veto fired on one and not the other. The backend scans every line and says so plainly. An
- *  unreachable source never carries the marker, so it still costs the hardware path nothing. */
+/** The backend's "the hardware failed" marker (`HW_FAILURE_PREFIX` in `mjpeg_server.rs`, keep in sync) —
+ *  not a match on ffmpeg's prose, whose first line varies on a lossy source. An unreachable source never
+ *  carries it. */
 const HW_TRANSCODE_FAILED = 'hardware transcode failed';
 
 /** `video/H264` → `H.264`. The RTP mime type is the only place the negotiated codec is named, and it
@@ -1409,8 +1395,8 @@ function startRtspStallMonitor(pc: RTCPeerConnection): void {
       prevDecoded = decoded;
       prevBytes = bytes;
       prevAt = now;
-      // A periodic trace of the same numbers, so a tester's Debug-level log shows where a jittery
-      // picture loses its frames (receive vs decode vs playout) without the Debug Monitor.
+      // A periodic trace of the same numbers, so a Debug-level log shows where a jittery picture loses its
+      // frames (receive vs decode vs playout).
       statTick++;
       if (statTick % 10 === 0) {
         // Helper instead of inline ternaries: TS does not apply assignments made inside the forEach
@@ -1767,10 +1753,8 @@ export function toggleVideo(): void {
     stopVideo();
     return;
   }
-  // Starting a source brings the floating window (the docked window on the phone) on screen —
-  // the panel has no preview, so this is where the picture appears — unless a Video widget is
-  // active: then the widget is the picture and the window starts parked (Marc, 2026-09-08). The
-  // toggle button shows / parks it afterwards, and the source runs on while it is parked.
+  // Starting a source brings the floating window (the phone's docked window) on screen — the panel has no
+  // preview — unless a Video widget is active: then the widget is the picture and the window starts parked.
   patch({ floating: !videoWidgetActive });
   savePrefs();
   void startActive();
@@ -1943,7 +1927,7 @@ export function setUnobstructedFullscreen(on: boolean): void {
   savePrefs();
 }
 
-/** The phone docked window's compact size relative to the normal fit (Marc, 2026-09-10: "2/3"). */
+/** The phone docked window's compact size relative to the normal fit. */
 export const PHONE_DOCK_COMPACT = 2 / 3;
 
 /** Phone docked window: flip between the normal size and the compact one. The swapped-in map

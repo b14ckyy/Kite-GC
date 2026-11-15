@@ -22,18 +22,9 @@ use super::parser::MavParser;
 /// Timeout waiting for the first FC HEARTBEAT
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Perform the MAVLink handshake on a ByteTransport.
-///
-/// 1. Read bytes until we receive a HEARTBEAT from the FC
-/// 2. Extract FC info (autopilot type, vehicle type, system ID)
-/// 3. Send a GCS HEARTBEAT back
-/// 4. Return (FcInfo, fc_system_id, fc_component_id, uid2_valid)
-///
-/// `uid2_valid` is true only when AUTOPILOT_VERSION arrived with a non-zero `uid2` (ArduPilot / PX4
-/// fill it from the MCU serial). INAV sends it all-zero — that, or no AUTOPILOT_VERSION at all, makes
-/// the connect path probe for INAV's MSP-over-MAVLink tunnel.
-///
-/// The transport is borrowed mutably — caller retains ownership.
+/// MAVLink handshake: wait for an autopilot HEARTBEAT, send ours back; returns (FcInfo, sysid, compid,
+/// uid2_valid). `uid2_valid` only for a non-zero AUTOPILOT_VERSION uid2 (ArduPilot / PX4) — INAV sends
+/// zeros, which (or no AUTOPILOT_VERSION) makes the connect path probe for the MSP tunnel.
 pub fn perform_handshake(transport: &mut dyn ByteTransport) -> Result<(FcInfo, u8, u8, bool), String> {
     let mut parser = MavParser::new();
     let mut buf = [0u8; 512];
@@ -113,12 +104,9 @@ pub fn perform_handshake(transport: &mut dyn ByteTransport) -> Result<(FcInfo, u
                             continue;
                         }
 
-                        // Lock onto an *autopilot* heartbeat, not the first non-GCS one. PX4 (and many
-                        // vehicles) stream HEARTBEATs from several components — a gimbal / companion /
-                        // ADS-B receiver typically reports autopilot=INVALID from a component_id ≠ 1.
-                        // Accepting one of those would set fc_variant to "MAV_AUTOPILOT_INVALID" and the
-                        // PX4 path (is_px4) would never engage. Accept when the autopilot field is set,
-                        // or the heartbeat comes from the autopilot component (compid 1 = AUTOPILOT1).
+                        // Lock onto an AUTOPILOT heartbeat, not the first non-GCS one: gimbals / companions report
+                        // autopilot=INVALID from compid ≠ 1 and would make fc_variant "MAV_AUTOPILOT_INVALID" (PX4 path never
+                        // engages). Accept a set autopilot field or compid 1.
                         let is_autopilot = hb.autopilot != MavAutopilot::MAV_AUTOPILOT_INVALID
                             || frame.header.component_id == 1;
                         if !is_autopilot {

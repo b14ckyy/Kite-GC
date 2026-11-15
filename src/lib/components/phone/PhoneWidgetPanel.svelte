@@ -63,8 +63,8 @@
   } = $props();
 
   const PAD = PHONE_GRID_PAD;
-  // Android's own long-press haptic fires at ~500 ms; arming later than that reads as "press
-  // longer than the buzz" (Marc) — so arm exactly there.
+  // Android's own long-press haptic fires at ~500 ms; arming later reads as "press longer than the
+  // buzz" — so arm exactly there.
   const LONG_PRESS_MS = 500;
   const DRAG_SLOP_PX = 8;
   /** In edit mode a touch must HOLD this long before it picks the widget up; a quicker flick

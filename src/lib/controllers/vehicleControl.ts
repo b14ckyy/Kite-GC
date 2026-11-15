@@ -285,11 +285,9 @@ export function changeSpeed(speed: number, airspeed: boolean): Promise<boolean> 
   return runCommand('changeSpeed', 'mav_change_speed', { speedType: airspeed ? 0 : 1, speed });
 }
 
-/** Change the active target altitude — repositions to the EXISTING Guided target (the loiter centre)
- *  at the new altitude, so only the height changes. Falling back to the vehicle's momentary position
- *  would move a fixed-wing's loiter centre to wherever it currently is on its circle, breaking it out
- *  of the loiter to fly straight there (tester report). The current position is used only when no
- *  Guided target has been set yet. Needs a GPS fix; the vehicle should be in the reposition-ready mode. */
+/** Change the target altitude by repositioning to the EXISTING Guided target (the loiter centre) — using
+ *  the momentary position would break a fixed-wing out of its loiter. Falls back to the current position
+ *  only without a Guided target. Needs a GPS fix and the reposition-ready mode. */
 export function changeAlt(alt: number): Promise<boolean> {
   const tel = get(telemetry);
   if (tel.fixType < 2) {
@@ -423,10 +421,8 @@ export async function setGuided(on: boolean): Promise<boolean> {
   guidedActive.set(ok);
   headingOverrideActive = false; // re-entering guided clears any heading slew
   if (ok) {
-    // Seed the target marker at the mode-entry point right away — ArduPlane loiters around the spot
-    // where GUIDED was entered, so this IS the initial target (MP shows nothing here, which testers
-    // read as "nothing happened"). The FC's 1 Hz POSITION_TARGET_GLOBAL_INT push then confirms or
-    // corrects it (ingestFcGuidedTarget).
+    // Seed the target marker at the mode-entry point — ArduPlane loiters where GUIDED was entered, so this IS
+    // the initial target; the FC's 1 Hz POSITION_TARGET_GLOBAL_INT then confirms or corrects it.
     const tel = get(telemetry);
     if (tel.fixType >= 2 && (tel.lat !== 0 || tel.lon !== 0)) {
       guidedTarget.set({ lat: tel.lat, lon: tel.lon });

@@ -59,8 +59,8 @@
     interfaceSettings: InterfaceSettings;
     /** `--phone-shift`: how far the widget column has slid out (the map frame grows by it). */
     frameShift?: number;
-    /** Right edge (css px) of a left-edge overlay the tiles must clear besides the arming pill — the
-     *  open nav rail (Marc, 2026-09-12: its lower buttons reach into the tiles' band). 0 = none. */
+    /** Right edge (css px) of a left-edge overlay the tiles must clear besides the arming pill — the open
+     *  nav rail, whose lower buttons reach into the tiles' band. 0 = none. */
     leftReserve?: number;
     /** Edit mode: the user dropped a widget on a slot. */
     onmovetobottom?: (id: string, slot: PhoneBottomSlot) => void;
@@ -165,9 +165,8 @@
   $effect(() => {
     if (barH !== filledH) barH = filledH;
   });
-  // Published on the root: the sensor chip, the error bar and the resume banner move up by the
-  // lift while a tile is on the bottom edge (or the slots show in edit mode). The Debug button and
-  // the Leaflet credit stay on the bottom edge — a tile may cover the credit (Marc: no priority).
+  // Published on the root: the sensor chip, the error bar and the resume banner move up by the lift while
+  // a tile is on the bottom edge (or in edit mode). The Debug button and the credit stay (a tile may cover it).
   $effect(() => {
     const lift = anyFilled || editing ? Math.max(filledH, editing ? Math.max(sideH, centreH) : 0) + PHONE_BOTTOM_GAP : 0;
     const root = document.documentElement;

@@ -18,9 +18,8 @@
 # out before the `gh release create` line above.
 #
 # What it does:
-#   1. Signs every updater artifact that has no `.sig` beside it. Nothing is signed at build time —
-#      not on CI, not on Sebastian's macOS machine — so the private key never leaves the
-#      maintainer's machines (it lives in the private Dev-Docs repository).
+#   1. Signs every updater artifact that has no `.sig` beside it. Nothing is signed at build time (not
+#      on CI, not on another machine), so the private key never leaves the maintainer's machines.
 #   2. Writes release/latest.json — one entry per platform key the plugin looks up
 #      (`<os>-<arch>[-<installer>]`). Missing artifacts are reported and skipped, so a release with
 #      fewer platforms still gets a valid manifest.

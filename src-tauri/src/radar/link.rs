@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Radar — the byte link a local radar source reads from: a serial port, a TCP connection or a UDP
-// socket. One spec type + one opener shared by the ADS-B receiver and the FormationFlight module, so
-// both accept every transport the same way. Platform capability stays a runtime property: on iOS a
-// serial open fails cleanly (transport::serial stand-in), TCP / UDP work everywhere.
+// Radar — the byte link a local radar source reads from (serial, TCP or UDP), shared by the ADS-B
+// receiver and FormationFlight. On iOS a serial open fails cleanly at runtime.
 
 use crate::transport::serial::SerialConnection;
 use crate::transport::tcp::TcpTransport;
@@ -21,11 +19,9 @@ pub enum LinkSpec {
 }
 
 impl LinkSpec {
-    /// Turn the stored source fields into a link, or `None` when the source cannot be started: a serial
-    /// source without a port, a TCP source with an empty host, an IP source with a port outside
-    /// 1..=65535, or a transport this build does not know. A UDP source needs no host: Kite listens on
-    /// the port and answers whoever sent (an empty host becomes `0.0.0.0`). `transport` empty ⇒ serial (configs stored before the field
-    /// existed). `baud` is the effective baud (the caller applies its default for 0).
+    /// Turn the stored source fields into a link, or `None` when the source cannot be started. A UDP
+    /// source needs no host (Kite listens and answers whoever sent); an empty `transport` is serial
+    /// (older configs). `baud` is the effective baud.
     pub fn from_config(transport: &str, port: &str, baud: u32, host: &str, net_port: u32) -> Option<Self> {
         let host = host.trim();
         let net_port = u16::try_from(net_port).ok().filter(|p| *p != 0);
@@ -49,16 +45,10 @@ impl LinkSpec {
         }
     }
 
-    /// Open the link. `raise_dtr_rts` applies to serial only: many USB-serial ADS-B receivers stream only
-    /// once the host raises DTR/RTS, while toggling them resets an ESP32 (FormationFlight must not). A
-    /// failure to set them is logged and the link is used anyway.
-    ///
-    /// UDP must own its configured local port. Both radar sources only ever answer or listen — the device
-    /// pushes to that port — so `UdpTransport`'s fallback to another local port (meant for a main link
-    /// that wakes its peer by sending first) would leave the source deaf for good, and a UDP link never
-    /// errors out on its own to retry. A busy port is therefore a failed open: the caller's reconnect
-    /// backoff retries until the port is free (e.g. once the previous worker of this very source has
-    /// closed its socket after a reconfigure).
+    /// Open the link. `raise_dtr_rts` (serial only): many USB-serial ADS-B receivers stream only once
+    /// DTR/RTS are raised, while toggling them resets an ESP32 (FormationFlight must not).
+    /// UDP must own its configured local port — the device pushes to it, so `UdpTransport`'s fallback
+    /// port would leave the source deaf for good. A busy port is a failed open; the caller's backoff retries.
     pub fn open(&self, raise_dtr_rts: bool) -> Result<Box<dyn ByteTransport>, String> {
         match self {
             LinkSpec::Serial { port, baud } => {
@@ -87,11 +77,9 @@ impl LinkSpec {
     }
 }
 
-/// Logs failed opens so a tester's default-level log shows why a source stays dark, without one line per
-/// reconnect attempt: the SECOND failure in a row goes to `warn`, every other one to `debug`. The first
-/// one alone is not worth a warning — a reconfigure restarts the ADS-B sources while the previous worker
-/// still holds the serial port / UDP socket for one read timeout, so the new worker's first open
-/// routinely fails once and succeeds on the next attempt.
+/// Logs failed opens without one line per reconnect attempt: the SECOND failure in a row goes to `warn`,
+/// every other one to `debug`. The first alone is routine — after a reconfigure the previous worker still
+/// holds the port for one read timeout.
 #[derive(Default)]
 pub struct OpenFailureLog {
     failures: u32,

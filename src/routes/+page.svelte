@@ -160,22 +160,17 @@
   // render loop while hidden.
   let map3dEverOpened = $state(false);
   $effect(() => { if (mapViewMode === '3d') map3dEverOpened = true; });
-  // Waypoints can only be edited on the 2D map → entering edit mode forces 2D (untracked read/write so
-  // toggling the view later doesn't re-trigger this; it reacts to the edit-mode transition only).
-  // Mission edit mode needs the full map: leave 3D, and bring the map back from a mini frame (the
-  // widget tile / the phone's docked frame take no waypoint interaction — Marc, 2026-09-04).
+  // Waypoints can only be edited on the full 2D map: entering edit mode leaves 3D and brings the map back
+  // from a mini frame (untracked, so it reacts to the edit-mode transition only).
   $effect(() => {
     if ($editMode) untrack(() => {
       if (mapViewMode === '3d') mapViewMode = '2d';
       if (mapInFrame) setMapLocation('main');
     });
   });
-  // Edit mode — INAV's `editMode` and the ArduPilot/PX4 panel's `arduEditMode` alike — lives only
-  // while the mission tab is the active one. Every way of leaving it ends the mode: the rail, and the
-  // programmatic jumps (a flight opening the logbook, "open vehicle", a log file drop). Parking the
-  // panel (re-clicking its rail button) keeps it: that is how the map gets the whole screen while
-  // waypoints are placed. Until now only the INAV store was reset, so an ArduPilot edit session
-  // survived every tab switch and kept placing waypoints on map clicks (Marc, 2026-09-14).
+  // Edit mode (INAV `editMode` and ArduPilot/PX4 `arduEditMode` alike) lives only while the mission tab is
+  // active: every way of leaving it ends the mode. Parking the panel keeps it — that is how the map gets
+  // the whole screen while waypoints are placed.
   $effect(() => {
     if (activeTab !== 'mission') untrack(() => {
       if ($editMode) editMode.set(false);
@@ -370,9 +365,8 @@
   // floating window frame, `widget` → the video-widget tile (its published rect). Every other surface
   // shows video. `main` (default) = the normal full-screen map.
   const mapInFrame = $derived($videoState.mapLocation !== 'main' && $videoState.status === 'live');
-  // Map centre offset for the covered right edge (PHONE_UI.md D16) — only while the map is the
-  // full-screen layer. In the docked frame / widget tile nothing covers it: a shifted centre put
-  // the follow anchor on the frame's left edge (Marc, 2026-09-04).
+  // Map centre offset for the covered right edge (PHONE_UI.md D16) — only while the map is full screen;
+  // in a frame nothing covers it, and a shifted centre put the follow anchor on the frame's edge.
   const phoneMapInset = $derived(phoneUi && !mapInFrame ? phonePanelW - phoneShift : 0);
   // …and for the bottom widget slots (PHONE_BOTTOM_WIDGETS.md B7): the tallest filled tile plus its
   // 8 px edge margin, published by PhoneBottomBar; 0 while every slot is empty.
@@ -987,9 +981,8 @@
   const geozonesAvailable = $derived($geozoneWorking?.has_geozones ?? false);
   const fenceAvailable = $derived($fenceWorking?.has_fence ?? false);
   const rallyAvailable = $derived($rallyWorking?.has_rally ?? false);
-  // Fleet tab: only once MORE THAN ONE vehicle is connected over the primary links (Marc, 2026-10-01) —
-  // a single-vehicle session must look exactly as before. Protocol-agnostic on purpose: any vehicle
-  // counts, so INAV fleets slot in later without touching this gate. Behind the fleet feature gate.
+  // Fleet tab: only once MORE THAN ONE vehicle is connected — a single-vehicle session must look exactly as
+  // before. Protocol-agnostic on purpose; behind the fleet feature gate.
   const fleetTabAvailable = $derived($fleetEnabled && $vehicles.size >= 2);
   // With the gate off, a Fleet tab restored from the last session (or open when it was switched off) must
   // not stay rendered — the same fallback as the RC tab above.
@@ -3863,11 +3856,8 @@
     {/if}
   </div>
 
-  <!-- Floating-frame map controls — top-level/unzoomed so they sit ABOVE the in-frame map (z2); the
-       float-win's own chrome lives in .ui-scale (z1) and would be hidden behind it. Only the two
-       corner handles: the map goes back to main by double-clicking the full-screen video (a ✕ here
-       did the same and was dropped, Marc 2026-09-10). Not while the frame is parked (the map slides
-       out with it). -->
+  <!-- Floating-frame map controls, top-level/unzoomed so they sit ABOVE the in-frame map: only the two
+       corner handles (the map goes back by double-clicking the full-screen video). Not while parked. -->
   {#if mapFloating && $videoState.status === 'live' && !phoneUi && $videoState.floating}
     <div class="miniframe-ctl" style={mapFrameStyle}>
       <!-- The window's resize corner, redrawn above the map just inside the picture's top-right
@@ -4419,9 +4409,8 @@
         <TerrainAnalysisPanel track={selectedTrackWithPosition} live={isPrimaryConnected} {interfaceSettings} confirm={showDialog} />
       {/if}
     </div>
-    <!-- Phone: the dev Debug toggle lives in the PANELS layer so it stays reachable over an open
-         panel (a developer tool); the arming / sensor chips stay in .app under the panels (Marc:
-         a panel may cover them, they still peek out left of it). Dialogs keep their higher z-index. -->
+    <!-- Phone: the dev Debug toggle lives in the PANELS layer so it stays reachable over an open panel; the
+         arming / sensor chips stay under the panels (they still peek out). Dialogs keep their higher z. -->
     {#if phoneUi && DEV_MODE}
       <div class="phone-debug-btn">
         <PhoneDebugButton bind:debugOpen />
@@ -5003,13 +4992,9 @@
     height: 100%;
     overflow: hidden;
     pointer-events: none;
-    /* A compositor layer of its own, permanently. The docked video window slides in and out BEHIND
-       this column; while it animates it overlaps the column, and Chromium then promoted the column
-       to a layer (overlap with an animating layer), squashed the glass into it and rasterised the
-       lot again — at the end of the slide the reverse. Every element squashed with the glass (the
-       hamburger, the connection button, the arming chip, the dock toggle) vanished for a frame at
-       both ends of every slide (Sony, 2026-09-13, traced with the CDP LayerTree). With the layer
-       fixed there is nothing to promote or demote. */
+    /* A compositor layer of its own, permanently: the docked video window slides BEHIND this column, and
+       Chromium otherwise promotes/demotes the column around every slide — everything squashed with the
+       glass vanished for a frame at both ends. */
     will-change: transform;
   }
   .zone-phone-widgets > :global(*) {
@@ -5110,13 +5095,9 @@
     transition: left 0.3s ease;
   }
 
-  /* Mobile: the layout zones around the map are compositor layers of their own, permanently.
-     The floating video window mounts and slides over them; Chromium promoted every zone it
-     overlaps to a layer for the duration (toolbar, both docks, nav rail, map controls, status bar)
-     and demoted them again afterwards — each flip rasterises the zone anew, and almost the whole
-     chrome vanished for a frame on the tablet when the window was switched on (Teclast M11,
-     2026-09-13, CDP LayerTree). Mobile only: on the desktop the same flips happen but the raster is
-     back within the frame, and the layers would cost texture memory on a 4K screen. */
+  /* Mobile: the zones around the map are permanent compositor layers — the floating window otherwise
+     promotes/demotes every zone it overlaps, and the chrome vanished for a frame on each switch. Mobile
+     only: on the desktop the raster is back within the frame, and the layers would cost texture memory. */
   :global(html.is-mobile) .zone-toolbar,
   :global(html.is-mobile) .zone-bottom-dock,
   :global(html.is-mobile) .zone-side-dock,

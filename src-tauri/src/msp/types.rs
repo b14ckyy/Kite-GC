@@ -62,9 +62,7 @@ pub const MSP_UID: u16 = 160;
 // pub const MSP_GPS_SV_INFO: u16 = 164;
 
 // ── Mission / Waypoint MSP v1 command codes ─────────────────────────
-// INAV: LOAD = 18 (load mission from NVRAM → RAM), SAVE = 19 (save RAM → NVRAM). These were previously
-// swapped here, so "EEPROM Save" actually sent LOAD (overwrote the upload with the old EEPROM, wrote
-// nothing) and "EEPROM Load" sent SAVE — i.e. mission EEPROM save never persisted.
+// INAV: LOAD = 18 (NVRAM → RAM), SAVE = 19 (RAM → NVRAM) — do not swap them.
 pub const MSP_WP_MISSION_LOAD: u16 = 18;
 pub const MSP_WP_MISSION_SAVE: u16 = 19;
 pub const MSP_WP_GETINFO: u16 = 20;
@@ -148,10 +146,9 @@ pub struct FcInfo {
     /// a QuadPlane reports fc_variant "ArduPlane" but a VTOL_* MAV_TYPE.
     #[serde(default)]
     pub mav_type: u8,
-    /// Hardware identity of the flight controller where the protocol exposes one: INAV = MSP_UID (the
-    /// 96-bit MCU serial, 24 hex chars), MAVLink = AUTOPILOT_VERSION uid2. Always passed through
-    /// [`hardware_uid`] — `None` for passive telemetry and for a simulator's synthetic id. Stored with
-    /// each flight and the first key when a flight is linked to its library vehicle (`flights.vehicle_id`).
+    /// Hardware identity of the flight controller: INAV = MSP_UID (96-bit MCU serial), MAVLink =
+    /// AUTOPILOT_VERSION uid2. Always passed through [`hardware_uid`]; `None` for passive telemetry and
+    /// a simulator's synthetic id. The first key when a flight is linked to its library vehicle.
     #[serde(default)]
     pub fc_uid: Option<String>,
     /// Whether the FC logs to a blackbox / dataflash: INAV `MSP_BLACKBOX_CONFIG` device != NONE (set in
@@ -165,10 +162,9 @@ pub struct FcInfo {
 /// the way the MSP handshake renders MSP_UID) — the same on every host, so it identifies no aircraft.
 pub(crate) const INAV_SITL_UID: &str = "000000000100000002000000";
 
-/// The FC hardware id worth storing, from the hex string a handshake rendered: `None` for an empty or
-/// all-zero id (a MAVLink `uid2` the autopilot did not fill — INAV, PX4 SITL at sysid 1) and for INAV
-/// SITL's constant MSP_UID. Such ids are no hardware identity: they would link every simulator (or
-/// every INAV board over plain MAVLink) to the same library vehicle. Other ids pass through trimmed.
+/// The FC hardware id worth storing: `None` for an empty or all-zero id (an unfilled MAVLink `uid2`)
+/// and for INAV SITL's constant MSP_UID — they would link every simulator (or every INAV board over
+/// plain MAVLink) to the same library vehicle. Other ids pass through trimmed.
 pub fn hardware_uid(raw: &str) -> Option<String> {
     let uid = raw.trim();
     if uid.is_empty() || uid.chars().all(|c| c == '0') || uid.eq_ignore_ascii_case(INAV_SITL_UID) {

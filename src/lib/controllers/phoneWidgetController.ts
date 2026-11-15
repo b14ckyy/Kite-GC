@@ -52,7 +52,7 @@ export const PHONE_GEOMETRY: PhoneGridGeometry = {
   pages: PHONE_GRID_PAGES,
 };
 
-/** Marc's default layout (PHONE_UI.md §6): page 1 AHI (L), Home · Altitude, GPS · Compass;
+/** Default layout (PHONE_UI.md §6): page 1 AHI (L), Home · Altitude, GPS · Compass;
  *  page 2 Live AGL (W), Terrain Radar (L), Flight Mode · Battery. Speed, RC Link, Battery 2 off. */
 export const DEFAULT_PHONE_WIDGETS: PhoneWidgetsConfig = {
   entries: [

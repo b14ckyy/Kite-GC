@@ -246,11 +246,8 @@
   let logFiles = $state<LogFileInfo[]>([]);
   let showLogPicker = $state(false);
 
-  /** Share the diagnostics log through the system sheet — the Android replacement for "open
-   *  folder": an app-private path is unreachable in any file manager, so opening it on the device
-   *  is useless, while sharing reaches mail, messengers or a text editor directly. The log is one
-   *  file per day and the one a tester needs after a restart is usually yesterday's, so the button
-   *  lists the day-files and `sharePickedLog` sends the chosen one. */
+  /** Share the diagnostics log through the system sheet — Android's replacement for "open folder" (the
+   *  app-private path is unreachable). The needed day-file is often yesterday's, so the user picks one. */
   async function shareLogFile() {
     logOpenError = '';
     if (!logPath) await loadLogPath();

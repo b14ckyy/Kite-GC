@@ -1,27 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-//! Group-flight coordinator (Dev-Docs active/GROUP_FLIGHTS.md §3.2, step 5): ties the flights of the
-//! vehicles that fly at the same time into one group flight.
-//!
-//! Protocol-agnostic: it knows recorders by vehicle key (`"L1:S2"`) through `register` and learns arm,
-//! disarm, first status and teardown from the recorders themselves — never a MAVLink or MSP detail.
-//!
-//! Rules (Marc, GROUP_FLIGHTS.md §1, §5, §5b): with group recording enabled
-//! (`crate::fleet_mode::group_recording` — the fleet features plus a developer opt-in) and at least two recorders registered, the first arm WITH a 3D fix
-//! starts a group. From then on every registered recorder records (member mode; an unarmed session
-//! where none runs), the group starts at the earliest arm among the recordings already running, and it
-//! ends when the last armed member has disarmed and nothing re-armed within `GROUP_END_GRACE` — or,
-//! when the last armed member was lost (its link went away while armed, or its recorder reported no
-//! status for `MEMBER_STALL`), after `LOST_ARMED_TIMEOUT` without an arm. Then every member is finalized
-//! for the group's store prompt (`PendingGroup`, `group-flight-ended`).
-//!
-//! Lock rule (deadlock-free by construction): recorder lock → coordinator lock, never the reverse. The
-//! coordinator never locks a recorder while it holds its own lock; the recorder-facing calls answer with
-//! a `GroupDirective` the calling recorder applies to itself. Work on other recorders — members that get
-//! no status, the finalization at the group end — runs in `tick` (the worker thread's, or a test's),
-//! which snapshots their `Weak` handles under the coordinator lock, releases it and then locks one
-//! recorder at a time.
+//! Group-flight coordinator (Dev-Docs active/GROUP_FLIGHTS.md §3.2): ties the flights of vehicles flying
+//! at the same time into one group flight; protocol-agnostic. Lock rule: recorder lock → coordinator
+//! lock, never the reverse — work on other recorders runs in `tick`, one recorder lock at a time.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -345,9 +327,8 @@ impl Group {
         self.kgrp_path.parent() == Some(sessions_dir)
     }
 
-    /// `key` joins with a session that began before the group start: the group starts there instead
-    /// (Marc, 2026-10-01 — e.g. a vehicle back via continue-on-reconnect whose flight began before the
-    /// group formed). The id stays the one formed at the start; the `.kgrp` header is rewritten.
+    /// `key` joins with a session that began before the group start (e.g. back via continue-on-reconnect):
+    /// the group starts there instead. The id stays; the `.kgrp` header is rewritten.
     fn pull_start(&mut self, key: &str, session_start: Option<DateTime<Utc>>) {
         let Some(start) = session_start.filter(|s| *s < self.header.start_time) else { return };
         log::info!(
@@ -568,10 +549,9 @@ impl GroupCoordinator {
         }
     }
 
-    /// Advance the group-end timer: an armed member silent for `MEMBER_STALL` counts as lost-armed
-    /// from its last status; with no member armed and no end timer (a state no path should leave), the
-    /// timer starts now; past its deadline with no member armed, the group starts ending (the worker
-    /// finalizes the members; a member's own next sync does the same for itself).
+    /// Advance the group-end timer: an armed member silent for `MEMBER_STALL` counts as lost-armed from its
+    /// last status; with no member armed the timer runs (started now if missing, a state no path should
+    /// leave), and past its deadline the group starts ending.
     fn advance_timers(&self, inner: &mut Inner, now: Instant) {
         let Inner { registered, group, .. } = &mut *inner;
         let Some(group) = group.as_mut() else { return };
@@ -758,10 +738,9 @@ impl GroupCoordinator {
         directive
     }
 
-    /// Start a group on `key`'s arm when the rules allow it (flag, ≥ 2 recorders, 3D fix, ≥ 2 recorders
-    /// without a pending single flight and with their temp files in the initiator's sessions folder).
-    /// The group's position — and with it the id — is the INITIATOR's (Marc, 2026-10-01): its arm with a
-    /// 3D fix anchors the group, even when the start is an earlier arm of another member.
+    /// Start a group on `key`'s arm when the rules allow it (flag, 3D fix, ≥ 2 recorders free of a pending
+    /// single flight with temp files in the initiator's sessions folder). The INITIATOR's arm position
+    /// anchors the group and its id, even when the start is an earlier arm of another member.
     fn try_form(&self, inner: &mut Inner, key: &str, report: &ArmReport) -> (GroupDirective, Option<GroupStartedEvent>) {
         let none = (GroupDirective::Stay, None);
         if !self.enabled.load(Ordering::Relaxed) {
@@ -961,10 +940,9 @@ impl GroupCoordinator {
         write_kgrp(&kgrp, |c| group_store::upsert_group_member(c, &row));
     }
 
-    /// A recorder is torn down (link closed or lost) — it unregisters. A member stays a member: a
-    /// disarmed one does not end the group; an armed one counts as "armed but lost" (§5.2). The session
-    /// of a member whose group is ending or over (suspended just now) goes to the group's finalized
-    /// members, so a later connection of the same aircraft cannot adopt it into a finished group.
+    /// A recorder is torn down: it unregisters; a member stays a member (armed → "armed but lost", §5.2).
+    /// A member session of an ending or ended group goes to its finalized members, so a later connection of
+    /// the same aircraft cannot adopt it into a finished group.
     pub(crate) fn on_teardown(&self, key: &str, armed: bool, member_of: Option<&str>) {
         let now = self.clock.instant();
         let mut inner = self.lock();
@@ -1460,9 +1438,8 @@ mod tests {
         assert_eq!(members[0].temp_path, a_path);
     }
 
-    /// (c) The initiator needs a 3D fix: an arm without one forms no group, and (§5e, Marc 2026-10-02)
-    /// records nothing; a later arm with a fix starts the group — at that arm, A had no recording — and A
-    /// joins it on its next status.
+    /// (c) The initiator needs a 3D fix: an arm without one forms no group and (§5e) records nothing; a
+    /// later arm with a fix starts the group — at that arm — and A joins it on its next status.
     #[test]
     fn initiator_without_3d_fix_forms_no_group_until_an_arm_with_one() {
         let rig = Rig::new("nofix", true);
@@ -1835,9 +1812,8 @@ mod tests {
         assert!(ended[0]["members"].as_array().unwrap().iter().all(|m| m["incomplete"] == false));
     }
 
-    /// m4 (Marc, 2026-10-01): a recorder joining with a session that began before the group start pulls
-    /// the group start back to it — here A, lost while armed before the group existed, back via
-    /// continue-on-reconnect. The id stays the one formed at the start.
+    /// m4: a recorder joining with a session that began before the group start pulls the group start back
+    /// to it (A, lost while armed before the group existed, back via continue-on-reconnect). The id stays.
     #[test]
     fn earlier_session_joining_pulls_the_group_start_back() {
         let rig = Rig::new("pullstart", true);
@@ -1907,10 +1883,9 @@ mod tests {
         assert_eq!(a2.emitted().last().map(String::as_str), Some("flight-recording-ended"));
     }
 
-    /// `on_disarm` take-over: a single flight that has not joined the running group when it disarms is
-    /// taken into it instead of ending. Here the recorder registers only after its first status and
-    /// arm, so the coordinator never saw that first status and its sync never joins it — in production
-    /// the same happens when a group forms between a recorder's sync and its disarm edge.
+    /// `on_disarm` take-over: a single flight not yet joined to the running group when it disarms is taken
+    /// into it instead of ending (here: registered only after its first status and arm — in production, a
+    /// group formed between a recorder's sync and its disarm edge).
     #[test]
     fn disarm_of_a_single_flight_is_taken_into_the_running_group() {
         let rig = Rig::new("takeover", true);

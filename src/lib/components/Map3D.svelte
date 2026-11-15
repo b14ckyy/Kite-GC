@@ -5,15 +5,9 @@
 
 <script lang="ts" module>
   // ── OffscreenCanvas guard ──────────────────────────────────────────────────
-  // Some WKWebView configurations expose no OffscreenCanvas global — observed on a macOS 26 machine
-  // (Discord report 2026-08-04; Lockdown Mode suspected, unconfirmed), while macOS 13–15 all have it.
-  // Cesium 1.131+ type-checks material uniforms with a bare `instanceof OffscreenCanvas`
-  // (CesiumGS/cesium#12558, unguarded as of 1.140), and an instanceof against a missing global throws —
-  // which killed CesiumWidget construction outright ("Can't find variable: OffscreenCanvas"). A marker
-  // class makes every such instanceof answer false instead. Nothing ever constructs it: Cesium only
-  // type-checks, and the MJPEG sink's detection (mjpegSink.ts) calls getContext() on a probe instance
-  // and cleanly bails on the null. On engines with the real API this block does nothing.
-  // Module scope: runs once per app; the marker keeps the label honest if dev HMR re-evaluates.
+  // Some WKWebView configurations (seen on macOS 26) have no OffscreenCanvas global, and Cesium 1.131+
+  // type-checks with a bare `instanceof OffscreenCanvas` (CesiumGS/cesium#12558), which then throws and
+  // kills CesiumWidget construction. A never-constructed marker class makes every such instanceof false.
   class OffscreenCanvasShim {
     static readonly kiteShim = true;
     getContext(): null { return null; }
@@ -128,9 +122,8 @@
   import { t } from "svelte-i18n";
   import { buildApproachGeometry } from "$lib/helpers/autolandGeometry";
 
-  /** Route 3D diagnostics into the file logger (Settings → Diagnostics). A remote tester's release
-   *  build has no console — the macOS 26 report arrived as a *photo* of Cesium's error panel because
-   *  nothing else ever captured the failure. Mirrors logVideo in stores/video.ts. */
+  /** Route 3D diagnostics into the file logger (Settings → Diagnostics): a release build has no console,
+   *  and Cesium failures are otherwise lost. Mirrors logVideo in stores/video.ts. */
   function log3d(level: 'warn' | 'debug', message: string): void {
     if (level === 'warn') console.warn(`[Map3D] ${message}`);
     else console.log(`[Map3D] ${message}`);
@@ -350,13 +343,9 @@
   let pendingTrailPos: Cesium.Cartesian3 | undefined;
   let pendingTrailColor = '';
   const MIN_TRAIL_DIST_3D = 1; // meters
-  /** Points per dynamic run before it is baked into a static segment. The growing run is a
-   *  CallbackProperty polyline, and Cesium rebuilds THAT geometry on every render — so its cost
-   *  is per frame × points. Unbounded, a long flight paid for its whole track every frame
-   *  (profiled on a Sony XQ-CT54, 2026-09-08: the polyline rebuild doubled in four minutes of
-   *  flight and the 3D view fell to ~15 fps). Baking every few hundred points keeps the
-   *  per-frame work constant; the static segments are batched by Cesium and cost nothing after
-   *  their one-off build. 256 points × 5 m spacing ≈ 1.3 km per segment. */
+  /** Points per dynamic run before it is baked into a static segment: the growing CallbackProperty
+   *  polyline is rebuilt on EVERY render, so unbounded its cost grew with the flight (~15 fps after
+   *  minutes on a phone). 256 points × 5 m ≈ 1.3 km; static segments are batched and cost nothing after. */
   const TRAIL_CHUNK_POINTS = 256;
   // Pre-arm trail: a thin plain black, ground-clamped line of GPS movement while DISARMED (monitoring
   // only). Cleared on arm; the colored flight trail takes over.
@@ -706,14 +695,9 @@
     const hasSubdomains = cesiumUrl.includes('{s}');
     const subdomains = hasSubdomains ? ['a', 'b', 'c'] : [];
 
-    // With High-Resolution 3D off the globe renders at half the display's pixel density, but Cesium
-    // picks tile levels in CSS pixels (QuadtreePrimitive divides the screen-space error by pixelRatio).
-    // Where that leaves fewer than one rendered pixel per CSS pixel — a DPR-1 screen at half density —
-    // the tiles would be finer than the picture can show; telling Cesium the tiles are wider makes it
-    // take the imagery from a lower level (factor 2 = one level, a quarter of the tiles). On a DPR ≥ 2
-    // screen half density is still ≥ 1 rendered pixel per CSS pixel, so nothing is coarsened there.
-    // A custom (local folder) map is left alone: its tiles cost no requests, and a lower level would
-    // fall below its lowest folder level sooner (rejected below → blank globe).
+    // High-Resolution 3D off renders at half density, but Cesium picks levels in CSS pixels: below one
+    // rendered pixel per CSS pixel (DPR 1) wider tiles make it take a lower level. A custom map is left
+    // alone — free tiles, and a lower level falls below its lowest folder level sooner (blank globe).
     const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
     const coarser = highRes3DSetting || provider.custom ? 1 : Math.max(1, 2 / dpr);
     const texelPx = Math.round((provider.custom?.tileSize ?? provider.tileSize ?? 256) * coarser);
@@ -722,10 +706,8 @@
       url: cesiumUrl,
       subdomains: hasSubdomains ? subdomains : undefined,
       maximumLevel: provider.cesiumMaxZoom ?? provider.maxZoom,
-      // A user online map's / custom map's real tile pixel size (Cesium default 256): Cesium picks the
-      // imagery level from texel spacing (ImageryLayer getLevelWithMaximumTexelSpacing divides by
-      // tileWidth), so a 512 px source is drawn from one level lower — its own native density. Levels
-      // stay file levels (maximumLevel = a custom map's highest level, the below-lowest check below).
+      // The source's real tile pixel size: Cesium picks the imagery level from texel spacing, so a 512 px
+      // source is drawn one level lower — its native density. Levels stay file levels.
       tileWidth: texelPx,
       tileHeight: texelPx,
       credit: new Cesium.Credit(provider.attribution, false),
@@ -1026,16 +1008,10 @@
     };
   }
 
-  /** Shift the projection so the camera axis lands in the middle of the uncovered area (the screen
-   *  minus `centerInsetRight`). A frustum `xOffset` moves the projection WINDOW, not the camera:
-   *  lookAt / setView / FPV keep aiming at the craft, the picture just slides left by half the inset.
-   *  In near-plane units the visible half-width is `right = aspect · near · tan(fovy / 2)`, and a
-   *  window shift of `inset / 2` px on a canvas `W` px wide is `right · inset / W` (a positive
-   *  xOffset moves the scene left). Cesium's projection and culling honour xOffset; its screen→ray
-   *  helpers (getPickRay / pickEllipsoid) do NOT — the only caller here, getCamFocus, asks for the
-   *  camera axis at the SCREEN centre, which is exactly where the un-offset ray still is. */
-  /** settings.highRes3D: native pixel density, or half of it (Cesium's own default was CSS pixels —
-   *  native on a DPR-1 desktop, a third of the pixels on the Sony). */
+  /** Shift the projection so the camera axis lands in the middle of the uncovered area (the screen minus
+   *  `centerInsetRight`): a frustum `xOffset` of `right · inset / W` moves the WINDOW, not the camera.
+   *  Cesium's projection and culling honour it, its screen→ray helpers (getPickRay) do NOT. */
+  /** settings.highRes3D: native pixel density, or half of it (Cesium's default is CSS pixels). */
   function applyRenderResolution() {
     if (!viewer) return;
     viewer.resolutionScale = highRes3DSetting ? 1 : 0.5;
@@ -1222,8 +1198,8 @@
         !(typeof localStorage !== 'undefined' && localStorage.getItem('kite_perf_oit') === 'off'),
     };
 
-    // One fingerprint line per 3D entry: warn when something is off (default log level → it reaches
-    // the diagnostics file a tester can send), debug when healthy.
+    // One fingerprint line per 3D entry: warn when something is off (reaches the diagnostics file at the
+    // default level), debug when healthy.
     const caps = probe3dCapabilities();
     log3d(caps.healthy ? 'debug' : 'warn', `capabilities: ${caps.summary}`);
 
@@ -1461,14 +1437,9 @@
       firstProviderCall = false;
       if (!skip) applyMapProvider(p);
     });
-    // Jump requests (stores/mapFocus).
-    // Custom map "Show map area" (Settings): fly to the requested covered region — like
-    // frameMission3d only in free look (follow / orbit / FPV own the camera), dropping a pending
-    // go-to-UAV jump. The fleet camera is left for free look the way it is left elsewhere (it only
-    // re-fits; it holds no lookAt transform).
-    // Map search: only while the 3D view is the one showing (the 2D map takes the jump as well, and
-    // a later switch to 3D starts from there). The user asked for that place, so a follow / orbit /
-    // FPV camera hands over to free look first — ignoring the request would look like a dead search.
+    // Jump requests (stores/mapFocus). "Show map area" flies only in free look (follow / orbit / FPV own
+    // the camera). A map search (only while 3D is showing) hands the camera over to free look first —
+    // ignoring it would look like a dead search.
     unsubCustomFocus3d = onMapFocus((f) => {
       if (!viewer) return;
       if (f.source === 'search') {
@@ -3455,8 +3426,8 @@
       maximumScale: 4000,
       scale: 5.2,
       color: tint,
-      // No mode tint on the model: it muddied the nav lights and the body (Marc, 2026-09-06);
-      // the trail and the mode chip carry the flight-mode colour.
+      // No mode tint on the model (it muddies the nav lights and the body); the trail and the mode chip carry
+      // the flight-mode colour.
       colorBlendMode: Cesium.ColorBlendMode.MIX,
       colorBlendAmount: 0,
       heightReference: Cesium.HeightReference.NONE,
@@ -4314,9 +4285,8 @@
 
   /** Same size factor as the 2D markers (Map.svelte `.mission-wp-icon`). */
   const WP_3D_SCALE = 0.85;
-  /** Raster the icon SVG at the display's pixel density: Cesium rasterizes a data-URI SVG at its
-   *  intrinsic width/height and draws billboards in CSS px, so a 48 px icon was 126 blurry device
-   *  px on the Sony. */
+  /** Raster the icon SVG at the display's pixel density: Cesium rasterizes a data-URI SVG at its intrinsic
+   *  size and draws billboards in CSS px, which blurs at high DPR. */
   function sharpSvg(svg: string): string {
     const k = Math.min(3, Math.max(1, Math.ceil(window.devicePixelRatio || 1)));
     if (k === 1) return svg;
@@ -5192,10 +5162,8 @@
   function exitFpv() {
     restoreFromFpv();
     cameraMode = 'free';
-    // FPV leaves the camera in the cockpit: at the aircraft, banked with it and looking at the horizon.
-    // Cesium's free controls cannot work from there — tilt and rotate pivot on the ground point under
-    // the gesture, and a level view has none, so on a touch screen the camera was stuck. Step back to
-    // an ordinary viewpoint instead: same compass direction, level horizon, the aircraft in view.
+    // Step back from the cockpit: Cesium's free controls pivot on the ground point under the gesture,
+    // and a level cockpit view has none (stuck on touch). Same heading, level horizon, aircraft in view.
     if (viewer && (lastFollowLat !== 0 || lastFollowLon !== 0)) {
       const target = Cesium.Cartesian3.fromDegrees(lastFollowLon, lastFollowLat, Math.max(lastFollowAlt, 1));
       viewer.camera.lookAt(target, new Cesium.HeadingPitchRange(viewer.camera.heading, FPV_EXIT_PITCH, FPV_EXIT_RANGE_M));

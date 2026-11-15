@@ -56,10 +56,8 @@ export const hasDbCompact = !isMobile;
  *  Settings row and the coverage frames are hidden there; the backend refuses the commands too. */
 export const hasCustomMaps = !isMobile;
 
-/** RC control (the RC tool and its Settings switch) is offered: desktop only. A phone or tablet has no
- *  joystick, and the on-screen touch sticks are too easy to hit by accident for something that steers
- *  an aircraft; there is also no way to configure the channels there (Marc, 2026-11-12 for phones,
- *  2026-11-13 for tablets). Planned to come back on mobile with an external controller, not before 2.1. */
+/** RC control (the RC tool and its Settings switch) is desktop only: no joystick on a phone or tablet,
+ *  touch sticks are too easy to hit by accident, and the channels cannot be configured there. */
 export const hasRcControl = !isMobile;
 
 /** True when running inside the macOS WebView (WKWebView) — used to mirror native window-control
@@ -111,19 +109,15 @@ if (typeof document !== 'undefined' && isMobile) {
   // `--safe-top` covers the status bar / notch strip so the toolbar and top-anchored map layers
   // are not overlaid by the iOS status bar (clock, battery). Same viewport-fit=cover requirement.
   document.documentElement.style.setProperty('--safe-top', 'env(safe-area-inset-top, 0px)');
-  // In landscape the notch / Dynamic Island sits on a side edge, over the left-anchored nav rail and
-  // panels. `--safe-left` / `--safe-right` let those shift clear of it (both 0 in portrait).
-  // Android reports a camera punch-hole as a left inset too (52 css px on a 21:9 phone) — for a
-  // few millimetres of hole the whole rail moved right and the row lost that width. Ignored on
-  // Android for now (Marc, 2026-09-12); the hidden-bar insets top/right stay (AX12, PR #159).
+  // In landscape the notch / Dynamic Island sits on a side edge: `--safe-left` / `--safe-right` move the
+  // rail and panels clear of it. Ignored on Android, which reports a small punch-hole as a full left
+  // inset (52 css px); the hidden-bar insets top/right stay.
   document.documentElement.style.setProperty('--safe-left', isAndroid ? '0px' : 'env(safe-area-inset-left, 0px)');
   document.documentElement.style.setProperty('--safe-right', 'env(safe-area-inset-right, 0px)');
 }
 
-// Replay player width — one variable read by LogPlayer (panel, hover zone, compact strip) and the
-// stick overlay that anchors to the panel's right edge. The phone's map area is ~760 css px, so
-// the panel must stay narrow there; on the desktop the same width squeezed the controls (Marc).
-// +page reads the number too: on a phone too narrow for it, the widget column slides aside.
+// Replay player width, read by LogPlayer, the stick overlay and +page (a phone too narrow for it slides
+// the widget column aside). Narrow on the phone (~760 css px map), wider on the desktop.
 export const logPlayerWidth = isPhone ? 480 : 640;
 if (typeof document !== 'undefined') {
   document.documentElement.style.setProperty('--log-player-w', `${logPlayerWidth}px`);

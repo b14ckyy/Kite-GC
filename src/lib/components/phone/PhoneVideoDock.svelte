@@ -45,14 +45,10 @@
   const showButton = $derived(live && !widgetActive && !phoneEdit.editing);
   const open = $derived($videoState.floating && live && !widgetActive);
 
-  // Mounted once the frame has been opened while a source is live, and with the native sink it stays
-  // mounted while parked (class `parked`, off screen behind the widget column): the native layer then stays where it is,
-  // covered by the opaque map, and a park / recall is nothing but the hole leaving and returning.
-  // Hiding and showing the Android SurfaceView on every toggle re-cut the window's transparent
-  // region each time, and that blanked the map for a few frames (Marc, 2026-09-13). Only a source
-  // going away (or the widget taking the picture) unmounts. On open it mounts parked and un-parks a
-  // frame later so the slide-in animates. Parking with the map in the frame swaps the map back
-  // first — a parked frame must never hold the map.
+  // Mounted once opened while a source is live; with the native sink it stays mounted while parked (off
+  // screen): re-cutting the Android SurfaceView's transparent region on every toggle blanked the map for a
+  // few frames. Only a source going away (or the widget taking the picture) unmounts. A parked frame must
+  // never hold the map — parking swaps it back first.
   let mounted = $state(false);
   let parked = $state(true);
   let frameEl = $state<HTMLDivElement | null>(null);
@@ -111,12 +107,9 @@
     bindVideoEl(videoEl, $videoStream);
   });
 
-  /** Where the native hole comes to rest (NativeSurfaceSpec.rest): the frame's box without the
-   *  slide transform — the layer is placed there before the frame moves (Marc, 2026-09-12: "the
-   *  video is already in position and does not move"), and the router cuts the hole once the frame
-   *  has arrived; during the slide the frame shows its own ground. The transform is on the frame,
-   *  the hole div only inherits it; the matrix is in the frame's layout px, the box in viewport px
-   *  (--ui-scale). */
+  /** Where the native hole comes to rest (NativeSurfaceSpec.rest): the frame's box without the slide
+   *  transform, so the video layer is in place before the frame moves; the hole is cut once it arrived.
+   *  The matrix is in the frame's layout px, the box in viewport px (--ui-scale). */
   function restRect(el: HTMLElement): DOMRect | null {
     const r = el.getBoundingClientRect();
     if (!frameEl) return r;
@@ -176,10 +169,8 @@
         use:doubleTap={() => setMapLocation('floating')}
       >
         {#if live && $videoState.nativeSink}
-          <!-- Nothing of its own: no placeholder ground, no text. Until the backend has armed the layer
-               the frame's ground (.dw-bg, opaque, no hole yet) covers the map; the moment the hole is
-               cut the picture is there. A placeholder that vanished at that moment was one more
-               layer change in the frame that blanked the map (Marc, 2026-09-13). -->
+          <!-- Nothing of its own: until the layer is armed the frame's opaque ground covers the map. A
+               placeholder vanishing at that moment was one more layer change that blanked the map. -->
           <div class="native-hole" use:nativeSurface={{ id: 'floating', rest: restRect }}></div>
         {:else if live && $videoState.mjpegUrl}
           {#if $canvasSink}

@@ -3,12 +3,9 @@
   Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 -->
 
-<!-- UpdateDialog.svelte — one-shot "new version available" prompt driven by the update-check controller.
-     Shows the release notes (GitHub's release body, rendered from markdown) above the choices: skip this
-     version, remind me later, open the release page, or "Update and Restart" — which downloads + installs
-     in place with a progress bar and relaunches. Mobile builds cannot install: a store installation
-     links to its store listing only, an Android APK to the release page only. Styled like
-     ConfirmDialog. -->
+<!-- UpdateDialog.svelte — one-shot "new version available" prompt with the release notes: skip, remind me
+     later, open the release page, or "Update and Restart" (installs in place, then relaunches). Mobile
+     cannot install: a store installation links to its listing, an Android APK to the release page. -->
 <script lang="ts">
   import { t } from 'svelte-i18n';
   import { marked } from 'marked';
@@ -22,10 +19,8 @@
   const info = $derived($pendingUpdate);
   const busy = $derived($installState.phase === 'download' || $installState.phase === 'install');
 
-  /** The sections of a release body that tell how to download and install the packages by hand. A store
-   *  installation is updated by its store and must not be walked through installing an APK, so these
-   *  are cut from its notes. The headings are the ones of the release template (Dev-Docs
-   *  `releases/TEMPLATE.md`); a section runs to the next `## ` heading. */
+  /** Release-body sections on installing the packages by hand (headings of Dev-Docs `releases/TEMPLATE.md`),
+   *  cut for a store installation, which must not be walked through installing an APK. */
   const INSTALL_SECTIONS = /^## +(?:Before you install|Installation)[^\n]*\n[\s\S]*?(?=^## |(?![\s\S]))/gim;
 
   /** Release body → sanitised HTML. The centred banner block at the top of every release is dropped (it is

@@ -1,15 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Geocoding via OSM Nominatim: reverse (position → place name, flight logs and missions) and the map
-// search (place name → positions, `search_places`).
-// Nominatim's usage policy: at most 1 request per second, an identifying User-Agent, cache results,
-// no search-as-you-type. Both requests keep to it for the whole app: they are spaced by one
-// process-wide slot (`next_slot`) and go through one client (`client`), names are remembered per
-// ~1 km cell and language (`CACHE`) — a batch import of flights from one field asks once — searches
-// per normalised query and language (`SEARCH_CACHE`), and a request that hangs is given up after
-// `REQUEST_TIMEOUT`. Searching on Enter only is the frontend's part (MapSearch.svelte).
-// The search text is never logged: it can be someone's home address.
+// Geocoding via OSM Nominatim: reverse (position → place name) and the map search. Nominatim's policy
+// (1 request/s, identifying User-Agent, caching, no search-as-you-type) holds app-wide via one slot and
+// one client. The search text is never logged: it can be someone's home address.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -77,11 +71,8 @@ struct NominatimAddress {
     country: Option<String>,
 }
 
-/// Reverse geocode a lat/lon to a human-readable location name.
-/// Returns a short name like "Garching, Bayern, Germany".
-/// `lang` is a BCP 47 language tag (e.g. "en", "de") used for Nominatim's
-/// `accept-language` parameter so names are returned in the UI language.
-/// Returns None on error (network, parse, etc.) — never blocks the recorder.
+/// Reverse geocode to a short name ("Garching, Bayern, Germany") in `lang` (BCP 47, Nominatim's
+/// `accept-language`). `None` on any error — never blocks the recorder.
 pub async fn reverse_geocode(lat: f64, lon: f64, lang: &str) -> Option<String> {
     if !lat.is_finite() || !lon.is_finite() {
         return None;
@@ -120,10 +111,8 @@ fn warn_refused(status: u16, request: &str, consequence: &str) {
     }
 }
 
-/// One client for the app's lifetime, shared by both request kinds: its kept-alive connection makes
-/// the time from `send()` to the request's arrival nearly constant, so the slot spacing also holds on
-/// Nominatim's side. Its default User-Agent is the flight-logging one; the search sets its own per
-/// request (a request header replaces the client's default).
+/// One client for the app's lifetime, shared by both request kinds: its kept-alive connection keeps
+/// the slot spacing intact on Nominatim's side. The search overrides the User-Agent per request.
 fn client() -> Option<&'static reqwest::Client> {
     static CLIENT: OnceLock<Option<reqwest::Client>> = OnceLock::new();
     CLIENT
@@ -155,9 +144,8 @@ async fn request_name(lat: f64, lon: f64, lang: &str) -> Option<String> {
         .await
         .ok()?; // no network / timeout: the normal offline case, nothing to report
 
-    // The service answered but refused (403 / 429 = blocked or rate-limited, 5xx = its own trouble).
-    // Without this line a block of Kite's User-Agent is indistinguishable from "offline" in a tester's
-    // log. Never logs the position.
+    // The service answered but refused (403 / 429 = blocked or rate-limited, 5xx = its own trouble):
+    // logged, or a block looks like "offline" in the log. Never logs the position.
     let status = resp.status();
     if !status.is_success() {
         warn_refused(
@@ -170,7 +158,6 @@ async fn request_name(lat: f64, lon: f64, lang: &str) -> Option<String> {
 
     let data: NominatimResponse = resp.json().await.ok()?;
 
-    // Build a short location name from address parts
     if let Some(addr) = data.address {
         let locality = addr
             .village
@@ -191,11 +178,8 @@ async fn request_name(lat: f64, lon: f64, lang: &str) -> Option<String> {
         }
     }
 
-    // Fallback to display_name
     data.display_name
 }
-
-// ── Map search (place name → positions) ─────────────────────────────────────────────────────────
 
 /// One search hit for the map search (MapSearch.svelte).
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -313,9 +297,8 @@ fn place_hit(raw: RawSearchHit) -> Option<PlaceHit> {
     Some(PlaceHit { name, lat, lon, bbox, kind })
 }
 
-/// Search places by name for the map search: up to `SEARCH_LIMIT` hits, names in `lang` (a BCP 47
-/// tag, Nominatim's `accept-language`). An empty list means "no hits". Shares the reverse geocoder's
-/// request slot and client; answers are cached per normalised query and language.
+/// Search places by name: up to `SEARCH_LIMIT` hits in `lang`; an empty list means "no hits". Shares the
+/// reverse geocoder's slot and client; cached per normalised query and language.
 pub async fn search_places(query: &str, lang: &str) -> Result<Vec<PlaceHit>, SearchError> {
     let key = search_key(query, lang);
     if key.0.is_empty() {
