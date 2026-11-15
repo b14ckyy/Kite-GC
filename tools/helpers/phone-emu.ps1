@@ -8,6 +8,9 @@
 #   .\tools\helpers\phone-emu.ps1                      # list the AVDs
 #   .\tools\helpers\phone-emu.ps1 Kite_21x9            # boot that AVD + tauri android dev on it
 #   .\tools\helpers\phone-emu.ps1 -Device              # skip the emulator: dev on the USB-attached device
+#   .\tools\helpers\phone-emu.ps1 -Device -Beside      # ... as "Kite Dev" (com.kitegc.app.dev) BESIDE an
+#                                                      # installed copy from Google Play, which a debug
+#                                                      # build cannot replace (different signature)
 #   .\tools\helpers\phone-emu.ps1 -Shot                # screenshot of the running app (see phone-devtools.mjs)
 #
 # The activity is locked to sensorLandscape (AndroidManifest.xml), so the emulator's rotation
@@ -34,6 +37,7 @@
 param(
   [string]$Avd = '',
   [switch]$Device,
+  [switch]$Beside,
   [switch]$Landscape,
   [switch]$Shot,
   [string]$ShotPath = ''
@@ -110,8 +114,35 @@ if (-not $Device) {
 # Wi-Fi involved. The reverse mapping lives until the device/emulator disconnects.
 & $adb -s $serial reverse tcp:1420 tcp:1420 | Out-Null
 Set-Location $repo
-if ($Device) {
-  npx tauri android dev --host 127.0.0.1
-} else {
-  npx tauri android dev --host 127.0.0.1 $Avd
+if ($Beside) {
+  # The debug build gets its own application id (app/build.gradle.kts reads the variable). The CLI
+  # then starts the app by the id in tauri.conf.json — the OTHER copy — so a watcher starts the dev
+  # copy as soon as Gradle has installed it (its lastUpdateTime changes). The dev server's HMR
+  # socket does not reach the dev copy: reload its page after a change with
+  #   node tools/helpers/phone-devtools.mjs eval "location.reload()"
+  $env:KITE_ANDROID_DEV_ID = '1'
+  $before = "$((& $adb -s $serial shell dumpsys package com.kitegc.app.dev) -match 'lastUpdateTime' | Select-Object -First 1)"
+  Start-Job -ArgumentList $adb, $serial, $before -ScriptBlock {
+    param($adb, $serial, $before)
+    for ($i = 0; $i -lt 600; $i++) {
+      Start-Sleep -Seconds 3
+      $now = "$((& $adb -s $serial shell dumpsys package com.kitegc.app.dev) -match 'lastUpdateTime' | Select-Object -First 1)"
+      if ($now -and $now -ne $before) {
+        Start-Sleep -Seconds 4   # let the CLI start the other copy first, then come to the front
+        & $adb -s $serial shell am start -n com.kitegc.app.dev/com.kitegc.app.MainActivity | Out-Null
+        break
+      }
+    }
+  } | Out-Null
+}
+try {
+  if ($Device) {
+    npx tauri android dev --host 127.0.0.1
+  } else {
+    npx tauri android dev --host 127.0.0.1 $Avd
+  }
+} finally {
+  # The script shares the caller's environment: without this, every later dev build from the same
+  # terminal would silently become the .dev copy.
+  if ($Beside) { Remove-Item Env:KITE_ANDROID_DEV_ID -ErrorAction SilentlyContinue }
 }

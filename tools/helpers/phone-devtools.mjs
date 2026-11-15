@@ -40,7 +40,16 @@ if (!serial) {
   serial = (rows.find((r) => r[0].startsWith('emulator-')) ?? rows[0])?.[0] ?? '';
   if (!serial) { console.error('no adb device'); process.exit(1); }
 }
-const pid = adb('shell', 'pidof', 'com.kitegc.app');
+// A debug build may carry its own application id (KITE_ANDROID_DEV_ID, app/build.gradle.kts).
+// `pidof` exits 1 when nothing matches, and adb hands that exit code on — which throws here.
+const pidOf = (pkg) => {
+  try {
+    return adb('shell', 'pidof', pkg);
+  } catch {
+    return '';
+  }
+};
+const pid = pidOf('com.kitegc.app.dev') || pidOf('com.kitegc.app');
 if (!pid) { console.error(`Kite is not running on ${serial}`); process.exit(1); }
 adb('forward', `tcp:${port}`, `localabstract:webview_devtools_remote_${pid}`);
 
