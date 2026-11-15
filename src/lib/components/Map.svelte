@@ -153,21 +153,21 @@
   } = $props();
 
   // ── UAV model marker (top-down canvas render of the same .glb used in 3D) ── a persistent <canvas>, so
-  // there is no toDataURL/setIcon churn; redrawn only on a changed attitude (see modelDrawnKey).
-  let uavMesh: UavMesh | null = null;       // geometry for the current model kind
+  // there is no toDataURL/setIcon churn; redrawn only on a changed tilt (see modelDrawn).
+  let uavMesh: UavMesh | null = null;
   let uavMeshToken = 0;                       // guards out-of-order async loads
   const MODEL_REAL_SPAN_M = 14;              // real-world span the model represents (zoom-scaled)
   const MODEL_MIN_PX = 100, MODEL_MAX_PX = 200;
   const MODEL_TINT = 0; // no mode tint on the model (same as 3D); the trail carries the mode colour
 
-  // (Re)load the mesh whenever the resolved model kind changes (platform type or override).
   $effect(() => {
     const kind = resolveModelKind(platformType, modelOverride);
     const token = ++uavMeshToken;
     loadUavMesh(modelUri(kind)).then((m) => {
-      if (token !== uavMeshToken) return; // a newer load superseded us
+      if (token !== uavMeshToken) return;
       uavMesh = m;
-      applyFollowFrame(); // redraw with the new model
+      modelDrawn = null; // the tilt gate knows nothing of the mesh
+      applyFollowFrame();
     }).catch(() => { /* keep the previous mesh / fallback dot */ });
   });
 
@@ -175,15 +175,12 @@
     const h = hex.replace('#', '');
     return [parseInt(h.slice(0, 2), 16) / 255, parseInt(h.slice(2, 4), 16) / 255, parseInt(h.slice(4, 6), 16) / 255];
   }
-  /** Model pixel size at the current zoom (clamped), then scaled by the UI scaling setting. */
   function modelSizePx(lat: number): number {
     if (!map) return MODEL_MIN_PX;
     const mpp = 156543.03392 * Math.cos(lat * Math.PI / 180) / Math.pow(2, map.getZoom());
     return Math.round(Math.max(MODEL_MIN_PX, Math.min(MODEL_MAX_PX, MODEL_REAL_SPAN_M / mpp)) * (uiScale || 1));
   }
-  // Resize the model when the UI scaling setting changes.
   $effect(() => { uiScale; if (map) onZoomEnd(); });
-  /** A DivIcon whose content is a blank canvas of `size`px (drawn into by drawModel). */
   function makeModelIcon(size: number): L.DivIcon {
     return L.divIcon({
       className: 'uav-model-icon',
@@ -191,7 +188,7 @@
       iconSize: [size, size], iconAnchor: [size / 2, size / 2],
     });
   }
-  /** Draw the model into a marker's persistent canvas (cheap — no DOM churn). */
+  /** Software raster, the expensive step of a follow frame: call it only behind the modelDrawn gate. */
   function drawModel(marker: L.Marker | undefined, heading: number, pitch: number, roll: number, color: string) {
     const cv = marker?.getElement()?.querySelector('canvas') as HTMLCanvasElement | null;
     const ctx = cv?.getContext('2d');
@@ -203,19 +200,24 @@
     }
     renderUavTopDown(ctx, uavMesh, cv.width, heading, pitch, roll, hexToRgb01(color), MODEL_TINT);
   }
-  /** Zoom changed → resize the marker canvases to the new pixel size, then redraw. */
   function onZoomEnd() {
     const lat = followCurrent?.lat ?? 0;
     for (const mk of [uavMarker, playbackMarker]) mk?.setIcon(makeModelIcon(modelSizePx(lat)));
-    modelDrawnKey = ''; // new canvas → the cached "already drawn" state is stale
+    modelDrawn = null; // new canvas
     applyFollowFrame();
     updateFleet(); // fleet model markers are zoom-sized too
   }
 
-  // The model is rasterised in software (uavTopDown.ts), the one expensive step of a follow frame: only
-  // when the telemetry attitude changed, while position and centre glide every frame. No smoothing on the
-  // 2D model — a real update, a real redraw, nothing else.
-  let modelDrawnKey = '';
+  // A redraw is the one paint of a follow frame, so the model is drawn nose-up and redrawn only when the
+  // tilt moved by a step; the heading is a rotation of the finished canvas, which costs no paint.
+  const MODEL_TILT_STEP_DEG = 5;
+  let modelDrawn: { marker: L.Marker; color: string; pitch: number; roll: number } | null = null;
+  function turnModel(marker: L.Marker, heading: number) {
+    const cv = marker.getElement()?.querySelector('canvas');
+    // Rounded the way the style reads back ("90deg", not "90.0deg"), or the comparison never matches.
+    const turn = `rotate(${Math.round(heading * 10) / 10}deg)`;
+    if (cv && cv.style.transform !== turn) cv.style.transform = turn;
+  }
 
   const ARMING_FLAG_ARMED = 2;
   const MIN_TRAIL_DIST = 1; // meters — don't add trail point if moved less
@@ -1777,8 +1779,6 @@
     map.setView(target, zoom, options);
   }
 
-  /** Apply the eased frame: move + redraw the active marker always, recenter (+rotate) the map
-   *  only while following. */
   /** 3D → 2D: resume from the newest target without gliding in from a minutes-old position. */
   $effect(() => {
     if (mapViewMode !== '2d' || !followParked) return;
@@ -1788,29 +1788,42 @@
     applyFollowFrame();
   });
 
+  /** Rotates the map container (`null` = north-up). The variable goes only to the panes that hold
+   *  upright elements: on the container it would restyle every tile and path on each follow frame. */
+  function setMapRotation(deg: number | null): void {
+    if (!mapContainer) return;
+    const value = `${deg ?? 0}deg`;
+    mapContainer.style.transform = deg === null ? '' : `rotate(${value})`;
+    const panes = mapContainer.querySelectorAll<HTMLElement>(
+      '.leaflet-map-pane > .leaflet-pane:not(.leaflet-tile-pane):not(.leaflet-overlay-pane), .leaflet-control-container',
+    );
+    for (const el of panes) el.style.setProperty('--map-rotation', value);
+  }
+
   function applyFollowFrame() {
     if (!map || !followCurrent) return;
     const ll: L.LatLngExpression = [followCurrent.lat, followCurrent.lon];
     if (activeFollowMarker) {
       activeFollowMarker.setLatLng(ll);
       const t = followTarget ?? followCurrent;
-      const key = `${t.heading}|${t.pitch}|${t.roll}|${activeColor}|${activeFollowMarker === uavMarker}`;
-      if (key !== modelDrawnKey) {
-        modelDrawnKey = key;
-        drawModel(activeFollowMarker, t.heading, t.pitch, t.roll, activeColor);
+      const d = modelDrawn;
+      if (
+        !d || d.marker !== activeFollowMarker || d.color !== activeColor ||
+        Math.abs(t.pitch - d.pitch) >= MODEL_TILT_STEP_DEG ||
+        Math.abs(((t.roll - d.roll + 540) % 360) - 180) >= MODEL_TILT_STEP_DEG
+      ) {
+        modelDrawn = { marker: activeFollowMarker, color: activeColor, pitch: t.pitch, roll: t.roll };
+        drawModel(activeFollowMarker, 0, t.pitch, t.roll, activeColor);
       }
+      turnModel(activeFollowMarker, t.heading);
     }
     redrawDirLines();
-    // Heading-up rotation is a CSS variable on the container, independent of Leaflet's view: it
-    // keeps turning through a zoom animation or a pinch (a frozen heading jumped by the turn's
-    // worth when the gesture ended).
+    // The rotation is independent of Leaflet's view, so it keeps turning through a zoom or a pinch.
     if (viewMode === 'heading-follow') {
       mapHeading = followCurrent.heading;
-      mapContainer?.style.setProperty('--map-rotation', `${-mapHeading}deg`);
+      setMapRotation(-mapHeading);
     }
-    // Don't fight an in-progress zoom animation (would snap mid-zoom; the animation itself heads for
-    // the aircraft, see the zoomanim hook in onMount). A pinch in flight is anchored instead of panned.
-    // Fleet view modes never recentre on the active vehicle.
+    // Don't fight a zoom animation (it would snap mid-zoom; the zoomanim hook in onMount heads for the aircraft).
     if ((viewMode === 'follow' || viewMode === 'heading-follow') && !(map as unknown as { _animatingZoom?: boolean })._animatingZoom) {
       followDrivingView = true;
       if (pinching()) anchorPinch(ll);
@@ -2674,7 +2687,7 @@
       applyFollowFrame();
     } else if (mode === 'follow') {
       mapHeading = 0;
-      mapContainer?.style.setProperty('--map-rotation', '0deg');
+      setMapRotation(null);
       applyHeadingUpSize(false);
       map.dragging.disable();
       setZoomAnchor('center');
@@ -2682,7 +2695,7 @@
     } else if (mode === 'fleet') {
       // Fleet: north-up, pan/zoom allowed (a drag hands the camera back to free), auto-fit the fleet.
       mapHeading = 0;
-      mapContainer?.style.setProperty('--map-rotation', '0deg');
+      setMapRotation(null);
       applyHeadingUpSize(false);
       map.dragging.enable();
       setZoomAnchor('cursor');
@@ -2690,7 +2703,7 @@
       fitFleet(true);
     } else {
       mapHeading = 0;
-      mapContainer?.style.setProperty('--map-rotation', '0deg');
+      setMapRotation(null);
       applyHeadingUpSize(false);
       map.dragging.enable();
       setZoomAnchor('cursor');
@@ -2928,7 +2941,7 @@
 </script>
 
 <div class="map-wrapper" style="--map-inset-right: {centerInsetRight}px">
-  <div bind:this={mapContainer} class="map" class:tile-overlap={isWebKitGtk} class:tile-snap={isAndroid} class:mini={miniControls} style="--map-rotation: 0deg"></div>
+  <div bind:this={mapContainer} class="map" class:tile-overlap={isWebKitGtk} class:tile-snap={isAndroid} class:mini={miniControls}></div>
 
   <div class="map-controls-corner">
     {#if !miniControls}
@@ -3082,6 +3095,9 @@
     mix-blend-mode: normal;
     width: 257px !important;
     height: 257px !important;
+    /* Without it a heading-up map exceeds the WebView's tile memory and the compositor drops other layers.
+       Observed effect: Chromium then rasters img tiles at image size instead of device pixels. */
+    will-change: transform;
   }
   /* The same full-pixel stretch for a custom online provider or offline map with 512 / 128 px tiles
      (see the tile-overlap counterparts above). */
@@ -3094,11 +3110,9 @@
     height: 129px !important;
   }
 
-  /* Heading-up: container size via inline styles (JS), CSS only rotates. will-change: the rotation is
-     written per follow frame, and without its own compositor layer every step repaints the whole
-     oversized square — enough raster tasks to saturate the GPU thread on a phone. */
+  /* Heading-up: size and rotation are inline (JS). will-change: without its own compositor layer every
+     rotation step repaints the whole oversized square. */
   :global(.map.heading-up) {
-    transform: rotate(var(--map-rotation, 0deg));
     transform-origin: center center;
     will-change: transform;
   }
@@ -3133,14 +3147,18 @@
     transform: rotate(calc(-1 * var(--map-rotation, 0deg)));
   }
 
-  /* Heading-up: everything drawn on the map stays upright via `rotate(var(--kite-upright))` in its inline
-     transform (leafletUpright.ts), so a heading change is one CSS-variable write; unset outside heading-up. */
-  :global(.map.heading-up) {
+  /* Heading-up: what is drawn on the map stays upright via `rotate(var(--kite-upright))` in its inline
+     transform (leafletUpright.ts). Per pane, not on the container — see setMapRotation. */
+  :global(.map.heading-up .leaflet-map-pane > .leaflet-pane) {
     --kite-upright: calc(-1 * var(--map-rotation, 0deg));
   }
-  /* Exception — the UAV model is drawn with its heading; the map rotation is what makes it point up. */
+  /* Exception — the model canvas carries the heading (turnModel); the map rotation is what makes it point up. */
   :global(.map.heading-up .uav-model-icon) {
     --kite-upright: 0deg;
+  }
+  /* Its own layer: the heading turns the canvas per frame (turnModel), and without one that repaints. */
+  :global(.uav-model-canvas) {
+    will-change: transform;
   }
   /* Radar contacts: the icon stands upright (callsign label readable, below the symbol), but the
      silhouette itself points along the contact's track, so it turns back with the map. */

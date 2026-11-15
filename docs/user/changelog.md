@@ -287,6 +287,10 @@ inside the box of the feature release they belong to, so the notes for one relea
       visibly changes, not on every position update. [#174]
     - **Location names for the logbook** — requests to OpenStreetMap's Nominatim are at least a
       second apart, and flights from the same field reuse the name instead of asking again. [#255]
+    - **Following an aircraft on the 2D map costs much less.** The aircraft model is turned
+      instead of redrawn on every heading change, and in heading-up mode turning the map no
+      longer restyles every tile and line on it — smoother panels and gestures while following,
+      on every platform. [#288]
 
     *Logbook and replay*
 
@@ -610,6 +614,7 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#271]: https://github.com/b14ckyy/Kite-GC/pull/271
 [#274]: https://github.com/b14ckyy/Kite-GC/pull/274
 [#285]: https://github.com/b14ckyy/Kite-GC/pull/285
+[#288]: https://github.com/b14ckyy/Kite-GC/pull/288
 [#259]: https://github.com/b14ckyy/Kite-GC/pull/259
 [#143]: https://github.com/b14ckyy/Kite-GC/pull/143
 [#145]: https://github.com/b14ckyy/Kite-GC/pull/145
