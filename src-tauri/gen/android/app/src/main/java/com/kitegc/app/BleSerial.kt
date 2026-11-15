@@ -29,21 +29,9 @@ import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
-/**
- * BLE-serial link for the Android build, on the platform's own `BluetoothLeScanner` /
- * `BluetoothGatt` — the native route, mirroring the iOS backend's CoreBluetooth implementation.
- *
- * The Rust side (`transport/ble_android.rs`) calls the static methods here over JNI, under the same
- * contract as [UsbSerial]: primitives, Strings and ByteArrays only, no callbacks back into Rust, one
- * error string to fetch after a failure. Which GATT service/characteristics make a "serial port" is
- * NOT decided here — Rust owns the profile table (`transport/ble_profiles.rs`) and tells this side
- * which UUIDs to subscribe to and write to, so a new adapter family is a Rust change, not a Kotlin one.
- *
- * Threading: the GATT callbacks arrive on binder threads; the Rust transport reads and writes from the
- * scheduler thread. Every phase that has to wait for a callback (connect, service discovery, the
- * CCCD write, each characteristic write, MTU) does so on a latch with a timeout, and received bytes
- * go through a blocking queue the reader drains — no busy waiting anywhere.
- */
+/** BLE-serial link on the platform GATT stack, driven over JNI by transport/ble_android.rs ([UsbSerial] contract).
+ *  Rust picks the profile's UUIDs; only [listen] chooses characteristics here. GATT callbacks arrive on
+ *  binder threads; every wait is a latch with a timeout. */
 object BleSerial {
     private const val TAG = "BleSerial"
 
@@ -61,6 +49,11 @@ object BleSerial {
 
     /** Client Characteristic Configuration descriptor — the "turn notifications on" switch. */
     private val CCCD: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+
+    /** Generic Access, Generic Attribute, Device Information: never telemetry, and subscribing to
+     *  Service Changed (0x2A05) makes some stacks ask for pairing. */
+    private val STANDARD_SERVICES: Set<UUID> = setOf("1800", "1801", "180a")
+        .map { UUID.fromString("0000$it-0000-1000-8000-00805f9b34fb") }.toSet()
 
     private lateinit var activity: MainActivity
     private var permissionLauncher: ActivityResultLauncher<Array<String>>? = null
@@ -327,33 +320,7 @@ object BleSerial {
             link.mtuLatch?.await(MTU_TIMEOUT_MS, TimeUnit.MILLISECONDS)
         }
 
-        if (!gatt.setCharacteristicNotification(readChar, true)) {
-            lastErrors[handle] = "could not enable notifications locally"; return false
-        }
-        val cccd = readChar.getDescriptor(CCCD) ?: run {
-            lastErrors[handle] = "read characteristic has no CCCD descriptor"; return false
-        }
-        val props = readChar.properties
-        val value = if (props and BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0) {
-            BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-        } else if (props and BluetoothGattCharacteristic.PROPERTY_INDICATE != 0) {
-            BluetoothGattDescriptor.ENABLE_INDICATION_VALUE
-        } else {
-            lastErrors[handle] = "read characteristic neither notifies nor indicates"; return false
-        }
-        link.descriptorLatch = CountDownLatch(1)
-        val ok = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            gatt.writeDescriptor(cccd, value) == BluetoothGatt.GATT_SUCCESS
-        } else {
-            @Suppress("DEPRECATION")
-            run { cccd.value = value; gatt.writeDescriptor(cccd) }
-        }
-        if (!ok) {
-            lastErrors[handle] = "CCCD write could not be started"; return false
-        }
-        if (!link.descriptorLatch!!.await(DESCRIPTOR_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
-            lastErrors[handle] = "enabling notifications timed out"; return false
-        }
+        enableNotifications(link, gatt, readChar)?.let { lastErrors[handle] = it; return false }
 
         link.writeChar = writeChar
         // Write-without-response where the adapter offers it: no round trip per chunk, which is
@@ -371,6 +338,97 @@ object BleSerial {
                 (if (link.writeType == BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE) "no-response" else "acknowledged")
         )
         return true
+    }
+
+    /** Null on success, else the reason for [lastErrors]. */
+    private fun enableNotifications(link: Link, gatt: BluetoothGatt, ch: BluetoothGattCharacteristic): String? {
+        if (!gatt.setCharacteristicNotification(ch, true)) return "could not enable notifications locally"
+        val cccd = ch.getDescriptor(CCCD) ?: return "characteristic has no CCCD descriptor"
+        val props = ch.properties
+        val value = if (props and BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0) {
+            BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+        } else if (props and BluetoothGattCharacteristic.PROPERTY_INDICATE != 0) {
+            BluetoothGattDescriptor.ENABLE_INDICATION_VALUE
+        } else {
+            return "characteristic neither notifies nor indicates"
+        }
+        // One descriptor write at a time: the stack answers a second one with "busy".
+        val latch = CountDownLatch(1)
+        link.pendingCccd = cccd
+        link.descriptorStatus = BluetoothGatt.GATT_SUCCESS
+        link.descriptorLatch = latch
+        val ok = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            gatt.writeDescriptor(cccd, value) == BluetoothGatt.GATT_SUCCESS
+        } else {
+            @Suppress("DEPRECATION")
+            run { cccd.value = value; gatt.writeDescriptor(cccd) }
+        }
+        if (!ok) return "CCCD write could not be started"
+        if (!latch.await(DESCRIPTOR_TIMEOUT_MS, TimeUnit.MILLISECONDS)) return "enabling notifications timed out"
+        return null
+    }
+
+    /** The device's answer to the last CCCD write; a refusal (e.g. pairing required) leaves the link silent. */
+    private fun cccdRefusal(link: Link): String? =
+        if (link.descriptorStatus == BluetoothGatt.GATT_SUCCESS) null
+        else "device refused the notification switch (GATT status ${link.descriptorStatus})"
+
+    /** Subscribes to every notifying characteristic outside [STANDARD_SERVICES], all feeding [read]; no write
+     *  characteristic. Returns the GATT table `[{uuid, characteristics: [{uuid, properties, subscribed}]}]`, or ""
+     *  with the reason in [lastError] when nothing could be subscribed. */
+    @JvmStatic
+    fun listen(handle: Int): String {
+        val link = handles[handle] ?: run { lastErrors[handle] = "no such link"; return "" }
+        val gatt = link.gatt ?: run { lastErrors[handle] = "link is closed"; return "" }
+
+        link.mtuLatch = CountDownLatch(1)
+        if (gatt.requestMtu(REQUESTED_MTU)) {
+            link.mtuLatch?.await(MTU_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        }
+
+        val table = JSONArray()
+        var subscribed = 0
+        var candidates = 0
+        var lastErr: String? = null
+        for (service in gatt.services) {
+            val standard = service.uuid in STANDARD_SERVICES
+            val chars = JSONArray()
+            for (ch in service.characteristics) {
+                val p = ch.properties
+                val names = JSONArray()
+                if (p and BluetoothGattCharacteristic.PROPERTY_READ != 0) names.put("Read")
+                if (p and BluetoothGattCharacteristic.PROPERTY_WRITE != 0) names.put("Write")
+                if (p and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE != 0) names.put("WriteNR")
+                if (p and BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0) names.put("Notify")
+                if (p and BluetoothGattCharacteristic.PROPERTY_INDICATE != 0) names.put("Indicate")
+                val notifies = p and
+                    (BluetoothGattCharacteristic.PROPERTY_NOTIFY or BluetoothGattCharacteristic.PROPERTY_INDICATE) != 0
+                var on = false
+                if (notifies && !standard) {
+                    candidates++
+                    val err = enableNotifications(link, gatt, ch) ?: cccdRefusal(link)
+                    on = err == null
+                    if (!on) {
+                        lastErr = "${ch.uuid}: $err"
+                        android.util.Log.w(TAG, "listen $handle: ${ch.uuid} not subscribed: $err")
+                    }
+                }
+                if (on) subscribed++
+                chars.put(
+                    JSONObject().put("uuid", ch.uuid.toString().lowercase())
+                        .put("properties", names).put("subscribed", on)
+                )
+            }
+            table.put(JSONObject().put("uuid", service.uuid.toString().lowercase()).put("characteristics", chars))
+        }
+        if (subscribed == 0) {
+            lastErrors[handle] = link.failure
+                ?: if (candidates == 0) "nothing on this device notifies"
+                else "no notifying characteristic could be subscribed ($lastErr)"
+            return ""
+        }
+        android.util.Log.i(TAG, "link $handle listening: $subscribed characteristic(s), mtu=${link.mtu}")
+        return table.toString()
     }
 
     /**
@@ -412,6 +470,8 @@ object BleSerial {
         val connectLatch = CountDownLatch(1)
         val servicesLatch = CountDownLatch(1)
         @Volatile var descriptorLatch: CountDownLatch? = null
+        @Volatile var pendingCccd: BluetoothGattDescriptor? = null
+        @Volatile var descriptorStatus = BluetoothGatt.GATT_SUCCESS
         @Volatile var mtuLatch: CountDownLatch? = null
         @Volatile var writeLatch: CountDownLatch? = null
         @Volatile var writeStatus = BluetoothGatt.GATT_SUCCESS
@@ -520,6 +580,9 @@ object BleSerial {
         }
 
         override fun onDescriptorWrite(g: BluetoothGatt, d: BluetoothGattDescriptor, status: Int) {
+            // A late answer to an earlier, timed-out write must not release the next one.
+            if (d.characteristic.uuid != pendingCccd?.characteristic?.uuid) return
+            descriptorStatus = status
             descriptorLatch?.countDown()
         }
 

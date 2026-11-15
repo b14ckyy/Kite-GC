@@ -1,23 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-//! BLE transport for Android, on the platform's own GATT stack.
-//!
-//! `btleplug` has no usable Android backend without its `droidplug` Java companion, so — like the
-//! iOS backend with CoreBluetooth — this one is native: `BleSerial.kt` drives `BluetoothLeScanner`
-//! and `BluetoothGatt`, and this file is the JNI shim in front of it, under the same contract as
-//! the USB-serial shim (primitives, Strings and byte arrays across the boundary; the Kotlin side
-//! owns all device state behind an integer handle; the reason for a failure is fetched afterwards).
-//!
-//! The split of responsibilities is deliberate: Kotlin knows nothing about which GATT service is a
-//! "serial port". After connecting it hands back the device's service list, this side picks the
-//! first known profile (`transport/ble_profiles.rs` — shared with the desktop backend) and tells
-//! Kotlin which characteristics to subscribe to and write to. A new adapter family is therefore a
-//! one-line Rust change.
-//!
-//! Public surface is identical to `transport/ble.rs`, so `commands/connection.rs` and the relay's
-//! BLE sink compile unchanged. Listen-only mode (the desktop's GATT dump) is not implemented yet
-//! and behaves like a normal connect.
+//! BLE transport for Android: the JNI shim in front of BleSerial.kt, same contract as the USB-serial shim
+//! (primitives across the boundary, Kotlin owns the device behind an integer handle). The profile table is
+//! Rust's (ble_profiles.rs); listen-only mode subscribes without one.
 
 use std::collections::HashSet;
 use std::time::Duration;
@@ -232,14 +218,20 @@ pub async fn connect_ble(device_id: &str) -> Result<BleTransport, String> {
         .map_err(|e| format!("BLE connect task failed: {e}"))?
 }
 
-/// Listen-only connect. Android: same path as `connect_ble` for now — the profile handshake already
-/// subscribes to the read characteristic; the desktop's whole-GATT dump is not implemented here yet.
+/// Listen-only connect, no profile needed: a radio's telemetry sits on a vendor service (FrSky:
+/// 0xFFF0), so every notifying characteristic outside the standard services is subscribed. Emits the
+/// GATT table as `ble-gatt-services` for the Debug Monitor, like the desktop backend.
 pub async fn connect_ble_listen(
     device_id: &str,
-    _app: tauri::AppHandle,
+    app: tauri::AppHandle,
 ) -> Result<BleTransport, String> {
-    log::info!("[ble] listen-only connect on Android uses the normal profile path ({device_id})");
-    connect_ble(device_id).await
+    use tauri::Emitter;
+    let address = device_id.to_string();
+    let (transport, services) = tauri::async_runtime::spawn_blocking(move || BleTransport::open_listen(&address))
+        .await
+        .map_err(|e| format!("BLE connect task failed: {e}"))??;
+    let _ = app.emit("ble-gatt-services", serde_json::json!({ "device": device_id, "services": services }));
+    Ok(transport)
 }
 
 /// A connected BLE-serial link. The Kotlin side owns the `BluetoothGatt`; this is the handle to it.
@@ -249,14 +241,51 @@ pub struct BleTransport {
     profile_name: String,
     write_delay_ms: i32,
     read_timeout_ms: i32,
+    /// Listen-only link: no write characteristic, writes fail.
+    listen: bool,
 }
 
 impl BleTransport {
-    /// Blocking: permission dialog, connect (≤15 s), service discovery (≤10 s), subscribe (≤7 s).
-    fn open(address: &str) -> Result<Self, String> {
-        log::info!("[ble] connect requested: {address}");
+    /// Blocking: connect and discovery as in `open`, then MTU (≤2 s) and up to 5 s per notifying characteristic.
+    fn open_listen(address: &str) -> Result<(Self, serde_json::Value), String> {
+        log::info!("[ble] listen-only connect requested: {address}");
         ensure_permissions()?;
+        let handle = Self::connect_handle(address)?;
+        let json = match call_string("listen", "(I)Ljava/lang/String;", &[JValue::Int(handle)]) {
+            Ok(json) => json,
+            Err(e) => {
+                close_handle(handle, address);
+                return Err(e);
+            }
+        };
+        if json.is_empty() {
+            let reason = last_error(handle);
+            close_handle(handle, address);
+            log::warn!("[ble] listen on {address} failed: {reason}");
+            return Err(format!("BLE listen failed: {reason}"));
+        }
+        let services: serde_json::Value = match serde_json::from_str(&json) {
+            Ok(v) => v,
+            Err(e) => {
+                close_handle(handle, address);
+                return Err(format!("bad GATT table from Android: {e}"));
+            }
+        };
+        log::info!("[ble] {address} listening (handle {handle}): {json}");
+        Ok((
+            Self {
+                address: address.to_string(),
+                handle,
+                profile_name: "listen-only".to_string(),
+                write_delay_ms: 0,
+                read_timeout_ms: READ_TIMEOUT_MS,
+                listen: true,
+            },
+            services,
+        ))
+    }
 
+    fn connect_handle(address: &str) -> Result<i32, String> {
         let env = jvm::env()?;
         let j_addr = env
             .new_string(address)
@@ -268,6 +297,14 @@ impl BleTransport {
             log::warn!("[ble] connect {address} failed: {reason}");
             return Err(format!("BLE connect failed: {reason}"));
         }
+        Ok(handle)
+    }
+
+    /// Blocking: permission dialog, connect (≤15 s), service discovery (≤10 s), subscribe (≤7 s).
+    fn open(address: &str) -> Result<Self, String> {
+        log::info!("[ble] connect requested: {address}");
+        ensure_permissions()?;
+        let handle = Self::connect_handle(address)?;
 
         // The device's services decide the profile — most adapters advertise nothing, so this is
         // the authoritative match, not the scan-time tag.
@@ -314,6 +351,7 @@ impl BleTransport {
             profile_name: profile.name.to_string(),
             write_delay_ms: profile.write_delay_ms as i32,
             read_timeout_ms: READ_TIMEOUT_MS,
+            listen: false,
         })
     }
 }
@@ -366,6 +404,9 @@ impl ByteTransport for BleTransport {
     }
 
     fn write_bytes(&mut self, data: &[u8]) -> Result<(), TransportError> {
+        if self.listen {
+            return Err(TransportError::Io("listen-only BLE link has no write characteristic".into()));
+        }
         let mut env = jvm::env().map_err(TransportError::Io)?;
         let class = jvm::app_class(&mut env, BRIDGE).map_err(TransportError::Io)?;
         let r = env.byte_array_from_slice(data);
