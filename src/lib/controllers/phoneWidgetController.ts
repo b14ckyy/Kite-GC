@@ -11,6 +11,7 @@ import { PHONE_GRID_MAX_COLS, PHONE_GRID_PAGES, PHONE_GRID_ROWS } from '$lib/con
 import {
   canActivate,
   packPhoneGrid,
+  packPhoneMove,
   type PackResult,
   type PhoneGridGeometry,
   type PhoneWidgetEntry,
@@ -170,8 +171,9 @@ export function cyclePhoneWidgetSize(cfg: PhoneWidgetsConfig, id: string): Phone
 }
 
 /** Put a widget at a position (page, row, col — the user's drop) in the COLUMN; the packer settles
- *  it. A widget coming out of a bottom slot frees the slot and is activated at the drop. Refused
- *  (returns null) when the column has no room for it. */
+ *  it (`packPhoneMove`: the dropped widget gets its row, what sat there gives way). A widget coming
+ *  out of a bottom slot frees the slot and is activated at the drop. Refused (returns null) when
+ *  the column has no room for it. */
 export function movePhoneWidget(cfg: PhoneWidgetsConfig, id: string, page: number, row: number, col: number): PhoneWidgetsConfig | null {
   const cur = cfg.entries.find((e) => e.id === id);
   if (!cur) return cfg;
@@ -179,11 +181,7 @@ export function movePhoneWidget(cfg: PhoneWidgetsConfig, id: string, page: numbe
   const bottom = slot ? { ...(cfg.bottom ?? EMPTY_BOTTOM), [slot]: null } : cfg.bottom;
   const c = col === 1 ? 1 : 0;
   if (slot && !canActivate(cfg.entries.filter((e) => e.id !== id), id, cur.size, c, PHONE_GEOMETRY)) return null;
-  return normalizePhoneWidgets({
-    ...cfg,
-    entries: cfg.entries.map((e) => (e.id === id ? { ...e, active: true, page, row, col: c } : e)),
-    bottom,
-  });
+  return normalizePhoneWidgets({ ...cfg, entries: packPhoneMove(cfg.entries, PHONE_GEOMETRY, id, page, row, c), bottom });
 }
 
 /** Put a widget into a bottom slot (B6). Coming from the column it is deactivated there (its

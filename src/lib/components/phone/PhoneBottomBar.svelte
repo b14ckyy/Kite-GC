@@ -38,7 +38,7 @@
     type PhoneBottomSlot,
     type PhoneWidgetsConfig,
   } from '$lib/controllers/phoneWidgetController';
-  import { phoneEdit, phoneHitTests, bottomSlotAt, sameTarget, type PhoneDragTarget } from '$lib/stores/phoneEdit.svelte';
+  import { phoneEdit, phoneHitTests, dragSlotAt, claimTouch, sameTarget, type PhoneDragTarget } from '$lib/stores/phoneEdit.svelte';
   import WidgetRenderer from '$lib/components/WidgetRenderer.svelte';
   import type { TelemetryData } from '$lib/stores/telemetry';
   import type { InterfaceSettings } from '$lib/stores/settings';
@@ -215,10 +215,12 @@
   }
 
   function startDrag(e: PointerEvent, id: string) {
+    if (e.pointerType === 'touch') claimTouch(e.target);
     const tile = (e.target as HTMLElement).closest<HTMLElement>('.tile');
     const r = tile?.getBoundingClientRect();
-    grabDx = r ? e.clientX - r.left : 0;
-    grabDy = r ? e.clientY - r.top : 0;
+    // Centred under the finger, like a widget picked up in the column.
+    grabDx = (r?.width ?? sideH) / 2;
+    grabDy = (r?.height ?? sideH) / 2;
     phoneEdit.drag = {
       id,
       owner: 'bottom',
@@ -237,14 +239,16 @@
     if (!d) return;
     d.x = clientX - grabDx;
     d.y = clientY - grabDy;
-    const slot = bottomSlotAt(clientX, clientY);
+    const slot = dragSlotAt(clientX, clientY);
     let target: PhoneDragTarget | null = slot ? { kind: 'bottom', slot } : null;
     if (!target) {
       const cell = phoneHitTests.column?.(clientX, clientY);
       if (cell) target = { kind: 'column', ...cell };
     }
-    // Over nothing: keep the last target (a finger just past a slot's edge still means that slot).
-    if (target && !sameTarget(target, d.target)) d.target = target;
+    // Over nothing there is no target: the preview falls back to the stored layout and a release
+    // there drops nothing (the same rule, and the same reach beside the column, as for a drag that
+    // started in the column).
+    if (!sameTarget(target, d.target)) d.target = target;
   }
 
   function endDrag(commit: boolean) {
