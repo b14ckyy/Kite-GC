@@ -232,8 +232,8 @@ Each widget, at a glance — expand for what it shows and how it works:
     ![The Flight Mode widget](../assets/getting-started/widgets/flightmode.png)
 
 ??? note "Live AGL"
-    A forward-looking **terrain-profile HUD** (a wide widget). The left third shows the terrain you've
-    flown over with the aircraft riding at its current height; the right two-thirds shows the
+    A forward-looking **terrain-profile HUD** (a wide widget). The left part (15 %) shows the terrain you've
+    flown over with the aircraft riding at its current height; the rest shows the
     **estimated** terrain ahead along your heading, with a dashed **projected flight line** so you can see
     a climb, descent or ground intersection coming. Centre read-outs give **AGL** and **minimum clearance
     ahead** (red when it goes negative). Works live and in replay.

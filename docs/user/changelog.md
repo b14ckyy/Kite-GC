@@ -313,10 +313,11 @@ inside the box of the feature release they belong to, so the notes for one relea
       message used to redraw its widgets on its own, and each redraw repaints the whole widget
       row. One shared update step keeps the map and the panels smoother; the desktop is unchanged.
     - **The video tile makes room when it has nothing to show.** In the widget docks the Video
-      widget takes no space while no stream runs, and on Android also while the floating video
-      window holds the picture; it comes back by itself, and edit mode always shows it for
-      placing. The mini map follows: put the floating window away and the map moves into the
-      tile, bring it back and the map returns to the window.
+      widget takes no space while video is off, and on Android also while the floating video
+      window is shown; it comes back by itself, and edit mode always shows it for placing. A
+      mini map in the floating window moves into the video tile — or back to the main view —
+      when the window is put away; on Android it returns to the window when the window is shown
+      again.
     - **Android: the floating video window keeps its picture while you drag it.** It used to go
       black until the finger stood still.
 
