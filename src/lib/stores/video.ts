@@ -1854,7 +1854,7 @@ export const FLOAT_BEZEL_PX = 4;
 export const FLOAT_MIN_H_PX = 200;
 /** Height caps as a fraction of the viewport height. */
 export const FLOAT_FRAC_MIN = 0.1;
-export const FLOAT_FRAC_MAX = 0.3;
+export const FLOAT_FRAC_MAX = 0.45;
 /** Widest the window may get (fraction of the viewport width). */
 export const FLOAT_MAX_W_FRAC = 0.7;
 /** Snapped position: this far from the left edge, and this far above the viewport bottom (the
@@ -1879,14 +1879,9 @@ export function floatFrameRect(s: VideoState, vw: number, vh: number): { left: n
   return { left, top, width, height };
 }
 
-/** `moveMap`: a map shown in the window leaves it when the window is put away — the phone's docked
- *  frame parks WITH its map instead. */
-export function toggleFloating(moveMap = true): void {
-  const s = get(videoState);
-  const floating = !s.floating;
-  patch({ floating });
+export function toggleFloating(): void {
+  patch({ floating: !get(videoState).floating });
   savePrefs();
-  if (moveMap && s.mapLocation === 'floating' && !floating) setMapLocation(videoWidgetActive ? 'widget' : 'main');
 }
 
 /** Park / recall the floating window for the moment, without storing it: the phone's widget edit
