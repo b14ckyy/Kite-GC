@@ -1854,7 +1854,7 @@ export const FLOAT_BEZEL_PX = 4;
 export const FLOAT_MIN_H_PX = 200;
 /** Height caps as a fraction of the viewport height. */
 export const FLOAT_FRAC_MIN = 0.1;
-export const FLOAT_FRAC_MAX = 0.45;
+export const FLOAT_FRAC_MAX = 0.4;
 /** Widest the window may get (fraction of the viewport width). */
 export const FLOAT_MAX_W_FRAC = 0.7;
 /** Snapped position: this far from the left edge, and this far above the viewport bottom (the
