@@ -1942,11 +1942,25 @@ stays <em>Stable releases</em>. <a href="https://github.com/b14ckyy/Kite-GC/pull
 <ul>
 <li><strong>Telemetry API</strong> — Kite serves its live telemetry as read-only JSON over TCP, HTTP and UDP
   for other programs. See the <a href="../reference/telemetry-api/">Telemetry API</a> reference. <a href="https://github.com/b14ckyy/Kite-GC/pull/123">#123</a></li>
-<li><strong>Default protocol</strong> — Settings → Interface → UI pins the protocol Kite opens with to MSP,
-  MAVLink or Telemetry; the default stays <em>Last used</em>. <a href="https://github.com/b14ckyy/Kite-GC/pull/151">#151</a></li>
+<li>
+<p><strong>Default protocol</strong> — Settings → Interface → UI pins the protocol Kite opens with to MSP,
+  MAVLink or Telemetry; the default stays <em>Last used</em>. <a href="https://github.com/b14ckyy/Kite-GC/pull/151">#151</a></p>
+</li>
+<li>
+<p><strong>Telemetry API: every GPS receiver on its own</strong> — on a MAVLink link the new <code>gpsReceivers</code>
+  group lists each receiver the autopilot reports with its own position, satellites, fix type
+  (unified and raw MAVLink value) and HDOP. See the
+  <a href="../reference/telemetry-api/">Telemetry API</a> reference. [#297]</p>
+</li>
 </ul>
 <p><em>Interface</em></p>
 <ul>
+<li><strong>GPS widget shows both receivers</strong> — on an ArduPilot aircraft with two GPS receivers the
+  widget's title switches between <strong>EKF</strong> (the fused position, with fix type and satellites
+  of the better receiver) and <strong>CYC</strong>, which alternates between GPS1 and GPS2 every three
+  seconds. On MAVLink the fix type now also reads NO GPS, RTK FLT and RTK FIX. The GPS
+  sensor tile turns amber as soon as one of the two receivers is below a 3D fix. See
+  <a href="../guides/telemetry-and-display/">Telemetry &amp; display</a>. [#297]</li>
 <li><strong>Resizable widgets</strong> — every flight widget has two or three sizes, switched with a corner
   button in edit mode; the docks adapt to their largest widget. <a href="https://github.com/b14ckyy/Kite-GC/pull/101">#101</a></li>
 <li><strong>Raw telemetry view</strong> — the <strong>≡ Raw</strong> button in the top bar lists every telemetry value in
