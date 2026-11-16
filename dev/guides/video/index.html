@@ -2128,7 +2128,10 @@ shipped with the app.</p>
 <p>The same feed can appear in several places at once (they all share one stream):</p>
 <ul>
 <li><strong>As a widget</strong> — the <strong>Video</strong> widget in a dock. It always <strong>crops the picture to fill</strong> its tile,
-  whatever its size.</li>
+  whatever its size. In the docks it takes <strong>no space while video is off</strong> (unless it is the dock's
+  only widget) and comes back when a source starts; edit mode always shows it, so you can place it.
+  <strong>On Android</strong> an RTSP stream on the <em>Native RTSP client</em> has one output: the tile also steps aside
+  while the floating window is shown, and returns when you put the window away.</li>
 <li><strong>In a floating window</strong> — a movable video frame over the map. <strong>Start</strong> slides it in from the left
   into the bottom-left corner (or to where you last left it) — unless a Video widget is active, in which
   case the window stays parked because the widget already shows the picture. A <strong>camera button</strong> —
@@ -2139,7 +2142,7 @@ shipped with the app.</p>
   bottom-left corner</strong> (the four-way arrow) to move it; dragging it to the <strong>bottom-left screen corner
   snaps it there</strong>, where it <strong>displaces the bottom widget dock</strong> to make room (the dock shrinks by the
   window's size). Drag it away from the corner to un-snap and free-float. The <strong>top-right corner grip
-  resizes</strong> it (aspect-locked, touch-friendly).
+  resizes</strong> it (aspect-locked, touch-friendly), up to 40 % of the app window's height.
   <strong>On an Android phone</strong> there is a <strong>docked window</strong> instead: fixed to the bottom-right of the map, sized to
   the stream (at most 40 % of the map height or half its width), no dragging. The <strong>corner marker in
   its top-left</strong> toggles between that size and a compact one (two thirds), for the video and the
