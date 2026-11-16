@@ -418,6 +418,7 @@
               sizePx={pl.h * slot}
               wPx={pl.w * slot}
               hPx={pl.h * slot}
+              small={pl.w === 1}
               {editing}
             />
             {#if editing}

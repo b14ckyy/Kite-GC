@@ -296,7 +296,7 @@
           onpointerdown={(e) => id && onTilePointerDown(e, id)}
         >
           {#if id}
-            <WidgetRenderer {id} {telem} {interfaceSettings} sizePx={box.h} wPx={box.w} hPx={box.h} {editing} />
+            <WidgetRenderer {id} {telem} {interfaceSettings} sizePx={box.h} wPx={box.w} hPx={box.h} small={box.w < box.h * 1.5} {editing} />
             {#if editing && slot === 'centre' && isWideFamily(id)}
               <button
                 class="wide-btn"

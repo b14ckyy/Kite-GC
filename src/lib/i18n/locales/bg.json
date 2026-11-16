@@ -1395,6 +1395,7 @@
     "flightMode": "Режим полет",
     "liveAgl": "AGL на живо",
     "terrainRadar": "Теренен радар",
+    "weather": "Време",
     "video": "Видео",
     "bottom": "Долу",
     "right": "Дясно",
@@ -1422,6 +1423,9 @@
     "thr": "THR",
     "acc": "ACC",
     "auto": "AUTO",
+    "gust": "П {value}",
+    "inMin": "+{n} min",
+    "offline": "ОФЛАЙН",
     "na": "N/A"
   },
   "compass": {

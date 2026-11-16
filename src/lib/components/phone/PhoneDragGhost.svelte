@@ -20,7 +20,7 @@
 
 {#if d}
   <div class="ghost" style="left:{d.x}px; top:{d.y}px; width:{d.w}px; height:{d.h}px;">
-    <WidgetRenderer id={d.id} {telem} {interfaceSettings} sizePx={d.h} wPx={d.w} hPx={d.h} ghost />
+    <WidgetRenderer id={d.id} {telem} {interfaceSettings} sizePx={d.h} wPx={d.w} hPx={d.h} small={d.w < d.h * 1.5} ghost />
   </div>
 {/if}
 

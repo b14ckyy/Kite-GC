@@ -28,3 +28,4 @@ pub mod update_check;
 pub mod updater;
 pub mod vehicles;
 pub mod video;
+pub mod weather;
