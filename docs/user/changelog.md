@@ -261,6 +261,10 @@ inside the box of the feature release they belong to, so the notes for one relea
       seconds. On MAVLink the fix type now also reads NO GPS, RTK FLT and RTK FIX. The GPS
       sensor tile turns amber as soon as one of the two receivers is below a 3D fix. See
       [Telemetry & display](guides/telemetry-and-display.md). [#297]
+    - **Weather widget** — the forecast wind at the aircraft's height, shown relative to the nose,
+      with gusts, a weather icon, the direction home and, in the wide size, the wind for the next
+      30, 60 and 90 minutes. Needs internet. See
+      [Telemetry & display](guides/telemetry-and-display.md).
     - **Resizable widgets** — every flight widget has two or three sizes, switched with a corner
       button in edit mode; the docks adapt to their largest widget. [#101]
     - **Raw telemetry view** — the **≡ Raw** button in the top bar lists every telemetry value in

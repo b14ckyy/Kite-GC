@@ -250,6 +250,15 @@ Each widget, at a glance — expand for what it shows and how it works:
 
     ![The Terrain Radar widget](../assets/getting-started/widgets/terrainradar.png)
 
+??? note "Weather"
+    The **forecast wind at your flight height** from a weather model: a blue arrow shows where the wind
+    blows relative to the aircraft's nose, an orange triangle on the rim points home. Wind speed, gusts
+    near the ground and a weather icon sit above the rose; the scale on the left shows your height
+    between the ground and 200 m. The wide size adds the wind for the next 30, 60 and 90 minutes.
+    Needs internet. See **[Telemetry & display](../guides/telemetry-and-display.md)**.
+
+    <!-- SCREENSHOT: ../assets/getting-started/widgets/weather.png -->
+
 ??? note "Video"
     A live **video feed** embedded as a widget — an RTSP stream or a local capture device / camera (e.g. a
     USB capture card), always cropped to fill its tile. **Double-click** it to swap the feed with the
