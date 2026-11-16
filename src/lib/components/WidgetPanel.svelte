@@ -427,6 +427,13 @@
     startPointerDrag(e, idx, slotEl);
   }
 
+  /** The ghost is `position: fixed`, and on mobile the dock is a permanent compositor layer — that makes the
+   *  dock its containing block and its `overflow: hidden` clips the ghost away. So it lives on `body`. */
+  function atRoot(node: HTMLElement): { destroy(): void } {
+    document.body.appendChild(node);
+    return { destroy: () => node.remove() };
+  }
+
   /** Pick the widget up (edit mode): the ghost follows the pointer, the window listeners drop it. */
   function startPointerDrag(e: PointerEvent, idx: number, slotEl: HTMLElement) {
     dragIdx = idx;
@@ -593,6 +600,7 @@
   {#if editing && ghostWidgetId && getGlobalDragPayload()?.panelId === panelId}
     <div
       class="drag-ghost"
+      use:atRoot
       style="left:{ghostX}px; top:{ghostY}px; width:{ghostW}px; height:{ghostH}px;"
     >
       <span>{ghostWidgetLabel}</span>
@@ -672,6 +680,9 @@
     position: relative;
     transition: opacity 0.15s, transform 0.15s;
     cursor: default;
+    /* Touch: the browser picks pan-or-not when the finger lands, so the long-press pickup needs the gesture
+       claimed BEFORE edit mode is on — else the first move cancels the pointer stream. The docks do not scroll. */
+    touch-action: none;
   }
 
   /* Overlay is visual-only; events must hit the slot directly for reliable DnD in WebView. */
@@ -721,10 +732,6 @@
 
   .widget-panel.editing .widget-slot {
     cursor: grab;
-    /* Touch: claim the gesture so the browser does not read the drag as a pan/scroll and cancel
-       the pointer stream. Scoped to edit mode, so ordinary use keeps native scrolling and the
-       widgets stay interactive. */
-    touch-action: none;
   }
 
   .widget-panel.editing .widget-slot:active {
