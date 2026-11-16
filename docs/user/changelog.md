@@ -309,6 +309,9 @@ inside the box of the feature release they belong to, so the notes for one relea
       new position or turn instead of on every telemetry message, which costs noticeably fewer
       frames on tablets and phones. The flown part now takes 15 % of the width instead of a third,
       so more of the terrain ahead is visible.
+    - **Widgets on phones and tablets update together, ten times a second.** Every telemetry
+      message used to redraw its widgets on its own, and each redraw repaints the whole widget
+      row. One shared update step keeps the map and the panels smoother; the desktop is unchanged.
 
     *Logbook and replay*
 
