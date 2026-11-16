@@ -320,6 +320,9 @@ inside the box of the feature release they belong to, so the notes for one relea
       again.
     - **Android: the floating video window keeps its picture while you drag it.** It used to go
       black until the finger stood still.
+    - **The aircraft model no longer fills a mini map.** On the 2D map its span is capped at a
+      quarter of the visible map height, so a map shown in the floating window or a widget tile
+      keeps its content readable.
 
     *Logbook and replay*
 
