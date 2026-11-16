@@ -39,15 +39,17 @@
 
 import { writable, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
+import { isAndroid } from '$lib/platform';
 
 export type NativeSurfaceId = 'main' | 'floating' | 'widget';
 
 /** Highest first: the fullscreen map-swap view beats the floating window beats the widget tile. */
 const PRIORITY: NativeSurfaceId[] = ['main', 'floating', 'widget'];
 
-/** How many surfaces the sink serves at once (VIDEO_MULTISINK_WINDOW.md D1): the widget tile plus
- *  one large surface. The backend caps this too — this is the polite half of the contract. */
-const MAX_SURFACES = 2;
+/** How many surfaces the sink serves at once (VIDEO_MULTISINK_WINDOW.md D1): the widget tile plus one large
+ *  surface — one only on Android, whose sink has a single output. A surface beyond the cap must stay out of the
+ *  active set: an armed hole with no layer behind it is a black tile instead of the "elsewhere" note. */
+export const MAX_SURFACES = isAndroid ? 1 : 2;
 
 /** The surfaces the native video is presented in right now — up to two at once since the sink
  *  became a hub (VIDEO_MULTISINK_WINDOW.md §4.3). A surface renders its transparent hole only while
@@ -83,6 +85,33 @@ const regs = new Map<NativeSurfaceId, Set<HTMLElement>>();
 let running = false;
 let raf = 0;
 let lastRectKey = '';
+
+// The full pass (ancestor walk per surface, clip paths per layer) costs a few percent of the main thread
+// at 60 Hz, and nearly every frame it finds nothing new. So each frame only compares the surfaces' own
+// boxes; the full pass runs while one of them moves, for WAKE_MS after anything that can move one, and
+// every IDLE_FULL_MS as the net for what neither sees (a clipping ancestor or a clipped layer changing
+// under a surface that stays put).
+const WAKE_MS = 600;
+const IDLE_FULL_MS = 250;
+const WAKE_EVENTS = ['pointerdown', 'pointerup', 'keydown', 'wheel', 'resize', 'scroll',
+  'transitionrun', 'transitionend', 'animationstart', 'animationend'] as const;
+let awakeUntil = 0;
+let lastFull = 0;
+let lastBoxKey = '';
+function wake(): void {
+  awakeUntil = performance.now() + WAKE_MS;
+}
+function boxKey(): string {
+  let key = `${window.devicePixelRatio}|${rightBound}`;
+  for (const [id, els] of regs) {
+    for (const el of els) {
+      if (!el.isConnected) continue;
+      const b = el.getBoundingClientRect();
+      key += `|${id}:${b.left.toFixed(1)},${b.top.toFixed(1)},${b.width.toFixed(1)},${b.height.toFixed(1)}`;
+    }
+  }
+  return key;
+}
 let groundEl: HTMLDivElement | null = null;
 /** Elements currently carrying a hole clip → the exact clip string applied. Writing style
  *  only on change matters: a same-value write still invalidates style every frame, and on
@@ -128,11 +157,13 @@ export function nativeSurface(el: HTMLElement, spec: NativeSurfaceId | NativeSur
   }
   if (import.meta.env.DEV) console.debug(`[nv] register ${id} (others=${set.size}, connected=${el.isConnected})`);
   set.add(el);
+  wake();
   return {
     destroy() {
       if (import.meta.env.DEV) console.debug(`[nv] destroy ${id} (left=${(regs.get(id)?.size ?? 1) - 1})`);
       regs.get(id)?.delete(el);
       rests.delete(el);
+      wake();
     },
   };
 }
@@ -142,8 +173,11 @@ export function startNativeSurfaceRouter(): void {
   if (running || typeof window === 'undefined') return;
   running = true;
   lastRectKey = '';
+  lastBoxKey = '';
   ackedKeys = new Set();
   pending = null;
+  for (const type of WAKE_EVENTS) window.addEventListener(type, wake, { capture: true, passive: true });
+  wake();
   raf = requestAnimationFrame(tick);
 }
 
@@ -152,6 +186,7 @@ export function stopNativeSurfaceRouter(): void {
   if (!running) return;
   running = false;
   cancelAnimationFrame(raf);
+  for (const type of WAKE_EVENTS) window.removeEventListener(type, wake, { capture: true });
   clearClips();
   removeGround();
   activeNativeSurfaces.set(new Set());
@@ -215,7 +250,10 @@ function visibleSurfaces(): LiveSurface[] {
       // following the frame — a new mask on every frame of the slide — re-rasterised the tiles under
       // the mask each time, and on a static map that was a black map for a frame, ten times per
       // slide (Sony, 2026-09-13: 10–11 flashes per animated mask, 0 per single change).
-      const settled = !rest || boxSettled(el, box);
+      // A frame dragged by hand has no slide transform — its box IS the rest box — and keeps its hole.
+      const still = boxSettled(el, box);
+      const sliding = !!rest && (Math.abs(rest.left - box.left) > 0.5 || Math.abs(rest.top - box.top) > 0.5);
+      const settled = !rest || !sliding || still;
       const liveVis = rest ? (settled ? visibleRect(el, box, id) : null) : vis;
       out.push({ id, el, rect, vis, hole: liveVis ? intersectRect(liveVis, vis) : null, box });
       break;
@@ -322,6 +360,7 @@ function sendSurfaces(payload: SurfacePayload[], keys: Set<NativeSurfaceId>): vo
   void invoke('video_rtsp_native_sink_surfaces', { surfaces: payload })
     .then(() => {
       ackedKeys = keys;
+      wake(); // an acknowledged surface may open its hole now
     })
     .catch(() => {})
     .finally(() => {
@@ -366,6 +405,16 @@ function setsEqual(a: Set<NativeSurfaceId>, b: Set<NativeSurfaceId>): boolean {
 
 function tick(): void {
   if (!running) return;
+  const now = performance.now();
+  const boxes = boxKey();
+  if (boxes !== lastBoxKey) {
+    lastBoxKey = boxes;
+    wake();
+  } else if (now >= awakeUntil && now - lastFull < IDLE_FULL_MS) {
+    raf = requestAnimationFrame(tick);
+    return;
+  }
+  lastFull = now;
   const live = visibleSurfaces();
   const dpr = window.devicePixelRatio || 1;
   const px = (v: number) => Math.round(v * dpr);

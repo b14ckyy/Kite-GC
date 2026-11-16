@@ -358,6 +358,14 @@
        hole with rounded corners, so the map behind caps the native layer's square edges. */
     border-radius: 5px;
   }
+  /* A switch between surfaces leaves this one unserved for a few frames — the note is for the lasting state. */
+  .native-hole span {
+    animation: nv-note-late 0.01s 0.6s both;
+  }
+  @keyframes nv-note-late {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
   .native-hole.armed {
     background: transparent;
   }

@@ -226,6 +226,14 @@
     font-size: 12px;
     text-align: center;
   }
+  /* A switch between surfaces leaves this one unserved for a few frames — the note is for the lasting state. */
+  .native-hole span {
+    animation: nv-note-late 0.01s 0.6s both;
+  }
+  @keyframes nv-note-late {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
   .native-hole.armed {
     background: transparent;
     /* Opaque ring in the card's 3 px padding gap — box-shadow paints only OUTSIDE the
