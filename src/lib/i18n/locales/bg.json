@@ -114,7 +114,10 @@
     "noFix": "NO FIX",
     "fix2d": "2D",
     "fix3d": "3D",
-    "fix3dDgps": "3D DGPS"
+    "fix3dDgps": "3D DGPS",
+    "noGps": "NO GPS",
+    "rtkFloat": "RTK FLT",
+    "rtkFixed": "RTK FIX"
   },
   "rcLink": {
     "title": "LINK",
@@ -1413,6 +1416,8 @@
     "alt": "ALT",
     "mUnit": "м",
     "bat": "BAT",
+    "cyc": "CYC",
+    "ekf": "EKF",
     "home": "HOME",
     "thr": "THR",
     "acc": "ACC",

@@ -85,8 +85,8 @@ impl TelemetryApi {
         }
         // One listener per unified event → its slot. `stamp` marks FC telemetry (not home / link
         // housekeeping) so `lastUpdate` means "the FC last said something".
-        // Array payloads (`telemetry-batteries`) arrive as `{ value: [...] }` — the backend's
-        // VehicleEmitter can only stamp `vehicleId` onto an object, so it wraps non-objects.
+        // Array payloads (`telemetry-batteries`, `telemetry-gps-receivers`) arrive as `{ value: [...] }`:
+        // the backend's VehicleEmitter can only stamp `vehicleId` onto an object, so it wraps non-objects.
         #[derive(Deserialize)]
         struct Wrapped<T> {
             value: T,
@@ -122,6 +122,7 @@ impl TelemetryApi {
         tap!("telemetry-attitude", state::Attitude, attitude, true);
         tap!("telemetry-gps", state::Gps, gps, true);
         tap!("telemetry-gps-stats", state::GpsStats, gps_stats, true);
+        tap!("telemetry-gps-receivers", wrapped Vec<state::GpsReceiver>, gps_receivers, true);
         tap!("telemetry-altitude", state::Altitude, altitude, true);
         tap!("telemetry-alt-ref", state::AltRef, alt_ref, false);
         tap!("telemetry-analog", state::Analog, analog, true);

@@ -155,7 +155,7 @@
       sensor_rangefinder: tel.sensorRangefinder !== 0,
       sensor_optical_flow: tel.sensorOpflow !== 0,
       sensor_gps: tel.sensorGps !== 0,
-      sensor_rtk: tel.fixType >= 5,
+      sensor_rtk: tel.gpsReceivers.some((r) => r.fixRaw === 5 || r.fixRaw === 6),
       sensor_compass: tel.sensorMag !== 0,
       fc_model: mavlink ? null : info.board_id || null,
       fc_manufacturer: null,

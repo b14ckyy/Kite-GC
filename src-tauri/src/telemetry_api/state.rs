@@ -32,6 +32,10 @@ dto! { pub struct Gps {
     pub ground_speed: f64, pub course: f64,
 } }
 dto! { pub struct GpsStats { pub hdop: f64, #[serde(default)] pub eph: Option<f64>, #[serde(default)] pub epv: Option<f64> } }
+dto! { pub struct GpsReceiver {
+    pub id: u8, pub fix_type: u8, pub fix_raw: u8, pub num_sat: u8, #[serde(default)] pub hdop: Option<f64>,
+    pub lat: f64, pub lon: f64, pub alt_msl: f64,
+} }
 dto! { pub struct Altitude { pub altitude: f64, pub vario: f64 } }
 dto! { pub struct AltRef { pub msl: bool } }
 dto! { pub struct Analog {
@@ -82,6 +86,7 @@ pub struct ApiState {
     pub attitude: Option<Attitude>,
     pub gps: Option<Gps>,
     pub gps_stats: Option<GpsStats>,
+    pub gps_receivers: Option<Vec<GpsReceiver>>,
     pub altitude: Option<Altitude>,
     pub alt_ref: Option<AltRef>,
     pub analog: Option<Analog>,
