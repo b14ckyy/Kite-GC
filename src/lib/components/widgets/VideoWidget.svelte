@@ -18,7 +18,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { videoStream, videoState, bindVideoEl, setMapLocation, setWidgetRect, reportMjpegError, reportImgSize, fpsProbe } from '$lib/stores/video';
   import { canvasSink, mjpegSink } from '$lib/controllers/mjpegSink';
-  import { nativeSurface, activeNativeSurfaces } from '$lib/controllers/nativeVideo';
+  import { nativeSurface, activeNativeSurfaces, MAX_SURFACES } from '$lib/controllers/nativeVideo';
   import { doubleTap, mouseDoubleClick } from '$lib/helpers/doubleTap';
   import VideoReconnectOverlay from '$lib/components/video/VideoReconnectOverlay.svelte';
 
@@ -91,6 +91,9 @@
 
   function swapHere() {
     if ($videoState.status !== 'live' || mapHere) return;
+    // Behind the floating window on a one-output sink (the tile shows only as its dock's last widget): the
+    // docks would send the map straight back to the window.
+    if (MAX_SURFACES === 1 && $videoState.nativeSink && $videoState.floating) return;
     setMapLocation('widget');
   }
 </script>

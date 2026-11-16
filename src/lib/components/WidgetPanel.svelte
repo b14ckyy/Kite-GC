@@ -309,7 +309,6 @@
   function computeSizes(): { id: string; state: WidgetSize; hidden: boolean; size: number }[] {
     if (widgetIds.length === 0) return [];
 
-    // Capped at LARGE_BASE_VMIN: widgets never grow beyond their designed max.
     const effectiveLargeBase = Math.min(maxWidgetVmin, LARGE_BASE_VMIN);
 
     // A dock whose widgets are all idle keeps them: edit mode is entered by a long-press on a widget.

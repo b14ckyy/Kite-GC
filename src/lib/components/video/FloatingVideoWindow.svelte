@@ -111,7 +111,7 @@
   // The button stands for what the window shows when it is out: a map that waits in the video tile comes back
   // to the window where the tile then hides (a sink with one output).
   const mapButton = $derived(
-    mapHere || (MAX_SURFACES === 1 && !$videoState.floating && $videoState.mapLocation === 'widget'),
+    mapHere || (MAX_SURFACES === 1 && $videoState.nativeSink && !$videoState.floating && $videoState.mapLocation === 'widget'),
   );
   const btnLabel = $derived(
     mapButton

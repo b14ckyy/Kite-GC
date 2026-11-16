@@ -2869,8 +2869,7 @@
     8 + PHONE_CTL_STEP_PX * (hasVideo && $videoState.status === 'live' && !phoneCtrl.isPhoneWidgetActive(phoneWidgets, 'videoFeed') ? 3 : 2),
   );
 
-  // A Video widget on screen (dock or phone grid). The video store needs it: Start then leaves the
-  // floating window parked — the widget is the picture.
+  // The video store needs it: Start then leaves the floating window parked — the tile is the picture.
   const videoTileOnScreen = $derived(
     phoneUi
       ? phoneCtrl.isPhoneWidgetActive(phoneWidgets, 'videoFeed')

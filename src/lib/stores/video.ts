@@ -138,7 +138,7 @@ export interface VideoState {
   /** Free position (px from top-left of the app window), used when not snapped. */
   floatX: number;
   floatY: number;
-  /** Window height as a fraction of the viewport height (0.1…0.3); width = height·aspect. */
+  /** Window height as a fraction of the viewport height (FLOAT_FRAC_MIN…FLOAT_FRAC_MAX); width = height·aspect. */
   floatHeightFrac: number;
   /** Unobstructed fullscreen: the map-swap video shrinks so occupied widget panels and the nav rail stay clear
    *  of the picture (an empty/hidden panel releases its edge). Off = it fills the whole map zone. Persisted. */

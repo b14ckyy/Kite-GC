@@ -249,7 +249,8 @@
       sampling = false;
       // A change that arrived while the backend was busy was dropped by the effect: catch up.
       const n = telem;
-      if (drawn && (n.lat !== drawn.lat || n.lon !== drawn.lon || n.altMsl !== drawn.alt)) redraw();
+      // Object.is: a NaN field would differ from itself forever and spin this.
+      if (drawn && !(Object.is(n.lat, drawn.lat) && Object.is(n.lon, drawn.lon) && Object.is(n.altMsl, drawn.alt))) redraw();
     }
   }
 

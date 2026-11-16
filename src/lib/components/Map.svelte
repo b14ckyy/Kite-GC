@@ -178,12 +178,13 @@
   /** Share of the visible map height a model's span may take: uncapped it fills a mini map (window, widget
    *  tile). The icon is larger than the model by 1 / MODEL_FIT. */
   const MODEL_MAX_VIEW_SHARE = 0.25;
+  /** Height of the wrapper (in heading-up the map itself is an oversized square), kept by its ResizeObserver:
+   *  reading layout here would force one per fleet marker and telemetry update. */
+  let viewH = 0;
   function modelSizePx(lat: number): number {
     if (!map) return MODEL_MIN_PX;
     const mpp = 156543.03392 * Math.cos(lat * Math.PI / 180) / Math.pow(2, map.getZoom());
     const size = Math.max(MODEL_MIN_PX, Math.min(MODEL_MAX_PX, MODEL_REAL_SPAN_M / mpp)) * (uiScale || 1);
-    // The wrapper, not the map: in heading-up the map itself is an oversized square.
-    const viewH = mapContainer?.parentElement?.clientHeight ?? 0;
     return Math.round(viewH > 0 ? Math.min(size, (viewH * MODEL_MAX_VIEW_SHARE) / MODEL_FIT) : size);
   }
   $effect(() => { uiScale; if (map) onZoomEnd(); });
@@ -2466,6 +2467,7 @@
       mapResizeObs = new ResizeObserver(() => {
         if (viewMode === 'heading-follow') applyHeadingUpSize(true);
         map?.invalidateSize();
+        viewH = mapContainer.parentElement?.clientHeight ?? 0;
         if (modelSizePx(followCurrent?.lat ?? 0) !== modelPx) onZoomEnd(); // the model's size follows the view height
         // A follow target is re-centred only by the next follow frame — a static one (a GCS without UAV, a
         // paused replay) never sends one, so re-centre here after the size change.
