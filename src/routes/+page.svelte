@@ -2874,7 +2874,8 @@
     setVideoWidgetActive(
       phoneUi
         ? phoneCtrl.isPhoneWidgetActive(phoneWidgets, 'videoFeed')
-        : panels.bottom.includes('videoFeed') || panels.right.includes('videoFeed'),
+        : (panels.bottom.includes('videoFeed') && $layout.bottomDock.visible) ||
+            (panels.right.includes('videoFeed') && $layout.sideDock.visible),
     );
   });
 
@@ -3003,9 +3004,9 @@
   const WIDGET_TICK_MS = 100;
   const tickedTelem = isMobile ? tickSnapshot(() => telem, WIDGET_TICK_MS) : null;
   const widgetTelem = $derived(tickedTelem ? tickedTelem() : telem);
-  // The video tile takes no dock space while it has nothing to show — no stream, or (a sink with one
-  // output) the floating window holds the picture; edit mode shows it for placing.
-  const videoTileBehindWindow = $derived(NATIVE_SURFACE_CAP === 1 && $videoState.floating);
+  // The video tile takes no dock space while it has nothing to show — no stream, or (a native sink with
+  // one output) the floating window holds the picture; edit mode shows it for placing.
+  const videoTileBehindWindow = $derived(NATIVE_SURFACE_CAP === 1 && $videoState.nativeSink && $videoState.floating);
   const idleWidgetIds = $derived($videoState.status === 'off' || videoTileBehindWindow ? ['videoFeed'] : []);
   // Docks only (the phone grid keeps its tile): a map inside the tile moves on before the tile hides.
   $effect(() => {

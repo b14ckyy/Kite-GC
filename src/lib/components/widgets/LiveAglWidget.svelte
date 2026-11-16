@@ -4,9 +4,8 @@
 -->
 
 <script lang="ts">
-  // Live AGL widget (2×1) — forward-looking terrain profile HUD: flown terrain + history on the left (`HIST_SHARE`),
-  // UAV at the "now" divider, ESTIMATED terrain ahead with a projected vario line on the right. History is
-  // accumulated here, so it works live AND in replay. Scale steps with speed (300/900/1800/3600 m), with hysteresis.
+  // Forward-looking terrain profile HUD (2×1). History is accumulated here from telemetry, so it works live and in
+  // replay.
   import { untrack } from 'svelte';
   import { get } from 'svelte/store';
   import { invoke } from '@tauri-apps/api/core';
@@ -118,7 +117,7 @@
 
   // ── State ──────────────────────────────────────────────────────────
   const profiler = new LiveTrackProfiler();
-  // Safety bound (the HUD shows ≤1200 m of history): let it accumulate to 5 km, then trim back
+  // Safety bound (the HUD shows far less history): let it accumulate to 5 km, then trim back
   // to the most recent 1500 m. The wide gap means the trim runs only once every few minutes, so
   // the per-tick fold cost stays flat and the widget never holds unbounded data on long replays.
   profiler.setWindow(1500, 5000);
@@ -248,23 +247,33 @@
       console.error('[liveAgl] update failed', e);
     } finally {
       sampling = false;
+      // A change that arrived while the backend was busy was dropped by the effect: catch up.
+      const n = telem;
+      if (drawn && (n.lat !== drawn.lat || n.lon !== drawn.lon || n.altMsl !== drawn.alt)) redraw();
     }
   }
 
-  // A redraw repaints the whole widget dock, so only a new 3D position or a turn asks for one — not every
-  // telemetry message. `drawn` is set when an update starts: a frame dropped by `sampling` is retried.
+  // A redraw repaints the whole widget dock, so only a new 3D position or a turn asks for one, not every
+  // telemetry message; once a second anyway, for what changes without them (terrain still loading, the MSL anchor).
   const YAW_REDRAW_DEG = 5;
+  const IDLE_REDRAW_MS = 1000;
   let drawn: { lat: number; lon: number; alt: number; yaw: number } | null = null;
+  let drawnAt = 0;
+  function redraw(): void {
+    drawn = { lat: telem.lat, lon: telem.lon, alt: telem.altMsl, yaw: telem.yaw };
+    drawnAt = performance.now();
+    void runUpdate();
+  }
   $effect(() => {
     const { lat, lon, altMsl, yaw } = telem;
+    void telem.lastUpdate;
     // runUpdate writes state it also reads (e.g. `step = nextStep(speed, step)`): untracked, or the read+write loop
     // trips effect_update_depth_exceeded and hard-freezes the main thread.
     untrack(() => {
       if (sampling) return;
       const moved = !drawn || lat !== drawn.lat || lon !== drawn.lon || altMsl !== drawn.alt;
-      if (!moved && drawn && angleDiff(yaw, drawn.yaw) <= YAW_REDRAW_DEG) return;
-      drawn = { lat, lon, alt: altMsl, yaw };
-      void runUpdate();
+      const turned = !!drawn && angleDiff(yaw, drawn.yaw) > YAW_REDRAW_DEG;
+      if (moved || turned || performance.now() - drawnAt > IDLE_REDRAW_MS) redraw();
     });
   });
 
@@ -288,7 +297,6 @@
   const fwdDist = $derived(step * (1 - HIST_SHARE));
   const baselineY = $derived(PAD.t + plotH);
 
-  // x: relative distance from UAV (−histDist … +fwdDist)
   function xS(rel: number): number {
     return PAD.l + ((rel + histDist) / (histDist + fwdDist)) * plotW;
   }

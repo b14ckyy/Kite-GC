@@ -86,11 +86,8 @@ let running = false;
 let raf = 0;
 let lastRectKey = '';
 
-// The full pass (ancestor walk per surface, clip paths per layer) costs a few percent of the main thread
-// at 60 Hz, and nearly every frame it finds nothing new. So each frame only compares the surfaces' own
-// boxes; the full pass runs while one of them moves, for WAKE_MS after anything that can move one, and
-// every IDLE_FULL_MS as the net for what neither sees (a clipping ancestor or a clipped layer changing
-// under a surface that stays put).
+// Full pass (ancestor walk, clip paths) only while a surface box moves, for WAKE_MS after a wake source, and
+// every IDLE_FULL_MS as the net for a clipping ancestor or clipped layer changing under a surface that stays put.
 const WAKE_MS = 600;
 const IDLE_FULL_MS = 250;
 const WAKE_EVENTS = ['pointerdown', 'pointerup', 'keydown', 'wheel', 'resize', 'scroll',
@@ -245,12 +242,9 @@ function visibleSurfaces(): LiveSurface[] {
       const rect = rest ?? box;
       const vis = visibleRect(el, rect, id);
       if (!vis) continue;
-      // A resting-position surface gets its hole only while its frame stands still: the hole opens in
-      // ONE step once the slide has ended and closes in one step as the next slide begins. The hole
-      // following the frame — a new mask on every frame of the slide — re-rasterised the tiles under
-      // the mask each time, and on a static map that was a black map for a frame, ten times per
-      // slide (Sony, 2026-09-13: 10–11 flashes per animated mask, 0 per single change).
-      // A frame dragged by hand has no slide transform — its box IS the rest box — and keeps its hole.
+      // A resting-position surface opens and closes its hole in one step at the ends of a slide: a mask following
+      // the frame re-rasters the tiles under it every frame (black-map flashes). A frame dragged by hand has no
+      // slide transform — its box is the rest box — and keeps its hole.
       const still = boxSettled(el, box);
       const sliding = !!rest && (Math.abs(rest.left - box.left) > 0.5 || Math.abs(rest.top - box.top) > 0.5);
       const settled = !rest || !sliding || still;

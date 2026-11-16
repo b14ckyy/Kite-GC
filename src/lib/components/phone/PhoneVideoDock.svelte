@@ -68,7 +68,7 @@
   // map (+page moves its layer with the frame) and the button becomes a map icon in the corner the 2D/3D controls
   // vacate; double-tap the full-screen video to bring the map back.
   function toggle() {
-    toggleFloating();
+    toggleFloating(false);
   }
 
   // Widget edit mode parks the docked window (it covers the bottom slots on most screens) and brings it back

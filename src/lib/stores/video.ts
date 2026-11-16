@@ -1879,13 +1879,14 @@ export function floatFrameRect(s: VideoState, vw: number, vh: number): { left: n
   return { left, top, width, height };
 }
 
-export function toggleFloating(): void {
+/** `moveMap`: a map shown in the window leaves it when the window is put away — the phone's docked
+ *  frame parks WITH its map instead. */
+export function toggleFloating(moveMap = true): void {
   const s = get(videoState);
   const floating = !s.floating;
   patch({ floating });
   savePrefs();
-  // The map does not stay in a window that is put away.
-  if (s.mapLocation === 'floating' && !floating) setMapLocation(videoWidgetActive ? 'widget' : 'main');
+  if (moveMap && s.mapLocation === 'floating' && !floating) setMapLocation(videoWidgetActive ? 'widget' : 'main');
 }
 
 /** Park / recall the floating window for the moment, without storing it: the phone's widget edit
