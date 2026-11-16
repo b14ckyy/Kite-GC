@@ -14,7 +14,7 @@ import type { UavMesh } from './uavMesh';
 
 const DEG = Math.PI / 180;
 const AMBIENT = 0.5, DIFFUSE = 0.6; // a bit more directional so the side light reveals the attitude
-const FIT = 0.66;                    // model fits this fraction of the icon (leaves room for the soft shadow)
+export const FIT = 0.66;             // model fits this fraction of the icon (leaves room for the soft shadow)
 const MODEL_RADIUS = 0.98;           // the current set is 1.5× the old size class (plane wingspan radius ≈ 0.95)
 // Light from the south (screen-down = −Z) + overhead (+Y): gives side shading so roll/pitch read.
 const LIGHT = norm3(0.1, 0.55, -0.66);

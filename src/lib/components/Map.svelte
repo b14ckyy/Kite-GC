@@ -79,7 +79,7 @@
   import { PLATFORM_MULTIROTOR, type PlatformType, type UavModelOverride } from "$lib/helpers/uavIcons";
   import { resolveModelKind, modelUri } from "$lib/helpers/uavModels";
   import { loadUavMesh, type UavMesh } from "$lib/helpers/uavMesh";
-  import { renderUavTopDown } from "$lib/helpers/uavTopDown";
+  import { renderUavTopDown, FIT as MODEL_FIT } from "$lib/helpers/uavTopDown";
   import { toTelemetryData } from "$lib/adapters/telemetryAdapter";
   import { sunAltitudeDeg, cesiumLikeBrightness } from "$lib/utils/sun";
   import { ensureUserLocation, resolveUserLocation, userGeoLocation } from "$lib/helpers/userLocation";
@@ -175,10 +175,16 @@
     const h = hex.replace('#', '');
     return [parseInt(h.slice(0, 2), 16) / 255, parseInt(h.slice(2, 4), 16) / 255, parseInt(h.slice(4, 6), 16) / 255];
   }
+  /** Share of the visible map height a model's span may take: uncapped it fills a mini map (window, widget
+   *  tile). The icon is larger than the model by 1 / MODEL_FIT. */
+  const MODEL_MAX_VIEW_SHARE = 0.25;
   function modelSizePx(lat: number): number {
     if (!map) return MODEL_MIN_PX;
     const mpp = 156543.03392 * Math.cos(lat * Math.PI / 180) / Math.pow(2, map.getZoom());
-    return Math.round(Math.max(MODEL_MIN_PX, Math.min(MODEL_MAX_PX, MODEL_REAL_SPAN_M / mpp)) * (uiScale || 1));
+    const size = Math.max(MODEL_MIN_PX, Math.min(MODEL_MAX_PX, MODEL_REAL_SPAN_M / mpp)) * (uiScale || 1);
+    // The wrapper, not the map: in heading-up the map itself is an oversized square.
+    const viewH = mapContainer?.parentElement?.clientHeight ?? 0;
+    return Math.round(viewH > 0 ? Math.min(size, (viewH * MODEL_MAX_VIEW_SHARE) / MODEL_FIT) : size);
   }
   $effect(() => { uiScale; if (map) onZoomEnd(); });
   function makeModelIcon(size: number): L.DivIcon {
@@ -200,9 +206,11 @@
     }
     renderUavTopDown(ctx, uavMesh, cv.width, heading, pitch, roll, hexToRgb01(color), MODEL_TINT);
   }
+  let modelPx = 0;
   function onZoomEnd() {
     const lat = followCurrent?.lat ?? 0;
-    for (const mk of [uavMarker, playbackMarker]) mk?.setIcon(makeModelIcon(modelSizePx(lat)));
+    modelPx = modelSizePx(lat);
+    for (const mk of [uavMarker, playbackMarker]) mk?.setIcon(makeModelIcon(modelPx));
     modelDrawn = null; // new canvas
     applyFollowFrame();
     updateFleet(); // fleet model markers are zoom-sized too
@@ -2458,6 +2466,7 @@
       mapResizeObs = new ResizeObserver(() => {
         if (viewMode === 'heading-follow') applyHeadingUpSize(true);
         map?.invalidateSize();
+        if (modelSizePx(followCurrent?.lat ?? 0) !== modelPx) onZoomEnd(); // the model's size follows the view height
         // A follow target is re-centred only by the next follow frame — a static one (a GCS without UAV, a
         // paused replay) never sends one, so re-centre here after the size change.
         if (viewMode !== 'free') applyFollowFrame();
