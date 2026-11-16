@@ -127,10 +127,10 @@ signal dips don't interrupt the stream unnecessarily.
 The same feed can appear in several places at once (they all share one stream):
 
 - **As a widget** — the **Video** widget in a dock. It always **crops the picture to fill** its tile,
-  whatever its size. In the docks it takes **no space while video is off** and comes back when a
-  source starts; edit mode always shows it, so you can place it. **On Android** the hardware video
-  has one output: the tile also steps aside while the floating window is shown, and returns when you
-  put the window away.
+  whatever its size. In the docks it takes **no space while video is off** (unless it is the dock's
+  only widget) and comes back when a source starts; edit mode always shows it, so you can place it.
+  **On Android** an RTSP stream on the *Native RTSP client* has one output: the tile also steps aside
+  while the floating window is shown, and returns when you put the window away.
 - **In a floating window** — a movable video frame over the map. **Start** slides it in from the left
   into the bottom-left corner (or to where you last left it) — unless a Video widget is active, in which
   case the window stays parked because the widget already shows the picture. A **camera button** —
@@ -141,7 +141,7 @@ The same feed can appear in several places at once (they all share one stream):
   bottom-left corner** (the four-way arrow) to move it; dragging it to the **bottom-left screen corner
   snaps it there**, where it **displaces the bottom widget dock** to make room (the dock shrinks by the
   window's size). Drag it away from the corner to un-snap and free-float. The **top-right corner grip
-  resizes** it (aspect-locked, touch-friendly), up to 40 % of the window height.
+  resizes** it (aspect-locked, touch-friendly), up to 40 % of the app window's height.
   **On an Android phone** there is a **docked window** instead: fixed to the bottom-right of the map, sized to
   the stream (at most 40 % of the map height or half its width), no dragging. The **corner marker in
   its top-left** toggles between that size and a compact one (two thirds), for the video and the
