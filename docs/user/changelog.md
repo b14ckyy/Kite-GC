@@ -322,7 +322,7 @@ inside the box of the feature release they belong to, so the notes for one relea
     - **The aircraft model no longer fills a mini map.** On the 2D map its span is capped at a
       quarter of the visible map height, so a map shown in the floating window or a widget tile
       keeps its content readable.
-    - **A larger floating video window** — it can be resized up to 45 % of the window height
+    - **A larger floating video window** — it can be resized up to 40 % of the window height
       instead of 30 %.
 
     *Logbook and replay*
