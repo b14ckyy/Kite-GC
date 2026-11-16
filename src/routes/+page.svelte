@@ -11,6 +11,7 @@
   import { connection, availablePorts, bleDevices, defaultNetPort, netHostOrLocal, hasMsp, isArduPilotLink } from "$lib/stores/connection";
   import type { FcInfo, PortInfo, BleDeviceInfo, TransportType, ProtocolType } from "$lib/stores/connection";
   import { settings } from "$lib/stores/settings";
+  import { tickSnapshot } from "$lib/helpers/telemetryTick.svelte";
   import { isAndroid, isMobile, isTablet, isPhone as isPhoneDevice, hasSerialPorts, hasVideo, hasRcControl, logPlayerWidth } from "$lib/platform";
   import { isDebugMode } from "$lib/stores/debug";
   import { telemetry } from "$lib/stores/telemetry";
@@ -2997,6 +2998,12 @@
       : liveTelem,
   );
 
+  // Widgets on phones and tablets: one telemetry snapshot per tick (the rate rows are stored at). The
+  // desktop keeps every sample — high-resolution replay exceeds it.
+  const WIDGET_TICK_MS = 100;
+  const tickedTelem = isMobile ? tickSnapshot(() => telem, WIDGET_TICK_MS) : null;
+  const widgetTelem = $derived(tickedTelem ? tickedTelem() : telem);
+
   // ── Active-WP highlight trust gating (see MISSION_TRACKING_AND_PROVENANCE.md) ──
   // Replay: the mission has the DB flag (or the user confirmed once for this log/file).
   // Live: the mission has the FC flag and the UAV is armed (or the user confirmed at arm).
@@ -3805,7 +3812,7 @@
   <div class="zone-phone-widgets">
     <PhoneWidgetPanel
       config={phoneWidgets}
-      {telem}
+      telem={widgetTelem}
       {interfaceSettings}
       onresize={(id) => patchPhoneWidgets(phoneCtrl.cyclePhoneWidgetSize(phoneWidgets, id))}
       onmove={phoneMoveToColumn}
@@ -3817,7 +3824,7 @@
        in the stacking order; the drag ghost shared with the column sits over everything. -->
   <PhoneBottomBar
     config={phoneWidgets}
-    {telem}
+    telem={widgetTelem}
     {interfaceSettings}
     frameShift={phoneShift}
     leftReserve={navPanelOpen ? NAV_RAIL_RIGHT_PX : 0}
@@ -3826,7 +3833,7 @@
     ontogglewide={() => patchPhoneWidgets(phoneCtrl.togglePhoneBottomWide(phoneWidgets))}
     bind:barH={phoneBarH}
   />
-  <PhoneDragGhost {telem} {interfaceSettings} />
+  <PhoneDragGhost telem={widgetTelem} {interfaceSettings} />
   <div class="phone-bottom-chips">
     <PhoneBottomChips {telem} />
   </div>
@@ -4030,7 +4037,7 @@
         smallBoost={isPhonePortrait ? 1.5 : isTablet ? 1.4 : 1}
         sizes={panels.sizes ?? {}}
         bind:crossPx={bottomPanelCrossPx}
-        {telem}
+        telem={widgetTelem}
         bind:editing={widgetEditMode}
         {interfaceSettings}
         onreorder={handleReorder}
@@ -4054,7 +4061,7 @@
       smallBoost={isTablet ? 1.4 : 1}
       sizes={panels.sizes ?? {}}
       bind:crossPx={sidePanelCrossPx}
-      {telem}
+      telem={widgetTelem}
       bind:editing={widgetEditMode}
       {interfaceSettings}
       onreorder={handleReorder}
