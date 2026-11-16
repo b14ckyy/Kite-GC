@@ -258,7 +258,8 @@ inside the box of the feature release they belong to, so the notes for one relea
     - **GPS widget shows both receivers** — on an ArduPilot aircraft with two GPS receivers the
       widget's title switches between **EKF** (the fused position, with fix type and satellites
       of the better receiver) and **CYC**, which alternates between GPS1 and GPS2 every three
-      seconds. On MAVLink the fix type now also reads NO GPS, RTK FLT and RTK FIX. See
+      seconds. On MAVLink the fix type now also reads NO GPS, RTK FLT and RTK FIX. The GPS
+      sensor tile turns amber as soon as one of the two receivers is below a 3D fix. See
       [Telemetry & display](guides/telemetry-and-display.md). [#297]
     - **Resizable widgets** — every flight widget has two or three sizes, switched with a corner
       button in edit mode; the docks adapt to their largest widget. [#101]
