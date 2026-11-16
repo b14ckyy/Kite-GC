@@ -21,6 +21,7 @@
     pxPerVmin = 1,
     smallBoost = 1,
     sizes = {},
+    idleIds = [],
     crossPx = $bindable(0),
     telem,
     interfaceSettings = { speedUnit: 'kmh', altitudeUnit: 'm', distanceUnit: 'metric', verticalSpeedUnit: 'ms', temperatureUnit: 'c' },
@@ -40,6 +41,8 @@
     smallBoost?: number;
     /** Per-widget size state (PanelConfig.sizes); a missing entry = the widget's default size. */
     sizes?: Record<string, WidgetSize>;
+    /** Widgets with nothing to show right now: they take no room, except in edit mode where they can be placed. */
+    idleIds?: string[];
     /** OUT: the panel's cross-axis extent in px (height in the bottom dock, width in the side dock) =
      *  its largest widget. The dock adapts to it (WIDGET_OVERHAUL.md D7) and the unobstructed
      *  fullscreen video reserves exactly this much. */
@@ -143,6 +146,13 @@
       if (!payload) {
         // The other panel's listener ran first and consumed the drop. With a mouse the next move
         // would have cleared our leftovers; a lifted finger sends no further event, so do it here.
+        resetLocalDrag();
+        return;
+      }
+      // Lifted where it was picked up: entering edit mode can reflow the dock under the finger (an idle
+      // widget appears), and the release would otherwise drop the widget at whatever slid there.
+      if (payload.panelId === panelId && Math.hypot(e.clientX - pickX, e.clientY - pickY) < PRESS_SLOP_PX) {
+        setGlobalDragPayload(null);
         resetLocalDrag();
         return;
       }
@@ -296,27 +306,30 @@
   }
   const crossFactor = (state: WidgetSize) => (state === 'S' ? smallRatio * smallBoost : 1);
 
-  // Compute widget sizes based on available space
-  function computeSizes(): { id: string; state: WidgetSize; size: number }[] {
+  function computeSizes(): { id: string; state: WidgetSize; hidden: boolean; size: number }[] {
     if (widgetIds.length === 0) return [];
 
-    // Cross-axis determines the target large widget size (fill dock height/width).
-    // Cap at LARGE_BASE_VMIN so widgets don't grow beyond their designed max.
     const effectiveLargeBase = Math.min(maxWidgetVmin, LARGE_BASE_VMIN);
 
+    // A dock whose widgets are all idle keeps them: edit mode is entered by a long-press on a widget.
+    const hideIdle = !editing && widgetIds.some(id => !idleIds.includes(id));
     let totalUnits = 0;
+    let shown = 0;
     const items = widgetIds.map(id => {
       const state = effectiveWidgetSize(id, sizes);
-      totalUnits += unitsFor(state);
-      return { id, state };
+      const hidden = hideIdle && idleIds.includes(id);
+      if (!hidden) {
+        totalUnits += unitsFor(state);
+        shown++;
+      }
+      return { id, state, hidden };
     });
 
     // Gap between widgets in vmin
     const gapVmin = 0.5;
-    const totalGaps = (widgetIds.length - 1) * gapVmin;
+    const totalGaps = Math.max(0, shown - 1) * gapVmin;
     const usableVmin = availableVmin - totalGaps;
 
-    // Check if widgets fit at their effective base size, scale down if not
     const baseTotal = totalUnits * effectiveLargeBase;
     const scale = baseTotal <= usableVmin ? 1 : Math.max(MIN_SCALE, usableVmin / baseTotal);
 
@@ -343,7 +356,7 @@
 
   // Report the cross-axis extent (= the largest widget) — see the `crossPx` prop.
   $effect(() => {
-    const max = items.reduce((m, it) => Math.max(m, it.sizePx), 0);
+    const max = items.reduce((m, it) => (it.hidden ? m : Math.max(m, it.sizePx)), 0);
     if (max !== crossPx) crossPx = max;
   });
 
@@ -393,6 +406,8 @@
   let pressTimer: ReturnType<typeof setTimeout> | null = null;
   let pressX = 0;
   let pressY = 0;
+  let pickX = 0;
+  let pickY = 0;
 
   function clearPress() {
     if (pressTimer) clearTimeout(pressTimer);
@@ -427,12 +442,21 @@
     startPointerDrag(e, idx, slotEl);
   }
 
+  /** The ghost is `position: fixed`, and on mobile the dock is a permanent compositor layer — that makes the
+   *  dock its containing block and its `overflow: hidden` clips the ghost away. So it lives on `body`. */
+  function atRoot(node: HTMLElement): { destroy(): void } {
+    document.body.appendChild(node);
+    return { destroy: () => node.remove() };
+  }
+
   /** Pick the widget up (edit mode): the ghost follows the pointer, the window listeners drop it. */
   function startPointerDrag(e: PointerEvent, idx: number, slotEl: HTMLElement) {
     dragIdx = idx;
     activeDragPayload = { panelId, widgetId: widgetIds[idx], sourceIdx: idx };
     setGlobalDragPayload(activeDragPayload);
     ghostWidgetId = activeDragPayload.widgetId;
+    pickX = e.clientX;
+    pickY = e.clientY;
     ghostX = e.clientX + 14;
     ghostY = e.clientY + 14;
     const rect = slotEl.getBoundingClientRect();
@@ -557,6 +581,7 @@
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       class="widget-slot"
+      class:idle={item.hidden}
       data-slot-idx={idx}
       class:dragging={dragIdx === idx}
       class:editing
@@ -593,6 +618,7 @@
   {#if editing && ghostWidgetId && getGlobalDragPayload()?.panelId === panelId}
     <div
       class="drag-ghost"
+      use:atRoot
       style="left:{ghostX}px; top:{ghostY}px; width:{ghostW}px; height:{ghostH}px;"
     >
       <span>{ghostWidgetLabel}</span>
@@ -672,6 +698,9 @@
     position: relative;
     transition: opacity 0.15s, transform 0.15s;
     cursor: default;
+    /* Touch: the browser picks pan-or-not when the finger lands, so the long-press pickup needs the gesture
+       claimed BEFORE edit mode is on — else the first move cancels the pointer stream. The docks do not scroll. */
+    touch-action: none;
   }
 
   /* Overlay is visual-only; events must hit the slot directly for reliable DnD in WebView. */
@@ -719,12 +748,12 @@
     stroke-linejoin: round;
   }
 
+  .widget-slot.idle {
+    display: none;
+  }
+
   .widget-panel.editing .widget-slot {
     cursor: grab;
-    /* Touch: claim the gesture so the browser does not read the drag as a pan/scroll and cancel
-       the pointer stream. Scoped to edit mode, so ordinary use keeps native scrolling and the
-       widgets stay interactive. */
-    touch-action: none;
   }
 
   .widget-panel.editing .widget-slot:active {

@@ -305,6 +305,26 @@ inside the box of the feature release they belong to, so the notes for one relea
       instead of redrawn on every heading change, and in heading-up mode turning the map no
       longer restyles every tile and line on it — smoother panels and gestures while following,
       on every platform. [#288]
+    - **Live AGL widget: lighter, and more room ahead.** The terrain profile redraws once per
+      new position or turn instead of on every telemetry message, which costs noticeably fewer
+      frames on tablets and phones. The flown part now takes 15 % of the width instead of a third,
+      so more of the terrain ahead is visible. [#298]
+    - **Widgets on phones and tablets update together, ten times a second.** Every telemetry
+      message used to redraw its widgets on its own, and each redraw repaints the whole widget
+      row. One shared update step keeps the map and the panels smoother; the desktop is unchanged. [#298]
+    - **The video tile makes room when it has nothing to show.** In the widget docks the Video
+      widget takes no space while video is off (unless it is the dock's only widget), and on
+      Android — for an RTSP stream on the native client — also while the floating video window
+      is shown; it comes back by itself, and edit mode always shows it for placing. A mini map
+      in the floating window moves into the video tile when the window is put away; in that
+      Android case it returns to the window when the window is shown again. [#298]
+    - **Android: the floating video window keeps its picture while you drag it.** It used to go
+      black until the finger stood still. [#298]
+    - **The aircraft model no longer fills a mini map.** On the 2D map its span is capped at a
+      quarter of the visible map height, so a map shown in the floating window or a widget tile
+      keeps its content readable. [#298]
+    - **A larger floating video window** — it can be resized up to 40 % of the app window's height
+      instead of 30 %. [#298]
 
     *Logbook and replay*
 

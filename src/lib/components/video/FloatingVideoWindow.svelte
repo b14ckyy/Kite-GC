@@ -26,7 +26,7 @@
   import { canvasSink, mjpegSink } from '$lib/controllers/mjpegSink';
   import { detachVideo } from '$lib/controllers/detachedVideo';
   import { isMobile } from '$lib/platform';
-  import { nativeSurface, activeNativeSurfaces, openNativeSurfaces } from '$lib/controllers/nativeVideo';
+  import { nativeSurface, activeNativeSurfaces, openNativeSurfaces, MAX_SURFACES } from '$lib/controllers/nativeVideo';
   import { doubleTap, mouseDoubleClick } from '$lib/helpers/doubleTap';
   import { startFloatMove, startFloatResize } from '$lib/helpers/floatWindowGestures';
   import VideoReconnectOverlay from '$lib/components/video/VideoReconnectOverlay.svelte';
@@ -108,8 +108,13 @@
   const btnAtFrame = $derived(open && $videoState.floatSnapped);
   const btnLeft = $derived(btnAtFrame ? left + width + FLOAT_BTN_GAP_PX : FLOAT_MARGIN_PX);
   const btnTop = $derived(btnAtFrame ? top + height - FLOAT_BTN_PX : vh - FLOAT_SNAP_BOTTOM_PX - FLOAT_BTN_PX);
+  // The button stands for what the window shows when it is out: a map that waits in the video tile comes back
+  // to the window where the tile then hides (a sink with one output).
+  const mapButton = $derived(
+    mapHere || (MAX_SURFACES === 1 && $videoState.nativeSink && !$videoState.floating && $videoState.mapLocation === 'widget'),
+  );
   const btnLabel = $derived(
-    mapHere
+    mapButton
       ? ($videoState.floating ? $t('video.dockMapHide') : $t('video.dockMapShow'))
       : ($videoState.floating ? $t('video.dockHide') : $t('video.dockShow')),
   );
@@ -138,7 +143,7 @@
     title={btnLabel}
     aria-label={btnLabel}
   >
-    {#if mapHere}
+    {#if mapButton}
       <!-- map -->
       <svg viewBox="2 2 20 20" aria-hidden="true">
         <path d="M3 6.5 9 4l6 2.5 6-2.5v13.5L15 20l-6-2.5L3 20z" />
@@ -357,6 +362,14 @@
     /* Matches the body's rounding — the surface router reads this radius and cuts the
        hole with rounded corners, so the map behind caps the native layer's square edges. */
     border-radius: 5px;
+  }
+  /* A switch between surfaces leaves this one unserved for a few frames — the note is for the lasting state. */
+  .native-hole span {
+    animation: nv-note-late 0.01s 0.6s both;
+  }
+  @keyframes nv-note-late {
+    from { opacity: 0; }
+    to { opacity: 1; }
   }
   .native-hole.armed {
     background: transparent;

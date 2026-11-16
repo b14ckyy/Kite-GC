@@ -18,7 +18,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { videoStream, videoState, bindVideoEl, setMapLocation, setWidgetRect, reportMjpegError, reportImgSize, fpsProbe } from '$lib/stores/video';
   import { canvasSink, mjpegSink } from '$lib/controllers/mjpegSink';
-  import { nativeSurface, activeNativeSurfaces } from '$lib/controllers/nativeVideo';
+  import { nativeSurface, activeNativeSurfaces, MAX_SURFACES } from '$lib/controllers/nativeVideo';
   import { doubleTap, mouseDoubleClick } from '$lib/helpers/doubleTap';
   import VideoReconnectOverlay from '$lib/components/video/VideoReconnectOverlay.svelte';
 
@@ -91,6 +91,9 @@
 
   function swapHere() {
     if ($videoState.status !== 'live' || mapHere) return;
+    // Behind the floating window on a one-output sink (the tile shows only as its dock's last widget): the
+    // docks would send the map straight back to the window.
+    if (MAX_SURFACES === 1 && $videoState.nativeSink && $videoState.floating) return;
     setMapLocation('widget');
   }
 </script>
@@ -225,6 +228,14 @@
     color: #888;
     font-size: 12px;
     text-align: center;
+  }
+  /* A switch between surfaces leaves this one unserved for a few frames — the note is for the lasting state. */
+  .native-hole span {
+    animation: nv-note-late 0.01s 0.6s both;
+  }
+  @keyframes nv-note-late {
+    from { opacity: 0; }
+    to { opacity: 1; }
   }
   .native-hole.armed {
     background: transparent;
