@@ -305,6 +305,10 @@ inside the box of the feature release they belong to, so the notes for one relea
       instead of redrawn on every heading change, and in heading-up mode turning the map no
       longer restyles every tile and line on it — smoother panels and gestures while following,
       on every platform. [#288]
+    - **Live AGL widget: lighter, and more room ahead.** The terrain profile redraws once per
+      new position or turn instead of on every telemetry message, which costs noticeably fewer
+      frames on tablets and phones. The flown part now takes 15 % of the width instead of a third,
+      so more of the terrain ahead is visible.
 
     *Logbook and replay*
 
