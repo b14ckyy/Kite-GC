@@ -597,6 +597,8 @@ struct FusedPos {
     course: f64,
     fix_type: u8,
     num_sat: u8,
+    /// A GPS_RAW_INT arrived: its fix type stands from then on, "no fix" included.
+    raw_seen: bool,
 }
 
 /// Dispatch a received MAVLink message to the same Tauri events as the MSP scheduler.
@@ -702,9 +704,9 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
             }
 
             let gps = GpsData {
-                // Fix/sat come from GPS_RAW_INT (cached). Before the first GPS_RAW_INT, GLOBAL_POSITION_INT
-                // already implies at least a 3D fix, so fall back to 2 rather than reporting "no fix".
-                fix_type: if fused.fix_type > 0 { fused.fix_type } else { 2 },
+                // ArduPilot sends GLOBAL_POSITION_INT without a fix too (position 0/0), so only a real
+                // position on a link that never carried GPS_RAW_INT is taken as a 3D fix.
+                fix_type: if fused.raw_seen || (gpi.lat == 0 && gpi.lon == 0) { fused.fix_type } else { 2 },
                 num_sat: fused.num_sat,
                 lat: fused.lat,
                 lon: fused.lon,
@@ -745,6 +747,7 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
             // values instead of emitting a conflicting fix/0-sats (which made the UI flash).
             fused.fix_type = fix_type;
             fused.num_sat = gps.satellites_visible;
+            fused.raw_seen = true;
 
             // Position comes from the fused GLOBAL_POSITION_INT solution (cached in `fused`) — emitting
             // GPS_RAW_INT's own raw lat/lon here would interleave two offset position streams and
