@@ -21,6 +21,7 @@
   import { startBreachMonitor } from "$lib/controllers/breachMonitor";
   import { startAlertAudio } from "$lib/controllers/alertAudio";
   import { get } from "svelte/store";
+  import { phoneEdit } from "$lib/stores/phoneEdit.svelte";
   import { t, locale } from 'svelte-i18n';
   import Map from "$lib/components/Map.svelte";
   import Map3D from "$lib/components/Map3D.svelte";
@@ -2868,15 +2869,30 @@
     8 + PHONE_CTL_STEP_PX * (hasVideo && $videoState.status === 'live' && !phoneCtrl.isPhoneWidgetActive(phoneWidgets, 'videoFeed') ? 3 : 2),
   );
 
-  // The video store learns whether a Video widget is on screen (dock or phone grid): Start then
-  // leaves the floating window parked — the widget is the picture.
+  // A Video widget on screen (dock or phone grid). The video store needs it: Start then leaves the
+  // floating window parked — the widget is the picture.
+  const videoTileOnScreen = $derived(
+    phoneUi
+      ? phoneCtrl.isPhoneWidgetActive(phoneWidgets, 'videoFeed')
+      : (panels.bottom.includes('videoFeed') && $layout.bottomDock.visible) ||
+          (panels.right.includes('videoFeed') && $layout.sideDock.visible),
+  );
   $effect(() => {
-    setVideoWidgetActive(
-      phoneUi
-        ? phoneCtrl.isPhoneWidgetActive(phoneWidgets, 'videoFeed')
-        : (panels.bottom.includes('videoFeed') && $layout.bottomDock.visible) ||
-            (panels.right.includes('videoFeed') && $layout.sideDock.visible),
-    );
+    setVideoWidgetActive(videoTileOnScreen);
+  });
+  // A map in the floating window moves into the video tile once that window is gone: put away, or — phone —
+  // replaced by the tile (the grid's video widget takes the dock's place). Not while the phone's edit mode
+  // parks the window for the moment; checked a task later, when the dock has reacted to the same change.
+  $effect(() => {
+    const windowGone = phoneUi || !$videoState.floating;
+    if ($videoState.mapLocation !== 'floating' || !videoTileOnScreen || !windowGone || phoneEdit.editing) return;
+    const id = setTimeout(() => {
+      const v = get(videoState);
+      if (v.mapLocation === 'floating' && v.status === 'live' && (phoneUi || !v.floating) && !phoneEdit.editing) {
+        setMapLocation('widget');
+      }
+    }, 0);
+    return () => clearTimeout(id);
   });
 
   function toggleWidget(widgetId: string) {
