@@ -118,7 +118,7 @@
   import MapSearch from "$lib/components/MapSearch.svelte";
   import PhoneBottomBar from "$lib/components/phone/PhoneBottomBar.svelte";
   import PhoneDragGhost from "$lib/components/phone/PhoneDragGhost.svelte";
-  import { setNativeRightBound } from "$lib/controllers/nativeVideo";
+  import { setNativeRightBound, MAX_SURFACES as NATIVE_SURFACE_CAP } from "$lib/controllers/nativeVideo";
   import { doubleTap, mouseDoubleClick } from "$lib/helpers/doubleTap";
   import { startFloatMove, startFloatResize } from "$lib/helpers/floatWindowGestures";
   import { initVideo, videoState, videoStream, bindVideoEl, setMapLocation, reportMjpegError, setVideoWidgetActive, floatFrameRect, togglePhoneDockCompact, PHONE_DOCK_COMPACT, FLOAT_BEZEL_PX, FLOAT_MARGIN_PX, FLOAT_BTN_PX, FLOAT_BTN_GAP_PX } from "$lib/stores/video";
@@ -3003,6 +3003,14 @@
   const WIDGET_TICK_MS = 100;
   const tickedTelem = isMobile ? tickSnapshot(() => telem, WIDGET_TICK_MS) : null;
   const widgetTelem = $derived(tickedTelem ? tickedTelem() : telem);
+  // The video tile takes no dock space while it has nothing to show — no stream, or (a sink with one
+  // output) the floating window holds the picture; edit mode shows it for placing.
+  const videoTileBehindWindow = $derived(NATIVE_SURFACE_CAP === 1 && $videoState.floating);
+  const idleWidgetIds = $derived($videoState.status === 'off' || videoTileBehindWindow ? ['videoFeed'] : []);
+  // Docks only (the phone grid keeps its tile): a map inside the tile moves on before the tile hides.
+  $effect(() => {
+    if (!phoneUi && videoTileBehindWindow && $videoState.mapLocation === 'widget') setMapLocation('floating');
+  });
 
   // ── Active-WP highlight trust gating (see MISSION_TRACKING_AND_PROVENANCE.md) ──
   // Replay: the mission has the DB flag (or the user confirmed once for this log/file).
@@ -4036,6 +4044,7 @@
         pxPerVmin={bottomPxPerUnit}
         smallBoost={isPhonePortrait ? 1.5 : isTablet ? 1.4 : 1}
         sizes={panels.sizes ?? {}}
+        idleIds={idleWidgetIds}
         bind:crossPx={bottomPanelCrossPx}
         telem={widgetTelem}
         bind:editing={widgetEditMode}
@@ -4060,6 +4069,7 @@
       pxPerVmin={sidePxPerUnit}
       smallBoost={isTablet ? 1.4 : 1}
       sizes={panels.sizes ?? {}}
+      idleIds={idleWidgetIds}
       bind:crossPx={sidePanelCrossPx}
       telem={widgetTelem}
       bind:editing={widgetEditMode}

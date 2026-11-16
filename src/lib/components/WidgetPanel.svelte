@@ -21,6 +21,7 @@
     pxPerVmin = 1,
     smallBoost = 1,
     sizes = {},
+    idleIds = [],
     crossPx = $bindable(0),
     telem,
     interfaceSettings = { speedUnit: 'kmh', altitudeUnit: 'm', distanceUnit: 'metric', verticalSpeedUnit: 'ms', temperatureUnit: 'c' },
@@ -40,6 +41,8 @@
     smallBoost?: number;
     /** Per-widget size state (PanelConfig.sizes); a missing entry = the widget's default size. */
     sizes?: Record<string, WidgetSize>;
+    /** Widgets with nothing to show right now: they take no room, except in edit mode where they can be placed. */
+    idleIds?: string[];
     /** OUT: the panel's cross-axis extent in px (height in the bottom dock, width in the side dock) =
      *  its largest widget. The dock adapts to it (WIDGET_OVERHAUL.md D7) and the unobstructed
      *  fullscreen video reserves exactly this much. */
@@ -297,7 +300,7 @@
   const crossFactor = (state: WidgetSize) => (state === 'S' ? smallRatio * smallBoost : 1);
 
   // Compute widget sizes based on available space
-  function computeSizes(): { id: string; state: WidgetSize; size: number }[] {
+  function computeSizes(): { id: string; state: WidgetSize; hidden: boolean; size: number }[] {
     if (widgetIds.length === 0) return [];
 
     // Cross-axis determines the target large widget size (fill dock height/width).
@@ -305,15 +308,20 @@
     const effectiveLargeBase = Math.min(maxWidgetVmin, LARGE_BASE_VMIN);
 
     let totalUnits = 0;
+    let shown = 0;
     const items = widgetIds.map(id => {
       const state = effectiveWidgetSize(id, sizes);
-      totalUnits += unitsFor(state);
-      return { id, state };
+      const hidden = !editing && idleIds.includes(id);
+      if (!hidden) {
+        totalUnits += unitsFor(state);
+        shown++;
+      }
+      return { id, state, hidden };
     });
 
     // Gap between widgets in vmin
     const gapVmin = 0.5;
-    const totalGaps = (widgetIds.length - 1) * gapVmin;
+    const totalGaps = Math.max(0, shown - 1) * gapVmin;
     const usableVmin = availableVmin - totalGaps;
 
     // Check if widgets fit at their effective base size, scale down if not
@@ -343,7 +351,7 @@
 
   // Report the cross-axis extent (= the largest widget) — see the `crossPx` prop.
   $effect(() => {
-    const max = items.reduce((m, it) => Math.max(m, it.sizePx), 0);
+    const max = items.reduce((m, it) => (it.hidden ? m : Math.max(m, it.sizePx)), 0);
     if (max !== crossPx) crossPx = max;
   });
 
@@ -564,6 +572,7 @@
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       class="widget-slot"
+      class:idle={item.hidden}
       data-slot-idx={idx}
       class:dragging={dragIdx === idx}
       class:editing
@@ -728,6 +737,10 @@
     stroke: currentColor;
     stroke-width: 2;
     stroke-linejoin: round;
+  }
+
+  .widget-slot.idle {
+    display: none;
   }
 
   .widget-panel.editing .widget-slot {

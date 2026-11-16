@@ -1880,8 +1880,12 @@ export function floatFrameRect(s: VideoState, vw: number, vh: number): { left: n
 }
 
 export function toggleFloating(): void {
-  patch({ floating: !get(videoState).floating });
+  const s = get(videoState);
+  const floating = !s.floating;
+  patch({ floating });
   savePrefs();
+  // The map does not stay in a window that is put away.
+  if (s.mapLocation === 'floating' && !floating) setMapLocation(videoWidgetActive ? 'widget' : 'main');
 }
 
 /** Park / recall the floating window for the moment, without storing it: the phone's widget edit
