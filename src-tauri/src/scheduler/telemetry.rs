@@ -88,6 +88,23 @@ pub struct GpsData {
     pub course: f64,      // degrees * 10 → degrees
 }
 
+/// One physical receiver for the `telemetry-gps-receivers` event (MAVLink GPS_RAW_INT = id 0,
+/// GPS2_RAW = id 1): its own raw values, where `telemetry-gps` carries the fused position.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct GpsReceiverData {
+    pub id: u8,
+    /// Unified fix scale, see `FIX_NONE` … `FIX_DGPS`.
+    pub fix_type: u8,
+    /// MAVLink `GPS_FIX_TYPE` as sent: 0 no receiver, 1 no fix, 2 2D, 3 3D, 4 DGPS, 5 RTK float,
+    /// 6 RTK fixed, 7 static, 8 PPP.
+    pub fix_raw: u8,
+    pub num_sat: u8,
+    pub hdop: Option<f64>,
+    pub lat: f64,     // decimal degrees
+    pub lon: f64,     // decimal degrees
+    pub alt_msl: f64, // meters
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AltitudeData {
     pub altitude: f64, // cm → meters

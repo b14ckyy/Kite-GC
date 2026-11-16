@@ -409,6 +409,8 @@ export interface AppSettings {
   /** Per-widget battery selection: 'auto' or an instance id (as a string). Keyed by widget id
    *  ('battery' / 'battery2'). Lets each battery widget pin a specific pack. See MULTI_BATTERY.md. */
   batterySelect: Record<string, string>;
+  /** GPS widget with two receivers: 'ekf' = fused position, 'cycle' = alternate between the receivers. */
+  gpsWidgetMode: 'ekf' | 'cycle';
   /** Which FC system messages (MAVLink STATUSTEXT) surface as on-screen toasts. */
   systemMessages: SystemMessagesLevel;
   /** Backend diagnostic file-log verbosity (applied to the Rust logger on startup + on change). */
@@ -508,6 +510,7 @@ const defaults: AppSettings = {
   warnAltitudeM: 120,
   batteryAlertPct: 30,
   batterySelect: {},
+  gpsWidgetMode: 'ekf',
   systemMessages: 'warning',
   logLevel: 'warning',
   interface: {

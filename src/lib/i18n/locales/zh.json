@@ -114,7 +114,10 @@
     "noFix": "无定位",
     "fix2d": "2D",
     "fix3d": "3D",
-    "fix3dDgps": "3D DGPS"
+    "fix3dDgps": "3D DGPS",
+    "noGps": "无GPS",
+    "rtkFloat": "RTK FLT",
+    "rtkFixed": "RTK FIX"
   },
   "rcLink": {
     "title": "链路",
@@ -1413,6 +1416,8 @@
     "alt": "高度",
     "mUnit": "m",
     "bat": "电池",
+    "cyc": "CYC",
+    "ekf": "EKF",
     "home": "家",
     "thr": "油门",
     "acc": "加速",

@@ -48,7 +48,7 @@ Every line is one complete JSON object terminated by `\n` (NDJSON). Read line by
 a fixed size.
 
 ```json
-{"schema":1,"hello":true,"groups":["gps","attitude","altitude","altRef","wind","battery","batteries","link","status","sensors","flightMode","nav","ekf","misc","vehicle","passiveProtocol","lastUpdate"],"rateHz":5}
+{"schema":1,"hello":true,"groups":["gps","gpsReceivers","attitude","altitude","altRef","wind","battery","batteries","link","status","sensors","flightMode","nav","ekf","misc","vehicle","passiveProtocol","lastUpdate"],"rateHz":5}
 ```
 
 A client that stops reading is disconnected after 200 ms of back-pressure, so one stuck consumer
@@ -87,6 +87,7 @@ delayed, and there is no back-pressure on Kite's side.
   "fcVariant": "INAV",
   "telemetry": {
     "gps": { "lat": 51.4923, "lon": 11.9263, "altMsl": 143.2, "groundSpeed": 18.4, "course": 271.5, "numSat": 14, "fixType": 2, "hdop": 0.9 },
+    "gpsReceivers": null,
     "attitude": { "roll": -2.1, "pitch": 3.4, "yaw": 271.0 },
     "altitude": { "altitude": 120.5, "vario": 0.8, "airspeed": 19.2 },
     "altRef": { "msl": true },
@@ -139,6 +140,26 @@ integers. **Sources** lists which links fill the group; a field the source does 
 | `numSat` | int | Satellites used. |
 | `fixType` | int | 0 none · 1 = 2D · 2 = 3D · 3 = DGPS/RTK — one scale for every link (MSP, MAVLink and passive telemetry), not the raw MAVLink `GPS_FIX_TYPE`. |
 | `hdop` | float · null | Horizontal dilution of precision. MSP (INAV) and MAVLink; `null` on passive links. |
+
+On MAVLink the position is the autopilot's fused estimate, and with two receivers `numSat`,
+`fixType` and `hdop` are those of the better one (higher fix, then more satellites).
+
+#### `gpsReceivers` — sources: MAVLink (`GPS_RAW_INT`, `GPS2_RAW`)
+
+Array, one object per GPS receiver the autopilot reports, with that receiver's own raw values. A
+receiver is listed once it has reported more than "no receiver" and stays listed if it drops out
+(`fixRaw` 0, also when its message stops for five seconds). `null` on MSP and passive links, and
+until the first receiver is listed.
+
+| Field | Type | Unit |
+| --- | --- | --- |
+| `id` | int | 0 = first receiver, 1 = second. |
+| `lat`, `lon` | float | Decimal degrees, WGS-84, as this receiver reports them. |
+| `altMsl` | float | Metres above mean sea level. |
+| `numSat` | int | Satellites used. |
+| `fixType` | int | The same scale as `gps.fixType`. |
+| `fixRaw` | int | The MAVLink `GPS_FIX_TYPE` as sent: 0 no receiver · 1 no fix · 2 = 2D · 3 = 3D · 4 DGPS · 5 RTK float · 6 RTK fixed · 7 static · 8 PPP. |
+| `hdop` | float · null | Horizontal dilution of precision; `null` when the receiver reports none. |
 
 #### `attitude` — sources: all
 

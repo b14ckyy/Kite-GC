@@ -248,8 +248,19 @@ inside the box of the feature release they belong to, so the notes for one relea
     - **Default protocol** — Settings → Interface → UI pins the protocol Kite opens with to MSP,
       MAVLink or Telemetry; the default stays *Last used*. [#151]
 
+    - **Telemetry API: every GPS receiver on its own** — on a MAVLink link the new `gpsReceivers`
+      group lists each receiver the autopilot reports with its own position, satellites, fix type
+      (unified and raw MAVLink value) and HDOP. See the
+      [Telemetry API](reference/telemetry-api.md) reference. [#297]
+
     *Interface*
 
+    - **GPS widget shows both receivers** — on an ArduPilot aircraft with two GPS receivers the
+      widget's title switches between **EKF** (the fused position, with fix type and satellites
+      of the better receiver) and **CYC**, which alternates between GPS1 and GPS2 every three
+      seconds. On MAVLink the fix type now also reads NO GPS, RTK FLT and RTK FIX. The GPS
+      sensor tile turns amber as soon as one of the two receivers is below a 3D fix. See
+      [Telemetry & display](guides/telemetry-and-display.md). [#297]
     - **Resizable widgets** — every flight widget has two or three sizes, switched with a corner
       button in edit mode; the docks adapt to their largest widget. [#101]
     - **Raw telemetry view** — the **≡ Raw** button in the top bar lists every telemetry value in
