@@ -288,26 +288,26 @@
           {#if hasAltitude && inGuided}
             <div class="cc-adjust">
               <NumberStepper bind:value={changeAltVal} min={1} max={5000} step={5} unit="m" />
-              <Button variant="standard" size="sm" disabled={busy('changeAlt')} onclick={() => changeAlt(changeAltVal)}>{$t('control.action.changeAlt')}</Button>
+              <Button variant="standard" disabled={busy('changeAlt')} onclick={() => changeAlt(changeAltVal)}>{$t('control.action.changeAlt')}</Button>
             </div>
           {/if}
           {#if canSetHeading}
             <div class="cc-adjust">
               <NumberStepper bind:value={headingVal} min={0} max={359} step={5} unit="°" />
-              <Button variant="standard" size="sm" disabled={busy('setHeading')} onclick={() => setHeading(headingVal)}>{$t('control.action.setHeading')}</Button>
+              <Button variant="standard" disabled={busy('setHeading')} onclick={() => setHeading(headingVal)}>{$t('control.action.setHeading')}</Button>
             </div>
           {/if}
           <div class="cc-adjust">
             <NumberStepper bind:value={changeSpeedVal} min={1} max={100} step={1} unit="m/s" />
-            <Button variant="standard" size="sm" disabled={busy('changeSpeed')} onclick={() => changeSpeed(changeSpeedVal, isFixedWing)}>{$t('control.action.changeSpeed')}</Button>
+            <Button variant="standard" disabled={busy('changeSpeed')} onclick={() => changeSpeed(changeSpeedVal, isFixedWing)}>{$t('control.action.changeSpeed')}</Button>
           </div>
           {#if isFixedWing}
             <div class="cc-adjust">
               <NumberStepper bind:value={loiterRadVal} min={10} max={2000} step={10} unit="m" />
-              <Button variant="standard" size="sm" disabled={busy('setLoiterRadius')} onclick={() => setLoiterRadius(loiterRadVal)}>{$t('control.action.setLoiterRadius')}</Button>
+              <Button variant="standard" disabled={busy('setLoiterRadius')} onclick={() => setLoiterRadius(loiterRadVal)}>{$t('control.action.setLoiterRadius')}</Button>
             </div>
           {/if}
-          <Button variant="standard" size="sm" full disabled={busy('setHome')} onclick={() => setHomeHere()}>{$t('control.action.setHome')}</Button>
+          <Button variant="standard" full disabled={busy('setHome')} onclick={() => setHomeHere()}>{$t('control.action.setHome')}</Button>
         </section>
 
         <!-- 6. Other modes (quick switch) -->
@@ -321,7 +321,7 @@
                   <HoldToConfirm variant="warning" onconfirm={() => pickMode(m)}>{m.name}</HoldToConfirm>
                 </div>
               {:else}
-                <Button variant="mode" size="sm" active={activeKey === m.key} onclick={() => pickMode(m)}>{m.name}</Button>
+                <Button variant="mode" active={activeKey === m.key} onclick={() => pickMode(m)}>{m.name}</Button>
               {/if}
             {/each}
           </div>
@@ -336,7 +336,7 @@
             {#if rcModesOpen}
               <div class="cc-modegrid">
                 {#each stickModes as m}
-                  <Button variant="mode" size="sm" active={activeKey === m.key} disabled={!stickUnlocked} onclick={() => pickMode(m)}>{m.name}</Button>
+                  <Button variant="mode" active={activeKey === m.key} disabled={!stickUnlocked} onclick={() => pickMode(m)}>{m.name}</Button>
                 {/each}
               </div>
             {/if}
@@ -346,7 +346,7 @@
         <!-- 7. Mission control -->
         <section class="cc-sec">
           <span class="cc-sec-title">{$t('control.section.mission')}</span>
-          <Button variant="data" icon="download" size="sm" full disabled={busy('missionDownload')} onclick={handleMissionDownload}>
+          <Button variant="data" icon="download" full disabled={busy('missionDownload')} onclick={handleMissionDownload}>
             {$t('control.action.missionDownload')}
           </Button>
           <div class="cc-row">
@@ -369,7 +369,7 @@
                 <option value={i + 1}>{wpLabel(i)}</option>
               {/each}
             </select>
-            <Button variant="standard" size="sm" disabled={!$arduMissionFcSynced || wpCount === 0 || busy('setWp')} onclick={setActiveWp}>
+            <Button variant="standard" disabled={!$arduMissionFcSynced || wpCount === 0 || busy('setWp')} onclick={setActiveWp}>
               {$t('control.action.setWp')}
             </Button>
           </div>
@@ -433,6 +433,8 @@
     align-items: center;
     gap: 8px;
   }
+  /* The stepper as tall as the button beside it. */
+  .cc-adjust :global(.ns-input) { min-height: 26px; }
   /* Let the button take the remaining width next to the fixed-size stepper. */
   .cc-adjust :global(button) { flex: 1; }
 
@@ -467,13 +469,13 @@
     letter-spacing: 0.5px;
     color: #949494;
   }
-  /* A hold-to-confirm mode in the quick grid: Button size="sm" metrics, the active mode outlined. */
+  /* A hold-to-confirm mode in the quick grid: Button metrics, the active mode outlined. */
   .cc-confirm :global(.htc) {
-    min-height: 24px;
-    height: 24px;
-    padding: 0 8px;
+    min-height: 28px;
+    height: 28px;
+    padding: 0 10px;
     border-radius: 4px;
-    font-size: 11px;
+    font-size: 12px;
   }
   .cc-confirm.active :global(.htc) { box-shadow: inset 0 0 0 1px #37a8db; }
   .cc-modegrid {
@@ -511,6 +513,7 @@
     align-items: stretch;
   }
   .cc-setwp .cc-select { flex: 1; }
+  .cc-setwp :global(.kbtn) { height: 30px; }
   .cc-setwp.disabled { opacity: 0.5; }
   .cc-setwp-hint {
     font-size: 10.5px;
