@@ -1911,6 +1911,11 @@ stays <em>Stable releases</em>. <a href="https://github.com/b14ckyy/Kite-GC/pull
 </ul>
 <p><em>Logbook and replay</em></p>
 <ul>
+<li><strong>Android: exports go to the share sheet</strong> — flights, tracks, missions, vehicles and batteries
+  are handed to the system share sheet instead of a save dialog (Android 14 and later also offer
+  <em>Save to device</em> there). See <a href="../guides/logbook/#exporting">Logbook</a>. [#315]</li>
+<li><strong>Readable file names for exported flights</strong> — vehicle, location, date and time instead of
+  the flight number, on every platform. [#315]</li>
 <li><strong>Database upgrade you can see</strong> — while Kite backs up and upgrades the flight database it
   shows a notice instead of an empty logbook; afterwards it names the size of the backup and asks
   whether to delete it (to the recycle bin on desktop), keep it, or be reminded in 14 days.

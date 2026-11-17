@@ -2180,6 +2180,16 @@ original-log export are desktop features, and so is the <strong>Open</strong> bu
   straight in (not kept as a file), so there's nothing to re-export for those.</li>
 <li><strong>Track</strong> — export a flight's path as <strong>KMZ / KML</strong> (Google Earth), <strong>GPX</strong> or <strong>CSV</strong>.</li>
 </ul>
+<p>The proposed file name of a single flight is its vehicle name and location where known, followed by the
+flight's date and local time — <code>Flight_&lt;number&gt;</code> stands in when neither is known.</p>
+<div class="admonition note">
+<p class="admonition-title">On Android</p>
+<p>An export opens the system <strong>share sheet</strong> instead of a save dialog: send the file to another
+device or person, a cloud drive, or a file manager. The file keeps the proposed name. From
+Android 14 the sheet also offers <strong>Save to device</strong>, which opens the system's save dialog. On
+older versions, share to a file manager app to keep the file on the device — the system's own
+Files app is not offered as a share target on every device.</p>
+</div>
 <h2 id="the-database-updates-and-the-automatic-backup">The database, updates and the automatic backup<a class="headerlink" href="#the-database-updates-and-the-automatic-backup" title="Permanent link">&para;</a></h2>
 <p>All flights live in a single SQLite database (<code>flights.db</code>, folder configurable in Settings). When a
 Kite update needs to <strong>upgrade the database format</strong>, Kite first writes a <strong>full backup</strong> next to the
