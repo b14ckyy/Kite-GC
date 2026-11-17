@@ -598,10 +598,25 @@ export function planFirmwareTarget(text: string): 'ardupilot' | 'px4' {
   }
 }
 
-/** Replace the working mission with waypoints loaded from a file — the shared post-parse sequence
- *  of every file-import path (panel dialog, global drag-drop): fresh selection, not a library
- *  mission, fresh undo baseline, FILE provenance. */
-export function loadArduMissionFromFile(wps: ArduWaypoint[]): void {
+/** Vehicle class a .plan was made for (`mission.vehicleType` is a MAV_TYPE), or null when it does not say. */
+export function planVehicleClass(text: string): VehicleClass | null {
+  try {
+    const type = (JSON.parse(text) as { mission?: { vehicleType?: number } })?.mission?.vehicleType;
+    return typeof type === 'number' ? mavTypeToClass(type) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A vehicle class read from a file or a library entry; unknown values are dropped. */
+export function knownVehicleClass(cls: string | null | undefined): VehicleClass | null {
+  return cls != null && (VEHICLE_CLASSES as string[]).includes(cls) ? (cls as VehicleClass) : null;
+}
+
+/** Shared post-parse step of every file import (FILE provenance, not a library mission). A class the
+ *  file names selects the editor's class; ignored while connected, the FC decides then. */
+export function loadArduMissionFromFile(wps: ArduWaypoint[], vehicleClass: VehicleClass | null = null): void {
+  if (vehicleClass) setArduVehicleClass(vehicleClass);
   arduMission.set(wps);
   arduSelectedWpIndex.set(-1);
   arduLoadedMissionId.set(null);

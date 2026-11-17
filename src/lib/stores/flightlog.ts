@@ -33,7 +33,7 @@ export {
 
 // ── Tauri command wrappers ───────────────────────────────────────────
 
-import type { FlightSummary, Flight, TelemetryRecord, BatteryRecord, BlackboxImportStatus, KflightImportResult, LibraryMission, LibraryMissionInput, BatteryPack, BatteryPackInput, BatteryAggregate, BatteryFile, Vehicle, VehicleInput, VehicleAggregate, VehicleFile, VehicleResolution } from './flightlogTypes';
+import type { FlightSummary, Flight, TelemetryRecord, BatteryRecord, BlackboxImportStatus, KflightImportResult, LibraryMission, LibraryMissionInput, BatteryPack, BatteryPackInput, BatteryAggregate, BatteryFile, Vehicle, VehicleInput, VehicleAggregate, VehicleFile, VehicleResolution, MissionFile } from './flightlogTypes';
 import type { BatteryInstance } from './telemetry';
 
 /** Save a mission to the library (dedup by content hash). Returns the mission id. */
@@ -92,6 +92,19 @@ export async function missionDbSetMeta(id: number, name: string, notes: string |
     notes,
     dbPath: dbPath || undefined,
   });
+}
+
+export async function missionFileWrite(path: string, id: number, dbPath: string): Promise<void> {
+  return invoke<void>('mission_file_write', { path, id, dbPath: dbPath || undefined });
+}
+
+/** `extra_json` is the file's extra data as text: it is stored as it is, never re-serialised here. */
+export async function missionFileRead(path: string): Promise<{ file: MissionFile; extra_json: string | null }> {
+  return invoke<{ file: MissionFile; extra_json: string | null }>('mission_file_read', { path });
+}
+
+export async function missionDbSetExtra(id: number, extraJson: string | null, dbPath: string): Promise<void> {
+  return invoke<void>('mission_db_set_extra', { id, extraJson, dbPath: dbPath || undefined });
 }
 
 /** Export a library mission (its waypoints JSON) to a .mission file (INAV). */

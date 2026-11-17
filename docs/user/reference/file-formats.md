@@ -7,11 +7,12 @@ Kite can save/export it.
 
 | Format | Extension | R/W | Notes |
 |---|---|---|---|
+| **Kite mission** | `.kmission` | R / W | One entry of the mission library as it is: waypoints, name, notes, target system, planned home, vehicle class — an INAV entry with several missions included. For moving missions between Kite installs: an older Kite keeps data of a newer one it cannot use yet and has it after the update. Exported and imported in the Mission Manager. |
 | **INAV mission** | `.mission` | R / W | MultiWii XML, compatible with the INAV Configurator and MWPTools. |
 | **ArduPilot / PX4 mission** | `.waypoints` | R / W | QGroundControl-compatible plain text. |
 | **QGroundControl plan** | `.plan` | R | QGC's JSON plan — the format QGC saves (PX4 workflows). A Survey is imported as the waypoints QGC generated for it — the pattern itself (area, spacing, camera) is not kept, so it cannot be re-edited as a pattern in Kite. A pattern item that stores no waypoints is refused with a message. The plan's geofence/rally sections are ignored — manage those in Kite's own Airspace tools. |
 
-You can also drag a mission file straight onto the map. See **[Missions](../guides/missions.md)**.
+You can also drag a mission file straight onto the map; a `.kmission` goes into the library (and onto the map if that is empty). See **[Missions](../guides/missions.md)**.
 
 ## Flights & logs
 

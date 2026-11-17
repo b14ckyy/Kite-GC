@@ -17,7 +17,7 @@
   import { settings } from '$lib/stores/settings';
   import {
     missionDbList, missionDbFlights, missionDbDelete, missionDbSetMeta,
-    missionExportFileFromJson, missionDbGeocode, missionDbSave,
+    missionExportFileFromJson, missionFileWrite, missionDbGeocode, missionDbSave,
     formatDurationSec,
   } from '$lib/stores/flightlog';
   import type { LibraryMission, FlightSummary } from '$lib/stores/flightlogTypes';
@@ -29,16 +29,19 @@
   } from '$lib/stores/mission';
   import {
     arduMission, arduSelectedWpIndex, arduLoadedMissionId, markArduMissionSynced, arduClearUndoHistory,
-    parseWaypoints, parsePlanFile, planFirmwareTarget, type ArduWaypoint,
+    parseWaypoints, parsePlanFile, planFirmwareTarget, planVehicleClass, knownVehicleClass, setArduVehicleClass,
+    type ArduWaypoint,
   } from '$lib/stores/missionArdupilot';
   import { frameMissionOnMap } from '$lib/stores/mapCamera';
   import {
     autopilotSystem, autopilotLocked, setAutopilotSystem, confirmSystemSwitch,
     pendingSystemSwitch, type AutopilotSystem,
   } from '$lib/stores/autopilotContext';
-  import { missionManagerSelectedId, requestOpenFlightId } from '$lib/stores/missionManager';
+  import { missionManagerSelectedId, requestOpenFlightId, missionLibraryRevision } from '$lib/stores/missionManager';
   import { buildMissionInput, findLibraryMissionId } from '$lib/helpers/missionLibrary';
-  import { anyCase } from '$lib/helpers/fileFilters';
+  import { importMissionFile } from '$lib/helpers/missionFile';
+  import type { VehicleClass } from '$lib/helpers/arduCommandCatalog';
+  import { openFilters, missionFileKind } from '$lib/helpers/fileFilters';
   import { buildArduMissionInput, findArduLibraryMissionId } from '$lib/helpers/missionLibraryArdu';
   import { convertAltitude, convertDistance, formatConverted } from '$lib/utils/units';
   import PanelShell, { type PanelVariant } from '$lib/components/panel/PanelShell.svelte';
@@ -264,10 +267,13 @@
         );
       } else {
         const wps = JSON.parse(m.waypoints_json) as ArduWaypoint[];
+        // The class the mission was planned for; ignored while connected (the FC decides then).
+        const cls = knownVehicleClass(m.vehicle_class);
+        if (cls) setArduVehicleClass(cls);
         arduMission.set(wps);
         arduSelectedWpIndex.set(-1);
         arduLoadedMissionId.set(m.id);
-        arduClearUndoHistory(); // loaded mission = fresh undo baseline
+        arduClearUndoHistory();
         markArduMissionSynced('db', wps);
       }
       frameMissionOnMap(); // standalone library load → frame the mission (not a replay-linked attach)
@@ -277,21 +283,37 @@
     }
   }
 
-  async function exportMission(m: LibraryMission) {
+  const fileSafeName = (name: string) => (name || 'mission').replace(/[\\/:*?"<>|\x00-\x1f]+/g, ' ').trim() || 'mission';
+
+  /** The counter tells entries apart whose FILE names would be equal (same system, same name once the
+   *  characters a file system refuses are gone). */
+  function exportFileName(m: LibraryMission): string {
+    const sys = m.format === 'ardupilot' ? 'AP' : m.format === 'px4' ? 'PX' : 'IN';
+    const name = fileSafeName(m.name);
+    const twins = missions
+      .filter((x) => fileSafeName(x.name) === name && (x.format || 'inav') === (m.format || 'inav'))
+      .sort((x, y) => x.id - y.id);
+    const counter = twins.length > 1 ? `_${twins.findIndex((x) => x.id === m.id) + 1}` : '';
+    return `${name}_${sys}${counter}`;
+  }
+
+  const isMavFormat = (m: LibraryMission) => m.format === 'ardupilot' || m.format === 'px4';
+  const platformExt = (m: LibraryMission) => (isMavFormat(m) ? 'waypoints' : 'mission');
+
+  /** `kmission` carries the whole entry incl. data of a newer Kite; the platform format only the waypoints. */
+  async function exportMission(m: LibraryMission, kind: 'kmission' | 'platform') {
     try {
-      // ArduPilot/PX4 library rows hold ArduWaypoint JSON → QGC WPL 110 `.waypoints`; the Rust
-      // `.mission` (INAV XML) path only understands INAV waypoints.
-      const isMav = m.format === 'ardupilot' || m.format === 'px4';
-      const base = (m.name || 'mission').replace(/[^\w\-]+/g, '_');
+      const isMav = isMavFormat(m);
+      const ext = kind === 'kmission' ? 'kmission' : platformExt(m);
       const path = await save({
         title: $t('missionMgr.exportTitle'),
-        defaultPath: isMav ? `${base}.waypoints` : `${base}.mission`,
-        filters: isMav
-          ? [{ name: 'Waypoints', extensions: ['waypoints'] }]
-          : [{ name: 'Mission', extensions: ['mission'] }],
+        defaultPath: `${kind === 'kmission' ? exportFileName(m) : fileSafeName(m.name)}.${ext}`,
+        filters: [{ name: kind === 'kmission' ? $t('missionMgr.kmissionFilter') : isMav ? 'Waypoints' : 'Mission', extensions: [ext] }],
       });
       if (!path) return;
-      if (isMav) {
+      if (kind === 'kmission') {
+        await missionFileWrite(path, m.id, dbPath());
+      } else if (isMav) {
         const wps = JSON.parse(m.waypoints_json) as ArduWaypoint[];
         await invoke<void>('write_text_file', { path, content: serializeWaypoints(wps) });
       } else {
@@ -357,9 +379,7 @@
     }
   }
 
-  /** After an ArduPilot `.waypoints` file is parsed, ask whether to add it to the library and/or
-   *  load it onto the map (mirrors {@link importMission}, over the ArduPilot store). */
-  async function importArduMission(wps: ArduWaypoint[], suggestedName: string, system: 'ardupilot' | 'px4' = 'ardupilot') {
+  async function importArduMission(wps: ArduWaypoint[], suggestedName: string, system: 'ardupilot' | 'px4' = 'ardupilot', vehicleClass: VehicleClass | null = null) {
     const existingId = await findArduLibraryMissionId(wps, dbPath()).catch(() => null);
     const ans = await confirmDialog.show({
       title: $t('missionMgr.importTitle'),
@@ -372,7 +392,7 @@
     if (ans == null) return;
     if (ans === 'db') {
       if (existingId == null) {
-        const input = await buildArduMissionInput(wps, { name: suggestedName, format: system });
+        const input = await buildArduMissionInput(wps, { name: suggestedName, format: system, vehicleClass });
         const id = await missionDbSave(input, dbPath());
         void missionDbGeocode(id, lang(), dbPath()).catch(() => {});
       }
@@ -382,10 +402,11 @@
       // ArduPilot and PX4 share the editor: with a vehicle of the other one connected the plan still loads.
       const locked = get(autopilotLocked) && sameFamily(get(autopilotSystem), system);
       if (!locked && !(await ensureSystemForFormat(system))) return;
+      if (vehicleClass) setArduVehicleClass(vehicleClass);
       arduMission.set(wps);
       arduSelectedWpIndex.set(-1);
       arduLoadedMissionId.set(existingId);
-      arduClearUndoHistory(); // loaded mission = fresh undo baseline
+      arduClearUndoHistory();
       statusMessage = $t('missionMgr.loadedToMap');
     }
   }
@@ -399,18 +420,28 @@
 
   async function handleImportButton() {
     try {
-      const path = await open({ title: $t('missionMgr.openTitle'), multiple: false, filters: [{ name: 'Mission', extensions: anyCase(['mission', 'waypoints', 'txt', 'plan']) }] });
+      const path = await open({ title: $t('missionMgr.openTitle'), multiple: false, filters: openFilters('Mission', ['kmission', 'mission', 'waypoints', 'txt', 'plan']) });
       if (!path || typeof path !== 'string') return;
-      const stem = path.replace(/^.*[\\/]/, '').replace(/\.[^.]+$/, '');
-      const lower = path.toLowerCase();
-      if (lower.endsWith('.plan')) {
+      // The name as the user sees it: an Android document URI need not contain it.
+      const fileName = await invoke<string>('file_display_name', { path });
+      const stem = fileName.replace(/\.[^.]+$/, '');
+      const readText = () => invoke<string>('read_text_file', { path });
+      const kind = await missionFileKind(fileName, readText);
+      if (kind == null) { statusMessage = $t('missionMgr.unknownFile'); return; }
+      if (kind === 'kmission') {
+        const res = await importMissionFile(path, dbPath(), (o) => confirmDialog.show(o), (key) => $t(key));
+        if (!res) return;
+        if (formatFilter !== 'all') formatFilter = 'all'; // the entry may belong to a hidden system
+        await reload();
+        select(res.id);
+        statusMessage = $t(res.added ? 'missionMgr.imported' : 'mission.saveLibAlready');
+      } else if (kind === 'plan') {
         // The plan names its firmware: a PX4 plan must not be forced onto the ArduPilot tab (locked while a
         // PX4 vehicle is connected).
-        const text = await invoke<string>('read_text_file', { path });
-        await importArduMission(parsePlanFile(text), stem || autoName(), planFirmwareTarget(text));
-      } else if (lower.endsWith('.waypoints') || lower.endsWith('.txt')) {
-        const text = await invoke<string>('read_text_file', { path });
-        await importArduMission(parseWaypoints(text), stem || autoName());
+        const text = await readText();
+        await importArduMission(parsePlanFile(text), stem || autoName(), planFirmwareTarget(text), planVehicleClass(text));
+      } else if (kind === 'waypoints') {
+        await importArduMission(parseWaypoints(await readText()), stem || autoName());
       } else {
         const wps = await missionLoadFile(path, confirmReplaceAll);
         if (wps) await importMission(wps, stem || autoName());
@@ -426,9 +457,8 @@
     return `New Mission - ${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
   }
 
-  // No DOM drop zone here: with Tauri's dragDropEnabled the WebView never receives DOM drop
-  // events — file drops arrive as the native `tauri://drag-drop` event, routed in +page.svelte
-  // (a dropped mission file loads to the MAP; importing into the library stays on the button).
+  // No DOM drop zone: with Tauri's dragDropEnabled file drops arrive as the native `tauri://drag-drop`
+  // event, routed in +page.svelte.
 
   // ── Formatters ─────────────────────────────────────────────────────
   function fmtDist(m: number | null): string {
@@ -460,6 +490,15 @@
     autoResizeNotes(el, true);
     return { update() { autoResizeNotes(el, true); } };
   }
+
+  // The library changed outside this panel (a `.kmission` dropped on the window).
+  let seenRevision = get(missionLibraryRevision);
+  $effect(() => {
+    const rev = $missionLibraryRevision;
+    if (rev === seenRevision) return;
+    seenRevision = rev;
+    void reload();
+  });
 
   // Init once: load the list and restore any persisted selection.
   let didInit = false;
@@ -519,9 +558,6 @@
                       {#if setSize(m) > 1}<span class="fmt-badge multi-badge">{$t('missionMgr.multiBadge')}</span>{/if}
                     </div>
                   </button>
-                  <!-- Row-level delete, so removing a saved mission doesn't require selecting it first. -->
-                  <button class="lib-item-del" title={$t('missionMgr.delete')} aria-label={$t('missionMgr.delete')}
-                          onclick={(e) => { e.stopPropagation(); select(m.id); void deleteMission(m); }}>✕</button>
                 </div>
               {/each}
             </div>
@@ -535,7 +571,8 @@
 {#snippet detailToolbar()}
   <div class="mmv2-detail-actions">
     <Button variant="data" icon="map" onclick={() => selected && loadToMap(selected)}>{$t('missionMgr.loadToMap')}</Button>
-    <Button variant="data" icon="export" onclick={() => selected && exportMission(selected)} title={$t('missionMgr.export')} />
+    <Button variant="data" icon="export" onclick={() => selected && exportMission(selected, 'platform')} title={selected ? `${$t('missionMgr.export')} .${platformExt(selected)}` : undefined}>{selected ? `.${platformExt(selected)}` : ''}</Button>
+    <Button variant="data" icon="export" onclick={() => selected && exportMission(selected, 'kmission')} title={`${$t('missionMgr.export')} .kmission`}>{'.kmission'}</Button>
     <Button variant="danger" icon="delete" onclick={() => selected && deleteMission(selected)} title={$t('missionMgr.delete')} />
   </div>
 {/snippet}
@@ -627,12 +664,10 @@
   .tree-count { font-size: 10px; color: #8fb4c5; background: rgba(55, 168, 219, 0.12); border: 1px solid rgba(55, 168, 219, 0.32); border-radius: 999px; padding: 1px 6px; }
   .tree-items { margin-top: 4px; margin-left: 12px; }
 
-  .lib-item { position: relative; display: flex; align-items: stretch; width: calc(100% - 12px); border: 1px solid #555; border-radius: 4px; background: #383838; color: #ddd; margin-bottom: 4px; }
+  .lib-item { display: flex; align-items: stretch; width: calc(100% - 12px); border: 1px solid #555; border-radius: 4px; background: #383838; color: #ddd; margin-bottom: 4px; }
   .lib-item:hover { border-color: #37a8db; }
   .lib-item.selected { border-color: #37a8db; background: rgba(55, 168, 219, 0.18); }
-  .lib-item-main { flex: 1 1 auto; min-width: 0; text-align: left; padding: 6px 26px 6px 6px; background: transparent; border: 0; color: inherit; font: inherit; cursor: pointer; }
-  .lib-item-del { position: absolute; top: 4px; right: 4px; width: 20px; height: 20px; padding: 0; background: transparent; border: 1px solid transparent; border-radius: 3px; color: #888; font-size: 11px; line-height: 1; cursor: pointer; }
-  .lib-item-del:hover { border-color: #e06c6c; color: #e06c6c; background: rgba(224, 108, 108, 0.12); }
+  .lib-item-main { flex: 1 1 auto; min-width: 0; text-align: left; padding: 6px; background: transparent; border: 0; color: inherit; font: inherit; cursor: pointer; }
   .lib-item-title { font-size: 12px; color: #fff; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .lib-item-meta { margin-top: 2px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 10px; color: #aaa; }
   .multi-badge { color: #e8c98a; background: rgba(245, 166, 35, 0.14); border-color: rgba(245, 166, 35, 0.4); }

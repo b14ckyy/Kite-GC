@@ -158,9 +158,14 @@ pub struct Mission {
     /// 3D mission preview's height. Mirrors the `.mission` `<mwp>` meta written on file export.
     pub home_lat: Option<f64>,
     pub home_lon: Option<f64>,
+    /// Vehicle class the mission was planned for (ArduPilot / PX4: `plane`, `copter`, …); None = not set.
+    pub vehicle_class: Option<String>,
+    /// A JSON object of data this version may not know. Never parsed here: stored and handed on as it
+    /// came, or a newer version's data would be lost.
+    pub extra_json: Option<String>,
 }
 
-/// Payload for saving a mission to the library (no `id` / `created_at` — assigned by the DB).
+/// Payload for saving a mission to the library (no `id` — assigned by the DB).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MissionInput {
     pub content_hash: String,
@@ -180,6 +185,17 @@ pub struct MissionInput {
     pub notes: Option<String>,
     pub home_lat: Option<f64>,
     pub home_lon: Option<f64>,
+    #[serde(default)]
+    pub vehicle_class: Option<String>,
+    /// See `Mission::extra_json`. On an overwrite `None` keeps what the row holds.
+    #[serde(default)]
+    pub extra_json: Option<String>,
+    /// Only a `.kmission` import sets these two (the row comes from another library); else the DB's
+    /// own time and the geocoder fill them.
+    #[serde(default)]
+    pub created_at: Option<String>,
+    #[serde(default)]
+    pub location_name: Option<String>,
 }
 
 /// A battery pack in the library (row in `battery_packs`), identified by the user's `serial`; flights
@@ -577,3 +593,46 @@ pub struct BlackboxImportProgress {
     pub message: String,
 }
 
+/// A library mission exported to a `.kmission` file (one mission, or one INAV mission set, per file):
+/// the row as it is, so another library rebuilds it — statistics excepted, the importer computes them.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MissionFile {
+    /// Always "kmission" (validated on import).
+    pub format: String,
+    pub version: u32,
+    #[serde(default)]
+    pub exported_at: String,
+    #[serde(default)]
+    pub app_version: String,
+    pub mission: MissionFileBody,
+}
+
+/// `waypoints` and `extra` stay raw JSON text: parsed into a `Value` and written again, a float can come
+/// back one bit off — a new content hash for an ArduPilot / PX4 mission, changed data of a newer Kite.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MissionFileBody {
+    pub name: String,
+    /// `inav` | `ardupilot` | `px4`
+    pub format: String,
+    /// Informational: the importer derives the identity from the waypoints.
+    #[serde(default)]
+    pub content_hash: String,
+    pub waypoints: Box<serde_json::value::RawValue>,
+    #[serde(default)]
+    pub source_xml: Option<String>,
+    #[serde(default)]
+    pub home_lat: Option<f64>,
+    #[serde(default)]
+    pub home_lon: Option<f64>,
+    #[serde(default)]
+    pub notes: Option<String>,
+    #[serde(default)]
+    pub created_at: Option<String>,
+    #[serde(default)]
+    pub location_name: Option<String>,
+    #[serde(default)]
+    pub vehicle_class: Option<String>,
+    /// `Mission::extra_json`, embedded.
+    #[serde(default)]
+    pub extra: Option<Box<serde_json::value::RawValue>>,
+}

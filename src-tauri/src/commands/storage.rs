@@ -1,12 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Storage-access commands — the platform side of the custom database / raw-log folder settings.
-//
-// Desktop needs none of this: the dialog plugin's folder picker returns a real path there. Android
-// owns the difference: the system tree picker grants ONE folder (scoped storage, no permission),
-// the setting stores that grant's tree URI, and the session-end mirror copies artefacts into it —
-// see `StorageAccess.kt` and `user_file::mirror_session` for the two halves.
+// Storage-access commands: share sheet, folder picker, picked-file names. Android stores the picker's
+// tree URI as the setting value; see `StorageAccess.kt` and `user_file::mirror_session`.
 
 /// Hand a file to the platform share sheet (Android). Desktop has no share sheet and no need for
 /// one — files live on paths the user can reach, and the frontend offers "open folder" there
@@ -22,6 +18,24 @@ pub fn share_file(path: String, mime: String) -> Result<(), String> {
         let _ = (path, mime);
         Err("share_file is Android-only — desktop reveals the file in its folder instead".into())
     }
+}
+
+/// The file name of something a file dialog returned. Desktop: the last path component. Android: the
+/// provider's display name — a document URI often ends in an id, not in the name.
+#[tauri::command]
+pub fn file_display_name(path: String) -> String {
+    #[cfg(target_os = "android")]
+    if crate::android::content::is_content_uri(&path) {
+        match crate::android::content::display_name(&path) {
+            Ok(Some(name)) => return name,
+            Ok(None) => {}
+            Err(e) => log::warn!("[storage] no display name for a picked document: {e}"),
+        }
+    }
+    std::path::Path::new(&path)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or(path)
 }
 
 /// Open the platform folder picker. On Android this returns the granted **tree URI** (`content://…`)

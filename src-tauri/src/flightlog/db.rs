@@ -2231,7 +2231,7 @@ pub fn get_flight(conn: &Connection, flight_id: i64) -> SqlResult<Option<Flight>
 const MISSION_COLS: &str = "id, content_hash, name, format, waypoints_json, source_xml, \
     wp_count, total_distance_m, alt_diff_m, max_alt_m, min_alt_m, \
     bndbox_min_lat, bndbox_min_lon, bndbox_max_lat, bndbox_max_lon, location_name, \
-    created_at, notes, home_lat, home_lon";
+    created_at, notes, home_lat, home_lon, vehicle_class, extra_json";
 
 fn row_to_mission(row: &rusqlite::Row) -> SqlResult<Mission> {
     Ok(Mission {
@@ -2255,6 +2255,8 @@ fn row_to_mission(row: &rusqlite::Row) -> SqlResult<Mission> {
         notes: row.get(17)?,
         home_lat: row.get(18)?,
         home_lon: row.get(19)?,
+        vehicle_class: row.get(20)?,
+        extra_json: row.get(21)?,
     })
 }
 
@@ -2276,8 +2278,9 @@ pub fn upsert_mission(conn: &Connection, m: &MissionInput) -> SqlResult<i64> {
             content_hash, name, format, waypoints_json, source_xml, wp_count,
             total_distance_m, alt_diff_m, max_alt_m, min_alt_m,
             bndbox_min_lat, bndbox_min_lon, bndbox_max_lat, bndbox_max_lon, notes,
-            home_lat, home_lon
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+            home_lat, home_lon, vehicle_class, extra_json, location_name, created_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
+                  ?18, ?19, ?20, COALESCE(?21, datetime('now')))",
         params![
             m.content_hash,
             m.name,
@@ -2296,6 +2299,10 @@ pub fn upsert_mission(conn: &Connection, m: &MissionInput) -> SqlResult<i64> {
             m.notes,
             m.home_lat,
             m.home_lon,
+            m.vehicle_class,
+            m.extra_json,
+            m.location_name,
+            m.created_at,
         ],
     )?;
     Ok(conn.last_insert_rowid())
@@ -2329,17 +2336,18 @@ pub fn find_mission_by_hash(conn: &Connection, content_hash: &str) -> SqlResult<
     .optional()
 }
 
-/// Overwrite an existing library mission in place (OVERWRITE on save). Updates content + all
-/// computed metadata; `created_at` and `location_name` are preserved. The caller should
-/// pre-check `find_mission_by_hash` so it does not collide with a *different* existing row.
+/// Overwrite a library mission in place. `created_at`, `location_name` and — unless the input brings
+/// one — `extra_json` are kept. The caller pre-checks `find_mission_by_hash`: the new hash must not be
+/// another row's.
 pub fn update_mission(conn: &Connection, id: i64, m: &MissionInput) -> SqlResult<()> {
     conn.execute(
         "UPDATE missions SET
             content_hash = ?1, name = ?2, format = ?3, waypoints_json = ?4, source_xml = ?5,
             wp_count = ?6, total_distance_m = ?7, alt_diff_m = ?8, max_alt_m = ?9, min_alt_m = ?10,
             bndbox_min_lat = ?11, bndbox_min_lon = ?12, bndbox_max_lat = ?13, bndbox_max_lon = ?14,
-            notes = ?15, home_lat = ?16, home_lon = ?17
-         WHERE id = ?18",
+            notes = ?15, home_lat = ?16, home_lon = ?17, vehicle_class = ?18,
+            extra_json = COALESCE(?19, extra_json)
+         WHERE id = ?20",
         params![
             m.content_hash,
             m.name,
@@ -2358,9 +2366,17 @@ pub fn update_mission(conn: &Connection, id: i64, m: &MissionInput) -> SqlResult
             m.notes,
             m.home_lat,
             m.home_lon,
+            m.vehicle_class,
+            m.extra_json,
             id,
         ],
     )?;
+    Ok(())
+}
+
+/// Only for a `.kmission` import onto an existing row; every other writer leaves `extra_json` as it is.
+pub fn set_mission_extra(conn: &Connection, id: i64, extra_json: Option<&str>) -> SqlResult<()> {
+    conn.execute("UPDATE missions SET extra_json = ?1 WHERE id = ?2", params![extra_json, id])?;
     Ok(())
 }
 
@@ -5271,6 +5287,60 @@ mod tests {
         tx.commit().unwrap();
         assert_eq!(alt_relative(crsf), None);
         assert_eq!(get_user_version(&conn).unwrap(), 22);
+    }
+
+    /// A mission row keeps `extra_json` through an overwrite that brings none, takes a new one when given,
+    /// and an insert stores the vehicle class and the creation time a `.kmission` import hands over.
+    #[test]
+    fn mission_extra_and_vehicle_class_round_trip() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        let input = |hash: &str, extra: Option<&str>| MissionInput {
+            content_hash: hash.into(),
+            name: "M".into(),
+            format: "px4".into(),
+            waypoints_json: "[]".into(),
+            source_xml: None,
+            wp_count: 0,
+            total_distance_m: None,
+            alt_diff_m: None,
+            max_alt_m: None,
+            min_alt_m: None,
+            bndbox_min_lat: None,
+            bndbox_min_lon: None,
+            bndbox_max_lat: None,
+            bndbox_max_lon: None,
+            notes: None,
+            home_lat: None,
+            home_lon: None,
+            vehicle_class: Some("copter".into()),
+            extra_json: extra.map(Into::into),
+            created_at: Some("2026-01-02 03:04:05".into()),
+            location_name: Some("Somewhere".into()),
+        };
+        let id = upsert_mission(&conn, &input("h1", Some(r#"{"patterns":[1]}"#))).unwrap();
+        let m = get_mission(&conn, id).unwrap().unwrap();
+        assert_eq!(m.vehicle_class.as_deref(), Some("copter"));
+        assert_eq!(m.extra_json.as_deref(), Some(r#"{"patterns":[1]}"#));
+        assert_eq!(m.created_at, "2026-01-02 03:04:05");
+        assert_eq!(m.location_name.as_deref(), Some("Somewhere"));
+
+        update_mission(&conn, id, &input("h2", None)).unwrap();
+        let m = get_mission(&conn, id).unwrap().unwrap();
+        assert_eq!(m.content_hash, "h2");
+        assert_eq!(m.extra_json.as_deref(), Some(r#"{"patterns":[1]}"#), "an overwrite without extra keeps it");
+        assert_eq!(m.created_at, "2026-01-02 03:04:05");
+
+        update_mission(&conn, id, &input("h2", Some("{}"))).unwrap();
+        assert_eq!(get_mission(&conn, id).unwrap().unwrap().extra_json.as_deref(), Some("{}"));
+        set_mission_extra(&conn, id, None).unwrap();
+        assert_eq!(get_mission(&conn, id).unwrap().unwrap().extra_json, None);
+
+        // Without a creation time from a file the database stamps its own.
+        let mut plain = input("h3", None);
+        plain.created_at = None;
+        let id3 = upsert_mission(&conn, &plain).unwrap();
+        assert!(!get_mission(&conn, id3).unwrap().unwrap().created_at.is_empty());
     }
 
     /// The v22 child tables carry no FK: `delete_flight` removes their rows, other flights keep theirs.
