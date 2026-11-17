@@ -246,7 +246,7 @@ inside the box of the feature release they belong to, so the notes for one relea
       everything it holds (name, notes, target system, planned home, vehicle class) and imports it on
       another install; the flight stack's own format stays available. ArduPilot missions now
       remember the vehicle class they were planned for, and a QGroundControl plan sets it. See
-      [Missions](guides/missions.md#the-mission-library-mission-manager).
+      [Missions](guides/missions.md#the-mission-library-mission-manager). [#314]
     - **INAV: several missions as one library entry** — with more than one mission tab in use,
       *Save to library* can store all of them together; loading the entry brings every tab back. A
       `.mission` file with several missions now opens into the tabs instead of one long mission. See
