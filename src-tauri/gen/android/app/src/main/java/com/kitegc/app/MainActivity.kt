@@ -97,6 +97,9 @@ class MainActivity : TauriActivity() {
    *  video layer below it is visible (see NativeVideo). */
   override fun onWebViewCreate(webView: android.webkit.WebView) {
     NativeVideo.attachWebView(webView)
+    // A WebView scales text by the system font size, but not the boxes around it: labels overflow
+    // their buttons. The app has its own UI scale.
+    webView.settings.textZoom = 100
   }
 
   /**
