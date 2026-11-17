@@ -62,7 +62,7 @@ exception on Android: if you pointed the flight database or the raw logs at a fo
 These transfers happen only because you trigger them, and you choose the recipient every time:
 
 - **Exports** — flight logs (`.kflight`), vehicle (`.kvehicle`) and battery (`.kbatt`) files, missions
-  (`.mission`, `.waypoints`, `.plan`). Kite writes the file where you tell it to; on Android and iOS it
+  (`.mission`, `.waypoints`). Kite writes the file where you tell it to; on Android and iOS it
   hands the file to the system share sheet.
 - **Diagnostic log** — Settings → Diagnostics → *Open Folder* shows you the log file, and on Android
   *Share log file* passes it to the app you pick (mail, messenger, cloud drive). Attaching it to a bug

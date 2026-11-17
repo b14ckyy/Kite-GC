@@ -217,10 +217,13 @@ the aircraft will fly.
 
 - **Save / load files** — INAV uses `.mission` (MultiWii XML); ArduPilot and PX4 use `.waypoints`
   (the QGroundControl-compatible plain-text format). Kite also **imports QGroundControl `.plan`
-  files** (the only format modern QGC saves, so the usual hand-off in PX4 workflows) — mission
-  waypoints only: QGC pattern items (Survey, Corridor Scan, …) can't be expanded outside QGC and are
-  refused with a clear message, and a plan's embedded geofence/rally sections are ignored. Saving
-  from Kite produces `.waypoints`, which QGC can open. You can also drag a file onto the map.
+  files** (the only format modern QGC saves, so the usual hand-off in PX4 workflows). A Survey
+  arrives as the waypoints QGC generated for it, camera commands included; the pattern itself is
+  not kept. A command Kite has no editor for is listed with its number and uploaded unchanged. A
+  pattern item that stores no waypoints is refused with a message — upload such a plan to the
+  flight controller from QGC and download the mission in Kite. A plan's embedded geofence/rally
+  sections are ignored. Saving from Kite produces `.waypoints`, which QGC can open. You can also
+  drag a file onto the map.
 - **Provenance badges** tell you where the loaded plan came from — **FC** (downloaded), **FILE** (opened
   from disk) or **DB** (from the library) — plus a **Modified** badge once you've edited it. Shown for
   all three stacks.
