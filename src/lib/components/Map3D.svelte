@@ -22,6 +22,7 @@
 </script>
 
 <script lang="ts">
+  import MapModeIcon from '$lib/components/MapModeIcon.svelte';
   import { onMount, onDestroy, untrack } from "svelte";
   import { get } from "svelte/store";
   import { invoke } from "@tauri-apps/api/core";
@@ -5444,7 +5445,7 @@
       title="2D View"
       aria-label="Switch to 2D view"
     >
-      2D
+      <MapModeIcon mode="2d" />
     </button>
 
     <button
@@ -5631,12 +5632,6 @@
      pinch cover it, and four buttons did not fit a small frame (see Map.svelte). */
   :global(.layer-map.in-frame) .map-zoom-btn {
     display: none;
-  }
-
-  .map-mode-btn {
-    font-size: var(--map-btn-text, 21px); /* "2D" ≈ 75 % of the button width (app.html) */
-    font-weight: 700;
-    letter-spacing: 0.03em;
   }
 
   /* Free = dimmed, no active lock */

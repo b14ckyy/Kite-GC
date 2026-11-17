@@ -10,6 +10,7 @@
 </script>
 
 <script lang="ts">
+  import MapModeIcon from '$lib/components/MapModeIcon.svelte';
   import { onMount, onDestroy, mount, unmount, untrack } from "svelte";
   import L from "leaflet";
   import "leaflet/dist/leaflet.css";
@@ -2960,7 +2961,7 @@
               onclick={() => onToggleMapView?.()}
               title={mapViewMode === '2d' ? '3D View' : '2D View'}
               aria-label={mapViewMode === '2d' ? 'Switch to 3D view' : 'Switch to 2D view'}>
-        {mapViewMode === '2d' ? '3D' : '2D'}
+        <MapModeIcon mode={mapViewMode === '2d' ? '3d' : '2d'} />
       </button>
 
       <button class="map-control-btn map-heading-btn"
@@ -3270,12 +3271,6 @@
     font-size: 23px;
     line-height: 1;
     font-weight: 700;
-  }
-
-  .map-mode-btn {
-    font-size: var(--map-btn-text, 21px); /* "2D" / "3D" ≈ 75 % of the button width (app.html) */
-    font-weight: 700;
-    letter-spacing: 0.03em;
   }
 
   .map-heading-btn.mode-free {
