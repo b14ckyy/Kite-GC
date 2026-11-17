@@ -7,7 +7,7 @@ import { get } from 'svelte/store';
 import type { FcInfo, PortInfo, BleDeviceInfo, TransportType, ProtocolType } from '$lib/stores/connection';
 import type { InavStats } from '$lib/stores/flightlogTypes';
 import { connection, connectionProtocol, fcLinkAlive, availablePorts, bleDevices } from '$lib/stores/connection';
-import { startTelemetryListeners, stopTelemetryListeners, resetTelemetry } from '$lib/stores/telemetry';
+import { startTelemetryListeners, stopTelemetryListeners, startConnectListeners, stopConnectListeners, resetTelemetry } from '$lib/stores/telemetry';
 import { applyRelaysOnConnect, clearRelaysOnDisconnect } from '$lib/controllers/relayController';
 import { loadSafehomeConfig, clearSafehome } from '$lib/stores/safehome';
 import { isQuadplane } from '$lib/stores/missionArdupilot';
@@ -112,10 +112,8 @@ export interface ConnectParams {
   flightLogRawAlways: boolean;
 }
 
-/**
- * Connect to the flight controller via Tauri, update stores, start listeners.
- */
 export async function connectFC(params: ConnectParams): Promise<FcInfo> {
+  await startConnectListeners();
   const info = await invoke<FcInfo>("connect", {
     protocol: params.protocolType,
     transportType: params.transportType,
@@ -135,9 +133,12 @@ export async function connectFC(params: ConnectParams): Promise<FcInfo> {
     flightLogRawPath: params.flightLogRawPath,
     flightLogRaw: params.flightLogRaw,
     flightLogRawAlways: params.flightLogRawAlways,
+  }).catch((e) => {
+    stopConnectListeners();
+    throw e;
   });
   // The Q_ENABLE answer may have arrived before this result, which still says "airplane".
-  if (info.platform_type === PLATFORM_AIRPLANE && isQuadplane()) info.platform_type = PLATFORM_VTOL;
+  if (params.protocolType === 'mavlink' && info.platform_type === PLATFORM_AIRPLANE && isQuadplane()) info.platform_type = PLATFORM_VTOL;
   connection.set({
     status: "connected",
     protocolType: params.protocolType,
@@ -183,6 +184,7 @@ export async function disconnectFC(baudRate: number): Promise<void> {
   clearFence();
   clearRally();
   stopTelemetryListeners();
+  stopConnectListeners();
   resetTelemetry();
   connectionProtocol.set({ primary: '', secondary: null });
   fcLinkAlive.set(true);

@@ -250,20 +250,19 @@ function detectVehicleClass(variant: string, mavType: number | null | undefined)
   return null;
 }
 
-// The FC answered Q_ENABLE = 1 on this link. The answer comes once and may arrive before connect returns,
-// so it is kept for the link's lifetime — the class derived from the HEARTBEAT ("plane") must not replace it.
+// The FC answered Q_ENABLE = 1 on this link. The answer comes once and may arrive before connect returns:
+// kept until disconnect, so the class and platform type of the connect result ("plane") do not replace it.
 let _quadplane = false;
 
 export function isQuadplane(): boolean {
   return _quadplane;
 }
 
-/** Record the FC's Q_ENABLE = 1 answer: vehicle class QuadPlane, platform type VTOL instead of airplane. */
 export function noteQuadplane(): void {
   _quadplane = true;
   arduVehicleClass.set('quadplane');
-  connection.update((c) => (c.fcInfo?.platform_type === PLATFORM_AIRPLANE
-    ? { ...c, fcInfo: { ...c.fcInfo, platform_type: PLATFORM_VTOL } } : c));
+  if (get(connection).fcInfo?.platform_type !== PLATFORM_AIRPLANE) return;
+  connection.update((c) => (c.fcInfo ? { ...c, fcInfo: { ...c.fcInfo, platform_type: PLATFORM_VTOL } } : c));
 }
 
 let _lastVariantForClass = '';
