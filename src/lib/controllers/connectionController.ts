@@ -7,7 +7,7 @@ import { get } from 'svelte/store';
 import type { FcInfo, PortInfo, BleDeviceInfo, TransportType, ProtocolType } from '$lib/stores/connection';
 import type { InavStats } from '$lib/stores/flightlogTypes';
 import { connection, connectionProtocol, fcLinkAlive, availablePorts, bleDevices } from '$lib/stores/connection';
-import { startTelemetryListeners, stopTelemetryListeners, resetTelemetry } from '$lib/stores/telemetry';
+import { startTelemetryListeners, stopTelemetryListeners, startConnectListeners, stopConnectListeners, resetTelemetry } from '$lib/stores/telemetry';
 import { applyRelaysOnConnect, clearRelaysOnDisconnect } from '$lib/controllers/relayController';
 import { loadSafehomeConfig, clearSafehome } from '$lib/stores/safehome';
 import { isQuadplane } from '$lib/stores/missionArdupilot';
@@ -112,10 +112,8 @@ export interface ConnectParams {
   flightLogRawAlways: boolean;
 }
 
-/**
- * Connect to the flight controller via Tauri, update stores, start listeners.
- */
 export async function connectFC(params: ConnectParams): Promise<FcInfo> {
+  await startConnectListeners();
   const info = await invoke<FcInfo>("connect", {
     protocol: params.protocolType,
     transportType: params.transportType,
@@ -135,9 +133,12 @@ export async function connectFC(params: ConnectParams): Promise<FcInfo> {
     flightLogRawPath: params.flightLogRawPath,
     flightLogRaw: params.flightLogRaw,
     flightLogRawAlways: params.flightLogRawAlways,
+  }).catch((e) => {
+    stopConnectListeners();
+    throw e;
   });
   // The Q_ENABLE answer may have arrived before this result, which still says "airplane".
-  if (info.platform_type === PLATFORM_AIRPLANE && isQuadplane()) info.platform_type = PLATFORM_VTOL;
+  if (params.protocolType === 'mavlink' && info.platform_type === PLATFORM_AIRPLANE && isQuadplane()) info.platform_type = PLATFORM_VTOL;
   connection.set({
     status: "connected",
     protocolType: params.protocolType,
@@ -147,8 +148,7 @@ export async function connectFC(params: ConnectParams): Promise<FcInfo> {
     errorMessage: "",
     fcInfo: info,
   });
-  // Seed the status-box protocol. MSP/MAVLink are known now; passive telemetry shows a placeholder
-  // until the backend's `telemetry-protocol` event reports the locked sub-protocol.
+  // Passive telemetry shows a placeholder until `telemetry-protocol` reports the locked sub-protocol.
   connectionProtocol.set({
     primary: params.protocolType === 'mavlink' ? 'MAVLink' : params.protocolType === 'msp' ? 'MSP' : 'Telemetry',
     secondary: null,
@@ -157,25 +157,19 @@ export async function connectFC(params: ConnectParams): Promise<FcInfo> {
   await startTelemetryListeners();
   // Auto-start the saved telemetry relays (push telemetry → no handshake needed).
   await applyRelaysOnConnect();
-  // INAV/MSP: always download safehomes + autoland config for the map overlay (fire-and-forget; the
-  // store updates when the ~18 MSP reads complete). See docs/active/AUTOLAND_SAFEHOME.md.
+  // INAV: safehomes + autoland config for the map overlay, fire-and-forget (~18 MSP reads).
   if (params.protocolType === 'msp') {
     void loadSafehomeConfig();
-    // Geozones (INAV ≥8.0; the backend returns has_geozones=false on older FCs). See docs/active/GEOZONES.md.
+    // INAV ≥ 8.0; older FCs answer has_geozones=false.
     void loadGeozoneConfig();
   }
-  // ArduPilot/PX4 geofence + rally points over MAVLink (MAV_MISSION_TYPE_FENCE/RALLY). Both ride the
-  // mission microprotocol (strict request→response) — run them SEQUENTIALLY so the two downloads don't
-  // collide. See docs/active/GEOFENCE.md.
+  // Fence + rally share the mission microprotocol (strict request→response): run them sequentially.
   if (params.protocolType === 'mavlink') {
     void (async () => { await loadFenceConfig(); await loadRallyConfig(); })();
   }
   return info;
 }
 
-/**
- * Disconnect from the flight controller, stop listeners, reset telemetry.
- */
 export async function disconnectFC(baudRate: number): Promise<void> {
   await clearRelaysOnDisconnect();
   clearSafehome();
@@ -183,6 +177,7 @@ export async function disconnectFC(baudRate: number): Promise<void> {
   clearFence();
   clearRally();
   stopTelemetryListeners();
+  stopConnectListeners();
   resetTelemetry();
   connectionProtocol.set({ primary: '', secondary: null });
   fcLinkAlive.set(true);

@@ -269,8 +269,38 @@ telemetry.subscribe((t) => {
 
 let unlisteners: UnlistenFn[] = [];
 
+// The one-shot answers of the connect sequence can arrive before `connect` returns, and an event without a
+// listener is dropped: these listen from before the connect call until disconnect.
+let connectUnlisteners: UnlistenFn[] = [];
+
+export async function startConnectListeners() {
+  stopConnectListeners();
+  // Collected locally: a second call during the awaits replaces `connectUnlisteners`.
+  const fresh = [
+    // A parameter answer, not a live sample: must not bump lastUpdate.
+    await listen<{ ekf_type: number }>('telemetry-ekf-type', (event) => {
+      telemetry.update((t) => ({ ...t, ekfType: event.payload.ekf_type }));
+    }),
+    // A QuadPlane may report MAV_TYPE_FIXED_WING; then only the Q_ENABLE answer tells it from a plane.
+    await listen<{ quadplane: boolean }>('telemetry-vehicle', (event) => {
+      if (event.payload.quadplane) noteQuadplane();
+    }),
+    // Passive telemetry, sent once at the protocol lock: true MSL, or only arming-relative altitude?
+    await listen<{ msl: boolean }>('telemetry-alt-ref', (event) => {
+      altReference.set({ msl: event.payload.msl });
+      // A real-MSL protocol supersedes any relative ground anchor.
+      if (event.payload.msl) groundAnchor.set(null);
+    }),
+  ];
+  connectUnlisteners.push(...fresh);
+}
+
+export function stopConnectListeners() {
+  for (const u of connectUnlisteners) u();
+  connectUnlisteners = [];
+}
+
 export async function startTelemetryListeners() {
-  // Clean up any existing listeners
   stopTelemetryListeners();
 
   unlisteners.push(
@@ -444,20 +474,6 @@ export async function startTelemetryListeners() {
     })
   );
 
-  // EKF core version (AHRS_EKF_TYPE) — one-shot reply on connect, so no lastUpdate bump.
-  unlisteners.push(
-    await listen<{ ekf_type: number }>('telemetry-ekf-type', (event) => {
-      telemetry.update((t) => ({ ...t, ekfType: event.payload.ekf_type }));
-    })
-  );
-
-  // A QuadPlane reports MAV_TYPE_FIXED_WING: only this one-shot Q_ENABLE answer tells it from a plane.
-  unlisteners.push(
-    await listen<{ quadplane: boolean }>('telemetry-vehicle', (event) => {
-      if (event.payload.quadplane) noteQuadplane();
-    })
-  );
-
   unlisteners.push(
     await listen<{ active_wp_number: number; nav_state: number }>('telemetry-nav-status', (event) => {
       telemetry.update((t) => ({
@@ -487,15 +503,6 @@ export async function startTelemetryListeners() {
         windSpeedMs: event.payload.speed_ms,
         lastUpdate: Date.now(),
       }));
-    })
-  );
-
-  // Altitude reference: does this protocol deliver true MSL, or only arming-relative altitude?
-  unlisteners.push(
-    await listen<{ msl: boolean }>('telemetry-alt-ref', (event) => {
-      altReference.set({ msl: event.payload.msl });
-      // A real-MSL protocol supersedes any relative ground anchor.
-      if (event.payload.msl) groundAnchor.set(null);
     })
   );
 
