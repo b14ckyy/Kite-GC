@@ -403,7 +403,7 @@ inside the box of the feature release they belong to, so the notes for one relea
       system font, labels ran out of their buttons and digits overlapped the units in number fields;
       with a smaller one everything was smaller than designed. Text now keeps its size.
     - **Full-width buttons were too flat** where they stood alone in a column (Set Home Here and
-      Download Mission in Vehicle Control, Add Source in the radar settings).
+      Download Mission in Vehicle Control, Add Source and Add Local Source in the radar settings).
     - **3D map: leaving FPV left the camera in the cockpit** — banked with the aircraft and
       looking at the horizon, and on a touch screen it could hardly be tilted or turned. The free
       camera now starts behind and above the aircraft, looking down at it. [#262]
