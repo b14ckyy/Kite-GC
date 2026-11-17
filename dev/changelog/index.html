@@ -1932,8 +1932,13 @@ stays <em>Stable releases</em>. <a href="https://github.com/b14ckyy/Kite-GC/pull
 <li><strong>ArduPlane: Takeoff button for fixed-wing planes</strong> — switches the plane to TAKEOFF mode
   (hold to confirm). In that mode the motor starts as soon as you arm. <a href="https://github.com/b14ckyy/Kite-GC/pull/242">#242</a></li>
 <li><strong>Vehicle type override, FC ID and "Save to vehicle library" in the UAV Info panel</strong> — the
-  detected type can be changed for the session, the flight controller's hardware ID is shown,
-  and the connected craft can be saved as a library vehicle. <a href="https://github.com/b14ckyy/Kite-GC/pull/157">#157</a></li>
+  detected type can be changed until you disconnect, the flight controller's hardware ID is
+  shown, and the connected craft can be saved as a library vehicle. <a href="https://github.com/b14ckyy/Kite-GC/pull/157">#157</a></li>
+<li><strong>Vehicle type from the vehicle library</strong> — a library vehicle whose FC ID matches the
+  connected flight controller sets the type on every connect: map model, UAV Info and the
+  recorded flights. Check the type of your library vehicles — until now it was only a label.
+  The library also knows <em>Tricopter</em> now. See
+  <a href="../guides/telemetry-and-display/">Telemetry &amp; display</a>. [#305]</li>
 <li><strong>Local radar devices over the network</strong> — an ADS-B receiver and the FormationFlight module
   connect over TCP or UDP as well as over a serial port. See
   <a href="../guides/radar-and-adsb/#connecting-a-local-device">Radar &amp; ADS-B</a>. <a href="https://github.com/b14ckyy/Kite-GC/pull/261">#261</a></li>
