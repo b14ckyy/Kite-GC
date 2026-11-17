@@ -265,6 +265,10 @@ inside the box of the feature release they belong to, so the notes for one relea
       with gusts, a weather icon, the direction home and, in the wide size, the wind for the next
       30, 60 and 90 minutes. Needs internet. See
       [Telemetry & display](guides/telemetry-and-display.md). [#299]
+    - **Terrain Analysis: Show Map is a tracking strip** — the chart takes the whole height of the
+      strip; beside it are only Show Map, Follow, reset and the legend. See
+      [Terrain analysis](guides/terrain-analysis.md#map-view-the-chart-on-the-map).
+    - **Vehicle Control: larger buttons and fields**, all at the normal button height.
     - **Resizable widgets** — every flight widget has two or three sizes, switched with a corner
       button in edit mode; the docks adapt to their largest widget. [#101]
     - **Raw telemetry view** — the **≡ Raw** button in the top bar lists every telemetry value in
@@ -395,6 +399,11 @@ inside the box of the feature release they belong to, so the notes for one relea
 
     Every fix of 1.0.1 and 1.0.2 is part of 2.0. This list holds what is fixed in 2.0 only.
 
+    - **Android: text followed the system font size, the boxes around it did not** — with a larger
+      system font, labels ran out of their buttons and digits overlapped the units in number fields;
+      with a smaller one everything was smaller than designed. Text now keeps its size.
+    - **Full-width buttons were too flat** where they stood alone in a column (Set Home Here and
+      Download Mission in Vehicle Control, Add Source in the radar settings).
     - **3D map: leaving FPV left the camera in the cockpit** — banked with the aircraft and
       looking at the horizon, and on a touch screen it could hardly be tilted or turned. The free
       camera now starts behind and above the aircraft, looking down at it. [#262]

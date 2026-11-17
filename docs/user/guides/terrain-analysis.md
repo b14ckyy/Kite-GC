@@ -158,8 +158,11 @@ If the track carries **logged signal strength**, the **Logged RSSI** line plots 
 
 ## Map view: the chart on the map
 
-**Show Map** switches the panel to a wide strip so the **2D map stays visible** next to the profile. This
-ties the two together:
+**Show Map** switches the panel to a wide strip so the **2D map stays visible** next to the profile. The
+strip is a pure tracking view: the chart takes its whole height, and beside it are only **Show Map**,
+**Follow** (while connected), the **↻** reset button and the legend. Mode (Waypoints / Track), datum
+(MSL / AGL), ground clearance and the read-outs are those of the full view — press **Show Map** again to
+get back to them. The strip ties chart and map together:
 
 - **Hover** the chart → a dot tracks the matching point on the map.
 - **Click** the chart → a **pin** drops on the map at that point (it stays put even after you close the
