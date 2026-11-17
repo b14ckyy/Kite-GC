@@ -9,7 +9,7 @@
   import { formatDurationSec, formatFlightDateTime, flightTzLabel, missionDbForFlight, flightLoggedWpCount, flightLinkMission, flightUnlinkMission, missionDbSave, missionDbFindByHash, missionDbGeocode, flightSetBatterySerial, batteryDbFindBySerial, batteryDbList, vehicleDbList, flightSetVehicle, getFlight } from '$lib/stores/flightlog';
   import type { Flight, LibraryMission, BatteryPack, Vehicle } from '$lib/stores/flightlogTypes';
   import type { InterfaceSettings } from '$lib/stores/settings';
-  import { mission, missionFlags, loadedMissionId, markMissionSynced } from '$lib/stores/mission';
+  import { mission, missionFlags, loadedMissionId, markMissionSynced, filledMissionCount } from '$lib/stores/mission';
   import { arduMission, arduLoadedMissionId } from '$lib/stores/missionArdupilot';
   import { autopilotSystem } from '$lib/stores/autopilotContext';
   import { batteryManagerOpen, batteryManagerSelectedId, normalizeSerial, normalizeSerialInput, normalizeSerialList, serialTokens } from '$lib/stores/batteryManager';
@@ -205,7 +205,8 @@
       if (get(autopilotSystem) === 'inav') {
         const flags = get(missionFlags);
         missionId = get(loadedMissionId);
-        if (!(flags.db && missionId != null)) {
+        // With several tabs in use the loaded entry can be a set: a flight links the mission of the open tab.
+        if (!(flags.db && missionId != null) || filledMissionCount() > 1) {
           const input = await buildMissionInput(get(mission).waypoints, { name: defaultMissionName() });
           missionId = await missionDbSave(input, dbPath);
           loadedMissionId.set(missionId);

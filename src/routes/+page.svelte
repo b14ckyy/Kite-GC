@@ -130,7 +130,7 @@
   import { initPulseBlink } from "$lib/stores/pulseBlink";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import TerrainAnalysisPanel from "$lib/components/terrain/TerrainAnalysisPanel.svelte";
-  import { editMode, replayActive, mission, missionFlags, missionDownload, missionUpload, missionFcInfo, markMissionSynced, loadedMissionId, missionSetWaypoints, missionImportXml, launchPoint, hasLocation, toDeg, type Waypoint } from "$lib/stores/mission";
+  import { editMode, replayActive, mission, missionFlags, missionDownload, missionUpload, missionFcInfo, markMissionSynced, loadedMissionId, missionLoadLibrary, missionImportXml, launchPoint, hasLocation, toDeg, type Waypoint } from "$lib/stores/mission";
   import { pendingSystemSwitch, autopilotSystem, autopilotLocked, setAutopilotSystem, confirmSystemSwitch } from "$lib/stores/autopilotContext";
   import { arduMission, arduSelectedWpIndex, arduLoadedMissionId, arduEditMode, parseWaypoints, parsePlanFile, planFirmwareTarget, loadArduMissionFromFile, type ArduWaypoint } from "$lib/stores/missionArdupilot";
   import { frameMissionOnMap } from "$lib/stores/mapCamera";
@@ -2039,7 +2039,11 @@
           if (get(pendingSystemSwitch)) confirmSystemSwitch('keep');
           if (get(autopilotSystem) !== 'inav') return;
         }
-        await missionImportXml(content);
+        await missionImportXml(content, async (count) => (await showDialog({
+          title: $t('missionMgr.replaceTitle'),
+          message: $t('missionMgr.replaceSetMsg', { values: { count: String(count) } }),
+          buttons: [{ label: $t('missionMgr.replaceYes'), value: 'replace', primary: true }],
+        })) === 'replace');
       } else {
         const isPlan = /\.plan$/i.test(path);
         const wps = isPlan ? parsePlanFile(content) : parseWaypoints(content);
@@ -2333,9 +2337,8 @@
           const linkedSys = linked.format === 'ardupilot' || linked.format === 'px4' ? linked.format : 'inav';
           if (linkedSys === 'inav') {
             switchAutopilotSystemForReplay('inav');
-            await missionSetWaypoints(JSON.parse(linked.waypoints_json));
+            await missionLoadLibrary(JSON.parse(linked.waypoints_json));
             loadedMissionId.set(linked.id);
-            markMissionSynced('db'); // it's the library mission → trusted for the highlight
             // Launch/home reference for the replay mission (REL waypoint altitudes + 3D height):
             // the real flown start if known, else the mission's saved home, else its first waypoint.
             const fl = data.flight;

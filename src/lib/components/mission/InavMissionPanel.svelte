@@ -17,12 +17,13 @@
     missionDownload, missionUpload,
     missionSaveFile, missionLoadFile,
     activeMissionIndex, missionCount,
-    switchMission, addMission, removeMission, getTotalWpCount,
+    switchMission, addMission, removeMission, getTotalWpCount, totalWpCount,
     canUndo, canRedo, undo, redo,
     MAX_MISSIONS, MAX_WAYPOINTS_TOTAL,
     type Waypoint, type Mission, WpAction, WP_ACTION_KEYS,
     hasLocation, isModifier, missionFlags, missionModified,
-    loadedMissionId, markMissionSynced,
+    loadedMissionId, markMissionSynced, markAllMissionsSynced,
+    filledMissionCount, combinedMissionWaypoints, missionSetSize,
     onMissionDownloadProgress, onMissionUploadProgress,
   } from '$lib/stores/mission';
   import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
@@ -35,7 +36,7 @@
   import Button from '$lib/components/panel/Button.svelte';
   import AutopilotSelect from '$lib/components/mission/AutopilotSelect.svelte';
   import { missionManagerOpen } from '$lib/stores/missionManager';
-  import { buildMissionInput, computeMissionStats } from '$lib/helpers/missionLibrary';
+  import { buildMissionInput, missionContentHash, computeMissionStats } from '$lib/helpers/missionLibrary';
   import { missionDbSave, missionDbUpdate, missionDbGet, missionDbFindByHash, missionDbGeocode } from '$lib/stores/flightlog';
   import { locale } from 'svelte-i18n';
   import { isFlyByHome } from '$lib/helpers/missionGeometry';
@@ -224,15 +225,76 @@
     return `New Mission - ${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
   }
 
-  /** Save the current map mission to the DB library (dedup by content hash). */
-  async function handleSaveToLibrary() {
-    const wps = currentMission.waypoints;
-    if (wps.length === 0) return;
+  async function saveSetToLibrary(loadedSetId: number | null) {
     const dbPath = get(settings).flightLogDbPath;
     const lang = get(locale) ?? 'en';
-    const id = get(loadedMissionId);
+    const wps = combinedMissionWaypoints();
+    const same = await missionDbFindByHash(await missionContentHash(wps), dbPath);
+    if (same) {
+      loadedMissionId.set(same.id);
+      markAllMissionsSynced('db');
+      statusMessage = $t('mission.saveLibAlready');
+      return;
+    }
+    if (loadedSetId != null) {
+      const ans = await confirmDialog.show({
+        title: $t('mission.saveLibUpdateTitle'),
+        message: $t('mission.saveLibUpdateMsg'),
+        buttons: [
+          { label: $t('mission.saveLibNew'), value: 'new' },
+          { label: $t('mission.saveLibOverwrite'), value: 'overwrite', primary: true },
+        ],
+      });
+      if (ans == null) return;
+      if (ans === 'overwrite') {
+        const existing = await missionDbGet(loadedSetId, dbPath);
+        const input = await buildMissionInput(wps, { name: existing?.name ?? autoMissionName(), notes: existing?.notes ?? '' });
+        await missionDbUpdate(loadedSetId, input, dbPath);
+        markAllMissionsSynced('db');
+        void missionDbGeocode(loadedSetId, lang, dbPath).catch(() => {});
+        statusMessage = $t('mission.saveLibUpdated');
+        return;
+      }
+    }
+    const res = await missionSaveDialog.show({ defaultName: autoMissionName() });
+    if (!res) return;
+    const input = await buildMissionInput(wps, { name: res.name || autoMissionName(), notes: res.notes });
+    const newId = await missionDbSave(input, dbPath);
+    loadedMissionId.set(newId);
+    markAllMissionsSynced('db');
+    void missionDbGeocode(newId, lang, dbPath).catch(() => {});
+    statusMessage = $t('mission.saveLibSaved');
+  }
+
+  /** Dedup by content hash; with several filled tabs the user picks this tab or the whole set. */
+  async function handleSaveToLibrary() {
+    const wps = currentMission.waypoints;
+    const filled = filledMissionCount();
+    if (filled === 0) return;
+    const dbPath = get(settings).flightLogDbPath;
+    const lang = get(locale) ?? 'en';
+    let id = get(loadedMissionId);
     const flags = get(missionFlags);
     try {
+      // A loaded set is one entry over all slots: a single slot must never overwrite it.
+      const loaded = id != null ? await missionDbGet(id, dbPath) : null;
+      const loadedIsSet = loaded != null && missionSetSize(JSON.parse(loaded.waypoints_json)) > 1;
+      if (filled > 1) {
+        const ans = await confirmDialog.show({
+          title: $t('mission.saveLibTitle'),
+          message: $t('mission.saveLibScopeMsg', { values: { count: String(filled), index: String(currentMissionIdx) } }),
+          buttons: [
+            ...(wps.length > 0 ? [{ label: $t('mission.saveLibScopeOne', { values: { index: String(currentMissionIdx) } }), value: 'one' }] : []),
+            { label: $t('mission.saveLibScopeAll', { values: { count: String(filled) } }), value: 'all', primary: true },
+          ],
+        });
+        if (ans == null) return;
+        if (ans === 'all') { await saveSetToLibrary(loadedIsSet ? id : null); return; }
+      }
+      if (wps.length === 0) return;
+      // A tab's DB badge can stem from another entry than the loaded one (a set, or a mission loaded later).
+      if (loadedIsSet || (flags.db && loaded?.content_hash !== await missionContentHash(wps))) id = null;
+
       if (id != null && flags.db) { statusMessage = $t('mission.saveLibAlready'); return; }
 
       if (id != null && !flags.db) {
@@ -277,12 +339,20 @@
     }
   }
 
+  /** A file with several missions replaces every tab: ask when other tabs hold waypoints. */
+  const confirmReplaceAll = async (count: number) => (await confirmDialog.show({
+    title: $t('missionMgr.replaceTitle'),
+    message: $t('missionMgr.replaceSetMsg', { values: { count: String(count) } }),
+    buttons: [{ label: $t('missionMgr.replaceYes'), value: 'replace', primary: true }],
+  })) === 'replace';
+
   async function handleOpenFile() {
     try {
       const path = await open({ title: $t('mission.openMissionTitle'), multiple: false, filters: [{ name: 'Mission', extensions: anyCase(['mission']) }] });
       if (!path) return;
-      const m = await missionLoadFile(typeof path === 'string' ? path : path);
-      statusMessage = $t('mission.loaded', { values: { count: m.waypoints.length } });
+      const wps = await missionLoadFile(path, confirmReplaceAll);
+      if (!wps) return;
+      statusMessage = $t('mission.loaded', { values: { count: wps.length } });
     } catch (e) {
       statusMessage = $t('mission.openFailed', { values: { error: String(e) } });
     }
@@ -564,7 +634,7 @@
         <Button variant="warning" icon="save" full disabled={eepromSaveLoading || isArmed()} title={isArmed() ? $t('mission.eepromSaveArmed') : $t('mission.eepromSaveTooltip')} onclick={handleEepromSave}>{$t('mission.eepromSave')}</Button>
       </div>
       <div class="ctrl-row">
-        <Button variant="data" icon="library" full disabled={currentMission.waypoints.length === 0} onclick={handleSaveToLibrary}>{$t('mission.saveToLibrary')}</Button>
+        <Button variant="data" icon="library" full disabled={$totalWpCount === 0} onclick={handleSaveToLibrary}>{$t('mission.saveToLibrary')}</Button>
       </div>
       <div class="ctrl-row">
         <Button variant="standard" icon="folder" full onclick={handleOpenFile}>{$t('mission.open')}</Button>

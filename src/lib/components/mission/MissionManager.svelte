@@ -23,8 +23,9 @@
   import type { LibraryMission, FlightSummary } from '$lib/stores/flightlogTypes';
   import { serializeWaypoints } from '$lib/stores/missionArdupilot';
   import {
-    mission, missionModified, missionSetWaypoints, loadedMissionId, markMissionSynced,
-    missionImportXml, missionLoadFile, applyMissionLaunchDefault, type Waypoint,
+    mission, missionModified, missionLoadLibrary, loadedMissionId, markMissionSynced, markAllMissionsSynced,
+    missionLoadFile, applyMissionLaunchDefault, missionSetSize, getTotalWpCount, hashWaypoints,
+    combinedMissionWaypoints, type Waypoint,
   } from '$lib/stores/mission';
   import {
     arduMission, arduSelectedWpIndex, arduLoadedMissionId, markArduMissionSynced, arduClearUndoHistory,
@@ -98,6 +99,13 @@
     const latSpan = Math.max(1e-9, m.bndbox_max_lat - m.bndbox_min_lat);
     return Math.min(3, Math.max(1, lonSpan / latSpan));
   });
+
+  /** Missions in an INAV entry (a set stores several, each ending on its terminator); 1 otherwise. */
+  function setSize(m: LibraryMission): number {
+    if (formatToSystem(m.format) !== 'inav') return 1;
+    try { return missionSetSize(JSON.parse(m.waypoints_json)); } catch { return 1; }
+  }
+  let selectedSetSize = $derived(selected ? setSize(selected) : 1);
 
   function dbPath(): string { return get(settings).flightLogDbPath; }
   function lang(): string { return get(locale) ?? 'en'; }
@@ -220,16 +228,22 @@
   async function loadToMap(m: LibraryMission) {
     const targetSys = formatToSystem(m.format);
     const curSys = get(autopilotSystem);
+    const size = setSize(m);
 
     if (targetSys === curSys) {
-      // Same system: warn before discarding unsaved changes in the active editor.
+      // Same system: warn before discarding unsaved changes in the active editor. A set replaces every
+      // slot, so anything on the map counts — unless it is this very entry, unchanged.
+      const replacesAll = size > 1 && getTotalWpCount() > 0
+        && hashWaypoints(combinedMissionWaypoints()) !== hashWaypoints(JSON.parse(m.waypoints_json));
       const dirty = curSys === 'inav'
-        ? (get(missionModified) && get(mission).waypoints.length > 0)
+        ? (get(missionModified) && get(mission).waypoints.length > 0) || replacesAll
         : (get(arduMission).length > 0 && get(arduLoadedMissionId) !== m.id);
       if (dirty) {
         const ans = await confirmDialog.show({
           title: $t('missionMgr.replaceTitle'),
-          message: $t('missionMgr.replaceMsg'),
+          message: replacesAll
+            ? $t('missionMgr.replaceSetMsg', { values: { count: String(size) } })
+            : $t('missionMgr.replaceMsg'),
           buttons: [{ label: $t('missionMgr.replaceYes'), value: 'replace', primary: true }],
         });
         if (ans !== 'replace') return;
@@ -240,9 +254,8 @@
 
     try {
       if (targetSys === 'inav') {
-        const loaded = await missionSetWaypoints(JSON.parse(m.waypoints_json));
+        const loaded = await missionLoadLibrary(JSON.parse(m.waypoints_json));
         loadedMissionId.set(m.id);
-        markMissionSynced('db');
         // Launch/home reference (REL altitude + 3D-preview): UAV HOME → the DB-saved home → WP1.
         applyMissionLaunchDefault(
           loaded,
@@ -282,7 +295,9 @@
         const wps = JSON.parse(m.waypoints_json) as ArduWaypoint[];
         await invoke<void>('write_text_file', { path, content: serializeWaypoints(wps) });
       } else {
-        await missionExportFileFromJson(path, m.waypoints_json);
+        // Library numbering may restart per mission; a `.mission` file numbers through.
+        const wps = (JSON.parse(m.waypoints_json) as Waypoint[]).map((w, i) => ({ ...w, number: i + 1 }));
+        await missionExportFileFromJson(path, JSON.stringify(wps));
       }
       statusMessage = $t('missionMgr.exported');
     } catch (e) {
@@ -312,6 +327,7 @@
 
   /** After a file is loaded onto the map, ask whether to also save it to the library. */
   async function importMission(loadedWps: Waypoint[], suggestedName: string) {
+    const markDb = () => (missionSetSize(loadedWps) > 1 ? markAllMissionsSynced('db') : markMissionSynced('db'));
     const existingId = await findLibraryMissionId(loadedWps, dbPath()).catch(() => null);
     const ans = await confirmDialog.show({
       title: $t('missionMgr.importTitle'),
@@ -325,18 +341,18 @@
     if (ans === 'db') {
       if (existingId != null) {
         loadedMissionId.set(existingId);
-        markMissionSynced('db');
+        markDb();
       } else {
         const input = await buildMissionInput(loadedWps, { name: suggestedName });
         const id = await missionDbSave(input, dbPath());
         loadedMissionId.set(id);
-        markMissionSynced('db');
+        markDb();
         void missionDbGeocode(id, lang(), dbPath()).catch(() => {});
       }
       await reload();
       statusMessage = $t('missionMgr.imported');
     } else {
-      if (existingId != null) { loadedMissionId.set(existingId); markMissionSynced('db'); }
+      if (existingId != null) { loadedMissionId.set(existingId); markDb(); }
       statusMessage = $t('missionMgr.loadedToMap');
     }
   }
@@ -372,6 +388,13 @@
     }
   }
 
+  /** A file with several missions replaces every tab: ask when other tabs hold waypoints. */
+  const confirmReplaceAll = async (count: number) => (await confirmDialog.show({
+    title: $t('missionMgr.replaceTitle'),
+    message: $t('missionMgr.replaceSetMsg', { values: { count: String(count) } }),
+    buttons: [{ label: $t('missionMgr.replaceYes'), value: 'replace', primary: true }],
+  })) === 'replace';
+
   async function handleImportButton() {
     try {
       const path = await open({ title: $t('missionMgr.openTitle'), multiple: false, filters: [{ name: 'Mission', extensions: anyCase(['mission', 'waypoints', 'txt', 'plan']) }] });
@@ -387,8 +410,8 @@
         const text = await invoke<string>('read_text_file', { path });
         await importArduMission(parseWaypoints(text), stem || autoName());
       } else {
-        const m = await missionLoadFile(path);
-        await importMission(m.waypoints, stem || autoName());
+        const wps = await missionLoadFile(path, confirmReplaceAll);
+        if (wps) await importMission(wps, stem || autoName());
       }
     } catch (e) {
       statusMessage = $t('missionMgr.importFailed', { values: { error: String(e) } });
@@ -491,6 +514,7 @@
                       <span>{m.wp_count} WP</span>
                       <span>{fmtDist(m.total_distance_m)}</span>
                       <span class="fmt-badge">{formatBadge(m.format || 'inav')}</span>
+                      {#if setSize(m) > 1}<span class="fmt-badge multi-badge">{$t('missionMgr.multiBadge')}</span>{/if}
                     </div>
                   </button>
                   <!-- Row-level delete, so removing a saved mission doesn't require selecting it first. -->
@@ -545,6 +569,9 @@
       </div>
 
       <div class="fc-info-grid">
+        {#if selectedSetSize > 1}
+          <span class="fc-label">{$t('missionMgr.missions')}</span><span class="fc-value">{selectedSetSize}</span>
+        {/if}
         <span class="fc-label">{$t('missionMgr.waypoints')}</span><span class="fc-value">{m.wp_count}</span>
         <span class="fc-label">{$t('missionMgr.distance')}</span><span class="fc-value">{fmtDist(m.total_distance_m)}</span>
         <span class="fc-label">{$t('missionMgr.altDiff')}</span><span class="fc-value">{fmtAlt(m.alt_diff_m)}</span>
@@ -606,6 +633,7 @@
   .lib-item-del:hover { border-color: #e06c6c; color: #e06c6c; background: rgba(224, 108, 108, 0.12); }
   .lib-item-title { font-size: 12px; color: #fff; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .lib-item-meta { margin-top: 2px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 10px; color: #aaa; }
+  .multi-badge { color: #e8c98a; background: rgba(245, 166, 35, 0.14); border-color: rgba(245, 166, 35, 0.4); }
   .fmt-badge { font-size: 9px; font-weight: 600; color: #9cc6d9; background: rgba(55, 168, 219, 0.14); border: 1px solid rgba(55, 168, 219, 0.34); border-radius: 999px; padding: 0 6px; text-transform: uppercase; letter-spacing: 0.4px; }
 
   .mmv2-detail { display: flex; flex-direction: column; gap: 10px; overflow-anchor: none; }
