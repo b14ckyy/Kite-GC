@@ -8,7 +8,7 @@
 // See docs/archive/MISSION_LIBRARY_AND_DB.md.
 
 import { get } from 'svelte/store';
-import { hashWaypoints, hasLocation, toDeg, altToM, WpAction, launchPoint, type Waypoint } from '$lib/stores/mission';
+import { hashWaypoints, hasLocation, toDeg, altToM, WpAction, WP_FLAG_LAST, launchPoint, type Waypoint } from '$lib/stores/mission';
 import type { LibraryMissionInput } from '$lib/stores/flightlogTypes';
 import { missionDbFindByHash } from '$lib/stores/flightlog';
 import { computeRouteStats, simulateRoute, type RouteCommand } from '$lib/helpers/missionStats';
@@ -80,7 +80,13 @@ export function computeMissionMetadata(wps: Waypoint[]): MissionMetadata {
     let maxLat = -Infinity;
     let maxLon = -Infinity;
 
-    for (const w of geo) {
+    for (const w of wps) {
+      // A mission set: no leg from the end of one mission to the start of the next.
+      const ends = w.flag === WP_FLAG_LAST;
+      if (!hasLocation(w.action) || (w.lat === 0 && w.lon === 0)) {
+        if (ends) prevLat = prevLon = null;
+        continue;
+      }
       const lat = toDeg(w.lat);
       const lon = toDeg(w.lon);
       const altM = altToM(w.altitude);
@@ -93,6 +99,7 @@ export function computeMissionMetadata(wps: Waypoint[]): MissionMetadata {
       maxLat = Math.max(maxLat, lat);
       minLon = Math.min(minLon, lon);
       maxLon = Math.max(maxLon, lon);
+      if (ends) prevLat = prevLon = null;
     }
 
     totalDistanceM = geo.length > 1 ? dist : 0;

@@ -262,11 +262,9 @@ pub async fn mission_upload(
     .await
 }
 
-/// Concatenate per-mission waypoint lists into one INAV multi-mission sequence: global 1-based
-/// numbering and each segment's last WP flagged `WP_FLAG_LAST` (0xA5) — or `WP_FLAG_FBH` (0x48) kept
-/// when that last WP is already a fly-by-home — with every other WP `WP_FLAG_NORMAL`. INAV stores all
-/// missions as one list split on those terminator flags, so a stray mid-segment terminator would break
-/// the boundaries; mid-segment flags are therefore forced to NORMAL. Empty missions are skipped.
+/// One INAV multi-mission list, numbered through. INAV ends a mission on 0xA5 only: every mission's last
+/// WP gets it, a stray one inside is cleared. Fly-by-home (0x48) is kept inside a mission; on the last WP
+/// the flag byte is taken, so it goes as lat/lon 0, which INAV also reads as home. Empty missions are skipped.
 fn assemble_multi_mission(missions: &[Vec<Waypoint>]) -> Vec<Waypoint> {
     let mut out: Vec<Waypoint> = Vec::new();
     for seg in missions {
@@ -276,11 +274,15 @@ fn assemble_multi_mission(missions: &[Vec<Waypoint>]) -> Vec<Waypoint> {
         let last = seg.len() - 1;
         for (i, wp) in seg.iter().enumerate() {
             let mut w = wp.clone();
-            w.flag = if i == last {
-                if w.flag == WP_FLAG_FBH { WP_FLAG_FBH } else { WP_FLAG_LAST }
-            } else {
-                WP_FLAG_NORMAL
-            };
+            if i == last {
+                if w.flag == WP_FLAG_FBH {
+                    w.lat = 0;
+                    w.lon = 0;
+                }
+                w.flag = WP_FLAG_LAST;
+            } else if w.flag == WP_FLAG_LAST {
+                w.flag = WP_FLAG_NORMAL;
+            }
             out.push(w);
         }
     }
@@ -553,21 +555,23 @@ mod tests {
     }
 
     #[test]
-    fn assemble_multi_mission_preserves_fbh_last_and_skips_empty() {
-        // An empty mission is skipped; a fly-by-home last WP keeps its 0x48 terminator; a stray
-        // mid-segment terminator is forced back to NORMAL so it doesn't split the segment.
+    fn assemble_multi_mission_fbh_and_empty() {
+        let mut fbh_last = Waypoint::new(0, WpAction::Land, 501234567, 81234567, 0);
+        fbh_last.flag = WP_FLAG_FBH;
         let m1 = vec![
-            wp(WpAction::Waypoint, WP_FLAG_LAST), // mid-segment stray terminator → must clear
-            wp(WpAction::Land, WP_FLAG_FBH),      // last, FBH → keep 0x48
+            wp(WpAction::Waypoint, WP_FLAG_LAST), // stray terminator inside → cleared
+            wp(WpAction::Waypoint, WP_FLAG_FBH),  // fly-by-home inside → kept
+            fbh_last,                             // fly-by-home last → 0xA5 at lat/lon 0
         ];
         let empty: Vec<Waypoint> = vec![];
-        let m2 = vec![wp(WpAction::Waypoint, WP_FLAG_NORMAL)]; // single WP → becomes last (0xA5)
+        let m2 = vec![wp(WpAction::Waypoint, WP_FLAG_NORMAL)];
         let out = assemble_multi_mission(&[m1, empty, m2]);
 
-        assert_eq!(out.len(), 3);
-        assert_eq!(out[0].flag, WP_FLAG_NORMAL); // stray mid terminator cleared
-        assert_eq!(out[1].flag, WP_FLAG_FBH); // FBH preserved
-        assert_eq!(out[2].flag, WP_FLAG_LAST); // single WP of m2 terminates it
-        assert_eq!(out.iter().map(|w| w.number).collect::<Vec<_>>(), vec![1, 2, 3]);
+        assert_eq!(out.len(), 4);
+        assert_eq!(out[0].flag, WP_FLAG_NORMAL);
+        assert_eq!(out[1].flag, WP_FLAG_FBH);
+        assert_eq!((out[2].flag, out[2].lat, out[2].lon), (WP_FLAG_LAST, 0, 0));
+        assert_eq!(out[3].flag, WP_FLAG_LAST);
+        assert_eq!(out.iter().map(|w| w.number).collect::<Vec<_>>(), vec![1, 2, 3, 4]);
     }
 }
