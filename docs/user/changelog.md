@@ -244,7 +244,7 @@ inside the box of the feature release they belong to, so the notes for one relea
       shown, and the connected craft can be saved as a library vehicle. [#157]
     - **Kite mission file (`.kmission`)** — the Mission Manager exports a library entry with
       everything it holds (name, notes, target system, planned home, vehicle class) and imports it on
-      another install; the flight stack's own format stays available. ArduPilot / PX4 missions now
+      another install; the flight stack's own format stays available. ArduPilot missions now
       remember the vehicle class they were planned for, and a QGroundControl plan sets it. See
       [Missions](guides/missions.md#the-mission-library-mission-manager).
     - **INAV: several missions as one library entry** — with more than one mission tab in use,

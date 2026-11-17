@@ -243,9 +243,8 @@ nothing.
 Dropping files onto the window follows one rule: **`.kmission` files are always imported into the
 library** — several at once if you like — while `.mission`, `.waypoints` and `.plan` files are only
 loaded onto the map. A dropped `.kmission` is additionally shown on the map when the map holds no
-mission; with a vehicle connected, only if it belongs to that vehicle's flight stack. The library is **shared across the flight stacks** (each mission
-loads back into the stack it belongs to), and library missions also link to flights in the
-**[logbook](logbook.md)**.
+mission (in either editor); with a vehicle connected, only when it is a mission for that vehicle's
+flight stack. If the drop also contains a plain mission file, that one gets the map.
 
 ![The Mission Manager](../assets/guides/missions/mission_manager.png)
 /// caption
