@@ -5,7 +5,7 @@ import { writable, derived, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
 import { connection, linkHasMsp } from './connection';
 import { settings } from './settings';
-import { activeVehicleId, vehicles } from './vehicles';
+import { activeVehicleId, isActive, vehicles } from './vehicles';
 import { CMD, cmdDef, cmdHasLocation, type VehicleClass } from '$lib/helpers/arduCommandCatalog';
 import { translateWaypoints } from '$lib/helpers/missionGeo';
 
@@ -267,17 +267,36 @@ export function detectVehicleClass(variant: string, mavType: number | null | und
   return null;
 }
 
+// Vehicles whose Q_ENABLE answered 1. The answer comes once and may arrive before connect returns, so it
+// is kept for the link's lifetime — the class derived from the HEARTBEAT ("plane") must not replace it.
+const _quadplanes = new Set<string>();
+
+/** Whether the FC of this vehicle answered Q_ENABLE = 1 on the current link. */
+export function isQuadplane(vehicleId: string | null | undefined): boolean {
+  return _quadplanes.has(vehicleId ?? '');
+}
+
+/** Record the FC's Q_ENABLE = 1 answer for a vehicle (`vehicleId` of the event payload). */
+export function noteQuadplane(payload: { vehicleId?: string }): void {
+  _quadplanes.add(payload.vehicleId ?? '');
+  if (isActive(payload) && get(arduVehicleClass) === 'plane' && !linkHasMsp(get(connection))) {
+    arduVehicleClass.set('quadplane');
+  }
+}
+
 let _lastVariantForClass = '';
 connection.subscribe((c) => {
+  if (c.status === 'disconnected' || c.status === 'error') _quadplanes.clear();
   if (c.status !== 'connected' || !c.fcInfo) { _lastVariantForClass = ''; return; }
   // An INAV MSP link (direct or MSP over MAVLink) has no ArduPilot vehicle class — its HEARTBEAT MAV_TYPE
   // (e.g. a VTOL type on a tunnel link) must not re-class the ArduPilot planner.
   if (linkHasMsp(c)) return;
-  const key = `${c.fcInfo.fc_variant}/${c.fcInfo.mav_type ?? ''}`;
+  const vehicleId = get(activeVehicleId) ?? '';
+  const key = `${vehicleId}/${c.fcInfo.fc_variant}/${c.fcInfo.mav_type ?? ''}`;
   if (key === _lastVariantForClass) return;
   _lastVariantForClass = key;
   const cls = detectVehicleClass(c.fcInfo.fc_variant, c.fcInfo.mav_type);
-  if (cls) arduVehicleClass.set(cls);
+  if (cls) arduVehicleClass.set(cls === 'plane' && _quadplanes.has(vehicleId) ? 'quadplane' : cls);
 });
 
 // Drop the FC provenance flag on any disconnect — the on-FC mission is then unknown (mirrors INAV).

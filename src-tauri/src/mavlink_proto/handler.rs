@@ -1660,6 +1660,16 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
                     if let Some(ref rec) = recorder {
                         if let Ok(mut r) = rec.lock() { r.set_quadplane(); }
                     }
+                    // The link's stored FcInfo follows (primary vehicle only), unless the user chose a type.
+                    if primary {
+                        if let Ok(mut reg) = tauri::Manager::state::<crate::state::AppState>(app_handle.app()).links.lock() {
+                            if let Some(entry) = reg.get_mut(app_handle.link_id()) {
+                                if entry.fc_info.platform_type == super::vehicle::platform::AIRPLANE {
+                                    entry.fc_info.platform_type = super::vehicle::platform::VTOL;
+                                }
+                            }
+                        }
+                    }
                 }
             } else if name == "LOG_BACKEND_TYPE" || name == "SDLOG_MODE" {
                 // Logging backend (requested in connect_mavlink): ArduPilot bitmask 0 = none, PX4 mode

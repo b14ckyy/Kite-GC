@@ -8,9 +8,9 @@
 import { writable, get } from 'svelte/store';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
-import { connection, connectionProtocol, fcLinkAlive } from '$lib/stores/connection';
+import { connection, connectionProtocol, fcLinkAlive, promoteDetectedToVtol } from '$lib/stores/connection';
 import { isActive, activeVehicleId, vehicles } from '$lib/stores/vehicles';
-import { arduVehicleClass } from '$lib/stores/missionArdupilot';
+import { noteQuadplane } from '$lib/stores/missionArdupilot';
 import type { FlightModeState } from '$lib/helpers/flightModeRegistry';
 
 /** One battery monitor instance (ArduPilot/PX4 multi-battery). Live: from the `telemetry-batteries`
@@ -346,6 +346,49 @@ let unlisteners: UnlistenFn[] = [];
 // leave the widgets without a live feed; now the second caller just awaits the first.
 let startingListeners: Promise<void> | null = null;
 
+// The one-shot answers of the connect sequence can arrive before `connect` returns, and an event without a
+// listener is dropped: these listen from before the connect call until the last link is closed.
+let connectUnlisteners: UnlistenFn[] = [];
+let startingConnectListeners: Promise<void> | null = null;
+
+export function startConnectListeners(): Promise<void> {
+  if (connectUnlisteners.length) return Promise.resolve();
+  startingConnectListeners ??= registerConnectListeners().finally(() => { startingConnectListeners = null; });
+  return startingConnectListeners;
+}
+
+async function registerConnectListeners() {
+  connectUnlisteners = [
+    // AHRS_EKF_TYPE: a parameter answer, not a live sample — must not bump lastUpdate.
+    await listen<{ ekf_type: number }>('telemetry-ekf-type', (event) => {
+      upd(event.payload, (t) => ({ ...t, ekfType: event.payload.ekf_type }));
+    }),
+    // Q_ENABLE (a QuadPlane may report MAV_TYPE_FIXED_WING; only this answer tells it from a plane) and the
+    // logging backend (ArduPilot LOG_BACKEND_TYPE / PX4 SDLOG_MODE) for the vehicle-library save.
+    await listen<{ vehicleId?: string; quadplane?: boolean; blackbox?: boolean }>('telemetry-vehicle', (event) => {
+      if (event.payload.quadplane) noteQuadplane(event.payload);
+      if (!isActive(event.payload)) return;
+      if (event.payload.quadplane) promoteDetectedToVtol();
+      const blackbox = event.payload.blackbox;
+      if (blackbox !== undefined) {
+        connection.update((c) => (c.fcInfo ? { ...c, fcInfo: { ...c.fcInfo, blackbox } } : c));
+      }
+    }),
+    // Passive telemetry, sent once at the protocol lock: true MSL, or only arming-relative altitude?
+    await listen<{ msl: boolean }>('telemetry-alt-ref', (event) => {
+      if (!isActive(event.payload)) return;
+      altReference.set({ msl: event.payload.msl });
+      // A real-MSL protocol supersedes any relative ground anchor.
+      if (event.payload.msl) groundAnchor.set(null);
+    }),
+  ];
+}
+
+export function stopConnectListeners() {
+  for (const unlisten of connectUnlisteners) unlisten();
+  connectUnlisteners = [];
+}
+
 export function startTelemetryListeners(): Promise<void> {
   if (startingListeners) return startingListeners;
   startingListeners = startTelemetryListenersInner().finally(() => { startingListeners = null; });
@@ -548,28 +591,6 @@ async function startTelemetryListenersInner() {
     })
   );
 
-  // EKF core version (AHRS_EKF_TYPE) — one-shot reply on connect, so no lastUpdate bump.
-  fresh.push(
-    await listen<{ ekf_type: number }>('telemetry-ekf-type', (event) => {
-      upd(event.payload, (t) => ({ ...t, ekfType: event.payload.ekf_type }));
-    })
-  );
-
-  // QuadPlane detection (ArduPilot Q_ENABLE reply) — a QuadPlane reports MAV_TYPE_FIXED_WING, so the
-  // mission vehicle class can only be upgraded to quadplane from this one-shot param. Upgrade only.
-  fresh.push(
-    await listen<{ quadplane?: boolean; blackbox?: boolean }>('telemetry-vehicle', (event) => {
-      if (!isActive(event.payload)) return;
-      if (event.payload.quadplane) arduVehicleClass.set('quadplane');
-      // Logging-backend answer (ArduPilot LOG_BACKEND_TYPE / PX4 SDLOG_MODE) → FC info for the UAV Info
-      // panel's vehicle-library save.
-      const blackbox = event.payload.blackbox;
-      if (blackbox !== undefined) {
-        connection.update((c) => (c.fcInfo ? { ...c, fcInfo: { ...c.fcInfo, blackbox } } : c));
-      }
-    })
-  );
-
   fresh.push(
     await listen<{ active_wp_number: number; nav_state: number }>('telemetry-nav-status', (event) => {
       upd(event.payload, (t) => ({
@@ -599,16 +620,6 @@ async function startTelemetryListenersInner() {
         windSpeedMs: event.payload.speed_ms,
         lastUpdate: Date.now(),
       }));
-    })
-  );
-
-  // Altitude reference: does this protocol deliver true MSL, or only arming-relative altitude?
-  fresh.push(
-    await listen<{ msl: boolean }>('telemetry-alt-ref', (event) => {
-      if (!isActive(event.payload)) return;
-      altReference.set({ msl: event.payload.msl });
-      // A real-MSL protocol supersedes any relative ground anchor.
-      if (event.payload.msl) groundAnchor.set(null);
     })
   );
 
