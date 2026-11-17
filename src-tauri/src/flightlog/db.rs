@@ -130,8 +130,24 @@ const FLIGHT_VIDEOS_DDL_FULL: &str = "CREATE TABLE IF NOT EXISTS flight_videos (
     created_at        TEXT NOT NULL DEFAULT (datetime('now'))
 );";
 
-/// Open (or create) the flight log database at the given path.
-/// Runs migrations if needed.
+static UPGRADE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// The schema version of an EXISTING database that has upgrade steps pending.
+fn upgrade_pending_on(conn: &Connection) -> SqlResult<Option<u32>> {
+    let version = get_user_version(conn)?;
+    Ok((version > 0 && version < CURRENT_SCHEMA_VERSION).then_some(version))
+}
+
+/// `(found, current)` schema versions of an existing database that is not at this build's: lower = an
+/// open would upgrade it, higher = written by a newer Kite. Read-only — nothing is created, migrated or
+/// backed up; a missing, fresh or unreadable file is `None`.
+pub fn schema_mismatch(path: &Path) -> Option<(u32, u32)> {
+    let conn = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).ok()?;
+    let found = get_user_version(&conn).ok()?;
+    (found > 0 && found != CURRENT_SCHEMA_VERSION).then_some((found, CURRENT_SCHEMA_VERSION))
+}
+
+/// Creates the file if missing; an existing one with pending steps is backed up, then migrated.
 pub fn open_database(path: &Path) -> SqlResult<Connection> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).ok();
@@ -156,16 +172,18 @@ pub fn open_database(path: &Path) -> SqlResult<Connection> {
         conn.execute_batch("VACUUM;")?;
     }
 
-    // Migration safety net (Dev-Docs active/DB_MIGRATIONS.md): with schema steps pending on an EXISTING DB,
-    // snapshot it first — exactly ONE backup is kept (multi-GB). If the snapshot fails the open fails:
-    // migrating without the safety copy is not acceptable.
-    let version = get_user_version(&conn)?;
-    let upgrade = version > 0 && version < CURRENT_SCHEMA_VERSION;
-    if upgrade {
+    // Safety net (Dev-Docs archive/DB_MIGRATIONS.md): one backup before pending steps; the open fails if it
+    // fails. One upgrade per process at a time: a second open waits here, re-reads the version and finds
+    // nothing left (two at once would write the same backup file).
+    let _upgrading = upgrade_pending_on(&conn)?
+        .is_some()
+        .then(|| UPGRADE_LOCK.lock().unwrap_or_else(|e| e.into_inner()));
+    if let Some(version) = upgrade_pending_on(&conn)? {
         backup_before_migration(&conn, path, version)?;
     }
 
     migrate(&conn)?;
+    drop(_upgrading);
 
     // A large freelist left behind (a schema step that dropped a table, a reclaim cut short by an app
     // exit) is handed back in the background; repeated triggers are harmless (single flight).
@@ -4001,6 +4019,30 @@ mod tests {
         let bconn = Connection::open(&backup).unwrap();
         assert_eq!(get_user_version(&bconn).unwrap(), CURRENT_SCHEMA_VERSION - 1);
         drop((conn, bconn));
+        cleanup(&path);
+    }
+
+    /// `schema_mismatch` reports an older and a newer existing database, and neither a missing, a fresh
+    /// nor a current one — without creating or changing the file.
+    #[test]
+    fn schema_mismatch_is_read_only_and_exact() {
+        let path = temp_db_path("schema-mismatch");
+        cleanup(&path);
+        assert_eq!(schema_mismatch(&path), None);
+        assert!(!path.exists(), "the probe must not create the database");
+        drop(open_database(&path).unwrap());
+        assert_eq!(schema_mismatch(&path), None);
+        let stamp = |version: u32| {
+            let conn = Connection::open(&path).unwrap();
+            set_user_version(&conn, version).unwrap();
+        };
+        stamp(CURRENT_SCHEMA_VERSION + 1);
+        assert_eq!(schema_mismatch(&path), Some((CURRENT_SCHEMA_VERSION + 1, CURRENT_SCHEMA_VERSION)));
+        stamp(CURRENT_SCHEMA_VERSION - 1);
+        assert_eq!(schema_mismatch(&path), Some((CURRENT_SCHEMA_VERSION - 1, CURRENT_SCHEMA_VERSION)));
+        assert!(!backup_path_for(&path).exists(), "the probe must not start the upgrade");
+        drop(open_database(&path).unwrap());
+        assert_eq!(schema_mismatch(&path), None);
         cleanup(&path);
     }
 

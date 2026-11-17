@@ -11,6 +11,8 @@
   import { SUPPORTED_LOCALES } from '$lib/i18n';
   import { MAP_PROVIDERS, getProviderById, isCustomProviderId, userProviderId } from '$lib/config/mapProviders';
   import { settings } from '$lib/stores/settings';
+  import { formatBackupSize, type DbBackupInfo } from '$lib/controllers/dbBackupPrompt';
+  import { connection } from '$lib/stores/connection';
   import UserMapsDialog from '$lib/components/UserMapsDialog.svelte';
   import {
     customMaps, ensureCustomMapsLoaded, chooseCustomMapsFolder, resetCustomMapsFolder, rescanCustomMaps,
@@ -314,31 +316,31 @@
     onPatch({ uiScale: Number((event.target as HTMLSelectElement).value) });
   }
 
-  // ── Pre-migration DB backup (Dev-Docs active/DB_MIGRATIONS.md) ── exactly ONE backup (made before a schema
-  // upgrade, next to the DB — multi-GB with blackbox logs, hence no rotation), shown with its size + delete.
-  let dbBackup = $state<{ path: string; size_bytes: number } | null>(null);
+  // A link records into, and finishes its flight in, the database it was opened with.
+  let dbFolderLocked = $derived($connection.status !== 'disconnected');
+
+  // ── Pre-migration DB backup (Dev-Docs archive/DB_MIGRATIONS.md) ──
+  let dbBackup = $state<DbBackupInfo | null>(null);
+  // The folder the row was loaded for: Delete must hit the backup that is shown, also when the folder
+  // changed while the row was on screen.
+  let dbBackupFor = '';
   async function loadDbBackup(): Promise<void> {
+    const dbPath = flightLogDbPath;
     try {
-      dbBackup = await invoke<{ path: string; size_bytes: number } | null>('flightlog_backup_info', {
-        dbPath: flightLogDbPath,
-      });
+      dbBackup = await invoke<DbBackupInfo | null>('flightlog_backup_info', { dbPath });
     } catch {
       dbBackup = null;
     }
+    dbBackupFor = dbPath;
   }
-  void loadDbBackup();
+  $effect(() => { void loadDbBackup(); });
   async function deleteDbBackup(): Promise<void> {
     try {
-      await invoke('flightlog_backup_delete', { dbPath: flightLogDbPath });
+      await invoke('flightlog_backup_delete', { dbPath: dbBackupFor });
     } catch {
       /* refresh below shows the truth either way */
     }
     await loadDbBackup();
-  }
-  function fmtBackupSize(bytes: number): string {
-    return bytes >= 1024 ** 3
-      ? `${(bytes / 1024 ** 3).toFixed(2)} GB`
-      : `${Math.max(1, Math.round(bytes / 1024 ** 2))} MB`;
   }
   function handleMapProviderChange(event: Event) {
     onPatch({ mapProvider: (event.target as HTMLSelectElement).value });
@@ -953,8 +955,8 @@
         <span class="s-label">{$t('settings.flightLogDbPath')}</span>
         <div class="path-picker-row">
           <input class="s-input path-input" type="text" readonly value={flightLogDbPath || defaultFlightLogPath || $t('settings.defaultPathUnknown')} />
-          <Button variant="standard" size="sm" onclick={onChooseFlightLogPath}>{$t('settings.choose')}</Button>
-          <Button variant="standard" size="sm" onclick={onResetFlightLogPath}>{$t('settings.useDefault')}</Button>
+          <Button variant="standard" size="sm" disabled={dbFolderLocked} title={dbFolderLocked ? $t('settings.dbFolderLockedHint') : undefined} onclick={onChooseFlightLogPath}>{$t('settings.choose')}</Button>
+          <Button variant="standard" size="sm" disabled={dbFolderLocked} title={dbFolderLocked ? $t('settings.dbFolderLockedHint') : undefined} onclick={onResetFlightLogPath}>{$t('settings.useDefault')}</Button>
         </div>
       </div>
       <!-- Desktop only — see `hasDbCompact`. -->
@@ -967,7 +969,7 @@
       {#if dbBackup}
         <div class="s-row" title={dbBackup.path}>
           <span class="s-label" title={$t('settings.dbBackupHint')}>
-            {$t('settings.dbBackup')} · {fmtBackupSize(dbBackup.size_bytes)}
+            {$t('settings.dbBackup')} · {formatBackupSize(dbBackup.size_bytes)}
           </span>
           <Button variant="standard" size="sm" onclick={deleteDbBackup} title={$t('settings.dbBackupHint')}>
             {$t('settings.dbBackupDelete')}

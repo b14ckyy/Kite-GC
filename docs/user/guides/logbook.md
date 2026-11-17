@@ -164,6 +164,21 @@ the **latest** backup is kept (with blackbox logs the file can be several GB), a
 with its size and a **Delete** button once it exists. To keep a copy permanently, move the file
 somewhere else yourself.
 
+While the backup and the upgrade run, Kite shows a notice — with a large database that takes several
+minutes; do not close Kite during it. It happens once, at the first start of the new version.
+
+After an upgrade Kite **asks what to do with the backup** and names its size: **Delete now**, **Keep**
+(it is not asked about again) or **Remind me in 14 days** (the question comes back at the first start
+after that). On Windows, Linux and macOS *Delete* moves the file to the recycle bin / trash where the
+drive has one; on a drive without (USB flash drives, on Linux every drive other than the one with your
+home folder) it is deleted right away. Kite never removes the backup on its own; only the next upgrade
+replaces it with a new one.
+
+**Choosing another database folder** that already holds a database in an older format asks first
+whether to upgrade it — decline, and the folder setting stays as it was. A database written by a newer
+Kite is refused the same way. The folder cannot be changed while a vehicle is connected. Switching the folder closes the flight that is open in the logbook and
+forgets which library mission the map mission came from: both belong to the previous database.
+
 If you ever **downgrade** Kite after such an upgrade, the older version refuses to touch the newer
 database: the logbook shows a notice (and the database stays untouched) until you either install the
 newer Kite again or restore a matching backup.
