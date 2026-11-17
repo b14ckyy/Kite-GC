@@ -84,7 +84,6 @@
     aria-label={$t('connection.panelTitle')}
     aria-expanded={open}
   >
-    <!-- chain link -->
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="M10 13a5 5 0 0 0 7.1 0l2.8-2.8a5 5 0 0 0-7.1-7.1L11 4.9" />
       <path d="M14 11a5 5 0 0 0-7.1 0l-2.8 2.8a5 5 0 0 0 7.1 7.1L13 19.1" />

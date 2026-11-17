@@ -117,7 +117,6 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 16px;
   }
 
   .dialog-box {
@@ -125,11 +124,8 @@
     border: 1px solid rgba(55, 168, 219, 0.45);
     border-radius: 8px;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
-    padding: 16px 18px 12px;
-    box-sizing: border-box;
+    padding: 16px 18px 0;
     width: min(520px, 100%);
-    /* % of the backdrop (the --ui-scale'd panels layer), not vh — see LogFilePicker. */
-    max-height: 100%;
     display: flex;
     flex-direction: column;
     min-height: 0;
@@ -145,7 +141,7 @@
   }
 
   /* The body scrolls (the editor on a landscape phone), the title stays. */
-  .dialog-body { flex: 0 1 auto; min-height: 0; overflow-y: auto; }
+  .dialog-body { flex: 0 1 auto; min-height: 0; overflow-y: auto; padding-bottom: 12px; }
 
   .dialog-empty {
     font-size: 12px;

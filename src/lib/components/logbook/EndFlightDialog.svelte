@@ -360,7 +360,7 @@
   .battery-dropdown {
     position: absolute; top: 100%; left: 0; right: 0; z-index: 10;
     margin: 2px 0 0; padding: 4px; list-style: none;
-    max-height: 180px; overflow-y: auto;
+    max-height: 120px; overflow-y: auto;
     background: #262626; border: 1px solid #444; border-radius: 4px;
     box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
   }

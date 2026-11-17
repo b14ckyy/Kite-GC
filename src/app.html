@@ -35,9 +35,9 @@
       }
       select:disabled { opacity: 0.5; }
 
-      /* Dialogs never outgrow the window and their buttons stay in view. Limits are % of the backdrop,
-         not vh / vw: the backdrop fills the --ui-scale'd layer, a viewport unit would be multiplied by
-         the scale. Boxes are border-box, so their own widths include the padding. */
+      /* Limits in % of the backdrop, never vh / vw: it fills the --ui-scale'd layer, where a viewport unit is
+         multiplied by the scale. Under a blurred or transformed ancestor the backdrop is that ancestor's box
+         (helpers/outOfPanel.ts). Boxes are border-box: their widths include the padding. */
       .dialog-backdrop, .about-backdrop, .gc-backdrop, .rc-modal-backdrop, .modal-backdrop, .switch-overlay {
         box-sizing: border-box;
         padding: max(8px, var(--safe-top, 0px)) max(8px, var(--safe-right, 0px)) max(8px, var(--safe-bottom, 0px)) max(8px, var(--safe-left, 0px));
@@ -47,6 +47,7 @@
         max-width: 100%;
         max-height: 100%;
         overflow-y: auto;
+        overflow-wrap: anywhere;
         overscroll-behavior: contain;
       }
       /* The shadow covers the box's bottom padding, where the content would show under the row. */
