@@ -87,7 +87,7 @@ along the bottom. Each widget is self-contained and updates live.
   place or into the other dock. In edit mode a press picks a widget up immediately. Click anywhere
   outside the docks, or press **Escape**, to leave edit mode.
 - **Resize them**: in edit mode each widget shows a **resize button** in its corner. Every tap steps
-  it to its next size — square widgets toggle **small ↔ large**, the wide ones (Live AGL, Video) cycle
+  it to its next size — square widgets toggle **small ↔ large**, the wide ones (Live AGL, Weather, Video) cycle
   **wide → large square → small square**. The aspect ratio never changes (a widget is only rescaled),
   and a dock shrinks to its largest widget, so a row of small tiles frees the space above it. The
   Video widget always **crops to fill** its tile, whatever its size.
