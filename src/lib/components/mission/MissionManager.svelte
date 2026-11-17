@@ -297,21 +297,23 @@
     return `${name}_${sys}${counter}`;
   }
 
-  async function exportMission(m: LibraryMission) {
+  const isMavFormat = (m: LibraryMission) => m.format === 'ardupilot' || m.format === 'px4';
+  /** Extension of the flight stack's own mission file. */
+  const platformExt = (m: LibraryMission) => (isMavFormat(m) ? 'waypoints' : 'mission');
+
+  /** `kmission` keeps the whole entry (name, notes, home, data of a newer Kite); the platform format
+   *  only the waypoints: `.waypoints` (QGC WPL 110) for ArduPilot / PX4, `.mission` (XML) for INAV. */
+  async function exportMission(m: LibraryMission, kind: 'kmission' | 'platform') {
     try {
-      // `.kmission` keeps the whole entry (name, notes, home, data of a newer Kite); the platform format
-      // only the waypoints: `.waypoints` (QGC WPL 110) for ArduPilot / PX4, `.mission` (XML) for INAV.
-      const isMav = m.format === 'ardupilot' || m.format === 'px4';
+      const isMav = isMavFormat(m);
+      const ext = kind === 'kmission' ? 'kmission' : platformExt(m);
       const path = await save({
         title: $t('missionMgr.exportTitle'),
-        defaultPath: `${exportFileName(m)}.kmission`,
-        filters: [
-          { name: $t('missionMgr.kmissionFilter'), extensions: ['kmission'] },
-          isMav ? { name: 'Waypoints', extensions: ['waypoints'] } : { name: 'Mission', extensions: ['mission'] },
-        ],
+        defaultPath: `${kind === 'kmission' ? exportFileName(m) : fileSafeName(m.name)}.${ext}`,
+        filters: [{ name: kind === 'kmission' ? $t('missionMgr.kmissionFilter') : isMav ? 'Waypoints' : 'Mission', extensions: [ext] }],
       });
       if (!path) return;
-      if (/\.kmission$/i.test(path)) {
+      if (kind === 'kmission') {
         await missionFileWrite(path, m.id, dbPath());
       } else if (isMav) {
         const wps = JSON.parse(m.waypoints_json) as ArduWaypoint[];
@@ -571,7 +573,8 @@
 {#snippet detailToolbar()}
   <div class="mmv2-detail-actions">
     <Button variant="data" icon="map" onclick={() => selected && loadToMap(selected)}>{$t('missionMgr.loadToMap')}</Button>
-    <Button variant="data" icon="export" onclick={() => selected && exportMission(selected)} title={$t('missionMgr.export')} />
+    <Button variant="data" icon="export" onclick={() => selected && exportMission(selected, 'platform')} title={$t('missionMgr.export')}>{selected ? `.${platformExt(selected)}` : ''}</Button>
+    <Button variant="data" icon="export" onclick={() => selected && exportMission(selected, 'kmission')} title={$t('missionMgr.export')}>{'.kmission'}</Button>
     <Button variant="danger" icon="delete" onclick={() => selected && deleteMission(selected)} title={$t('missionMgr.delete')} />
   </div>
 {/snippet}
