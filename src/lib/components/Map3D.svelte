@@ -4654,10 +4654,11 @@
     return a + (b - a) * t;
   }
 
-  /** Shortest-path angle lerp in degrees (handles 359→1 wrap). */
+  /** Angle lerp in degrees, the shortest way round, result in 0..360. JS `%` keeps the sign: an input outside
+   *  that range must not reach a single modulo, or the difference comes out a full turn off. */
   function lerpAngle(a: number, b: number, t: number): number {
-    const diff = ((b - a + 540) % 360) - 180;
-    return a + diff * t;
+    const diff = ((((b - a) % 360) + 540) % 360) - 180;
+    return (((a + diff * t) % 360) + 360) % 360;
   }
 
   /** Toggle the heading-locked follow input model: Cesium's rotate/tilt/look/pan off (a sideways drag would
