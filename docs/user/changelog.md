@@ -237,6 +237,9 @@ inside the box of the feature release they belong to, so the notes for one relea
     - **Vehicle type override, FC ID and "Save to vehicle library" in the UAV Info panel** — the
       detected type can be changed until you disconnect, the flight controller's hardware ID is
       shown, and the connected craft can be saved as a library vehicle. [#157]
+    - **QGroundControl plans with a Survey can be imported** — the survey arrives as the waypoints
+      QGC generated for it, camera commands included. Before, such a plan was refused. See
+      [Missions](guides/missions.md#files-the-mission-library). [#308]
     - **Vehicle type from the vehicle library** — a library vehicle whose FC ID matches the
       connected flight controller sets the type on every connect: map model, UAV Info and the
       recorded flights. Check the type of your library vehicles — until now it was only a label.
