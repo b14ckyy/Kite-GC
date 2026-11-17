@@ -1,17 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Which *recorded* flights carry arming-relative altitude instead of true MSL.
-//
-// The live path already knows this: the passive backend emits `telemetry-alt-ref` when it locks a
-// protocol (`handler.rs`, `msl = !matches!(p, Protocol::Ltm | Protocol::Crsf)`), and the frontend
-// anchors the relative value to a ground MSL captured at the arm edge. A *replayed* flight has no such
-// event — the only surviving hint is the `protocol` label the recorder wrote onto the flight row.
-//
-// So this matches on that label. It is deliberately the ONLY place that does, because the match makes
-// the label part of a data contract: renaming it in `handler.rs` would silently break every stored
-// flight. The clean fix is a dedicated column plus a migration that back-fills it from exactly this
-// function — worth doing on the next schema change, not worth a migration on its own.
+// Which recorded flights carry arming-relative altitude instead of true MSL, decided from the `protocol`
+// label (`passive_telemetry/handler.rs`) — renaming a label breaks stored flights. The v22 back-fill of
+// `flights.alt_relative` (`ALT_RELATIVE_PROTOCOL_SQL`, db.rs) applies the same rule: change both together.
 
 /** Flight-row `protocol` labels written by the passive backend (see `passive_telemetry/handler.rs`). */
 const RELATIVE_ALTITUDE_PROTOCOLS = ['CRSF', 'LTM'];

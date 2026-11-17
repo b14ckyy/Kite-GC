@@ -16,7 +16,7 @@ use super::types::{
 use crate::msp::hardware_uid;
 use crate::msp::types::INAV_SITL_UID;
 
-const CURRENT_SCHEMA_VERSION: u32 = 21;
+const CURRENT_SCHEMA_VERSION: u32 = 22;
 
 /// Column list (excluding the autoincrement `id`) for `telemetry_records`, shared by the temp-session
 /// copy so the SELECT and INSERT column orders can never drift apart. `flight_id` is first so the
@@ -68,6 +68,66 @@ const BATTERY_RECORDS_DDL_FULL: &str = "CREATE TABLE IF NOT EXISTS battery_recor
     battery_percentage INTEGER,
     cell_count    INTEGER,
     temperature   REAL
+);";
+
+/// Raw values of every GPS receiver next to the fused track (`instance` 0 = GPS_RAW_INT, 1 = GPS2_RAW).
+/// `fix_type` is the unified scale, `fix_raw` MAVLink's `GPS_FIX_TYPE` as sent.
+const GPS_RECORDS_DDL_FULL: &str = "CREATE TABLE IF NOT EXISTS gps_records (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    flight_id     INTEGER NOT NULL,
+    timestamp_ms  INTEGER NOT NULL,
+    instance      INTEGER NOT NULL,
+    fix_type      INTEGER,
+    fix_raw       INTEGER,
+    num_sat       INTEGER,
+    hdop          REAL,
+    lat           REAL,
+    lon           REAL,
+    alt_msl       REAL,
+    vdop          REAL,
+    h_acc_m       REAL,
+    v_acc_m       REAL,
+    speed_ms      REAL,
+    course_deg    REAL,
+    yaw_deg       REAL
+);";
+
+/// One row per weather answer during a flight; `data_json` is the backend's `WindAloft` as returned, so
+/// the widget reads it back unchanged and a new field needs no schema change.
+const WEATHER_RECORDS_DDL_FULL: &str = "CREATE TABLE IF NOT EXISTS weather_records (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    flight_id     INTEGER NOT NULL,
+    timestamp_ms  INTEGER NOT NULL,
+    lat           REAL,
+    lon           REAL,
+    source        TEXT,
+    data_json     TEXT NOT NULL
+);";
+
+/// Videos attached to a flight: a path relative to the video folder (a setting), never the file. The
+/// sync is two anchors (a, b), each a video frame / video time and the flight time it belongs to, so a
+/// split or partial recording maps onto the log. Dev-Docs active/SCHEMA_V22.md.
+const FLIGHT_VIDEOS_DDL_FULL: &str = "CREATE TABLE IF NOT EXISTS flight_videos (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    flight_id         INTEGER NOT NULL,
+    rel_path          TEXT NOT NULL,
+    label             TEXT,
+    duration_ms       INTEGER,
+    codec             TEXT,
+    width             INTEGER,
+    height            INTEGER,
+    fps               REAL,
+    frame_count       INTEGER,
+    file_size         INTEGER,
+    fingerprint       TEXT,
+    sync_a_frame      INTEGER,
+    sync_a_video_ms   INTEGER,
+    sync_a_flight_ms  INTEGER,
+    sync_b_frame      INTEGER,
+    sync_b_video_ms   INTEGER,
+    sync_b_flight_ms  INTEGER,
+    extra_json        TEXT,
+    created_at        TEXT NOT NULL DEFAULT (datetime('now'))
 );";
 
 /// Open (or create) the flight log database at the given path.
@@ -628,7 +688,7 @@ type MigrationStep = fn(&Connection) -> SqlResult<()>;
 
 /// The migration chain, one `(target version, step)` per schema version. Module-level so the tests
 /// can build a DB at an older version from the real steps.
-const MIGRATION_STEPS: [(u32, MigrationStep); 21] = [
+const MIGRATION_STEPS: [(u32, MigrationStep); 22] = [
     (1, migrate_v0_to_v1),
     (2, migrate_v1_to_v2),
     (3, migrate_v2_to_v3),
@@ -650,6 +710,7 @@ const MIGRATION_STEPS: [(u32, MigrationStep); 21] = [
     (19, migrate_v18_to_v19),
     (20, migrate_v19_to_v20),
     (21, migrate_v20_to_v21),
+    (22, migrate_v21_to_v22),
 ];
 
 fn migrate(conn: &Connection) -> SqlResult<()> {
@@ -690,6 +751,7 @@ fn migrate(conn: &Connection) -> SqlResult<()> {
     ensure_v19_schema(conn)?;
     ensure_v20_schema(conn)?;
     ensure_v21_schema(conn)?;
+    ensure_v22_schema(conn)?;
 
     Ok(())
 }
@@ -1194,6 +1256,56 @@ fn backfill_source_before_link(conn: &Connection) -> SqlResult<usize> {
 fn migrate_v20_to_v21(conn: &Connection) -> SqlResult<()> {
     ensure_v21_schema(conn)?;
     set_user_version(conn, 21)?;
+    Ok(())
+}
+
+/// SQL condition on a `flights` row: altitudes relative to the arming point (passive CRSF / LTM carry no
+/// MSL; labels from `passive_telemetry/handler.rs`). Same rule as `isRelativeAltitudeProtocol`
+/// (helpers/altReference.ts) — change both together.
+const ALT_RELATIVE_PROTOCOL_SQL: &str =
+    "protocol LIKE 'Telemetry (%' AND (protocol LIKE '%CRSF%' OR protocol LIKE '%LTM%')";
+
+/// v22 (Dev-Docs active/SCHEMA_V22.md). `missions.extra_json` is kept opaque: data this version does not
+/// know.
+fn ensure_v22_schema(conn: &Connection) -> SqlResult<()> {
+    conn.execute_batch(GPS_RECORDS_DDL_FULL)?;
+    conn.execute_batch(WEATHER_RECORDS_DDL_FULL)?;
+    conn.execute_batch(FLIGHT_VIDEOS_DDL_FULL)?;
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_gps_records_flight ON gps_records(flight_id, timestamp_ms);
+         CREATE INDEX IF NOT EXISTS idx_weather_records_flight ON weather_records(flight_id, timestamp_ms);
+         CREATE INDEX IF NOT EXISTS idx_flight_videos_flight ON flight_videos(flight_id);",
+    )?;
+    if !column_exists(conn, "missions", "extra_json")? {
+        conn.execute_batch("ALTER TABLE missions ADD COLUMN extra_json TEXT;")?;
+    }
+    if !column_exists(conn, "missions", "vehicle_class")? {
+        conn.execute_batch("ALTER TABLE missions ADD COLUMN vehicle_class TEXT;")?;
+    }
+    if !column_exists(conn, "flights", "alt_relative")? {
+        // Column and back-fill commit together; the back-fill runs only when the column is born. NULL
+        // (a row written before the recorder sets it) = decide from the protocol label as before.
+        conn.execute_batch("SAVEPOINT v22_alt_relative;")?;
+        let added = conn.execute_batch("ALTER TABLE flights ADD COLUMN alt_relative INTEGER;").and_then(|_| {
+            conn.execute(
+                &format!("UPDATE flights SET alt_relative = CASE WHEN {ALT_RELATIVE_PROTOCOL_SQL} THEN 1 ELSE 0 END"),
+                [],
+            )
+        });
+        match added {
+            Ok(_) => conn.execute_batch("RELEASE v22_alt_relative;")?,
+            Err(e) => {
+                let _ = conn.execute_batch("ROLLBACK TO v22_alt_relative; RELEASE v22_alt_relative;");
+                return Err(e);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn migrate_v21_to_v22(conn: &Connection) -> SqlResult<()> {
+    ensure_v22_schema(conn)?;
+    set_user_version(conn, 22)?;
     Ok(())
 }
 
@@ -3286,9 +3398,7 @@ pub fn find_duplicate_flight(
     Ok(Some(flight))
 }
 
-/// Delete a flight and all related data (telemetry, battery samples, events, archived files).
-/// Explicitly deletes child rows first (in case foreign_keys is off), then starts the background
-/// reclaim of the freed pages.
+/// Delete a flight and all its child rows, then start the background reclaim of the freed pages.
 pub fn delete_flight(conn: &Connection, flight_id: i64) -> SqlResult<bool> {
     let deleted = delete_flight_rows(conn, flight_id)?;
 
@@ -3328,17 +3438,18 @@ pub(crate) const END_LINK_SET: &str = concat!(
 
 /// The row work of `delete_flight` without the page reclaim, so it can run inside a transaction.
 fn delete_flight_rows(conn: &Connection, flight_id: i64) -> SqlResult<bool> {
-    // Clear any linked_flight_id references pointing to this flight
     conn.execute(
         &format!("UPDATE flights SET {END_LINK_SET} WHERE linked_flight_id = ?1"),
         params![flight_id],
     )?;
 
-    // Explicitly delete child tables (don't rely solely on CASCADE; `battery_records` has no FK at
-    // all, so without this its rows outlived the flight).
+    // Child tables are deleted explicitly: most have no FK, their rows would outlive the flight.
     conn.execute("DELETE FROM blackbox_files WHERE flight_id = ?1", params![flight_id])?;
     conn.execute("DELETE FROM telemetry_records WHERE flight_id = ?1", params![flight_id])?;
     conn.execute("DELETE FROM battery_records WHERE flight_id = ?1", params![flight_id])?;
+    conn.execute("DELETE FROM gps_records WHERE flight_id = ?1", params![flight_id])?;
+    conn.execute("DELETE FROM weather_records WHERE flight_id = ?1", params![flight_id])?;
+    conn.execute("DELETE FROM flight_videos WHERE flight_id = ?1", params![flight_id])?;
     conn.execute("DELETE FROM flight_events WHERE flight_id = ?1", params![flight_id])?;
     let affected = conn.execute("DELETE FROM flights WHERE id = ?1", params![flight_id])?;
     Ok(affected > 0)
@@ -5060,6 +5171,93 @@ mod tests {
         assert_eq!(get_flight(&conn, id).unwrap().unwrap().craft_name, "quad");
     }
 
+    // ── Schema v22 ────────────────────────────────────────────────────────────────────────
+
+    /// A v21 database with flights and a mission: the v22 step adds the tables and columns, back-fills
+    /// `alt_relative` from the protocol label, keeps the existing rows, and a second pass is a no-op.
+    #[test]
+    fn v21_database_migrates_to_v22() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        migrate_to(&conn, 21);
+        assert!(!table_exists(&conn, "gps_records").unwrap());
+        let flight = |protocol: &str| {
+            conn.execute(
+                "INSERT INTO flights (start_time, craft_name, source, protocol) VALUES ('2026-09-01T10:00:00+00:00', 'W', 'live', ?1)",
+                params![protocol],
+            )
+            .unwrap();
+            conn.last_insert_rowid()
+        };
+        let msp = flight("MSP");
+        let crsf = flight("Telemetry (CRSF)");
+        let ltm = flight("Telemetry (LTM)");
+        let mavlink_passive = flight("Telemetry (MAVLink)");
+        conn.execute(
+            "INSERT INTO missions (content_hash, name, waypoints_json) VALUES ('h1', 'M', '[]')",
+            [],
+        )
+        .unwrap();
+
+        migrate(&conn).unwrap();
+        assert_eq!(get_user_version(&conn).unwrap(), 22);
+        for table in ["gps_records", "weather_records", "flight_videos"] {
+            assert!(table_exists(&conn, table).unwrap(), "{table}");
+        }
+        for (table, column) in [("missions", "extra_json"), ("missions", "vehicle_class"), ("flights", "alt_relative")] {
+            assert!(column_exists(&conn, table, column).unwrap(), "{table}.{column}");
+        }
+        let alt_relative = |id: i64| -> Option<i64> {
+            conn.query_row("SELECT alt_relative FROM flights WHERE id = ?1", params![id], |r| r.get(0)).unwrap()
+        };
+        assert_eq!(alt_relative(msp), Some(0));
+        assert_eq!(alt_relative(crsf), Some(1));
+        assert_eq!(alt_relative(ltm), Some(1));
+        assert_eq!(alt_relative(mavlink_passive), Some(0));
+        let mission: (String, Option<String>, Option<String>) = conn
+            .query_row("SELECT name, extra_json, vehicle_class FROM missions WHERE content_hash = 'h1'", [], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })
+            .unwrap();
+        assert_eq!(mission, ("M".to_string(), None, None));
+
+        // Re-entrant: a value set after the migration survives the self-heal pass and the step itself.
+        conn.execute("UPDATE flights SET alt_relative = NULL WHERE id = ?1", params![crsf]).unwrap();
+        migrate(&conn).unwrap();
+        let tx = conn.unchecked_transaction().unwrap();
+        migrate_v21_to_v22(&tx).unwrap();
+        tx.commit().unwrap();
+        assert_eq!(alt_relative(crsf), None);
+        assert_eq!(get_user_version(&conn).unwrap(), 22);
+    }
+
+    /// The v22 child tables carry no FK: `delete_flight` removes their rows, other flights keep theirs.
+    #[test]
+    fn delete_flight_removes_v22_child_rows() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        migrate(&conn).unwrap();
+        let flight = || {
+            conn.execute(
+                "INSERT INTO flights (start_time, craft_name, source) VALUES ('2026-09-01T10:00:00+00:00', 'W', 'live')",
+                [],
+            )
+            .unwrap();
+            conn.last_insert_rowid()
+        };
+        let (gone, kept) = (flight(), flight());
+        for id in [gone, kept] {
+            conn.execute("INSERT INTO gps_records (flight_id, timestamp_ms, instance) VALUES (?1, 0, 0)", params![id]).unwrap();
+            conn.execute("INSERT INTO weather_records (flight_id, timestamp_ms, data_json) VALUES (?1, 0, '{}')", params![id]).unwrap();
+            conn.execute("INSERT INTO flight_videos (flight_id, rel_path) VALUES (?1, 'a/b.mp4')", params![id]).unwrap();
+        }
+        delete_flight(&conn, gone).unwrap();
+        for table in ["gps_records", "weather_records", "flight_videos"] {
+            assert_eq!(count(&conn, &format!("SELECT COUNT(*) FROM {table} WHERE flight_id = ?1"), gone), 0, "{table}");
+            assert_eq!(count(&conn, &format!("SELECT COUNT(*) FROM {table} WHERE flight_id = ?1"), kept), 1, "{table}");
+        }
+    }
+
     // ── Schema v21: no decoded Blackbox rows, `flights.source_before_link` ───────────────────
 
     fn source_of(conn: &Connection, flight_id: i64) -> (String, Option<String>, Option<i64>) {
@@ -5130,7 +5328,7 @@ mod tests {
         let lone_live = raw("live");
 
         migrate(&conn).unwrap();
-        assert_eq!(get_user_version(&conn).unwrap(), 21);
+        assert_eq!(get_user_version(&conn).unwrap(), CURRENT_SCHEMA_VERSION);
         assert!(!table_exists(&conn, "blackbox_records").unwrap());
         assert!(!object_exists(&conn, "index", "idx_blackbox_records_flight"));
         assert_eq!(source_of(&conn, live_1), linked("live", log_1));
