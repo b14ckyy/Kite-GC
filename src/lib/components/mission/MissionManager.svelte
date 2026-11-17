@@ -379,7 +379,9 @@
       await reload();
       statusMessage = $t('missionMgr.imported');
     } else {
-      if (!(await ensureSystemForFormat(system))) return;
+      // ArduPilot and PX4 share the editor: with a vehicle of the other one connected the plan still loads.
+      const locked = get(autopilotLocked) && sameFamily(get(autopilotSystem), system);
+      if (!locked && !(await ensureSystemForFormat(system))) return;
       arduMission.set(wps);
       arduSelectedWpIndex.set(-1);
       arduLoadedMissionId.set(existingId);

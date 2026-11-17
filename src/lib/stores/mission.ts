@@ -334,27 +334,32 @@ function saveCurrentToSlot() {
   missionSlots.set(idx, [...m.waypoints]);
 }
 
-/** Switch to a different mission tab */
+/** Number and end flag as `Mission::renumber` sets them — a slot is only cached here, and a waypoint moved
+ *  in from another mission brings its own. */
+function normalizeSlot(wps: Waypoint[]): Waypoint[] {
+  const last = wps.length - 1;
+  return wps.map((w, i) => ({
+    ...w,
+    number: i + 1,
+    flag: i === last
+      ? (w.flag === WP_FLAG_FBH ? WP_FLAG_FBH : WP_FLAG_LAST)
+      : (w.flag === WP_FLAG_LAST ? WP_FLAG_NORMAL : w.flag),
+  }));
+}
+
+/** Sent whole via `mission_set`: a `mission_add_wp` rebuild drops the flag (fly-by-home) and the altitude
+ *  mode (AGL). */
+async function loadSlot(idx: number): Promise<void> {
+  const waypoints = normalizeSlot(missionSlots.get(idx) ?? []);
+  mission.set(await invoke<Mission>('mission_set', { waypoints }));
+}
+
 export async function switchMission(newIdx: number): Promise<void> {
   const currentIdx = get(activeMissionIndex);
   if (newIdx === currentIdx) return;
 
-  // Save current mission to slot cache
   saveCurrentToSlot();
-
-  // Load target mission from slot cache (or empty)
-  const targetWps = missionSlots.get(newIdx) || [];
-
-  // Clear backend and re-add target WPs
-  await invoke<Mission>('mission_clear');
-  for (const wp of targetWps) {
-    await invoke<Mission>('mission_add_wp', {
-      action: wp.action, lat: wp.lat, lon: wp.lon,
-      altitude: wp.altitude, p1: wp.p1, p2: wp.p2, p3: wp.p3,
-    });
-  }
-  const m = await invoke<Mission>('mission_get');
-  mission.set(m);
+  await loadSlot(newIdx);
   activeMissionIndex.set(newIdx);
   clearWpSelection();
   frameMissionOnMap(); // switching the active multi-mission reframes the map (free pan only)
@@ -412,17 +417,7 @@ export async function removeMission(idx: number): Promise<number> {
     newActive = currentIdx;
   }
 
-  // Load the new active mission into the backend
-  const targetWps = missionSlots.get(newActive) || [];
-  await invoke<Mission>('mission_clear');
-  for (const wp of targetWps) {
-    await invoke<Mission>('mission_add_wp', {
-      action: wp.action, lat: wp.lat, lon: wp.lon,
-      altitude: wp.altitude, p1: wp.p1, p2: wp.p2, p3: wp.p3,
-    });
-  }
-  const m = await invoke<Mission>('mission_get');
-  mission.set(m);
+  await loadSlot(newActive);
   activeMissionIndex.set(newActive);
   clearWpSelection();
   return newActive;
@@ -691,7 +686,7 @@ export async function moveWaypointToMission(wpIndex: number, targetIdx: number):
     // Append a copy to the target slot, then remove from the active mission.
     const target = missionSlots.get(targetIdx) ?? [];
     target.push({ ...wps[wpIndex] });
-    missionSlots.set(targetIdx, target);
+    missionSlots.set(targetIdx, normalizeSlot(target));
 
     await missionRemoveWp(wpIndex);
   } finally {
@@ -717,7 +712,7 @@ export async function moveSelectedWpsToMission(targetIdx: number): Promise<void>
     // descending so the indices stay valid.
     const target = missionSlots.get(targetIdx) ?? [];
     for (const wp of toMove) target.push(wp);
-    missionSlots.set(targetIdx, target);
+    missionSlots.set(targetIdx, normalizeSlot(target));
 
     for (const i of [...sel].sort((a, b) => b - a)) await missionRemoveWp(i);
   } finally {

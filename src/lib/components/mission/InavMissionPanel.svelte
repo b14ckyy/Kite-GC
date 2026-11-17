@@ -174,8 +174,8 @@
     uploadLoading = true; statusMessage = $t('mission.uploading');
     const un = await listenUploadProgress();
     try {
-      const m = await missionUpload(false);
-      statusMessage = $t('mission.uploaded', { values: { count: m.waypoints.length } });
+      await missionUpload(false);
+      statusMessage = $t('mission.uploaded', { values: { count: getTotalWpCount() } });
     } catch (e) {
       statusMessage = $t('mission.uploadFailed', { values: { error: String(e) } });
     } finally { un(); uploadLoading = false; }
@@ -187,8 +187,8 @@
     eepromSaveLoading = true; statusMessage = $t('mission.uploading');
     const un = await listenUploadProgress();
     try {
-      const m = await missionUpload(true);
-      statusMessage = $t('mission.eepromSaved', { values: { count: m.waypoints.length } });
+      await missionUpload(true);
+      statusMessage = $t('mission.eepromSaved', { values: { count: getTotalWpCount() } });
     } catch (e) {
       statusMessage = $t('mission.eepromSaveFailed', { values: { error: String(e) } });
     } finally { un(); eepromSaveLoading = false; }
@@ -658,7 +658,7 @@
     {#if currentMission.waypoints.length > 0}
       <div class="mission-summary">
         {#if currentMissionCount > 1}
-          M{currentMissionIdx}: {currentMission.waypoints.length} WPs | Total: {getTotalWpCount()}/{MAX_WAYPOINTS_TOTAL}
+          M{currentMissionIdx}: {currentMission.waypoints.length} WPs | Total: {$totalWpCount}/{MAX_WAYPOINTS_TOTAL}
         {:else}
           {currentMission.waypoints.length}/{MAX_WAYPOINTS_TOTAL} WPs
         {/if}
