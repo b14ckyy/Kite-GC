@@ -39,6 +39,8 @@
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import UpdateDialog from "$lib/components/UpdateDialog.svelte";
   import { runUpdateCheck, resolveUpdateKind } from "$lib/controllers/updateCheck";
+  import { checkDbBackupPrompt, runPendingDbUpgrade, probeDbSchema, formatBackupSize, type DbSchemaState, type DbUpgradeOutcome } from "$lib/controllers/dbBackupPrompt";
+  import DbUpgradeNotice from "$lib/components/DbUpgradeNotice.svelte";
   import ContextMenu from "$lib/components/ContextMenu.svelte";
   import BatchEditPopup from "$lib/components/mission/BatchEditPopup.svelte";
   import ArduBatchEditPopup from "$lib/components/mission/ArduBatchEditPopup.svelte";
@@ -1447,21 +1449,55 @@
     return typeof selected === 'string' && selected.length > 0 ? selected : null;
   }
 
+  // The flight database upgrade at start, before anything else opens the database (a plain open would
+  // upgrade it unseen, and on the main thread). 'failed' leaves the database to the error shown.
+  let dbUpgrade = $state<DbSchemaState | null>(null);
+  const dbUpgradeOutcome: Promise<DbUpgradeOutcome | 'failed'> =
+    runPendingDbUpgrade(get(settings).flightLogDbPath, (p) => { dbUpgrade = p; })
+      .catch((e) => { errorMsg = String(e); return 'failed' as const; });
+
+  function askAboutDbBackup(dbPath: string): Promise<void> {
+    return checkDbBackupPrompt(dbPath, showDialog, (key, values) => $t(key, { values }));
+  }
+
+  /** Point Kite at another database folder. A database there in an older format is upgraded only after
+   *  the user agreed; declined, or written by a newer Kite, the folder stays as it was. */
+  async function switchFlightLogPath(next: string) {
+    const state = await probeDbSchema(next);
+    if (state && state.from_version > state.to_version) {
+      await showInfo($t('logbook.dbNewerTitle'), $t('settings.dbFolderNewerMsg'));
+      return;
+    }
+    if (state) {
+      const answer = await showDialog({
+        title: $t('settings.dbFolderUpgradeTitle'),
+        message: $t('settings.dbFolderUpgradeMsg', { values: { size: formatBackupSize(state.size_bytes) } }),
+        buttons: [{ label: $t('settings.dbFolderUpgradeYes'), value: 'upgrade', primary: true }],
+      });
+      if (answer !== 'upgrade') return;
+    }
+    flightLogDbPath = next;
+    settings.patch({ flightLogDbPath });
+    if (!state) return;
+    try {
+      await runPendingDbUpgrade(next, (p) => { dbUpgrade = p; });
+      await askAboutDbBackup(next);
+    } catch (e) {
+      errorMsg = String(e);
+    }
+  }
+
   async function chooseFlightLogPath() {
     try {
       const selected = await pickStorageFolder(flightLogDbPath || defaultFlightLogPath || undefined);
-      if (selected) {
-        flightLogDbPath = selected;
-        settings.patch({ flightLogDbPath });
-      }
+      if (selected) await switchFlightLogPath(selected);
     } catch (e) {
       console.error('Failed to choose flight log path', e);
     }
   }
 
   function resetFlightLogPath() {
-    flightLogDbPath = '';
-    settings.patch({ flightLogDbPath: '' });
+    void switchFlightLogPath('');
   }
 
   async function chooseRawLogPath() {
@@ -2820,6 +2856,7 @@
       defaultRawLogPath = '';
     }
     if (activeTab === 'logbook') {
+      await dbUpgradeOutcome;
       await loadLogbook();
     }
   }
@@ -3400,7 +3437,14 @@
     }
   }
 
-  onMount(() => { void runStartupRecovery(); });
+  // After the upgrade: recovery opens the database too. No backup question on a database that failed to
+  // upgrade or belongs to a newer Kite — its backup is the way back.
+  onMount(() => {
+    void dbUpgradeOutcome.then(async (outcome) => {
+      await runStartupRecovery();
+      if (outcome === 'none' || outcome === 'done') await askAboutDbBackup(flightLogDbPath);
+    });
+  });
 
   // The Windows main window starts hidden: it is `transparent` for the native-video hole punch and would be
   // see-through before the first paint. Shown once mounted (no-op elsewhere). A failure is fatal for a
@@ -4310,6 +4354,9 @@
       </div>
     {/if}
     <ConfirmDialog bind:this={confirmDialog} />
+    {#if dbUpgrade}
+      <DbUpgradeNotice title={$t('settings.dbUpgradeTitle')} message={$t('settings.dbUpgradeMsg', { values: { size: formatBackupSize(dbUpgrade.size_bytes) } })} />
+    {/if}
     <UpdateDialog />
     <CesiumKeyPrompt bind:open={cesiumKeyPromptOpen} onSave={cesiumKeySave} onRemindLater={cesiumKeyRemindLater} onIgnore={cesiumKeyIgnore} />
     <EndFlightDialog bind:this={endFlightDialog} {interfaceSettings} />

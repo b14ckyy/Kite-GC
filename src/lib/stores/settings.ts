@@ -433,6 +433,9 @@ export interface AppSettings {
   cesiumIonToken: string;
   /** User chose "don't remind me" on the missing-Cesium-key prompt → never auto-show it again. */
   cesiumKeyPromptDismissed: boolean;
+  /** Answers to the backup prompt, by backup file path, for the backup with this modification time:
+   *  `remindAt` 0 = keep and do not ask again, else the time (ms) from which the prompt comes back. */
+  dbBackupAck: Record<string, { modifiedMs: number; remindAt: number }>;
   /** Low-power 3D render cap: off = uncapped · on = always 20fps · auto = 20fps only while on battery. */
   lowPower3D: 'off' | 'on' | 'auto';
   /** 3D globe at native pixel density (on) or half of it (off). Default: on for desktop, off for mobile. */
@@ -530,6 +533,7 @@ const defaults: AppSettings = {
   stayAwake: false,
   cesiumIonToken: '',
   cesiumKeyPromptDismissed: false,
+  dbBackupAck: {},
   lowPower3D: 'auto',
   highRes3D: !isMobile,
   altitudeCurtain3D: false,

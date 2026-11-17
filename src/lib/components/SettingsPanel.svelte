@@ -11,6 +11,7 @@
   import { SUPPORTED_LOCALES } from '$lib/i18n';
   import { MAP_PROVIDERS, getProviderById, isCustomProviderId, userProviderId } from '$lib/config/mapProviders';
   import { settings } from '$lib/stores/settings';
+  import { formatBackupSize } from '$lib/controllers/dbBackupPrompt';
   import UserMapsDialog from '$lib/components/UserMapsDialog.svelte';
   import {
     customMaps, ensureCustomMapsLoaded, chooseCustomMapsFolder, resetCustomMapsFolder, rescanCustomMaps,
@@ -314,8 +315,7 @@
     onPatch({ uiScale: Number((event.target as HTMLSelectElement).value) });
   }
 
-  // ── Pre-migration DB backup (Dev-Docs active/DB_MIGRATIONS.md) ── exactly ONE backup (made before a schema
-  // upgrade, next to the DB — multi-GB with blackbox logs, hence no rotation), shown with its size + delete.
+  // ── Pre-migration DB backup (Dev-Docs archive/DB_MIGRATIONS.md) ──
   let dbBackup = $state<{ path: string; size_bytes: number } | null>(null);
   async function loadDbBackup(): Promise<void> {
     try {
@@ -334,11 +334,6 @@
       /* refresh below shows the truth either way */
     }
     await loadDbBackup();
-  }
-  function fmtBackupSize(bytes: number): string {
-    return bytes >= 1024 ** 3
-      ? `${(bytes / 1024 ** 3).toFixed(2)} GB`
-      : `${Math.max(1, Math.round(bytes / 1024 ** 2))} MB`;
   }
   function handleMapProviderChange(event: Event) {
     onPatch({ mapProvider: (event.target as HTMLSelectElement).value });
@@ -967,7 +962,7 @@
       {#if dbBackup}
         <div class="s-row" title={dbBackup.path}>
           <span class="s-label" title={$t('settings.dbBackupHint')}>
-            {$t('settings.dbBackup')} · {fmtBackupSize(dbBackup.size_bytes)}
+            {$t('settings.dbBackup')} · {formatBackupSize(dbBackup.size_bytes)}
           </span>
           <Button variant="standard" size="sm" onclick={deleteDbBackup} title={$t('settings.dbBackupHint')}>
             {$t('settings.dbBackupDelete')}

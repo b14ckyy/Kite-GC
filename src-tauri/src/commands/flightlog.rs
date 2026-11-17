@@ -26,13 +26,15 @@ fn open_db(custom_path: &str) -> Result<rusqlite::Connection, String> {
     db::open_database(&path).map_err(|e| format!("Database error: {}", e))
 }
 
-// ── Pre-migration backup (Settings → maintenance row; Dev-Docs active/DB_MIGRATIONS.md) ──
+// ── Pre-migration backup and start-up upgrade (Dev-Docs archive/DB_MIGRATIONS.md) ──
 
 /// Metadata of the single pre-migration backup file, or absent when none exists.
 #[derive(serde::Serialize)]
 pub struct DbBackupInfo {
     pub path: String,
     pub size_bytes: u64,
+    /// Modification time (Unix ms, 0 = unknown): tells one backup from the next for the prompt.
+    pub modified_ms: u64,
 }
 
 #[tauri::command]
@@ -40,15 +42,50 @@ pub fn flightlog_backup_info(db_path: Option<String>) -> Option<DbBackupInfo> {
     let backup =
         db::backup_path_for(&db::resolve_db_path(&db_path.unwrap_or_default(), portable_mode()));
     let meta = std::fs::metadata(&backup).ok()?;
-    Some(DbBackupInfo { path: backup.to_string_lossy().into_owned(), size_bytes: meta.len() })
+    let modified_ms = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0, |d| d.as_millis() as u64);
+    Some(DbBackupInfo { path: backup.to_string_lossy().into_owned(), size_bytes: meta.len(), modified_ms })
 }
 
-/// Delete the pre-migration backup (explicit user action — it can be multi-GB).
-#[tauri::command]
+/// Remove the pre-migration backup on the user's word. Desktop: into the recycle bin / trash, so a wrong
+/// click can be undone; where there is none (mobile, some network or removable drives) it is deleted.
+#[tauri::command(async)]
 pub fn flightlog_backup_delete(db_path: Option<String>) -> Result<(), String> {
     let backup =
         db::backup_path_for(&db::resolve_db_path(&db_path.unwrap_or_default(), portable_mode()));
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    match trash::delete(&backup) {
+        Ok(()) => return Ok(()),
+        Err(e) => log::warn!("[flightlog] backup not moved to the trash ({e}) — deleting it"),
+    }
     std::fs::remove_file(&backup).map_err(|e| format!("could not delete {}: {e}", backup.display()))
+}
+
+/// An existing flight database whose schema is not this build's (`db::schema_mismatch`).
+#[derive(serde::Serialize)]
+pub struct DbSchemaState {
+    pub from_version: u32,
+    pub to_version: u32,
+    pub size_bytes: u64,
+}
+
+/// Read-only: `None` when there is no database at the path or it is at this build's schema.
+#[tauri::command]
+pub fn flightlog_schema_state(db_path: Option<String>) -> Option<DbSchemaState> {
+    let path = db::resolve_db_path(&db_path.unwrap_or_default(), portable_mode());
+    let (from_version, to_version) = db::schema_mismatch(&path)?;
+    let size_bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+    Some(DbSchemaState { from_version, to_version, size_bytes })
+}
+
+/// Open the flight database once so a pending upgrade (backup, then migration) runs now. `(async)`:
+/// the backup of a large database takes minutes and must not sit on the main thread.
+#[tauri::command(async)]
+pub fn flightlog_upgrade_run(db_path: Option<String>) -> Result<(), String> {
+    open_db(&db_path.unwrap_or_default()).map(|_| ())
 }
 
 #[inline]
