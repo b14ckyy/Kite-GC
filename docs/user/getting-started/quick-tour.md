@@ -289,7 +289,9 @@ room for either the map or a widget, rarely both. Tablets keep the desktop layou
   **sensor warning** chip next to it that only appears while a sensor is amber or red.
 - **Connecting** happens in a pop-out: tap the **🔗 chain-link** button at the top-right of the map for
   protocol and transport on the first row, the port / host / device on the second, **Connect** — and
-  **Relay**, which extends the pop-out with the relay entries. Tap anywhere else to close it.
+  **Relay**, which extends the pop-out with the relay entries. Tap anywhere else to close it. The
+  button's dot is **green** while data flows, **amber** while connected without data and **red** when
+  not connected.
 - **Widgets** live in a **frosted-glass column** on the right edge, on a grid of 4 rows and up to 2
   columns, with **two pages** — swipe up or down to switch. The map runs on underneath the glass. A
   small widget takes one cell, a large one 2 × 2, the wide Live AGL 2 × 1; the column narrows to one
