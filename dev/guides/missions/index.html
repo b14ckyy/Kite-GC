@@ -2541,6 +2541,14 @@ handy for storing alternates. Uploading sends <strong>all</strong> of them to th
 mission set (and <strong>EEPROM save</strong> stores the whole set); downloading reads it back and splits it into the
 separate tabs again — so a multi-mission round-trips cleanly. ArduPilot and PX4 work with a <strong>single</strong>
 mission.</p>
+<p><strong>Save to library</strong> asks, when more than one tab holds waypoints, whether to store <strong>all missions as
+one library entry</strong> or only the mission of the current tab. In the Mission Manager such an entry
+carries a <strong>MULTI</strong> badge; its preview draws every mission in its own colour, and the arrows in the
+preview step through the missions one by one. <strong>Loading it to the map replaces every mission tab</strong>
+(Kite asks first when tabs would be lost), and exporting it writes one <code>.mission</code> file with all
+missions. Opening a <code>.mission</code> file that holds several missions fills the tabs the same way. <strong>Save</strong>
+to a file from the panel still writes the current tab only. Linking a flight in the logbook always
+links the mission of the open tab, not the whole set.</p>
 <h2 id="staying-clear-of-airspace">Staying clear of airspace<a class="headerlink" href="#staying-clear-of-airspace" title="Permanent link">&para;</a></h2>
 <p>If the aircraft has <strong>geozones</strong> (INAV) or a <strong>geofence</strong> (ArduPilot / PX4) set, Kite can check your
 plan against them and warn about waypoints that breach a no-fly area. See <strong><a href="../safety/">Safety</a></strong>.</p>

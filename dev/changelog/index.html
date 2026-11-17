@@ -1934,6 +1934,10 @@ stays <em>Stable releases</em>. <a href="https://github.com/b14ckyy/Kite-GC/pull
 <li><strong>Vehicle type override, FC ID and "Save to vehicle library" in the UAV Info panel</strong> — the
   detected type can be changed until you disconnect, the flight controller's hardware ID is
   shown, and the connected craft can be saved as a library vehicle. <a href="https://github.com/b14ckyy/Kite-GC/pull/157">#157</a></li>
+<li><strong>INAV: several missions as one library entry</strong> — with more than one mission tab in use,
+  <em>Save to library</em> can store all of them together; loading the entry brings every tab back. A
+  <code>.mission</code> file with several missions now opens into the tabs instead of one long mission. See
+  <a href="../guides/missions/#multiple-missions-inav">Missions</a>. [#309]</li>
 <li><strong>QGroundControl plans with a Survey can be imported</strong> — the survey arrives as the waypoints
   QGC generated for it, camera commands included. Before, such a plan was refused. See
   <a href="../guides/missions/#files-the-mission-library">Missions</a>. [#308]</li>
