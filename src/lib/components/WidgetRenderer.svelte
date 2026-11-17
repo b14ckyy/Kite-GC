@@ -39,7 +39,7 @@
     interfaceSettings: InterfaceSettings;
     /** Cross-axis size (the square widgets' edge). */
     sizePx: number;
-    /** Box of the wide widgets (Live AGL, Video). */
+    /** Box of the wide widgets. */
     wPx: number;
     hPx: number;
     /** The widget is in its `S` state (for those that lay out differently then). */

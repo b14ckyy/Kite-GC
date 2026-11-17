@@ -11,7 +11,7 @@
   import type { InterfaceSettings } from '$lib/stores/settings';
   import { homePosition } from '$lib/stores/home';
   import { replayActive } from '$lib/stores/mission';
-  import { bearing } from '$lib/utils/geo';
+  import { bearing, haversineDistance } from '$lib/utils/geo';
   import { convertSpeed, speedDigits } from '$lib/utils/units';
   import { watchWindAloft, windAloft } from '$lib/controllers/windAloft';
   import { currentStep, weatherKind, windAt } from '$lib/helpers/windAloft';
@@ -36,20 +36,28 @@
     return () => clearInterval(id);
   });
 
-  // Every change repaints the whole dock: the rose follows the nose in steps, the height in 2 m.
+  // Every change repaints the whole dock: the rose follows the nose and the height in steps.
   const YAW_STEP_DEG = 5;
+  const HEIGHT_STEP_M = 2;
   let yawShown = $state(0);
+  // Height above home stands in for height above ground: the model cell is kilometres wide.
+  let heightM = $state(0);
   $effect(() => {
     const y = telem.yaw;
+    const h = telem.lastUpdate ? Math.max(0, telem.altitude) : 0;
     untrack(() => {
       if (Math.abs(((y - yawShown + 540) % 360) - 180) > YAW_STEP_DEG) yawShown = y;
+      if (Math.abs(h - heightM) >= HEIGHT_STEP_M || (h === 0 && heightM !== 0)) heightM = Math.round(h);
     });
   });
-  // Height above home stands in for height above ground: the model cell is kilometres wide.
-  let heightM = $derived(telem.lastUpdate ? Math.max(0, Math.round(telem.altitude / 2) * 2) : 0);
 
   const STALE_MS = 30 * 60_000;
-  let data = $derived($replayActive ? null : $windAloft.data);
+  const STEP_MS = 15 * 60_000;
+  /** The answer, until its last step is over: older than that it says nothing about now. */
+  let data = $derived.by(() => {
+    const d = $replayActive ? null : $windAloft.data;
+    return d && now < d.steps[d.steps.length - 1].time * 1000 + STEP_MS ? d : null;
+  });
   let stale = $derived(!!data && now - $windAloft.fetchedAt > STALE_MS);
   let stepIdx = $derived(data ? currentStep(data.steps, now) : 0);
   let step = $derived(data ? data.steps[stepIdx] : null);
@@ -72,11 +80,15 @@
       : [],
   );
 
-  let homeRel = $derived(
-    $homePosition.set && telem.lastUpdate && (telem.lat !== 0 || telem.lon !== 0)
-      ? Math.round((bearing(telem.lat, telem.lon, $homePosition.lat, $homePosition.lon) - yawShown + 720) % 360)
-      : null,
-  );
+  // No bearing on top of home: GPS noise would spin it.
+  const HOME_MIN_M = 10;
+  let homeRel = $derived.by(() => {
+    const h = $homePosition;
+    if (!h.set || !telem.lastUpdate || (telem.lat === 0 && telem.lon === 0)) return null;
+    if (haversineDistance(telem.lat, telem.lon, h.lat, h.lon) < HOME_MIN_M) return null;
+    const deg = (bearing(telem.lat, telem.lon, h.lat, h.lon) - yawShown + 720) % 360;
+    return Math.round(deg / YAW_STEP_DEG) * YAW_STEP_DEG;
+  });
 
   // Height scale: ground at the bottom, SCALE_TOP_M at the tip of its arrow head.
   const SCALE_TOP_M = 200;
@@ -87,7 +99,6 @@
   const scaleY = (m: number) => SCALE_Y0 - (m / SCALE_TOP_M) * (SCALE_Y0 - SCALE_Y1);
   let above = $derived(heightM >= SCALE_TOP_M);
 
-  // Rose: centre and radius per layout.
   let rose = $derived(mode === 'S' ? { cx: 100, cy: 100, r: 84, k: 1.4 } : { cx: 118, cy: 122, r: 60, k: 1 });
   const TICKS = [0, 45, 90, 135, 180, 225, 270, 315];
   const ARROW = '-8,42 -8,-10 -20,-10 0,-46 20,-10 8,-10 8,42';
@@ -106,7 +117,7 @@
 
 <div class="widget-card" style="width:{width}px; height:{height}px;">
   <svg {width} {height} viewBox="0 0 {mode === 'W' ? 400 : 200} 200">
-    <!-- Rose: ring, the aircraft nose up, wind arrow pointing downwind, home on the rim -->
+    <!-- Wind arrow points DOWNWIND (from + 180), relative to the nose -->
     <g transform="translate({rose.cx}, {rose.cy})">
       <circle r={rose.r} class="ring" />
       {#each TICKS as a}
@@ -115,7 +126,7 @@
       {/each}
       <polygon points={UAV} class="uav" transform="scale({rose.k})" />
       {#if wind && wind.speedMs > CALM_MS}
-        <polygon points={ARROW} class="wind" class:under-text={mode === 'S'} transform="rotate({rel(wind.dirDeg)}) scale({rose.k})" />
+        <polygon points={ARROW} class="wind" class:stale class:under-text={mode === 'S'} transform="rotate({rel(wind.dirDeg)}) scale({rose.k})" />
       {/if}
       {#if homeRel != null}
         <polygon points="0,{-rose.r - 11} -7,{-rose.r + 2} 7,{-rose.r + 2}" class="home" transform="rotate({homeRel})" />
@@ -127,7 +138,6 @@
     </g>
 
     {#if mode !== 'S'}
-      <!-- Height scale 0 … 200 m with the aircraft's height -->
       <line x1={SCALE_X} y1={SCALE_Y0} x2={SCALE_X} y2="33" class="scale" />
       <line x1={SCALE_X - 8} y1={SCALE_Y0} x2={SCALE_X + 8} y2={SCALE_Y0} class="scale" />
       <polygon points="{SCALE_X},20 {SCALE_X - 7},33 {SCALE_X + 7},33" class="scale-head" class:above />
@@ -156,7 +166,7 @@
           <text x="0" y="30" text-anchor="middle" class="fc-time">{$t('widgetLabels.inMin', { values: { n: f.min } })}</text>
           <circle cy="96" r="27" class="ring thin" />
           {#if f.w.speedMs > CALM_MS}
-            <polygon points={ARROW} class="wind" transform="translate(0, 96) rotate({rel(f.w.dirDeg)}) scale(0.52)" />
+            <polygon points={ARROW} class="wind" class:stale transform="translate(0, 96) rotate({rel(f.w.dirDeg)}) scale(0.52)" />
           {/if}
           <text x="0" y="158" text-anchor="middle" class="fc-speed">{speedText(f.w.speedMs)}</text>
           <text x="0" y="177" text-anchor="middle" class="fc-unit">{unit}</text>
@@ -206,6 +216,9 @@
   }
   .wind.under-text {
     opacity: 0.75;
+  }
+  .wind.stale {
+    fill: #6a6a6a;
   }
   .home {
     fill: #f5a623;

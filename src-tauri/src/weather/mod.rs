@@ -2,21 +2,21 @@
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
 // Wind by height from the Open-Meteo forecast model (no key), for the weather widget.
-// - Fixed heights are above ground; pressure levels come with a geopotential height (MSL) and are
-//   converted with the model cell's elevation.
-// - A model without a level answers `null` for it (180 m in GFS / ECMWF): the level is left out.
+// Fixed heights are above ground; pressure levels carry a geopotential height (MSL), made AGL with the answer's `elevation`.
 
 use serde::Serialize;
 use serde_json::Value;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 const OPEN_METEO_URL: &str = "https://api.open-meteo.com/v1/forecast";
 
-/// Heights above ground the model serves directly.
+/// Heights above ground the model serves directly; a model without one answers `null` (180 m in GFS / ECMWF).
 const FIXED_LEVELS_M: [u32; 4] = [10, 80, 120, 180];
 /// Pressure levels asked for above them; the low ones lie below ground over high terrain.
 const PRESSURE_LEVELS_HPA: [u32; 10] = [975, 950, 925, 900, 850, 800, 750, 700, 650, 600];
-/// 15-minute steps per answer: now and the 90 minutes after it.
-const STEPS: usize = 7;
+/// 15-minute steps per answer: now, the 90 minutes after it, and an hour of margin — the widget
+/// reads 90 minutes ahead of the CURRENT step, which moves on while the answer ages.
+const STEPS: usize = 11;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -44,7 +44,7 @@ pub struct WindStep {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WindAloft {
-    /// Elevation of the model cell the answer is for, metres MSL.
+    /// Terrain elevation at the requested point, metres MSL.
     pub elevation_m: f64,
     pub steps: Vec<WindStep>,
 }
@@ -81,13 +81,31 @@ pub async fn fetch_wind_aloft(lat: f64, lon: f64) -> Result<WindAloft, String> {
         ])
         .send()
         .await
-        .map_err(|e| e.to_string())?;
-    if !resp.status().is_success() {
-        return Err(format!("weather service answered {}", resp.status()));
+        // The error's URL carries the position.
+        .map_err(|e| e.without_url().to_string())?;
+    let status = resp.status();
+    let parsed = if status.is_success() {
+        resp.json::<Value>().await.ok().as_ref().and_then(parse)
+    } else {
+        None
+    };
+    match parsed {
+        Some(w) => {
+            REFUSED.store(false, Ordering::Relaxed);
+            Ok(w)
+        }
+        None => {
+            // The widget retries every minute: one line per outage.
+            if !REFUSED.swap(true, Ordering::Relaxed) {
+                log::warn!("weather: the service answered {status} without usable wind data");
+            }
+            Err(format!("weather service answered {status}"))
+        }
     }
-    let body: Value = resp.json().await.map_err(|e| e.to_string())?;
-    parse(&body).ok_or_else(|| "unexpected weather answer".to_string())
 }
+
+/// The service answered, but not with data (rate limit, rejected request, changed format).
+static REFUSED: AtomicBool = AtomicBool::new(false);
 
 fn parse(body: &Value) -> Option<WindAloft> {
     let elevation_m = body.get("elevation")?.as_f64()?;
@@ -150,14 +168,14 @@ mod tests {
                 "wind_speed_120m": [9.0, 9.1], "wind_direction_120m": [245, 246],
                 "wind_speed_180m": [null, null], "wind_direction_180m": [null, null],
                 "wind_speed_975hPa": [3.0, 3.0], "wind_direction_975hPa": [200, 200], "geopotential_height_975hPa": [205.0, 205.0],
-                "wind_speed_925hPa": [12.0, 12.0], "wind_direction_925hPa": [257, 257], "geopotential_height_925hPa": [635.0, 635.0],
-                "wind_speed_900hPa": [13.0, 13.0], "wind_direction_900hPa": [263, 263], "geopotential_height_900hPa": [856.0, 856.0]
+                "wind_speed_925hPa": [13.0, 13.0], "wind_direction_925hPa": [263, 263], "geopotential_height_925hPa": [856.0, 856.0],
+                "wind_speed_900hPa": [12.0, 12.0], "wind_direction_900hPa": [257, 257], "geopotential_height_900hPa": [635.0, 635.0]
             }
         });
         let w = parse(&body).unwrap();
         assert_eq!(w.steps.len(), 2);
         let h: Vec<f64> = w.steps[0].levels.iter().map(|l| l.height_agl_m).collect();
-        // 180 m is null, 975 hPa lies below ground.
+        // 180 m is null, 975 hPa lies below ground, the two upper levels arrive out of order.
         assert_eq!(h, vec![10.0, 80.0, 120.0, 235.0, 456.0]);
         assert!(w.steps[0].is_day && !w.steps[1].is_day);
         assert_eq!(w.steps[1].gust_ms, None);

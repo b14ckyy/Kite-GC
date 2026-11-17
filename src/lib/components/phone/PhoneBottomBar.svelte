@@ -213,6 +213,7 @@
       y: e.clientY - grabDy,
       w: r?.width ?? sideH,
       h: r?.height ?? sideH,
+      small: (r?.width ?? sideH) < (r?.height ?? sideH) * 1.5,
     };
     console.log('[phoneBar] drag start', id, Math.round(e.clientX), Math.round(e.clientY));
     updateDrag(e.clientX, e.clientY);

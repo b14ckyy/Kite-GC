@@ -9,14 +9,13 @@
 <script lang="ts">
   import type { WeatherKind } from '$lib/helpers/windAloft';
 
-  let { kind, day = true, stale = false, x = 0, y = 0, scale = 1 }: {
+  let { kind, day = true, stale = false, x = 0, y = 0 }: {
     kind: WeatherKind;
     day?: boolean;
     /** Grey: the data behind it is old. */
     stale?: boolean;
     x?: number;
     y?: number;
-    scale?: number;
   } = $props();
 
   const GREY = '#6a6a6a';
@@ -31,7 +30,7 @@
   let withSky = $derived(kind === 'partly' || kind === 'showers');
 </script>
 
-<g transform="translate({x}, {y}) scale({scale})">
+<g transform="translate({x}, {y})">
   {#if kind === 'clear'}
     {#if day}
       <circle cx="20" cy="20" r="7.5" fill={sun} />
