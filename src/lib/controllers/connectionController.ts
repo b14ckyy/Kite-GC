@@ -7,8 +7,11 @@ import { get } from 'svelte/store';
 import { t } from 'svelte-i18n';
 import type { FcInfo, PortInfo, BleDeviceInfo, TransportType, ProtocolType } from '$lib/stores/connection';
 import type { InavStats } from '$lib/stores/flightlogTypes';
-import { connection, connectionProtocol, fcLinkAlive, availablePorts, bleDevices, detectedPlatformType, hasMsp, isArduPilotLink } from '$lib/stores/connection';
+import { connection, connectionProtocol, fcLinkAlive, availablePorts, bleDevices, detectedPlatformType, platformTypeSource, hasMsp, isArduPilotLink } from '$lib/stores/connection';
 import { PLATFORM_AIRPLANE, PLATFORM_VTOL } from '$lib/helpers/uavIcons';
+import { platformForVehicleType } from '$lib/helpers/vehicleTypes';
+import { vehicleDbFindByFcUid } from '$lib/stores/flightlog';
+import { settings } from '$lib/stores/settings';
 import { isQuadplane } from '$lib/stores/missionArdupilot';
 import { startTelemetryListeners, stopTelemetryListeners, startConnectListeners, stopConnectListeners, blackboxOf, resetTelemetry, setFcVariant } from '$lib/stores/telemetry';
 import { startVehicleListeners, activeVehicleId, resetVehicles, refreshLinks, selectVehicle, links, vehicles, type VehicleSummary, type LinkSummary } from '$lib/stores/vehicles';
@@ -24,9 +27,16 @@ import { loadRallyConfig, clearRally } from '$lib/stores/rally';
 import { loadPx4RcInMode, px4RcInMode, px4RcInModeError } from '$lib/stores/rcFcConfig';
 import { rcPlatform } from '$lib/stores/rcPlatform';
 
-/** Session-only memory of the platform-type override, keyed by the FC hardware id (MSP / MAVLink).
- *  RAM only by design: a Kite restart forgets it; passive telemetry has no id and never lands here. */
-const platformOverrides = new Map<string, number>();
+/** Undefined without a library vehicle for this FC id, for type "other", or when the lookup fails.
+ *  ArduPilot SITL (per machine) and PX4 SITL (sysid > 1) report shared ids and do match. */
+async function libraryPlatformType(fcUid: string | null | undefined): Promise<number | undefined> {
+  if (!fcUid) return undefined;
+  const vehicle = await vehicleDbFindByFcUid(fcUid, get(settings).flightLogDbPath).catch((e) => {
+    console.warn('[connect] vehicle library lookup failed', e);
+    return null;
+  });
+  return vehicle ? platformForVehicleType(vehicle.vehicle_type) : undefined;
+}
 
 /** Refresh the serial port list and return the port to select. Diffs against the known list: first
  *  population keeps the restored port (else the first); a new (hotplugged) port is auto-selected; a vanished
@@ -200,25 +210,27 @@ export async function connectFC(params: ConnectParams): Promise<FcInfo> {
   }
   void refreshLinks().catch(() => {});
   const info = res.fcInfo;
-  // Phase A: the singleton UI follows the newest link's primary vehicle (the backend only auto-selects
-  // when nothing was active, so a second link must be selected explicitly here).
+  // The singleton UI follows the newest link's primary (local store; the backend activated it if nothing was active).
   activeVehicleId.set(res.vehicleId);
-  // The one-shot answers may have arrived before this result, which then lacks them: the backend holds
-  // the handshake's platform type ("airplane" for a QuadPlane) and no logging-backend flag.
+  // Awaited before the one-shot answers are read: one arriving during the lookup must not be missed.
+  const fromLibrary = await libraryPlatformType(info.fc_uid);
+  // The one-shot answers may come before this result, which then still carries the handshake type (Airplane
+  // for a QuadPlane) and no logging-backend flag.
   const handshakeType = info.platform_type;
   if (handshakeType === PLATFORM_AIRPLANE && isQuadplane(res.vehicleId)) info.platform_type = PLATFORM_VTOL;
   info.blackbox ??= blackboxOf(res.vehicleId) ?? null;
   detectedPlatformType.set(info.platform_type);
-  // The override chosen earlier this session for the same FC (see `platformOverrides`) wins.
-  const remembered = info.fc_uid ? platformOverrides.get(info.fc_uid) : undefined;
-  const target = remembered ?? info.platform_type;
-  if (target !== handshakeType) {
+  platformTypeSource.set(fromLibrary !== undefined ? 'library' : 'detected');
+  const target = fromLibrary ?? info.platform_type;
+  // A QuadPlane's backend copy may already be VTOL, whatever the handshake said.
+  if (target !== handshakeType || isQuadplane(res.vehicleId)) {
     try {
       await invoke('set_platform_type', { platformType: target });
       info.platform_type = target;
     } catch (e) {
       console.warn('[connect] setting the platform type failed', e);
       info.platform_type = handshakeType;
+      platformTypeSource.set('detected');
     }
   }
   // MAVLink link to INAV 10.0+ with MSP over MAVLink up (the backend probed it during connect).
@@ -373,11 +385,26 @@ async function applyActiveVehicle(vehicleId: string, linkList: LinkSummary[] = g
   // from the link, not the `vehicles` store (a not-yet-announced vehicle isn't automatically primary).
   const isPrimary = vehicleId === link.primaryVehicleId;
   const v = get(vehicles).get(vehicleId);
+  // Awaited before anything is read: a second switch or a one-shot answer may come during the lookup.
+  const fromLibrary = await libraryPlatformType(isPrimary || !v ? link.fcInfo.fc_uid : v.fcUid);
+  if (get(activeVehicleId) !== vehicleId) return;
   let fcInfo: FcInfo = !isPrimary && v
     ? secondaryFcInfo(link.fcInfo, v)
     : link.fcInfo;
   if (fcInfo.platform_type === PLATFORM_AIRPLANE && isQuadplane(vehicleId)) fcInfo = { ...fcInfo, platform_type: PLATFORM_VTOL };
   if (fcInfo.blackbox == null && blackboxOf(vehicleId) !== undefined) fcInfo = { ...fcInfo, blackbox: blackboxOf(vehicleId) ?? null };
+  // The HEARTBEAT type where known: the link's FcInfo of a primary may carry an earlier override.
+  const heartbeatType = v?.platformType ?? fcInfo.platform_type;
+  detectedPlatformType.set(heartbeatType === PLATFORM_AIRPLANE && isQuadplane(vehicleId) ? PLATFORM_VTOL : heartbeatType);
+  platformTypeSource.set(fromLibrary !== undefined ? 'library' : 'detected');
+  if (fromLibrary !== undefined && fromLibrary !== fcInfo.platform_type) {
+    try {
+      await invoke('set_platform_type', { platformType: fromLibrary });
+      fcInfo = { ...fcInfo, platform_type: fromLibrary };
+    } catch (e) {
+      console.warn('[vehicle] setting the library platform type failed', e);
+    }
+  }
   // MSP over MAVLink belongs to the link's handshake (primary) vehicle only — the backend's `with_msp`
   // refuses a secondary vehicle on the same link.
   const mspTunnel = protocolType === 'mavlink' && isPrimary && (fcInfo.features?.msp_tunnel ?? false);
@@ -488,6 +515,7 @@ export async function disconnectFC(baudRate: number): Promise<void> {
   px4RcInModeError.set(null);
   stopTelemetryListeners();
   stopConnectListeners();
+  platformTypeSource.set('detected');
   resetTelemetry();
   clearFcModeLists();
   connectionProtocol.set({ primary: '', secondary: null });
@@ -514,14 +542,13 @@ export async function setInavCraftName(name: string): Promise<void> {
   await invoke("inav_set_craft_name", { name });
 }
 
-/** Live platform-type override (UAV Info panel dropdown). Applied to the backend (FC info + the flight
- *  recorder, so the flights of this link are stored with the chosen type), mirrored into the store, and
- *  remembered per FC hardware id for a reconnect within this session. Never persisted. */
+/** UAV Info dropdown: the backend applies it to the active vehicle's FC info and recorder (the running flight
+ *  too). Only the link keeps it; no reconnect restores it. */
 export async function setLivePlatformType(platformType: number): Promise<void> {
+  // Before the invoke: a QuadPlane answer in between must not follow the detection.
+  platformTypeSource.set('manual');
   await invoke('set_platform_type', { platformType });
   connection.update((c) => (c.fcInfo ? { ...c, fcInfo: { ...c.fcInfo, platform_type: platformType } } : c));
-  const uid = get(connection).fcInfo?.fc_uid;
-  if (uid) platformOverrides.set(uid, platformType);
 }
 
 /** Read the INAV lifetime flight statistics from the FC `stats` settings (INAV/MSP only). */

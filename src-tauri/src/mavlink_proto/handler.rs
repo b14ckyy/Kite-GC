@@ -1650,9 +1650,6 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
                 *quadplane_seen = true; // got the answer → the loop stops re-probing
                 let quadplane = pv.param_value as i32 >= 1;
                 eprintln!("[MAVLINK-PARAM] Q_ENABLE = {} (quadplane={})", pv.param_value, quadplane);
-                let _ = app_handle.emit("telemetry-vehicle", serde_json::json!({
-                    "quadplane": quadplane,
-                }));
                 // A QuadPlane reports MAV_TYPE_FIXED_WING: the recorder stores it as VTOL.
                 if quadplane {
                     if let Some(ref rec) = recorder {
@@ -1669,6 +1666,10 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
                         }
                     }
                 }
+                // After the raise: the frontend answers this event with a platform type of its own.
+                let _ = app_handle.emit("telemetry-vehicle", serde_json::json!({
+                    "quadplane": quadplane,
+                }));
             } else if name == "LOG_BACKEND_TYPE" || name == "SDLOG_MODE" {
                 // Logging backend (requested in connect_mavlink): ArduPilot bitmask 0 = none, PX4 mode
                 // -1 = disabled. Lands in the stored FcInfo (the UAV Info panel's "Save to vehicle

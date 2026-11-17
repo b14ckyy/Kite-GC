@@ -403,7 +403,7 @@
   // Open the Vehicle Manager's create form pre-filled from this flight (craft name, FC id); the flight
   // is linked to the new vehicle when it is saved.
   function createVehicleFromFlight() {
-    vehicleManagerCreatePrefill.set({ craftName: flight.craft_name ?? '', fcUid: flight.fc_uid, flightId: flight.id });
+    vehicleManagerCreatePrefill.set({ craftName: flight.craft_name ?? '', fcUid: flight.fc_uid, flightId: flight.id, platformType: flight.platform_type });
     vehicleManagerOpen.set(true);
   }
 
