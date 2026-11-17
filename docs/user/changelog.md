@@ -241,7 +241,7 @@ inside the box of the feature release they belong to, so the notes for one relea
       connected flight controller sets the type on every connect: map model, UAV Info and the
       recorded flights. Check the type of your library vehicles — until now it was only a label.
       The library also knows *Tricopter* now. See
-      [Telemetry & display](guides/telemetry-and-display.md).
+      [Telemetry & display](guides/telemetry-and-display.md). [#305]
     - **Local radar devices over the network** — an ADS-B receiver and the FormationFlight module
       connect over TCP or UDP as well as over a serial port. See
       [Radar & ADS-B](guides/radar-and-adsb.md#connecting-a-local-device). [#261]
