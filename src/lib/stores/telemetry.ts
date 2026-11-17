@@ -275,8 +275,9 @@ let connectUnlisteners: UnlistenFn[] = [];
 
 export async function startConnectListeners() {
   stopConnectListeners();
-  connectUnlisteners.push(
-    // AHRS_EKF_TYPE — no lastUpdate bump.
+  // Collected locally: a second call during the awaits replaces `connectUnlisteners`.
+  const fresh = [
+    // A parameter answer, not a live sample: must not bump lastUpdate.
     await listen<{ ekf_type: number }>('telemetry-ekf-type', (event) => {
       telemetry.update((t) => ({ ...t, ekfType: event.payload.ekf_type }));
     }),
@@ -284,7 +285,14 @@ export async function startConnectListeners() {
     await listen<{ quadplane: boolean }>('telemetry-vehicle', (event) => {
       if (event.payload.quadplane) noteQuadplane();
     }),
-  );
+    // Passive telemetry, sent once at the protocol lock: true MSL, or only arming-relative altitude?
+    await listen<{ msl: boolean }>('telemetry-alt-ref', (event) => {
+      altReference.set({ msl: event.payload.msl });
+      // A real-MSL protocol supersedes any relative ground anchor.
+      if (event.payload.msl) groundAnchor.set(null);
+    }),
+  ];
+  connectUnlisteners.push(...fresh);
 }
 
 export function stopConnectListeners() {
@@ -495,15 +503,6 @@ export async function startTelemetryListeners() {
         windSpeedMs: event.payload.speed_ms,
         lastUpdate: Date.now(),
       }));
-    })
-  );
-
-  // Altitude reference: does this protocol deliver true MSL, or only arming-relative altitude?
-  unlisteners.push(
-    await listen<{ msl: boolean }>('telemetry-alt-ref', (event) => {
-      altReference.set({ msl: event.payload.msl });
-      // A real-MSL protocol supersedes any relative ground anchor.
-      if (event.payload.msl) groundAnchor.set(null);
     })
   );
 

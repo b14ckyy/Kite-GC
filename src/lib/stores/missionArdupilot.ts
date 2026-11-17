@@ -202,8 +202,7 @@ export const arduMissionModified = derived(
 export const arduMissionFcSynced = derived(arduMissionFlags, (f) => f.fc);
 
 // ── Vehicle class (drives the command catalog filter) ─────────────────
-// Online: derived from the FC's variant and locked. Offline: the operator picks it (QuadPlane can't be
-// auto-detected — it reports as ArduPlane — so it is an offline-only choice for now).
+// Online: derived from the FC (variant, MAV_TYPE, Q_ENABLE) and locked. Offline: the operator picks it.
 
 const VEHICLE_CLASSES: VehicleClass[] = ['plane', 'copter', 'quadplane', 'rover', 'boat', 'sub'];
 
