@@ -1114,6 +1114,7 @@
     "dbFolderUpgradeMsg": "Le dossier contient une base de données des vols dans un format plus ancien ({size}). Pour l’utiliser, Kite la met au format actuel et écrit d’abord une sauvegarde. Les versions plus anciennes de Kite ne pourront plus l’ouvrir ensuite.\n\nSans la mise à niveau, le dossier de la base de données reste inchangé.",
     "dbFolderUpgradeYes": "Mettre à niveau",
     "dbFolderNewerMsg": "La base de données des vols de ce dossier a été écrite par une version plus récente de Kite et ne peut pas être utilisée avec celle-ci. Le dossier de la base de données reste inchangé.",
+    "dbFolderLockedHint": "Le dossier de la base de données ne peut pas être modifié tant qu’un véhicule est connecté.",
     "dbBackupPromptTitle": "Sauvegarde de la base de données",
     "dbBackupPromptMsg": "La base de données des vols a été mise à niveau vers un nouveau format. La sauvegarde faite avant la mise à niveau est toujours sur le disque ({size}) :\n{path}\n\nLa supprimer maintenant, la conserver ou recevoir un rappel dans 14 jours ?",
     "dbBackupPromptDelete": "Supprimer maintenant",

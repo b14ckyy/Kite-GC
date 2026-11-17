@@ -1114,6 +1114,7 @@
     "dbFolderUpgradeMsg": "In dem Ordner liegt eine Flugdatenbank in einem älteren Format ({size}). Um sie zu verwenden, bringt Kite sie auf das aktuelle Format und schreibt vorher eine Sicherung. Ältere Kite-Versionen können sie danach nicht mehr öffnen.\n\nOhne die Aktualisierung bleibt der Datenbankordner unverändert.",
     "dbFolderUpgradeYes": "Aktualisieren",
     "dbFolderNewerMsg": "Die Flugdatenbank in diesem Ordner wurde von einer neueren Kite-Version geschrieben und kann mit dieser nicht verwendet werden. Der Datenbankordner bleibt unverändert.",
+    "dbFolderLockedHint": "Der Datenbankordner kann nicht geändert werden, solange ein Fahrzeug verbunden ist.",
     "dbBackupPromptTitle": "Datenbank-Sicherung",
     "dbBackupPromptMsg": "Die Flugdatenbank wurde auf ein neues Format aktualisiert. Die Sicherung von vor der Aktualisierung liegt noch auf dem Datenträger ({size}):\n{path}\n\nJetzt löschen, behalten oder in 14 Tagen erinnern?",
     "dbBackupPromptDelete": "Jetzt löschen",

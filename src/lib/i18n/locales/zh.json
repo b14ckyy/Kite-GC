@@ -1114,6 +1114,7 @@
     "dbFolderUpgradeMsg": "该文件夹中的飞行数据库为旧格式（{size}）。要使用它，Kite 会将其升级到当前格式，并先写入一份备份。之后旧版本的 Kite 将无法再打开它。\n\n如果不升级，数据库文件夹保持不变。",
     "dbFolderUpgradeYes": "升级",
     "dbFolderNewerMsg": "此文件夹中的飞行数据库由较新版本的 Kite 写入，无法在此版本中使用。数据库文件夹保持不变。",
+    "dbFolderLockedHint": "有载具连接时无法更改数据库文件夹。",
     "dbBackupPromptTitle": "数据库备份",
     "dbBackupPromptMsg": "飞行数据库已升级到新格式。升级前创建的备份仍在磁盘上（{size}）：\n{path}\n\n现在删除、保留，还是 14 天后提醒？",
     "dbBackupPromptDelete": "立即删除",

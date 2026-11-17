@@ -50,18 +50,44 @@ pub fn flightlog_backup_info(db_path: Option<String>) -> Option<DbBackupInfo> {
     Some(DbBackupInfo { path: backup.to_string_lossy().into_owned(), size_bytes: meta.len(), modified_ms })
 }
 
-/// Remove the pre-migration backup on the user's word. Desktop: into the recycle bin / trash, so a wrong
-/// click can be undone; where there is none (mobile, some network or removable drives) it is deleted.
+/// Remove the pre-migration backup on the user's word: desktop moves it to the recycle bin / trash; if that
+/// fails (none on mobile, network or removable drives, file too large, permission) it is deleted.
 #[tauri::command(async)]
 pub fn flightlog_backup_delete(db_path: Option<String>) -> Result<(), String> {
     let backup =
         db::backup_path_for(&db::resolve_db_path(&db_path.unwrap_or_default(), portable_mode()));
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
-    match trash::delete(&backup) {
+    match move_to_trash(&backup) {
         Ok(()) => return Ok(()),
         Err(e) => log::warn!("[flightlog] backup not moved to the trash ({e}) — deleting it"),
     }
     std::fs::remove_file(&backup).map_err(|e| format!("could not delete {}: {e}", backup.display()))
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+fn move_to_trash(path: &std::path::Path) -> Result<(), String> {
+    // Linux: off the home file system the crate may COPY the file into the home trash — minutes and
+    // gigabytes for nothing. Such a drive counts as having no trash.
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let device = |p: &std::path::Path| std::fs::metadata(p).map(|m| m.dev()).ok();
+        let home = dirs::home_dir().ok_or("no home directory")?;
+        if device(path) != device(&home) {
+            return Err("not on the home file system".into());
+        }
+    }
+    // macOS: the crate's default drives Finder by Apple events, which needs an automation permission
+    // Kite does not declare; NSFileManager moves the file without it.
+    #[cfg(target_os = "macos")]
+    {
+        use trash::macos::{DeleteMethod, TrashContextExtMacos};
+        let mut ctx = trash::TrashContext::default();
+        ctx.set_delete_method(DeleteMethod::NsFileManager);
+        ctx.delete(path).map_err(|e| e.to_string())
+    }
+    #[cfg(not(target_os = "macos"))]
+    trash::delete(path).map_err(|e| e.to_string())
 }
 
 /// An existing flight database whose schema is not this build's (`db::schema_mismatch`).
@@ -73,7 +99,7 @@ pub struct DbSchemaState {
 }
 
 /// Read-only: `None` when there is no database at the path or it is at this build's schema.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn flightlog_schema_state(db_path: Option<String>) -> Option<DbSchemaState> {
     let path = db::resolve_db_path(&db_path.unwrap_or_default(), portable_mode());
     let (from_version, to_version) = db::schema_mismatch(&path)?;

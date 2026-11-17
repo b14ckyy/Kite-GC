@@ -1114,6 +1114,7 @@
     "dbFolderUpgradeMsg": "La carpeta contiene una base de datos de vuelos en un formato anterior ({size}). Para usarla, Kite la pasa al formato actual y antes escribe una copia de seguridad. Las versiones anteriores de Kite ya no podrán abrirla después.\n\nSin la actualización, la carpeta de la base de datos queda como estaba.",
     "dbFolderUpgradeYes": "Actualizar",
     "dbFolderNewerMsg": "La base de datos de vuelos de esta carpeta fue escrita por una versión más reciente de Kite y no puede usarse con esta. La carpeta de la base de datos queda como estaba.",
+    "dbFolderLockedHint": "La carpeta de la base de datos no se puede cambiar mientras haya un vehículo conectado.",
     "dbBackupPromptTitle": "Copia de seguridad de la base de datos",
     "dbBackupPromptMsg": "La base de datos de vuelos se actualizó a un formato nuevo. La copia de seguridad hecha antes de la actualización sigue en el disco ({size}):\n{path}\n\n¿Eliminarla ahora, conservarla o recibir un recordatorio en 14 días?",
     "dbBackupPromptDelete": "Eliminar ahora",

@@ -1463,7 +1463,10 @@
   /** Point Kite at another database folder. A database there in an older format is upgraded only after
    *  the user agreed; declined, or written by a newer Kite, the folder stays as it was. */
   async function switchFlightLogPath(next: string) {
-    const state = await probeDbSchema(next);
+    if (get(connection).status !== 'disconnected') return; // the buttons are disabled then
+    const prev = flightLogDbPath;
+    // Android keeps the database in app storage whatever folder is chosen (it only mirrors there).
+    const state = isAndroid && next.startsWith('content://') ? null : await probeDbSchema(next);
     if (state && state.from_version > state.to_version) {
       await showInfo($t('logbook.dbNewerTitle'), $t('settings.dbFolderNewerMsg'));
       return;
@@ -1478,11 +1481,22 @@
     }
     flightLogDbPath = next;
     settings.patch({ flightLogDbPath });
+    // Row ids restart in every database: a selected flight or a loaded library mission of the old one
+    // would be written to an unrelated row of the new one.
+    resetPlayback();
+    selectedFlight = null;
+    selectedFlightId = null;
+    selectedFlightTrack = [];
+    selectedFlightTrackCount = 0;
+    loadedMissionId.set(null);
+    arduLoadedMissionId.set(null);
     if (!state) return;
     try {
-      await runPendingDbUpgrade(next, (p) => { dbUpgrade = p; });
-      await askAboutDbBackup(next);
+      if ((await runPendingDbUpgrade(next, (p) => { dbUpgrade = p; })) === 'done') await askAboutDbBackup(next);
     } catch (e) {
+      // A database that cannot be upgraded would fail on every access: back to the folder that worked.
+      flightLogDbPath = prev;
+      settings.patch({ flightLogDbPath: prev });
       errorMsg = String(e);
     }
   }
@@ -2856,8 +2870,8 @@
       defaultRawLogPath = '';
     }
     if (activeTab === 'logbook') {
-      await dbUpgradeOutcome;
-      await loadLogbook();
+      // After a failed upgrade a load would run the backup again, on the main thread.
+      if ((await dbUpgradeOutcome) !== 'failed') await loadLogbook();
     }
   }
 

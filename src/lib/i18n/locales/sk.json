@@ -1114,6 +1114,7 @@
     "dbFolderUpgradeMsg": "V priečinku je databáza letov v staršom formáte ({size}). Aby ju Kite mohol používať, prevedie ju na aktuálny formát a najprv zapíše zálohu. Staršie verzie Kite ju potom už neotvoria.\n\nBez aktualizácie zostane priečinok databázy nezmenený.",
     "dbFolderUpgradeYes": "Aktualizovať",
     "dbFolderNewerMsg": "Databázu letov v tomto priečinku zapísala novšia verzia Kite a s touto verziou ju nemožno použiť. Priečinok databázy zostáva nezmenený.",
+    "dbFolderLockedHint": "Priečinok databázy nemožno zmeniť, kým je pripojené vozidlo.",
     "dbBackupPromptTitle": "Záloha databázy",
     "dbBackupPromptMsg": "Databáza letov bola aktualizovaná na nový formát. Záloha vytvorená pred aktualizáciou je stále na disku ({size}):\n{path}\n\nOdstrániť ju teraz, ponechať, alebo pripomenúť o 14 dní?",
     "dbBackupPromptDelete": "Odstrániť teraz",

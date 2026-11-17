@@ -1114,6 +1114,7 @@
     "dbFolderUpgradeMsg": "The folder holds a flight database in an older format ({size}). To use it, Kite upgrades it to the current format and writes a backup first. Older Kite versions cannot open it afterwards.\n\nWithout the upgrade the database folder stays as it was.",
     "dbFolderUpgradeYes": "Upgrade",
     "dbFolderNewerMsg": "The flight database in this folder was written by a newer Kite version and cannot be used with this one. The database folder stays as it was.",
+    "dbFolderLockedHint": "The database folder cannot be changed while a vehicle is connected.",
     "dbBackupPromptTitle": "Database backup",
     "dbBackupPromptMsg": "The flight database was upgraded to a new format. The backup made before the upgrade is still on disk ({size}):\n{path}\n\nDelete it now, keep it, or be reminded in 14 days?",
     "dbBackupPromptDelete": "Delete now",
