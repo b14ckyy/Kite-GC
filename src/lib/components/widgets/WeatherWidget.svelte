@@ -52,12 +52,8 @@
   });
 
   const STALE_MS = 30 * 60_000;
-  const STEP_MS = 15 * 60_000;
-  /** The answer, until its last step is over: older than that it says nothing about now. */
-  let data = $derived.by(() => {
-    const d = $replayActive ? null : $windAloft.data;
-    return d && now < d.steps[d.steps.length - 1].time * 1000 + STEP_MS ? d : null;
-  });
+  // An old answer stays as a reference (greyed): better than nothing where the FC reports no wind.
+  let data = $derived($replayActive ? null : $windAloft.data);
   let stale = $derived(!!data && now - $windAloft.fetchedAt > STALE_MS);
   let stepIdx = $derived(data ? currentStep(data.steps, now) : 0);
   let step = $derived(data ? data.steps[stepIdx] : null);
@@ -80,8 +76,8 @@
       : [],
   );
 
-  // No bearing on top of home: GPS noise would spin it.
-  const HOME_MIN_M = 10;
+  // No bearing close to home: it swings with every metre flown and says nothing about the way back.
+  const HOME_MIN_M = 100;
   let homeRel = $derived.by(() => {
     const h = $homePosition;
     if (!h.set || !telem.lastUpdate || (telem.lat === 0 && telem.lon === 0)) return null;
