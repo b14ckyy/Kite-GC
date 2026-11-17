@@ -240,7 +240,7 @@ inside the box of the feature release they belong to, so the notes for one relea
     - **INAV: several missions as one library entry** — with more than one mission tab in use,
       *Save to library* can store all of them together; loading the entry brings every tab back. A
       `.mission` file with several missions now opens into the tabs instead of one long mission. See
-      [Missions](guides/missions.md#multiple-missions-inav).
+      [Missions](guides/missions.md#multiple-missions-inav). [#309]
     - **QGroundControl plans with a Survey can be imported** — the survey arrives as the waypoints
       QGC generated for it, camera commands included. Before, such a plan was refused. See
       [Missions](guides/missions.md#files-the-mission-library). [#308]
