@@ -265,6 +265,10 @@ inside the box of the feature release they belong to, so the notes for one relea
       with gusts, a weather icon, the direction home and, in the wide size, the wind for the next
       30, 60 and 90 minutes. Needs internet. See
       [Telemetry & display](guides/telemetry-and-display.md). [#299]
+    - **Telemetry lost notice** — when a link that had delivered data is silent for five seconds, a red
+      line is pinned above the system messages with a running timer and an alarm tone that repeats
+      every minute, until data returns or you disconnect. See
+      [Connecting](guides/connecting.md#reconnecting). [#300]
     - **Resizable widgets** — every flight widget has two or three sizes, switched with a corner
       button in edit mode; the docks adapt to their largest widget. [#101]
     - **Raw telemetry view** — the **≡ Raw** button in the top bar lists every telemetry value in
@@ -395,6 +399,11 @@ inside the box of the feature release they belong to, so the notes for one relea
 
     Every fix of 1.0.1 and 1.0.2 is part of 2.0. This list holds what is fixed in 2.0 only.
 
+    - **Dialogs taller than the window were cut off** at the top and the bottom, with their buttons
+      out of reach — on a phone, in a small window or at a high UI scale. Every dialog now stays
+      inside the window and scrolls, and its buttons stay in view. [#300]
+    - **Phone: the link button stayed green on a silent link.** Its dot is amber now while the link
+      is connected without data. [#300]
     - **3D map: leaving FPV left the camera in the cockpit** — banked with the aircraft and
       looking at the horizon, and on a touch screen it could hardly be tilted or turned. The free
       camera now starts behind and above the aircraft, looking down at it. [#262]

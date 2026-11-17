@@ -35,6 +35,29 @@
       }
       select:disabled { opacity: 0.5; }
 
+      /* Limits in % of the backdrop, never vh / vw: it fills the --ui-scale'd layer, where a viewport unit is
+         multiplied by the scale. Under a blurred or transformed ancestor the backdrop is that ancestor's box
+         (helpers/outOfPanel.ts). Boxes are border-box: their widths include the padding. */
+      .dialog-backdrop, .about-backdrop, .gc-backdrop, .rc-modal-backdrop, .modal-backdrop, .switch-overlay {
+        box-sizing: border-box;
+        padding: max(8px, var(--safe-top, 0px)) max(8px, var(--safe-right, 0px)) max(8px, var(--safe-bottom, 0px)) max(8px, var(--safe-left, 0px));
+      }
+      .dialog-box, .about-box, .gc-box, .rc-modal, .modal-card, .switch-dialog {
+        box-sizing: border-box;
+        max-width: 100%;
+        max-height: 100%;
+        overflow-y: auto;
+        overflow-wrap: break-word;
+        overscroll-behavior: contain;
+      }
+      /* The shadow covers the box's bottom padding, where the content would show under the row. */
+      .dialog-box .dialog-buttons {
+        position: sticky;
+        bottom: 12px;
+        background: #2e2e2e;
+        box-shadow: 0 16px 0 #2e2e2e;
+      }
+
       /* Glass blur — two switches, the radii stay at the elements as the var() fallback.
          Every backdrop-filter in the components reads `var(--glass-blur, blur(6px))` (everything that
          lies on the map: widget cards, buttons, chips, the widget column's glass, toasts, menus) or

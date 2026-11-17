@@ -89,7 +89,6 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 16px;
   }
 
   .dialog-box {
@@ -98,11 +97,7 @@
     border-radius: 8px;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
     padding: 16px 18px 12px;
-    box-sizing: border-box;
     width: min(420px, 100%);
-    /* % of the backdrop, not vh: the backdrop fills the --ui-scale'd panels layer, so this clamp
-       holds at any zoom while a vh figure would be multiplied by the scale. */
-    max-height: 100%;
     display: flex;
     flex-direction: column;
     min-height: 0;
@@ -123,8 +118,8 @@
     padding: 12px 0 14px;
   }
 
-  /* The list scrolls, the dialog does not: 30 days of files must fit under the Close button on a
-     720 px-high phone screen. Shrinkable, so the box's own clamp above wins when 60vh is too tall. */
+  /* The list scrolls first: 30 days of files must fit under the Close button on a phone. Shrinkable, so
+     the box's limit wins when 60vh is too tall. */
   .log-list {
     display: flex;
     flex-direction: column;

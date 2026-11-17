@@ -94,7 +94,7 @@
     border: 1px solid #37a8db;
     border-radius: 6px;
     padding: 16px;
-    max-width: 280px;
+    max-width: 314px;
     width: 90%;
   }
   .switch-title { font-size: 14px; font-weight: bold; color: #37a8db; margin-bottom: 8px; }

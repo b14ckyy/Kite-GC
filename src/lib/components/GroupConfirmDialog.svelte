@@ -235,9 +235,7 @@
     font-family: 'Segoe UI', Tahoma, sans-serif;
   }
   .gc-box {
-    width: 460px;
-    max-width: 94vw;
-    max-height: 86vh;
+    width: 494px;
     display: flex;
     flex-direction: column;
     padding: 14px 16px 14px;
