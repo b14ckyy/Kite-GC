@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// FC system messages (MAVLink STATUSTEXT, `mavlink-statustext`) as top-of-screen toasts: the last few, each
-// expiring 20 s after it arrived, with a severity-tiered audio cue. Severity = MAV_SEVERITY (0 = emergency … 7 = debug).
+// FC system messages (MAVLink STATUSTEXT, `mavlink-statustext`) as top-of-screen toasts, each expiring 20 s after
+// it arrived, with a severity-tiered audio cue; plus pinned GCS notices (`setPinnedStatus`) that stay until
+// cleared. Severity = MAV_SEVERITY (0 = emergency … 7 = debug).
 
 import { writable, get } from 'svelte/store';
 import { isActive, vehicles } from '$lib/stores/vehicles';

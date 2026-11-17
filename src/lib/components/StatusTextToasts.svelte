@@ -3,9 +3,8 @@
   Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 -->
 
-<!-- StatusTextToasts — FC system messages (MAVLink STATUSTEXT) as one compact top-edge banner: a line per
-     message, colour-coded, newest at the bottom; lines expire individually (the store drops them). Verbosity:
-     settings.systemMessages; the audio cue plays in the store. -->
+<!-- StatusTextToasts — FC system messages as one top-edge banner (expiry, filter and sound live in the store);
+     pinned GCS notices sit above the scrolling lines. -->
 <script lang="ts">
   import { fade } from 'svelte/transition';
   import { statusTexts, type StatusTextLevel } from '$lib/stores/statusText';
@@ -17,8 +16,9 @@
 
   let scroller = $state<HTMLDivElement | undefined>(undefined);
   // Keep the newest line in view as messages arrive.
+  let lineCount = $derived(lines.length);
   $effect(() => {
-    void lines.length;
+    void lineCount;
     if (scroller) scroller.scrollTop = scroller.scrollHeight;
   });
 </script>
@@ -108,7 +108,6 @@
     white-space: nowrap;
   }
   .m-icon { font-size: 11px; line-height: 1; flex: 0 0 auto; }
-  /* A pinned GCS notice: above the scrolling lines, larger, opaque red. */
   .msg-line.pinned {
     padding: 6px 10px;
     margin-bottom: 2px;

@@ -33,6 +33,10 @@
 {/if}
 
 <style>
+  /* The group confirmation renders in the panels layer, below this bar: out of its way while it is open. */
+  :global(body:has(.gc-backdrop)) .gcb {
+    visibility: hidden;
+  }
   .gcb {
     position: absolute;
     /* Bottom-centre of the frame, above the status bar / bottom widget dock. */

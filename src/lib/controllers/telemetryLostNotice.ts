@@ -14,11 +14,18 @@ import { LINK_STALE_MS } from '$lib/helpers/linkActivity.svelte';
 
 const KEY = 'telemetry-lost';
 const ALARM_REPEAT_MS = 60_000;
+/** A link dropping in and out around the stale limit does not re-alarm at every gap. */
+const ALARM_MIN_GAP_MS = 15_000;
+/** Timers that stood still (app in the background on a phone) say nothing: the queued telemetry arrives a
+ *  moment after they run again. A minimised desktop window keeps its timers and keeps alarming. */
+const RESUME_GRACE_MS = 2000;
 const CHECK_MS = 1000;
 
 let started = false;
 let lostSince = 0;
 let lastAlarm = 0;
+let lastCheck = 0;
+let resumedAt = 0;
 
 function clock(ms: number): string {
   const sec = Math.floor(ms / 1000);
@@ -32,6 +39,9 @@ function check(): void {
   const c = get(connection);
   const last = get(telemetry).lastUpdate;
   const now = Date.now();
+  if (lastCheck && now - lastCheck > 3 * CHECK_MS) resumedAt = now;
+  lastCheck = now;
+  if (now - resumedAt < RESUME_GRACE_MS) return;
   // Passive telemetry never goes quiet by itself: the backend's FC-origin flag decides there.
   const fcGone = c.protocolType === 'telemetry' && !get(fcLinkAlive);
   const lost = c.status === 'connected' && last > 0 && (now - last >= LINK_STALE_MS || fcGone);
@@ -40,12 +50,10 @@ function check(): void {
     lostSince = 0;
     return;
   }
-  if (!lostSince) {
-    lostSince = fcGone ? now : last;
-    lastAlarm = 0;
-  }
+  const onset = !lostSince;
+  if (onset) lostSince = fcGone ? now : last;
   setPinnedStatus(KEY, get(t)('connection.telemetryLost', { values: { time: clock(now - lostSince) } }));
-  if (now - lastAlarm >= ALARM_REPEAT_MS) {
+  if (now - lastAlarm >= (onset ? ALARM_MIN_GAP_MS : ALARM_REPEAT_MS)) {
     lastAlarm = now;
     playAlarm();
   }
