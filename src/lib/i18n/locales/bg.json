@@ -1656,6 +1656,7 @@
     "extraConflictKeep": "Запазване на съществуващите",
     "extraConflictOverwrite": "Замяна",
     "importedCount": "Импортирани: {added}, вече в библиотеката: {known}.",
+    "unknownFile": "Този файл не е файл с мисия, който Kite може да прочете.",
     "multiBadge": "Мулти",
     "previewAll": "Всички",
     "previewPrev": "Предишна мисия",

@@ -1656,6 +1656,7 @@
     "extraConflictKeep": "Conservar la existente",
     "extraConflictOverwrite": "Sobrescribir",
     "importedCount": "{added} importadas, {known} ya estaban en la biblioteca.",
+    "unknownFile": "Este archivo no es un archivo de misión que Kite pueda leer.",
     "multiBadge": "Multi",
     "previewAll": "Todas",
     "previewPrev": "Misión anterior",

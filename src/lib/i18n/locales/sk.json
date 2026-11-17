@@ -1656,6 +1656,7 @@
     "extraConflictKeep": "Ponechať existujúce",
     "extraConflictOverwrite": "Prepísať",
     "importedCount": "Importované: {added}, už v knižnici: {known}.",
+    "unknownFile": "Tento súbor nie je súbor misie, ktorý Kite dokáže prečítať.",
     "multiBadge": "Multi",
     "previewAll": "Všetky",
     "previewPrev": "Predchádzajúca misia",

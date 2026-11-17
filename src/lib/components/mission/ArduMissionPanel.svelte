@@ -28,7 +28,7 @@
   import { onMissionDownloadProgress, onMissionUploadProgress } from '$lib/stores/mission';
   import { cmdName, cmdShort, cmdHasLocation, cmdDef, cmdValidForVehicle, cmdValidForPx4, enumLabel, type VehicleClass } from '$lib/helpers/arduCommandCatalog';
   import { buildArduWaypointMenu } from '$lib/helpers/arduWaypointMenu';
-  import { anyCase } from '$lib/helpers/fileFilters';
+  import { openFilters } from '$lib/helpers/fileFilters';
   import { contextMenu } from '$lib/actions/contextMenu';
   import { arduWpDetailLines } from '$lib/helpers/missionWpDetails';
   import { frameMissionOnMap } from '$lib/stores/mapCamera';
@@ -184,7 +184,7 @@
         multiple: false,
         // .plan = QGroundControl's JSON plan (the only format QGC saves — the PX4 ecosystem's
         // mission files); .waypoints/.txt = the QGC WPL 110 text format (Mission Planner et al).
-        filters: [{ name: 'Missions', extensions: anyCase(['waypoints', 'txt', 'plan']) }],
+        filters: openFilters('Missions', ['waypoints', 'txt', 'plan']),
       });
       if (!path) return;
       const content = await invoke<string>('read_text_file', { path: typeof path === 'string' ? path : path });

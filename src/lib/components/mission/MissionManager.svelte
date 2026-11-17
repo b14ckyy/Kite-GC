@@ -41,7 +41,7 @@
   import { buildMissionInput, findLibraryMissionId } from '$lib/helpers/missionLibrary';
   import { importMissionFile } from '$lib/helpers/missionFile';
   import type { VehicleClass } from '$lib/helpers/arduCommandCatalog';
-  import { anyCase } from '$lib/helpers/fileFilters';
+  import { openFilters, missionFileKind } from '$lib/helpers/fileFilters';
   import { buildArduMissionInput, findArduLibraryMissionId } from '$lib/helpers/missionLibraryArdu';
   import { convertAltitude, convertDistance, formatConverted } from '$lib/utils/units';
   import PanelShell, { type PanelVariant } from '$lib/components/panel/PanelShell.svelte';
@@ -420,25 +420,28 @@
 
   async function handleImportButton() {
     try {
-      const path = await open({ title: $t('missionMgr.openTitle'), multiple: false, filters: [{ name: 'Mission', extensions: anyCase(['kmission', 'mission', 'waypoints', 'txt', 'plan']) }] });
+      const path = await open({ title: $t('missionMgr.openTitle'), multiple: false, filters: openFilters('Mission', ['kmission', 'mission', 'waypoints', 'txt', 'plan']) });
       if (!path || typeof path !== 'string') return;
-      const stem = path.replace(/^.*[\\/]/, '').replace(/\.[^.]+$/, '');
-      const lower = path.toLowerCase();
-      if (lower.endsWith('.kmission')) {
+      // The name as the user sees it: an Android document URI need not contain it.
+      const fileName = await invoke<string>('file_display_name', { path });
+      const stem = fileName.replace(/\.[^.]+$/, '');
+      const readText = () => invoke<string>('read_text_file', { path });
+      const kind = await missionFileKind(fileName, readText);
+      if (kind == null) throw new Error($t('missionMgr.unknownFile'));
+      if (kind === 'kmission') {
         const res = await importMissionFile(path, dbPath(), (o) => confirmDialog.show(o), (key) => $t(key));
         if (!res) return;
         if (formatFilter !== 'all') formatFilter = 'all'; // the entry may belong to a hidden system
         await reload();
         select(res.id);
         statusMessage = $t(res.added ? 'missionMgr.imported' : 'mission.saveLibAlready');
-      } else if (lower.endsWith('.plan')) {
+      } else if (kind === 'plan') {
         // The plan names its firmware: a PX4 plan must not be forced onto the ArduPilot tab (locked while a
         // PX4 vehicle is connected).
-        const text = await invoke<string>('read_text_file', { path });
+        const text = await readText();
         await importArduMission(parsePlanFile(text), stem || autoName(), planFirmwareTarget(text), planVehicleClass(text));
-      } else if (lower.endsWith('.waypoints') || lower.endsWith('.txt')) {
-        const text = await invoke<string>('read_text_file', { path });
-        await importArduMission(parseWaypoints(text), stem || autoName());
+      } else if (kind === 'waypoints') {
+        await importArduMission(parseWaypoints(await readText()), stem || autoName());
       } else {
         const wps = await missionLoadFile(path, confirmReplaceAll);
         if (wps) await importMission(wps, stem || autoName());
@@ -555,9 +558,6 @@
                       {#if setSize(m) > 1}<span class="fmt-badge multi-badge">{$t('missionMgr.multiBadge')}</span>{/if}
                     </div>
                   </button>
-                  <!-- Row-level delete, so removing a saved mission doesn't require selecting it first. -->
-                  <button class="lib-item-del" title={$t('missionMgr.delete')} aria-label={$t('missionMgr.delete')}
-                          onclick={(e) => { e.stopPropagation(); select(m.id); void deleteMission(m); }}>✕</button>
                 </div>
               {/each}
             </div>
@@ -667,9 +667,7 @@
   .lib-item { position: relative; display: flex; align-items: stretch; width: calc(100% - 12px); border: 1px solid #555; border-radius: 4px; background: #383838; color: #ddd; margin-bottom: 4px; }
   .lib-item:hover { border-color: #37a8db; }
   .lib-item.selected { border-color: #37a8db; background: rgba(55, 168, 219, 0.18); }
-  .lib-item-main { flex: 1 1 auto; min-width: 0; text-align: left; padding: 6px 26px 6px 6px; background: transparent; border: 0; color: inherit; font: inherit; cursor: pointer; }
-  .lib-item-del { position: absolute; top: 4px; right: 4px; width: 20px; height: 20px; padding: 0; background: transparent; border: 1px solid transparent; border-radius: 3px; color: #888; font-size: 11px; line-height: 1; cursor: pointer; }
-  .lib-item-del:hover { border-color: #e06c6c; color: #e06c6c; background: rgba(224, 108, 108, 0.12); }
+  .lib-item-main { flex: 1 1 auto; min-width: 0; text-align: left; padding: 6px; background: transparent; border: 0; color: inherit; font: inherit; cursor: pointer; }
   .lib-item-title { font-size: 12px; color: #fff; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .lib-item-meta { margin-top: 2px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 10px; color: #aaa; }
   .multi-badge { color: #e8c98a; background: rgba(245, 166, 35, 0.14); border-color: rgba(245, 166, 35, 0.4); }

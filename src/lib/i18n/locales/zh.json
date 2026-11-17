@@ -1656,6 +1656,7 @@
     "extraConflictKeep": "保留现有",
     "extraConflictOverwrite": "覆盖",
     "importedCount": "已导入 {added} 个，库中已有 {known} 个。",
+    "unknownFile": "此文件不是 Kite 能读取的任务文件。",
     "multiBadge": "多任务",
     "previewAll": "全部",
     "previewPrev": "上一个任务",

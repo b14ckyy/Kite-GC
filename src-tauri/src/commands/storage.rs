@@ -24,6 +24,24 @@ pub fn share_file(path: String, mime: String) -> Result<(), String> {
     }
 }
 
+/// The file name of something a file dialog returned. Desktop: the last path component. Android: the
+/// provider's display name — a document URI often ends in an id, not in the name.
+#[tauri::command]
+pub fn file_display_name(path: String) -> String {
+    #[cfg(target_os = "android")]
+    if crate::android::content::is_content_uri(&path) {
+        match crate::android::content::display_name(&path) {
+            Ok(Some(name)) => return name,
+            Ok(None) => {}
+            Err(e) => log::warn!("[storage] no display name for a picked document: {e}"),
+        }
+    }
+    std::path::Path::new(&path)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or(path)
+}
+
 /// Open the platform folder picker. On Android this returns the granted **tree URI** (`content://…`)
 /// to store as the setting value (`Ok(None)` = cancelled); on desktop the frontend uses the dialog
 /// plugin directly, so this answers with a pointer rather than a dead end.
