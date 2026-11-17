@@ -261,6 +261,10 @@ inside the box of the feature release they belong to, so the notes for one relea
       seconds. On MAVLink the fix type now also reads NO GPS, RTK FLT and RTK FIX. The GPS
       sensor tile turns amber as soon as one of the two receivers is below a 3D fix. See
       [Telemetry & display](guides/telemetry-and-display.md). [#297]
+    - **Weather widget** — the forecast wind at the aircraft's height, shown relative to the nose,
+      with gusts, a weather icon, the direction home and, in the wide size, the wind for the next
+      30, 60 and 90 minutes. Needs internet. See
+      [Telemetry & display](guides/telemetry-and-display.md). [#299]
     - **Telemetry lost notice** — when a link that had delivered data is silent for five seconds, a red
       line is pinned above the system messages with a running timer and an alarm tone that repeats
       every minute, until data returns or you disconnect. See

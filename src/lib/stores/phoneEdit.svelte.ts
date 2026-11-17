@@ -21,6 +21,8 @@ export interface PhoneDragSession {
   y: number;
   w: number;
   h: number;
+  /** The dragged tile is in its `S` state. */
+  small: boolean;
 }
 
 export const phoneEdit = $state({
