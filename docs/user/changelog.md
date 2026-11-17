@@ -261,7 +261,7 @@ inside the box of the feature release they belong to, so the notes for one relea
       seconds. On MAVLink the fix type now also reads NO GPS, RTK FLT and RTK FIX. The GPS
       sensor tile turns amber as soon as one of the two receivers is below a 3D fix. See
       [Telemetry & display](guides/telemetry-and-display.md). [#297]
-    - **Telemetry lost notice** — when a connected link has delivered nothing for five seconds, a red
+    - **Telemetry lost notice** — when a link that had delivered data is silent for five seconds, a red
       line is pinned above the system messages with a running timer and an alarm tone that repeats
       every minute, until data returns or you disconnect. See
       [Connecting](guides/connecting.md#reconnecting).

@@ -263,7 +263,7 @@ usually a single click on **Connect**. To drop the link, click **Disconnect**.
 A link that **goes quiet** is not dropped: when the aircraft has sent nothing for three seconds on an
 MSP or MAVLink link, the status bar switches to **Reconnecting…** (amber dot), Kite keeps the link
 open, and the display returns to normal as soon as data arrives again — a radio dropout heals on its
-own. After five seconds without data a red **Telemetry lost** line is pinned above the system messages,
+own. Once a link that had delivered data is silent for five seconds, a red **Telemetry lost** line is pinned above the system messages,
 with a timer counting up and an alarm tone that repeats every minute; on the phone the dot of the
 **🔗** button turns amber. The line stays until data returns or you disconnect, whatever
 **System Messages** is set to. Only a **lost transport** — a USB cable unplugged, a Bluetooth link gone, a TCP socket closed —
