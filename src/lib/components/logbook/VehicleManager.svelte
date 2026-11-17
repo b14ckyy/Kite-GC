@@ -1236,7 +1236,7 @@
   .vmv-sensor-fc { grid-column: 1 / -1; }
 
   .modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55); display: flex; align-items: center; justify-content: center; z-index: 1000; }
-  .modal-card { box-sizing: border-box; background: #2e2e2e; border: 1px solid rgba(55, 168, 219, 0.35); border-radius: 8px; padding: 14px; width: min(600px, 94vw); max-height: 90vh; overflow-y: auto; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5); }
+  .modal-card { background: #2e2e2e; border: 1px solid rgba(55, 168, 219, 0.35); border-radius: 8px; padding: 14px; width: min(600px, 100%); box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5); }
 
   .veh-status { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); z-index: 1001; padding: 6px 12px; font-size: 11px; color: #f39c12; background: rgba(0, 0, 0, 0.8); border-radius: 6px; }
   /* Phone: centre on the map area — a screen-centred pill runs under the widget column. */

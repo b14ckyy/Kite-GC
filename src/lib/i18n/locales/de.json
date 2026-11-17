@@ -44,6 +44,7 @@
     "idle": "inaktiv"
   },
   "connection": {
+    "telemetryLost": "Telemetrie verloren — keine Daten seit {time}",
     "connect": "Verbinden",
     "disconnect": "Trennen",
     "connecting": "Verbinde...",

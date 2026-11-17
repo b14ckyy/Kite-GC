@@ -60,7 +60,7 @@
 
 <style>
   .dialog-backdrop { position: fixed; inset: 0; z-index: 9999; background: rgba(0, 0, 0, 0.55); display: flex; align-items: center; justify-content: center; }
-  .dialog-box { background: #2e2e2e; border: 1px solid rgba(55, 168, 219, 0.45); border-radius: 8px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5); padding: 20px 24px 16px; min-width: 360px; max-width: 480px; }
+  .dialog-box { background: #2e2e2e; border: 1px solid rgba(55, 168, 219, 0.45); border-radius: 8px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5); padding: 20px 24px 16px; min-width: min(410px, 100%); max-width: 530px; }
   .dialog-title { font-size: 14px; font-weight: 700; color: #e0e0e0; margin-bottom: 10px; }
   .ck-text { font-size: 13px; color: #c4c4c4; line-height: 1.5; margin: 0 0 8px; }
   .ck-link { display: inline-block; font-size: 12px; color: #37a8db; margin-bottom: 12px; }

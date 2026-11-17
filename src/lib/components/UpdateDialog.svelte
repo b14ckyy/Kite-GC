@@ -121,7 +121,6 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 16px;
   }
 
   .dialog-box {
@@ -130,8 +129,7 @@
     border-radius: 8px;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
     padding: 20px 24px 16px;
-    width: min(640px, 100%);
-    max-height: 90vh;
+    width: min(690px, 100%);
     display: flex;
     flex-direction: column;
     min-height: 0;
