@@ -41,6 +41,7 @@ mod user_agent;
 mod user_file;
 mod vehicle_registry;
 mod video;
+mod weather;
 
 use commands::connection::{connect, disconnect, set_platform_type, inav_set_craft_name, inav_read_stats, scan_ble_devices, ble_scan_start, ble_scan_stop, debug_tunnel_msp_request, debug_tunnel_stats_snapshot};
 use commands::vehicles::{list_links, set_active_vehicle, get_active_vehicle, announce_vehicles, set_fleet_enabled, debug_group_state};
@@ -117,6 +118,7 @@ use commands::terrain::{
     terrain_profile,
 };
 use terrain::TerrainProvider;
+use commands::weather::weather_wind_aloft;
 use commands::mission::{
     mission_get, mission_clear, mission_set, mission_add_wp, mission_insert_wp,
     mission_remove_wp, mission_update_wp, mission_reorder_wp,
@@ -747,6 +749,7 @@ pub fn run() {
             terrain_elevations,
             terrain_profile,
             terrain_fan,
+            weather_wind_aloft,
             terrain_cache_stats,
             terrain_cache_clear,
             system_on_battery,

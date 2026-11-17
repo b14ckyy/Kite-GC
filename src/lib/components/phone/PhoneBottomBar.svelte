@@ -213,6 +213,7 @@
       y: e.clientY - grabDy,
       w: r?.width ?? sideH,
       h: r?.height ?? sideH,
+      small: (r?.width ?? sideH) < (r?.height ?? sideH) * 1.5,
     };
     console.log('[phoneBar] drag start', id, Math.round(e.clientX), Math.round(e.clientY));
     updateDrag(e.clientX, e.clientY);
@@ -296,7 +297,7 @@
           onpointerdown={(e) => id && onTilePointerDown(e, id)}
         >
           {#if id}
-            <WidgetRenderer {id} {telem} {interfaceSettings} sizePx={box.h} wPx={box.w} hPx={box.h} {editing} />
+            <WidgetRenderer {id} {telem} {interfaceSettings} sizePx={box.h} wPx={box.w} hPx={box.h} small={box.w < box.h * 1.5} {editing} />
             {#if editing && slot === 'centre' && isWideFamily(id)}
               <button
                 class="wide-btn"

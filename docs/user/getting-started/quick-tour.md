@@ -144,7 +144,7 @@ dock** (3) down the side, and the **bottom dock** (4) along the bottom.
 to rearrange the dock or move it into the other one; click outside the docks or press **Escape** to
 finish. In edit mode every widget also shows a **resize button** in its corner: each tap
 steps it to its next size — square widgets toggle between small and large, the wide ones (Live AGL,
-Video) go wide → large square → small square. The aspect ratio never changes, and a dock shrinks to its
+Weather, Video) go wide → large square → small square. The aspect ratio never changes, and a dock shrinks to its
 largest widget. Choose which widgets appear in **Settings → Interface**. Widgets scale to fit the dock,
 and your layout (which dock each sits in and its size) is remembered between sessions. Every widget
 follows your global units and works the same **live** and in **[replay](../guides/logbook.md)**.
@@ -250,6 +250,15 @@ Each widget, at a glance — expand for what it shows and how it works:
 
     ![The Terrain Radar widget](../assets/getting-started/widgets/terrainradar.png)
 
+??? note "Weather"
+    The **forecast wind at your flight height** from a weather model: a blue arrow shows where the wind
+    blows relative to the aircraft's nose, an orange triangle on the rim points home. Wind speed, gusts
+    near the ground and a weather icon sit above the rose; the scale on the left shows your height
+    between the ground and 200 m. The wide size adds the wind for the next 30, 60 and 90 minutes.
+    Needs internet. See **[Telemetry & display](../guides/telemetry-and-display.md)**.
+
+    <!-- SCREENSHOT: ../assets/getting-started/widgets/weather.png -->
+
 ??? note "Video"
     A live **video feed** embedded as a widget — an RTSP stream or a local capture device / camera (e.g. a
     USB capture card), always cropped to fill its tile. **Double-click** it to swap the feed with the
@@ -292,7 +301,7 @@ room for either the map or a widget, rarely both. Tablets keep the desktop layou
   **Relay**, which extends the pop-out with the relay entries. Tap anywhere else to close it.
 - **Widgets** live in a **frosted-glass column** on the right edge, on a grid of 4 rows and up to 2
   columns, with **two pages** — swipe up or down to switch. The map runs on underneath the glass. A
-  small widget takes one cell, a large one 2 × 2, the wide Live AGL 2 × 1; the column narrows to one
+  small widget takes one cell, a large one 2 × 2, a wide one (Live AGL, Weather, Video) 2 × 1; the column narrows to one
   cell when only small widgets are active. Widgets that no longer fit are switched off automatically,
   and **Settings → HUD widgets** tells you when the grid is full.
 - **Rearranging widgets**: **long-press** a widget to enter edit mode. Hold a widget briefly and drag
@@ -302,7 +311,7 @@ room for either the map or a widget, rarely both. Tablets keep the desktop layou
   turn the page; a quick flick still turns it too. Tap the corner button to step through the sizes.
   Tap the map to leave edit mode. The docked video window moves out of the way while edit mode is on.
 - **Three widget slots on the bottom edge** of the map, centred: a larger one in the middle (30 % of
-  the screen height, square — or 2:1 wide for Live AGL) and a smaller one on each side (20 %, square).
+  the screen height, square — or 2:1 wide for Live AGL and Weather) and a smaller one on each side (20 %, square).
   In edit mode the three slots show as dashed frames; drag a widget from the column into a slot, or
   drag it back. Outside edit mode only the widgets you placed are visible, with their normal card and
   no bar behind them — an empty middle slot takes no room, so two side widgets sit together in the

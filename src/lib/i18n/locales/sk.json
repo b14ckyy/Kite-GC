@@ -1395,6 +1395,7 @@
     "flightMode": "Letový režim",
     "liveAgl": "Živá AGL",
     "terrainRadar": "Radar terénu",
+    "weather": "Počasie",
     "video": "Video",
     "bottom": "Dole",
     "right": "Vpravo",
@@ -1422,6 +1423,9 @@
     "thr": "THR",
     "acc": "ACC",
     "auto": "AUTO",
+    "gust": "N {value}",
+    "inMin": "+{n} min",
+    "offline": "OFFLINE",
     "na": "N/A"
   },
   "compass": {

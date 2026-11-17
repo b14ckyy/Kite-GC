@@ -113,6 +113,7 @@ Each provider handles the request under its own privacy policy, which we link be
 | --- | --- | --- |
 | **3D map** | Cesium ion ([privacy](https://cesium.com/legal/privacy-policy/)) with the access token *you* created; imagery and terrain from the providers configured in your Cesium account | Terrain and imagery requests for the area on screen — and, with *3D Buildings (OSM)* switched on, the OpenStreetMap building tiles Cesium serves for that area — authenticated with your own token, i.e. under your own Cesium account |
 | **Radar / ADS-B traffic** | adsb.lol, adsb.one, adsb.fi (community ADS-B aggregators; each publishes its own terms) | The query centre (the map viewport or your aircraft's position) and a search radius, polled while the radar is on |
+| **Weather widget** (off by default; not during replay) | Open-Meteo ([privacy](https://open-meteo.com/en/terms)) | The aircraft's position — the home position while there is no GPS fix — every five minutes (every minute while a request fails), to get the forecast wind and weather for that place |
 | **Airspace Manager** | OpenAIP ([privacy](https://www.openaip.net/privacy)) with the API key *you* registered | A position and radius for the airspace layers you enabled, authenticated with your key |
 
 !!! note "Weather and place-name lookup"

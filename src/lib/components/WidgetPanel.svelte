@@ -610,7 +610,7 @@
         </button>
       {/if}
       <div class="widget-content">
-        <WidgetRenderer id={item.id} {telem} {interfaceSettings} sizePx={item.sizePx} wPx={item.wPx} hPx={item.hPx} {editing} />
+        <WidgetRenderer id={item.id} {telem} {interfaceSettings} sizePx={item.sizePx} wPx={item.wPx} hPx={item.hPx} small={item.state === 'S'} {editing} />
       </div>
     </div>
   {/each}
