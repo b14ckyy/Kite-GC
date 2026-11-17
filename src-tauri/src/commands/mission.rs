@@ -51,9 +51,8 @@ pub fn mission_clear(store: State<'_, MissionStore>) {
     store.clear();
 }
 
-/// Replace the entire active-mission waypoint list in one call. Preserves
-/// every field (including `alt_mode`). Used by undo/redo restore, where the
-/// snapshot is already a valid, numbered mission.
+/// Replace the entire active-mission waypoint list in one call. Preserves every field (including
+/// `alt_mode`) and does not renumber: the caller passes a numbered, flagged list.
 #[tauri::command]
 pub fn mission_set(waypoints: Vec<Waypoint>, store: State<'_, MissionStore>) -> Mission {
     store.set_waypoints(waypoints);
@@ -262,9 +261,9 @@ pub async fn mission_upload(
     .await
 }
 
-/// One INAV multi-mission list, numbered through. INAV ends a mission on 0xA5 only: every mission's last
-/// WP gets it, a stray one inside is cleared. Fly-by-home (0x48) is kept inside a mission; on the last WP
-/// the flag byte is taken, so it goes as lat/lon 0, which INAV also reads as home. Empty missions are skipped.
+/// One INAV multi-mission list, numbered through. INAV ends a mission on 0xA5 only: a stray one inside is
+/// cleared, fly-by-home (0x48) stays inside. On the last WP that byte is taken, so fly-by-home goes as
+/// lat/lon 0, INAV's other home marker. Resolve AGL before this: (0,0) has no terrain.
 fn assemble_multi_mission(missions: &[Vec<Waypoint>]) -> Vec<Waypoint> {
     let mut out: Vec<Waypoint> = Vec::new();
     for seg in missions {
@@ -306,15 +305,19 @@ pub async fn mission_upload_multi(
     app: tauri::AppHandle,
     terrain: State<'_, TerrainProvider>,
 ) -> Result<Mission, String> {
-    let combined = assemble_multi_mission(&missions);
+    // AGL → AMSL per mission, before the serial handle is taken (async terrain lookup) and before the
+    // assembly moves a final fly-by-home to lat/lon 0.
+    let mut amsl: Vec<Vec<Waypoint>> = Vec::with_capacity(missions.len());
+    for seg in &missions {
+        let m = Mission { waypoints: seg.clone(), info: MissionInfo::default(), dirty: false, home: None };
+        amsl.push(resolve_agl(&m, &terrain).await.waypoints);
+    }
+    let combined = assemble_multi_mission(&amsl);
     if combined.is_empty() {
         return Err("No waypoints to upload".into());
     }
     let mission_count = missions.iter().filter(|m| !m.is_empty()).count();
-
-    // Resolve AGL → AMSL before touching the serial handle (async terrain lookup).
-    let mission = Mission { waypoints: combined, info: MissionInfo::default(), dirty: false, home: None };
-    let resolved = resolve_agl(&mission, &terrain).await;
+    let resolved = Mission { waypoints: combined, info: MissionInfo::default(), dirty: false, home: None };
 
     with_msp_blocking(&app, move |app, handle| {
         let store = app.state::<MissionStore>();
