@@ -164,12 +164,15 @@ INAV mixer platform, or the MAVLink vehicle type plus the QuadPlane check), and 
 time — when the flight controller's platform setting does not match the airframe, or on a telemetry-only
 link where Kite can only say *Generic*. The map and the 3D model follow your choice, and the flight
 recorder stores it with the flight, including a flight that is already being recorded. The override is
-not saved: it lasts for the session, and after a reconnect it comes back only when Kite recognises the
-same flight controller. INAV and MAVLink links report a hardware ID for that, shown as **FC ID**
-(shortened, with a copy button for the full value) and stored with each flight — it is also how a flight
-finds its [vehicle](vehicles.md#linking-flights). Telemetry-only links, INAV over plain MAVLink (without
-MSP/MAV) and simulators that report a placeholder (INAV SITL, PX4 SITL as system ID 1) have none: there
-the override is not restored after a reconnect, and the type starts from what the link detects.
+not saved: it lasts until you disconnect, and every connect starts from the detected type again.
+
+To set the type for good, give the aircraft an entry in the [vehicle library](vehicles.md): when a
+vehicle there carries the flight controller's hardware ID, its type is used on every connect, whatever
+the link detects. A library type of *Other* leaves the detection alone. INAV and MAVLink links report
+that ID, shown as **FC ID** (shortened, with a copy button for the full value) and stored with each
+flight — it is also how a flight finds its [vehicle](vehicles.md#linking-flights). Telemetry-only
+links, INAV over plain MAVLink (without MSP/MAV) and simulators that report a placeholder (INAV SITL,
+PX4 SITL as system ID 1) have none: there the type always starts from what the link detects.
 
 **Save to vehicle library** creates a [vehicle library](vehicles.md) entry from the connected craft in
 one click — name and craft name, the vehicle type, the board as FC model, firmware and version, the FC

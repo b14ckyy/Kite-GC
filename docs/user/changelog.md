@@ -235,8 +235,13 @@ inside the box of the feature release they belong to, so the notes for one relea
     - **ArduPlane: Takeoff button for fixed-wing planes** — switches the plane to TAKEOFF mode
       (hold to confirm). In that mode the motor starts as soon as you arm. [#242]
     - **Vehicle type override, FC ID and "Save to vehicle library" in the UAV Info panel** — the
-      detected type can be changed for the session, the flight controller's hardware ID is shown,
-      and the connected craft can be saved as a library vehicle. [#157]
+      detected type can be changed until you disconnect, the flight controller's hardware ID is
+      shown, and the connected craft can be saved as a library vehicle. [#157]
+    - **Vehicle type from the vehicle library** — a library vehicle whose FC ID matches the
+      connected flight controller sets the type on every connect: map model, UAV Info and the
+      recorded flights. Check the type of your library vehicles — until now it was only a label.
+      The library also knows *Tricopter* now. See
+      [Telemetry & display](guides/telemetry-and-display.md).
     - **Local radar devices over the network** — an ADS-B receiver and the FormationFlight module
       connect over TCP or UDP as well as over a serial port. See
       [Radar & ADS-B](guides/radar-and-adsb.md#connecting-a-local-device). [#261]
