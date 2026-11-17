@@ -25,8 +25,10 @@ use super::handler::MavlinkCommand;
 const ITEM_TIMEOUT: Duration = Duration::from_secs(5);
 /// Timeout for the initial MISSION_COUNT after sending MISSION_REQUEST_LIST
 const COUNT_TIMEOUT: Duration = Duration::from_secs(10);
-/// Overall deadline for the upload handshake
+/// Overall deadline for the upload handshake, plus `UPLOAD_PER_ITEM` for every item (a survey can have
+/// several hundred, and a slow link needs its time; a stall is caught per message anyway).
 const UPLOAD_DEADLINE: Duration = Duration::from_secs(60);
+const UPLOAD_PER_ITEM: Duration = Duration::from_millis(250);
 
 /// Address the autopilot component (MAV_COMP_ID_AUTOPILOT1) explicitly instead of broadcasting to
 /// component 0. Both firmwares accept either on a direct link, but a relay in between (Mission
@@ -199,7 +201,7 @@ pub fn upload(
 
     // 2. Respond to the FC's item requests (MISSION_REQUEST_INT *or* the deprecated MISSION_REQUEST)
     //    until we receive MISSION_ACK.
-    let deadline = Instant::now() + UPLOAD_DEADLINE;
+    let deadline = Instant::now() + UPLOAD_DEADLINE + UPLOAD_PER_ITEM * waypoints.len() as u32;
     loop {
         if Instant::now() > deadline {
             unregister(cmd_tx);

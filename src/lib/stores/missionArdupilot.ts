@@ -582,22 +582,9 @@ export function parseWaypoints(text: string): ArduWaypoint[] {
 }
 
 // ── QGroundControl .plan file format (PX4 ecosystem) ──────────────────
-// A QGC "Plan" is a JSON container: `mission.items[]` of SimpleItems (command / frame /
-// params[7] / autoContinue — exactly the ArduWaypoint fields, with lat/lon/alt riding in
-// params[4..6]), plus a plannedHomePosition and geoFence/rallyPoints sections. QGC saves
-// ONLY this format since v3.2 (it still *imports* .waypoints), so missions coming out of
-// the PX4 ecosystem arrive as .plan files. Import scope for 1.0:
-//  * ComplexItems (Survey, Corridor Scan, …) are QGC-computed patterns that only QGC can
-//    expand into waypoints → refuse the whole file with a readable error rather than
-//    silently dropping flight path.
-//  * geoFence / rallyPoints sections are ignored — Kite handles fence and rally as
-//    separate subsystems; a .plan EXPORT that bundles them is a planned 1.1 feature.
-//  * plannedHomePosition is ignored — like the MAVLink path, the working mission holds
-//    only real waypoints (ArduPilot's home slot 0 is synthesized on upload, PX4 has no
-//    home slot at all; see `reserve_home` in mavlink_proto/mission.rs).
-//  * null params (QGC's "no preference", typically yaw) become 0 — the same value
-//    Kite-authored missions carry in those fields. NaN cannot cross the Tauri IPC
-//    boundary (JSON has no NaN; the Rust side deserializes plain f32).
+// QGC .plan: `mission.items[]` = SimpleItems (lat / lon / alt in params[4..6]) and ComplexItems (patterns).
+// geoFence / rallyPoints and plannedHomePosition are ignored: the working mission holds real waypoints
+// only (see `reserve_home` in mavlink_proto/mission.rs).
 
 /** Which system a .plan targets: `mission.firmwareType` 12 (MAV_AUTOPILOT_PX4) → px4, everything
  *  else (3 = ArduPilotMega, absent, unparseable) → ardupilot. Both share the mission stack — this
@@ -635,39 +622,61 @@ export function parsePlanFile(text: string): ArduWaypoint[] {
   }
   const wps: ArduWaypoint[] = [];
   for (const raw of plan.mission.items) {
-    const item = raw as {
-      type?: string;
-      command?: number;
-      frame?: number;
-      autoContinue?: boolean;
-      params?: (number | null)[];
-    };
-    if (item?.type !== 'SimpleItem') {
-      throw new Error(
-        `unsupported "${item?.type ?? 'unknown'}" item — pattern items (Survey, Corridor Scan, …) exist only inside QGroundControl`,
-      );
-    }
-    if (typeof item.command !== 'number' || !Array.isArray(item.params) || item.params.length < 7) {
-      throw new Error('malformed mission item in .plan file');
-    }
-    const p = (i: number): number => {
-      const v = item.params?.[i];
-      return typeof v === 'number' && Number.isFinite(v) ? v : 0;
-    };
-    wps.push({
-      command: item.command,
-      frame: (item.frame ?? MAV_FRAME_GLOBAL_RELATIVE_ALT) as MavFrame,
-      param1: p(0),
-      param2: p(1),
-      param3: p(2),
-      param4: p(3),
-      lat: Math.round(p(4) * 1e7),
-      lon: Math.round(p(5) * 1e7),
-      alt: p(6),
-      autocontinue: item.autoContinue !== false,
-    });
+    for (const item of planSimpleItems(raw)) wps.push(planItemToWaypoint(item));
   }
   return wps;
+}
+
+interface PlanSimpleItem {
+  type?: string;
+  command?: number;
+  frame?: number;
+  autoContinue?: boolean;
+  params?: (number | null)[];
+}
+
+/** A Survey carries the waypoints QGC generated (`TransectStyleComplexItem.Items`) next to its definition;
+ *  they are taken as they are. A pattern without them only QGC can expand: the file is refused. */
+function planSimpleItems(raw: unknown): PlanSimpleItem[] {
+  const item = raw as PlanSimpleItem & {
+    complexItemType?: string;
+    TransectStyleComplexItem?: { Items?: unknown[] };
+  };
+  if (item?.type === 'SimpleItem') return [item];
+  const generated = item?.TransectStyleComplexItem?.Items;
+  if (item?.type === 'ComplexItem' && Array.isArray(generated) && generated.length > 0) {
+    return generated.map((g) => {
+      if ((g as PlanSimpleItem)?.type !== 'SimpleItem') throw new Error('malformed pattern item in .plan file');
+      return g as PlanSimpleItem;
+    });
+  }
+  const kind = item?.complexItemType ?? item?.type ?? 'unknown';
+  throw new Error(
+    `unsupported "${kind}" item — the file holds only its definition, not the waypoints. Upload the plan to the flight controller from QGroundControl, then download the mission here`,
+  );
+}
+
+function planItemToWaypoint(item: PlanSimpleItem): ArduWaypoint {
+  if (typeof item.command !== 'number' || !Array.isArray(item.params) || item.params.length < 7) {
+    throw new Error('malformed mission item in .plan file');
+  }
+  // null = QGC's "no preference" (typically yaw) → 0, like Kite's own missions; NaN cannot cross the Tauri IPC.
+  const p = (i: number): number => {
+    const v = item.params?.[i];
+    return typeof v === 'number' && Number.isFinite(v) ? v : 0;
+  };
+  return {
+    command: item.command,
+    frame: (item.frame ?? MAV_FRAME_GLOBAL_RELATIVE_ALT) as MavFrame,
+    param1: p(0),
+    param2: p(1),
+    param3: p(2),
+    param4: p(3),
+    lat: Math.round(p(4) * 1e7),
+    lon: Math.round(p(5) * 1e7),
+    alt: p(6),
+    autocontinue: item.autoContinue !== false,
+  };
 }
 
 // ── Per-vehicle missions (multi-vehicle) ───────────────────────────────
