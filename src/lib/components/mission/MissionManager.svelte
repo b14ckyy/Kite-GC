@@ -427,7 +427,7 @@
       const stem = fileName.replace(/\.[^.]+$/, '');
       const readText = () => invoke<string>('read_text_file', { path });
       const kind = await missionFileKind(fileName, readText);
-      if (kind == null) throw new Error($t('missionMgr.unknownFile'));
+      if (kind == null) { statusMessage = $t('missionMgr.unknownFile'); return; }
       if (kind === 'kmission') {
         const res = await importMissionFile(path, dbPath(), (o) => confirmDialog.show(o), (key) => $t(key));
         if (!res) return;
@@ -664,7 +664,7 @@
   .tree-count { font-size: 10px; color: #8fb4c5; background: rgba(55, 168, 219, 0.12); border: 1px solid rgba(55, 168, 219, 0.32); border-radius: 999px; padding: 1px 6px; }
   .tree-items { margin-top: 4px; margin-left: 12px; }
 
-  .lib-item { position: relative; display: flex; align-items: stretch; width: calc(100% - 12px); border: 1px solid #555; border-radius: 4px; background: #383838; color: #ddd; margin-bottom: 4px; }
+  .lib-item { display: flex; align-items: stretch; width: calc(100% - 12px); border: 1px solid #555; border-radius: 4px; background: #383838; color: #ddd; margin-bottom: 4px; }
   .lib-item:hover { border-color: #37a8db; }
   .lib-item.selected { border-color: #37a8db; background: rgba(55, 168, 219, 0.18); }
   .lib-item-main { flex: 1 1 auto; min-width: 0; text-align: left; padding: 6px; background: transparent; border: 0; color: inherit; font: inherit; cursor: pointer; }

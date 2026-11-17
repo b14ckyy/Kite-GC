@@ -1,14 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// File-dialog extension filters.
-//
-// Linux file pickers match extensions case-sensitively: the GTK3 backend compiles each filter into
-// a `GPatternSpec` (`*.txt`) and the XDG desktop portal uses plain globs — neither offers a
-// case-fold flag, and GLib's matcher understands only `*` and `?`, so a `*.[tT][xX][tT]` character
-// class doesn't work either. A lowercase-only list therefore hides the uppercase `.TXT` blackbox
-// logs that Configurator and FAT-formatted cards produce (issue #41). Windows and macOS match
-// case-insensitively, where the extra patterns are simply redundant.
+// File-dialog filters and the format of a picked mission file. Linux pickers match extensions
+// case-sensitively (GTK `GPatternSpec`, portal globs, no case-fold), hence `anyCase`.
 
 import { isAndroid } from '$lib/platform';
 
@@ -32,12 +26,14 @@ export function openFilters(name: string, extensions: string[]): { name: string;
 
 export type MissionFileKind = 'kmission' | 'plan' | 'waypoints' | 'mission';
 
-/** Which mission format a picked file is. By extension where the path has one; an Android document URI
- *  need not carry the file name, so `readText` is then asked for the content. Null = none of them. */
-export async function missionFileKind(path: string, readText: () => Promise<string>): Promise<MissionFileKind | null> {
-  const ext = /\.([a-z0-9]+)$/i.exec(path)?.[1].toLowerCase();
+/** Which mission format a picked file is: by the extension of its `name`, and by content when the name has
+ *  none (an Android provider need not give one). A foreign extension is refused unread — without a
+ *  filter the Android picker also offers videos. Null = none of them. */
+export async function missionFileKind(name: string, readText: () => Promise<string>): Promise<MissionFileKind | null> {
+  const ext = /\.([a-z0-9]+)$/i.exec(name)?.[1].toLowerCase();
   if (ext === 'kmission' || ext === 'plan' || ext === 'waypoints' || ext === 'mission') return ext;
   if (ext === 'txt') return 'waypoints';
+  if (ext !== undefined && ext !== 'json' && ext !== 'xml') return null;
   const head = (await readText()).trimStart().slice(0, 4096);
   if (head.startsWith('QGC WPL')) return 'waypoints';
   if (head.startsWith('<')) return 'mission';

@@ -1,12 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Storage-access commands — the platform side of the custom database / raw-log folder settings.
-//
-// Desktop needs none of this: the dialog plugin's folder picker returns a real path there. Android
-// owns the difference: the system tree picker grants ONE folder (scoped storage, no permission),
-// the setting stores that grant's tree URI, and the session-end mirror copies artefacts into it —
-// see `StorageAccess.kt` and `user_file::mirror_session` for the two halves.
+// Storage-access commands: share sheet, folder picker, picked-file names. Android stores the picker's
+// tree URI as the setting value; see `StorageAccess.kt` and `user_file::mirror_session`.
 
 /// Hand a file to the platform share sheet (Android). Desktop has no share sheet and no need for
 /// one — files live on paths the user can reach, and the frontend offers "open folder" there

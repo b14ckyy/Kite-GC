@@ -1,20 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-//! Reading and writing the `content://` URIs Android's file pickers hand back.
-//!
-//! Tauri's dialog plugin opens the Storage Access Framework on Android — `ACTION_CREATE_DOCUMENT`
-//! for save, `ACTION_OPEN_DOCUMENT` for open — and returns the chosen document as a `content://`
-//! URI string, not a filesystem path. Nothing in `std::fs` can open one: scoped storage means the
-//! file may live in another app's provider, on a SD card, or in Drive, and is reachable only through
-//! the `ContentResolver`.
-//!
-//! That is why every export was failing on mobile. The app could write perfectly good bytes and had
-//! nowhere to put them — and since app-private storage is wiped on uninstall, "export" could not get
-//! a flight log off the device at all.
-//!
-//! These two functions bridge the gap over JNI, using the plumbing in `android/jvm.rs`. Callers do
-//! not use them directly; `user_file.rs` decides when a path is really a URI and routes accordingly.
+//! `content://` URIs from Android's file pickers, reached over JNI through the `ContentResolver`
+//! (`std::fs` cannot open them). `user_file.rs` routes reads and writes here.
 
 use jni::objects::{JByteArray, JObject, JString, JValue};
 
@@ -178,6 +166,9 @@ pub fn write_uri(uri: &str, src: &std::path::Path) -> Result<(), String> {
                 &[JValue::Object(&chunk), JValue::Int(0), JValue::Int(n as i32)],
             )
             .map(|_| ());
+        // A local reference lives until this native call returns: without the release every chunk of
+        // the export stays pinned in the Java heap.
+        let _ = env.delete_local_ref(chunk);
         if let Err(e) = jvm::check(&mut env, r, "OutputStream.write") {
             result = Err(e);
             break;

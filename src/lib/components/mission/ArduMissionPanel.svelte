@@ -187,19 +187,17 @@
         filters: openFilters('Missions', ['waypoints', 'txt', 'plan']),
       });
       if (!path) return;
-      const content = await invoke<string>('read_text_file', { path: typeof path === 'string' ? path : path });
-      const wps = parseMissionFile(String(path), content);
-      loadArduMissionFromFile(wps, /\.plan$/i.test(String(path)) ? planVehicleClass(content) : null);
+      const content = await invoke<string>('read_text_file', { path });
+      // By content, not by name: an Android document URI need not end in the file name. A plan is JSON,
+      // WPL text never starts with a brace.
+      const isPlan = content.trimStart().startsWith('{');
+      const wps = isPlan ? parsePlanFile(content) : parseWaypoints(content);
+      loadArduMissionFromFile(wps, isPlan ? planVehicleClass(content) : null);
       statusMessage = $t('mission.loaded', { values: { count: wps.length } });
       frameMissionOnMap();
     } catch (e) {
       statusMessage = $t('mission.openFailed', { values: { error: String(e) } });
     }
-  }
-
-  /** Route by extension: .plan → the QGC JSON plan parser, everything else → QGC WPL text. */
-  function parseMissionFile(name: string, content: string): ArduWaypoint[] {
-    return /\.plan$/i.test(name) ? parsePlanFile(content) : parseWaypoints(content);
   }
 
   // No DOM drop zone here: with Tauri's dragDropEnabled the WebView never receives DOM drop
