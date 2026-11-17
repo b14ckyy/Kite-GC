@@ -1,4 +1,7 @@
 {
+  "export": {
+    "saveToDevice": "Запазване на устройството"
+  },
   "app": {
     "brand": "KiteGC",
     "version": "v{version}"
@@ -1309,6 +1312,7 @@
     "deleteBlackboxConfirm": "Изтриване на оригиналния файл",
     "deleteBlackboxSuccess": "Оригиналният файл на blackbox е изтрит ({filename}). Полетът остава достъпен за повторение.",
     "exportTrack": "Траектория",
+    "exportTrackFormat": "Кой формат?",
     "exportTrackTitle": "Експортирането на траекторията завърши",
     "exportTrackSuccess": "Траекторията на полета е експортирана успешно.",
     "importKflight": "Импортирай .kflight",

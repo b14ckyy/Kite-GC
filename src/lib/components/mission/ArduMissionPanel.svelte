@@ -10,7 +10,7 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import { get } from 'svelte/store';
-  import { save, open } from '@tauri-apps/plugin-dialog';
+  import { open } from '@tauri-apps/plugin-dialog';
   import { invoke } from '@tauri-apps/api/core';
   import { t, locale } from 'svelte-i18n';
   import {
@@ -29,6 +29,7 @@
   import { cmdName, cmdShort, cmdHasLocation, cmdDef, cmdValidForVehicle, cmdValidForPx4, enumLabel, type VehicleClass } from '$lib/helpers/arduCommandCatalog';
   import { buildArduWaypointMenu } from '$lib/helpers/arduWaypointMenu';
   import { openFilters } from '$lib/helpers/fileFilters';
+  import { exportFile } from '$lib/helpers/exportFile';
   import { contextMenu } from '$lib/actions/contextMenu';
   import { arduWpDetailLines } from '$lib/helpers/missionWpDetails';
   import { frameMissionOnMap } from '$lib/stores/mapCamera';
@@ -164,13 +165,13 @@
 
   async function handleSaveFile() {
     try {
-      const path = await save({
+      const path = await exportFile({
         title: $t('mission.saveMissionTitle'),
-        defaultPath: 'mission.waypoints',
+        name: 'mission.waypoints',
         filters: [{ name: 'Waypoints', extensions: ['waypoints'] }],
+        write: (p) => invoke<void>('write_text_file', { path: p, content: serializeWaypoints(get(arduMission)) }),
       });
       if (!path) return;
-      await invoke<void>('write_text_file', { path, content: serializeWaypoints(get(arduMission)) });
       statusMessage = $t('mission.missionSaved');
     } catch (e) {
       statusMessage = $t('mission.saveFailed', { values: { error: String(e) } });

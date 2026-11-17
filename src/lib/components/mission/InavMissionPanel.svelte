@@ -41,6 +41,7 @@
   import { locale } from 'svelte-i18n';
   import { isFlyByHome } from '$lib/helpers/missionGeometry';
   import { anyCase } from '$lib/helpers/fileFilters';
+  import { exportFile } from '$lib/helpers/exportFile';
   import { contextMenu } from '$lib/actions/contextMenu';
   import { buildWaypointMenu } from '$lib/helpers/waypointMenu';
   import { connection, hasMsp } from '$lib/stores/connection';
@@ -50,7 +51,7 @@
   import type { InterfaceSettings } from '$lib/stores/settings';
   import { convertAltitude, convertSpeed, convertDistance, formatConverted } from '$lib/utils/units';
   import { inavWpDetailLines } from '$lib/helpers/missionWpDetails';
-  import { save, open } from '@tauri-apps/plugin-dialog';
+  import { open } from '@tauri-apps/plugin-dialog';
   import { t } from 'svelte-i18n';
   // Helper: untyped $t wrapper for dynamic params (svelte-i18n types are too strict)
   function _t(id: string, params?: Record<string, string>): string {
@@ -209,9 +210,13 @@
 
   async function handleSaveFile() {
     try {
-      const path = await save({ title: $t('mission.saveMissionTitle'), defaultPath: 'mission.mission', filters: [{ name: 'Mission', extensions: ['mission'] }] });
+      const path = await exportFile({
+        title: $t('mission.saveMissionTitle'),
+        name: 'mission.mission',
+        filters: [{ name: 'Mission', extensions: ['mission'] }],
+        write: (p) => missionSaveFile(p),
+      });
       if (!path) return;
-      await missionSaveFile(path);
       statusMessage = $t('mission.missionSaved');
     } catch (e) {
       statusMessage = $t('mission.saveFailed', { values: { error: String(e) } });

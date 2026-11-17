@@ -129,6 +129,7 @@ gst_app = { package = "gstreamer-app", version = "0.21" }
 # Swift, no Tauri plugin - so it survives `cargo tauri ios init` regeneration.
 [target.'cfg(target_os = "ios")'.dependencies]
 objc2 = "0.6"
+block2 = "0.6"  # the (absent) completion block of the share sheet presentation (commands/storage.rs); already in the tree
 objc2-foundation = { version = "0.3", features = ["NSArray", "NSData", "NSDictionary", "NSString", "NSValue", "NSEnumerator", "NSObject"] }
 objc2-core-bluetooth = { version = "0.3", features = ["CBCentralManager", "CBPeripheral", "CBService", "CBCharacteristic", "CBAttribute", "CBPeer", "CBAdvertisementData", "CBManager", "CBError", "CBUUID"] }
 # Native RTSP decode on iPad: the macOS sink (video/apple_sink.rs) under a UIKit host (video/ios_host.rs).

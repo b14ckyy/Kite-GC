@@ -40,6 +40,7 @@
 </script>
 
 <script lang="ts">
+  import Toggle from '$lib/components/panel/Toggle.svelte';
   import { t } from 'svelte-i18n';
   import { get } from 'svelte/store';
   import type { InterfaceSettings } from '$lib/stores/settings';
@@ -301,10 +302,10 @@
           <textarea class="fld-input fld-area" rows="2" bind:value={notes}></textarea>
         </label>
         {#if missionConfirm}
-          <label class="ef-check">
-            <input type="checkbox" bind:checked={linkMission} />
-            <span>{$t('endFlight.linkMission')}</span>
-          </label>
+          <div class="ef-check">
+            <Toggle bind:checked={linkMission} id="ef-link-mission" />
+            <label for="ef-link-mission">{$t('endFlight.linkMission')}</label>
+          </div>
         {/if}
         {#if confirmingArchived && archivedMatch}
           <div class="ef-discard-warn">
@@ -376,14 +377,14 @@
   .vehicle-hint { display: block; margin-top: 4px; font-size: 11px; color: #949494; }
   .vehicle-hint-warn { color: #e0b050; }
 
-  .ef-check { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #e0e0e0; margin-bottom: 12px; cursor: pointer; }
-  .ef-check input { accent-color: #37a8db; }
+  .ef-check { display: flex; align-items: center; gap: 10px; font-size: 12px; color: #e0e0e0; margin: 4px 0 18px; }
+  .ef-check label { cursor: pointer; }
 
   .ef-discard-warn { font-size: 12px; color: #f0b0b0; background: rgba(212, 0, 0, 0.12); border: 1px solid rgba(212, 0, 0, 0.4); border-radius: 4px; padding: 8px 10px; margin: 10px 0 12px; }
 
   .dialog-buttons { display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 4px; }
   .ef-spacer { flex: 1 1 auto; }
-  .dialog-btn { padding: 6px 14px; font-size: 12px; font-weight: 600; border-radius: 4px; border: 1px solid #555; background: #434343; color: #e0e0e0; cursor: pointer; transition: background 0.15s; }
+  .dialog-btn { height: 28px; padding: 0 14px; font-size: 12px; font-weight: 600; border-radius: 4px; border: 1px solid #555; background: #434343; color: #e0e0e0; cursor: pointer; transition: background 0.15s; }
   .dialog-btn:hover { background: #505050; }
   .dialog-btn-primary { background: #1a6b94; border-color: #2590c8; color: #fff; }
   .dialog-btn-primary:hover { background: #237fae; }

@@ -1,4 +1,7 @@
 {
+  "export": {
+    "saveToDevice": "保存到设备"
+  },
   "app": {
     "brand": "KiteGC",
     "version": "v{version}"
@@ -1309,6 +1312,7 @@
     "deleteBlackboxConfirm": "删除原始文件",
     "deleteBlackboxSuccess": "原始黑盒子文件已删除 ({filename})。飞行数据仍可用于回放。",
     "exportTrack": "轨迹",
+    "exportTrackFormat": "选择哪种格式？",
     "exportTrackTitle": "轨迹导出完成",
     "exportTrackSuccess": "飞行轨迹导出成功。",
     "importKflight": "导入 .kflight",

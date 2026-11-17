@@ -93,6 +93,10 @@ See **[Video](../guides/video.md)**, especially its platform notes.
   install. Installed from Google Play, the notice offers the Play Store and the setting is an on/off
   switch; installed from the `.apk`, the notice offers the release page. On iPhone and iPad the
   update check is switched off. See **[Settings → Updates](../reference/settings.md#updates)**.
+- **Exports on Android** (flights, tracks, missions, vehicles, batteries) open the system **share sheet**
+  instead of a save dialog — an export on a mobile device is mostly a hand-over to another device or
+  person. From Android 14 the sheet has a **Save to device** action; on older versions share to a file
+  manager app to keep the file locally. iPhone and iPad still use the save dialog.
 - **Diagnostic log on Android:** the log folder is app-private, so **Settings → Diagnostics → Share log
   file** replaces *Open Folder* — pick the day and hand it to mail or a messenger. See
   **[Reporting a problem](../troubleshooting/reporting-issues.md)**.

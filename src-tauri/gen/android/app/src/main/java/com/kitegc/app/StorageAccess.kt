@@ -3,10 +3,18 @@
 
 package com.kitegc.app
 
+import android.app.PendingIntent
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.graphics.drawable.Icon
+import android.os.Build
+import android.service.chooser.ChooserAction
 import android.net.Uri
 import android.provider.DocumentsContract
 import androidx.activity.result.ActivityResultLauncher
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import java.io.File
 import java.util.concurrent.CountDownLatch
@@ -101,14 +109,27 @@ object StorageAccess {
     @JvmStatic
     fun getLastError(): String? = lastError
 
-    /**
-     * Hand [path] to the system share sheet (mail, messengers, "save to Files", a text editor…).
-     * The file travels as a FileProvider URI — app-private paths are meaningless to other apps, and
-     * since API 24 a raw file:// URI in an intent throws outright. Returns null on success, the
-     * error message otherwise.
-     */
+    private const val ACTION_SAVE_TO_DEVICE = "com.kitegc.app.EXPORT_SAVE_TO_DEVICE"
+
+    /** The file of the share sheet that is open, and the one whose "save to device" action was tapped. */
+    @Volatile private var sharedPath: String? = null
+    @Volatile private var saveRequest: String? = null
+    private var saveReceiver: BroadcastReceiver? = null
+
+    /** The path the user asked to save to the device from the share sheet, once; null when none. Polled
+     *  by the Rust side — no callbacks into Rust (see the class note). */
     @JvmStatic
-    fun shareFile(path: String, mime: String): String? {
+    fun takeSaveRequest(): String? {
+        val r = saveRequest
+        saveRequest = null
+        return r
+    }
+
+    /** Hand [path] to the share sheet as a FileProvider URI (a raw file:// URI throws since API 24). A
+     *  non-empty [saveLabel] adds a "save to device" action (API 34+), fetched via [takeSaveRequest].
+     *  Returns null on success, the error message otherwise. */
+    @JvmStatic
+    fun shareFile(path: String, mime: String, saveLabel: String): String? {
         return try {
             val f = File(path)
             if (!f.isFile) return "file not found: $path"
@@ -118,13 +139,46 @@ object StorageAccess {
                 putExtra(Intent.EXTRA_STREAM, uri)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
+            val chooser = Intent.createChooser(send, f.name)
+            if (saveLabel.isNotEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                addSaveAction(chooser, saveLabel)
+            }
+            saveRequest = null
+            sharedPath = path
             activity.runOnUiThread {
-                activity.startActivity(Intent.createChooser(send, f.name))
+                activity.startActivity(chooser)
             }
             null
         } catch (e: Exception) {
             "share failed: ${e.message}"
         }
+    }
+
+    private fun addSaveAction(chooser: Intent, label: String) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return
+        if (saveReceiver == null) {
+            val receiver = object : BroadcastReceiver() {
+                override fun onReceive(context: Context?, intent: Intent?) {
+                    saveRequest = sharedPath
+                }
+            }
+            // On the application context: a receiver of the activity dies with it when Android
+            // recreates the activity, and this one is registered once per process.
+            ContextCompat.registerReceiver(
+                activity.applicationContext, receiver, IntentFilter(ACTION_SAVE_TO_DEVICE),
+                ContextCompat.RECEIVER_NOT_EXPORTED
+            )
+            saveReceiver = receiver
+        }
+        val tap = PendingIntent.getBroadcast(
+            activity, 0,
+            Intent(ACTION_SAVE_TO_DEVICE).setPackage(activity.packageName),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val action = ChooserAction.Builder(
+            Icon.createWithResource(activity, android.R.drawable.ic_menu_save), label, tap
+        ).build()
+        chooser.putExtra(Intent.EXTRA_CHOOSER_CUSTOM_ACTIONS, arrayOf(action))
     }
 
     /**

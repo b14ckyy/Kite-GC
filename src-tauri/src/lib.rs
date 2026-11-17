@@ -95,7 +95,10 @@ use commands::fence::{fence_read_all, fence_write_all};
 use commands::rally::{rally_read_all, rally_write_all};
 use commands::info::{get_app_version, is_debug_mode, is_fleet_mode, is_fleet_group_recording};
 use commands::system::{system_active_net_is_wifi, system_on_battery};
-use commands::storage::{file_display_name, share_file, storage_pick_folder};
+use commands::storage::{
+    export_copy, export_scratch_clear, export_scratch_path, export_take_save_request, file_display_name,
+    share_file, storage_pick_folder,
+};
 use commands::video::{
     video_ffmpeg_status, video_hw_transcode_available, video_ffmpeg_download,
     video_engine_status, video_engine_download, video_webrtc_start, video_webrtc_offer,
@@ -763,6 +766,10 @@ pub fn run() {
             storage_pick_folder,
             share_file,
             file_display_name,
+            export_scratch_path,
+            export_scratch_clear,
+            export_take_save_request,
+            export_copy,
             video_ffmpeg_status,
             video_hw_transcode_available,
             video_ffmpeg_download,
