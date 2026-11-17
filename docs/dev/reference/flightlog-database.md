@@ -17,10 +17,10 @@ Excluded fields are typically Blackbox tuning data, PID internals, or low-level 
 
 ## Current schema
 
-Current implemented schema version: `v21`. The core replay-focused telemetry field set was complete at
+Current implemented schema version: `v22`. The core replay-focused telemetry field set was complete at
 `v5`; `v6`–`v20` add flight-level mission/pilot/battery/vehicle links and a handful of additional
 live/import telemetry fields (link metrics, airspeed, throttle, canonical flight mode); `v21` drops the
-stored decoded Blackbox rows.
+stored decoded Blackbox rows; `v22` adds the tables and columns the 2.x features build on.
 
 Migration history (tracked via `PRAGMA user_version`):
 
@@ -50,6 +50,21 @@ Migration history (tracked via `PRAGMA user_version`):
   log importer made it (`protocol` `BLACKBOX` / `DATAFLASH` / `ULOG`) or it holds decoded rows or an
   archived log, otherwise `live`. On unlink, a flight without a stored value falls back to the same
   protocol / archived-log check.
+- `v22`: three per-flight tables, none with a foreign key (deleting a flight removes their rows
+  explicitly):
+    - `gps_records` + `idx_gps_records_flight` — raw values of every GPS receiver next to the fused track
+      (`instance` 0 = `GPS_RAW_INT`, 1 = `GPS2_RAW`; unified and raw fix type, satellites, HDOP / VDOP,
+      position, MSL altitude, accuracies, speed, course, yaw);
+    - `weather_records` + `idx_weather_records_flight` — one row per weather answer during a flight, the
+      answer stored whole as JSON (`data_json`) with the position it was asked for;
+    - `flight_videos` + `idx_flight_videos_flight` — videos attached to a flight: a path relative to the
+      video folder, basic metadata, and two sync anchors (video frame, time in the video, time on the
+      flight's timeline). Prepared; nothing reads or writes it yet.
+
+  New columns: `missions.extra_json` (data a version does not know yet — kept as it is) and
+  `missions.vehicle_class`; `flights.alt_relative` (1 = altitudes relative to the arming point, 0 = MSL,
+  NULL = decide from the `protocol` label). The back-fill sets it on every existing flight: 1 for the
+  passive CRSF and LTM links, else 0.
 
 Freed space: the database runs with `auto_vacuum = INCREMENTAL`, so deleted data (e.g. a blackbox
 BLOB) first lands on the SQLite freelist. A background thread hands the freelist back to the file
