@@ -160,8 +160,8 @@ pub struct Mission {
     pub home_lon: Option<f64>,
     /// Vehicle class the mission was planned for (ArduPilot / PX4: `plane`, `copter`, …); None = not set.
     pub vehicle_class: Option<String>,
-    /// A JSON object of data this version may not know (2.1: survey patterns). Never parsed here: it is
-    /// stored and handed on as it came, or a newer version's data would be lost.
+    /// A JSON object of data this version may not know. Never parsed here: stored and handed on as it
+    /// came, or a newer version's data would be lost.
     pub extra_json: Option<String>,
 }
 

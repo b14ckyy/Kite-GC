@@ -11,6 +11,7 @@
 // dedup hash, exactly like INAV's separate launch point. See docs/active/ARDUPILOT_MISSION_LIBRARY.md.
 
 import { get } from 'svelte/store';
+import { connection } from '$lib/stores/connection';
 import type { LibraryMissionInput } from '$lib/stores/flightlogTypes';
 import {
   arduHasLocation,
@@ -173,7 +174,8 @@ export interface BuildArduMissionOpts {
   notes?: string | null;
   /** Concrete system stored in the DB `format` column ('ardupilot' | 'px4'). */
   format?: string;
-  /** Left out = the class selected in the editor; null = unknown (a file that does not say). */
+  /** Left out = the editor's class (PX4: only while connected — offline it has no class selector, the
+   *  store holds ArduPilot's choice); null = unknown (a file that does not say). */
   vehicleClass?: string | null;
 }
 
@@ -202,6 +204,8 @@ export async function buildArduMissionInput(
     notes: opts.notes ?? null,
     home_lat: null,
     home_lon: null,
-    vehicle_class: opts.vehicleClass !== undefined ? opts.vehicleClass : get(arduVehicleClass),
+    vehicle_class: opts.vehicleClass !== undefined
+      ? opts.vehicleClass
+      : opts.format === 'px4' && get(connection).status !== 'connected' ? null : get(arduVehicleClass),
   };
 }

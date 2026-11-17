@@ -273,7 +273,7 @@
         arduMission.set(wps);
         arduSelectedWpIndex.set(-1);
         arduLoadedMissionId.set(m.id);
-        arduClearUndoHistory(); // loaded mission = fresh undo baseline
+        arduClearUndoHistory();
         markArduMissionSynced('db', wps);
       }
       frameMissionOnMap(); // standalone library load → frame the mission (not a replay-linked attach)
@@ -298,11 +298,9 @@
   }
 
   const isMavFormat = (m: LibraryMission) => m.format === 'ardupilot' || m.format === 'px4';
-  /** Extension of the flight stack's own mission file. */
   const platformExt = (m: LibraryMission) => (isMavFormat(m) ? 'waypoints' : 'mission');
 
-  /** `kmission` keeps the whole entry (name, notes, home, data of a newer Kite); the platform format
-   *  only the waypoints: `.waypoints` (QGC WPL 110) for ArduPilot / PX4, `.mission` (XML) for INAV. */
+  /** `kmission` carries the whole entry incl. data of a newer Kite; the platform format only the waypoints. */
   async function exportMission(m: LibraryMission, kind: 'kmission' | 'platform') {
     try {
       const isMav = isMavFormat(m);
@@ -408,7 +406,7 @@
       arduMission.set(wps);
       arduSelectedWpIndex.set(-1);
       arduLoadedMissionId.set(existingId);
-      arduClearUndoHistory(); // loaded mission = fresh undo baseline
+      arduClearUndoHistory();
       statusMessage = $t('missionMgr.loadedToMap');
     }
   }
@@ -490,7 +488,6 @@
     return { update() { autoResizeNotes(el, true); } };
   }
 
-  // Init once: load the list and restore any persisted selection.
   // The library changed outside this panel (a `.kmission` dropped on the window).
   let seenRevision = get(missionLibraryRevision);
   $effect(() => {
@@ -500,6 +497,7 @@
     void reload();
   });
 
+  // Init once: load the list and restore any persisted selection.
   let didInit = false;
   $effect(() => {
     if (didInit) return;
@@ -573,8 +571,8 @@
 {#snippet detailToolbar()}
   <div class="mmv2-detail-actions">
     <Button variant="data" icon="map" onclick={() => selected && loadToMap(selected)}>{$t('missionMgr.loadToMap')}</Button>
-    <Button variant="data" icon="export" onclick={() => selected && exportMission(selected, 'platform')} title={$t('missionMgr.export')}>{selected ? `.${platformExt(selected)}` : ''}</Button>
-    <Button variant="data" icon="export" onclick={() => selected && exportMission(selected, 'kmission')} title={$t('missionMgr.export')}>{'.kmission'}</Button>
+    <Button variant="data" icon="export" onclick={() => selected && exportMission(selected, 'platform')} title={selected ? `${$t('missionMgr.export')} .${platformExt(selected)}` : undefined}>{selected ? `.${platformExt(selected)}` : ''}</Button>
+    <Button variant="data" icon="export" onclick={() => selected && exportMission(selected, 'kmission')} title={`${$t('missionMgr.export')} .kmission`}>{'.kmission'}</Button>
     <Button variant="danger" icon="delete" onclick={() => selected && deleteMission(selected)} title={$t('missionMgr.delete')} />
   </div>
 {/snippet}

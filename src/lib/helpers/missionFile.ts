@@ -25,7 +25,7 @@ const isNumOrNull = (v: unknown): boolean => v === null || (typeof v === 'number
 /** The fields the editor and the backend need on every waypoint, per system — a list that fails here
  *  would sit in the library and never load. */
 function checkWaypoints(list: unknown, mav: boolean): void {
-  const ok = Array.isArray(list) && list.length > 0 && list.every((w) => {
+  const ok = Array.isArray(list) && list.every((w) => {
     if (typeof w !== 'object' || w === null) return false;
     const r = w as Record<string, unknown>;
     return mav

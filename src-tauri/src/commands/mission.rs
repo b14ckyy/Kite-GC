@@ -412,8 +412,7 @@ pub async fn mission_save_file_from_json(
     let mission = Mission { waypoints, info: MissionInfo::default(), dirty: false, home: None };
     let resolved = resolve_agl(&mission, &terrain).await;
     let xml = mission_to_xml(&resolved);
-    std::fs::write(&path, xml).map_err(|e| format!("Failed to save: {e}"))?;
-    Ok(())
+    crate::user_file::with_write_path(&path, |p| std::fs::write(p, &xml).map_err(|e| format!("Failed to save: {e}")))
 }
 
 /// Import mission from MW XML string

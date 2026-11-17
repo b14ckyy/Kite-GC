@@ -94,7 +94,7 @@
   import { liveTrack, appendLivePoint, clearLiveTrack, backfillLivePoints } from '$lib/stores/liveTrack';
   import { toTelemetryData } from '$lib/adapters/telemetryAdapter';
   import { activeWpNumber, replayWpTotal } from '$lib/stores/navStatus';
-  import { missionManagerOpen, missionManagerSelectedId, requestOpenFlightId, requestOpenMissionId } from '$lib/stores/missionManager';
+  import { missionManagerOpen, missionManagerSelectedId, requestOpenFlightId, requestOpenMissionId, missionLibraryRevision } from '$lib/stores/missionManager';
   import { batteryManagerOpen, batteryManagerCreateSerial, normalizeSerial } from '$lib/stores/batteryManager';
   import { vehicleManagerOpen, vehicleManagerCreatePrefill, vehicleManagerSelectedId } from '$lib/stores/vehicleManager';
   import { settleEndFlightVehicle } from '$lib/controllers/vehicleLinkController';
@@ -2077,41 +2077,40 @@
     await importFiles(supported);
   }
 
-  /** Whether library mission `m` may go onto the map with a drop: only onto an empty map, and never
-   *  against a connected vehicle of another system. Returns the system to show it in, or null. */
+  /** A dropped library mission goes onto the map only when the map is empty (both editors) and, with a
+   *  vehicle connected, only when it is that vehicle's system. Returns the system to show it in, or null. */
   function mapSystemForDrop(m: LibraryMission): 'inav' | 'ardupilot' | 'px4' | null {
     if (getTotalWpCount() > 0 || get(arduMission).length > 0) return null;
     const target = m.format === 'ardupilot' || m.format === 'px4' ? m.format : 'inav';
-    const current = get(autopilotSystem);
-    if (current === target) return target;
-    // ArduPilot and PX4 share the editor: with one of them connected the other's mission still loads.
-    const sameEditor = current !== 'inav' && target !== 'inav';
-    if (get(autopilotLocked)) return sameEditor ? current : null;
-    return target;
+    if (get(autopilotSystem) === target) return target;
+    return get(autopilotLocked) ? null : target;
   }
 
-  /** `.kmission` files dropped on the window: all go into the library; the first one is also shown on
-   *  the map when `mapSystemForDrop` allows it. */
-  async function importDroppedLibraryMissions(paths: string[]): Promise<void> {
+  /** `.kmission` files dropped on the window: all go into the library; with `showOnMap` the first one
+   *  `mapSystemForDrop` admits is also shown on the map. */
+  async function importDroppedLibraryMissions(paths: string[], showOnMap: boolean): Promise<void> {
     let added = 0;
     let known = 0;
-    let shown = false;
+    let shown = !showOnMap;
     for (const path of paths) {
       try {
         const res = await importMissionFile(path, flightLogDbPath, showDialog, (key) => $t(key));
         if (!res) continue;
         if (res.added) {
           added++;
-          void missionDbGeocode(res.id, $locale ?? 'en', flightLogDbPath).catch(() => {});
+          void missionDbGeocode(res.id, $locale ?? 'en', flightLogDbPath)
+            .then(() => missionLibraryRevision.update((n) => n + 1))
+            .catch(() => {});
         } else {
           known++;
         }
-        if (!shown) shown = await showLibraryMissionOnMap(res.id);
+        // Not a failed import when only the map step fails: the entry is in the library.
+        if (!shown) shown = await showLibraryMissionOnMap(res.id).catch(() => false);
       } catch (e) {
         errorMsg = $t('mission.importFailed', { values: { error: String(e) } });
       }
     }
-    if (added + known === 0 || (shown && paths.length === 1)) return;
+    if (added + known === 0 || (showOnMap && shown && paths.length === 1)) return;
     await showInfo(
       $t('missionMgr.title'),
       $t('missionMgr.importedCount', { values: { added: String(added), known: String(known) } }),
@@ -3324,7 +3323,6 @@
     catch (e) { console.warn('[end-flight] mission link failed', e); }
   }
 
-  // Fresh recording started — clear any stale captured-mission snapshot (defensive).
   function onRecordingStarted(): void {
     endedMission = { system: 'inav', inavWps: [], arduWps: [], fc: false, cls: null };
   }
@@ -3707,13 +3705,15 @@
       if (!paths.length) return;
       // Mission files import from anywhere (see importDroppedMission). `.txt` deliberately stays on
       // the logbook side (SD blackbox collision).
-      // `.kmission` = library entries: always imported, every one of a drop.
+      // `.kmission` = library entries: always imported, every one of a drop. A plain mission file in the
+      // same drop keeps the map for itself.
       const libraryFiles = paths.filter((p) => /\.kmission$/i.test(p));
+      const missionFile = paths.find((p) => /\.(mission|plan|waypoints)$/i.test(p));
       if (libraryFiles.length > 0) {
-        void importDroppedLibraryMissions(libraryFiles);
+        void importDroppedLibraryMissions(libraryFiles, !missionFile)
+          .then(() => (missionFile ? importDroppedMission(missionFile) : undefined));
         return;
       }
-      const missionFile = paths.find((p) => /\.(mission|plan|waypoints)$/i.test(p));
       if (missionFile) {
         void importDroppedMission(missionFile);
         return;
