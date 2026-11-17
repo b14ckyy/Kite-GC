@@ -218,7 +218,7 @@ inside the box of the feature release they belong to, so the notes for one relea
       shows a notice instead of an empty logbook; afterwards it names the size of the backup and asks
       whether to delete it (to the recycle bin on desktop), keep it, or be reminded in 14 days.
       Choosing a database folder with an older database asks before upgrading it. See
-      [Logbook](guides/logbook.md#the-database-updates-and-the-automatic-backup).
+      [Logbook](guides/logbook.md#the-database-updates-and-the-automatic-backup). [#313]
     - **INAV Blackbox import without a helper program** — Kite decodes INAV Blackbox logs itself;
       imports are faster and no longer lose the frames after a flight-mode change. [#234]
     - **PX4 ULog import** — the logbook imports `.ulg` logs, split into flights like any other
