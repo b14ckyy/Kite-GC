@@ -267,8 +267,8 @@ inside the box of the feature release they belong to, so the notes for one relea
       [Telemetry & display](guides/telemetry-and-display.md). [#299]
     - **Terrain Analysis: Show Map is a tracking strip** — the chart takes the whole height of the
       strip; beside it are only Show Map, Follow, reset and the legend. See
-      [Terrain analysis](guides/terrain-analysis.md#map-view-the-chart-on-the-map).
-    - **Vehicle Control: larger buttons and fields**, all at the normal button height.
+      [Terrain analysis](guides/terrain-analysis.md#map-view-the-chart-on-the-map). [#301]
+    - **Vehicle Control: larger buttons and fields**, all at the normal button height. [#301]
     - **Telemetry lost notice** — when a link that had delivered data is silent for five seconds, a red
       line is pinned above the system messages with a running timer and an alarm tone that repeats
       every minute, until data returns or you disconnect. See
@@ -405,9 +405,9 @@ inside the box of the feature release they belong to, so the notes for one relea
 
     - **Android: text followed the system font size, the boxes around it did not** — with a larger
       system font, labels ran out of their buttons and digits overlapped the units in number fields;
-      with a smaller one everything was smaller than designed. Text now keeps its size.
+      with a smaller one everything was smaller than designed. Text now keeps its size. [#301]
     - **Full-width buttons were too flat** where they stood alone in a column (Set Home Here and
-      Download Mission in Vehicle Control, Add Source and Add Local Source in the radar settings).
+      Download Mission in Vehicle Control, Add Source and Add Local Source in the radar settings). [#301]
     - **Dialogs taller than the window were cut off** at the top and the bottom, with their buttons
       out of reach — on a phone, in a small window or at a high UI scale. Every dialog now stays
       inside the window and scrolls, and its buttons stay in view. [#300]
