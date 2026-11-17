@@ -251,6 +251,15 @@ mission set (and **EEPROM save** stores the whole set); downloading reads it bac
 separate tabs again — so a multi-mission round-trips cleanly. ArduPilot and PX4 work with a **single**
 mission.
 
+**Save to library** asks, when more than one tab holds waypoints, whether to store **all missions as
+one library entry** or only the mission of the current tab. In the Mission Manager such an entry
+carries a **MULTI** badge; its preview draws every mission in its own colour, and the arrows in the
+preview step through the missions one by one. **Loading it to the map replaces every mission tab**
+(Kite asks first when tabs would be lost), and exporting it writes one `.mission` file with all
+missions. Opening a `.mission` file that holds several missions fills the tabs the same way. **Save**
+to a file from the panel still writes the current tab only. Linking a flight in the logbook always
+links the mission of the open tab, not the whole set.
+
 ## Staying clear of airspace
 
 If the aircraft has **geozones** (INAV) or a **geofence** (ArduPilot / PX4) set, Kite can check your
