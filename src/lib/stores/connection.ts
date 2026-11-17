@@ -4,7 +4,8 @@
 // Connection state store
 // Manages the reactive state of the FC connection across the UI
 
-import { derived, writable } from 'svelte/store';
+import { derived, get, writable } from 'svelte/store';
+import { PLATFORM_AIRPLANE, PLATFORM_VTOL } from '$lib/helpers/uavIcons';
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
@@ -134,9 +135,18 @@ export const hasMsp = derived(connection, linkHasMsp);
 /** Store form of `linkIsArduPilot` — ArduPilot mission panel, vehicle control, fence / rally. */
 export const isArduPilotLink = derived(connection, linkIsArduPilot);
 
-/** Platform type the handshake detected for the current link — `fcInfo.platform_type` diverges from it
- *  once the user overrides the type in the UAV Info panel (the panel shows the detected one as a hint). */
+/** Platform type detected for the current link (handshake, QuadPlane answer) — `fcInfo.platform_type`
+ *  diverges from it once the user overrides the type in the UAV Info panel (which shows it as a hint). */
 export const detectedPlatformType = writable<number>(0);
+
+/** A QuadPlane reports MAV_TYPE_FIXED_WING; its Q_ENABLE answer turns the detected type, and a shown
+ *  Airplane, into VTOL. */
+export function promoteDetectedToVtol(): void {
+  if (get(detectedPlatformType) !== PLATFORM_AIRPLANE) return;
+  detectedPlatformType.set(PLATFORM_VTOL);
+  connection.update((c) => (c.fcInfo?.platform_type === PLATFORM_AIRPLANE
+    ? { ...c, fcInfo: { ...c.fcInfo, platform_type: PLATFORM_VTOL } } : c));
+}
 
 /// Active protocol for the status box: primary name (MSP / MAVLink / SmartPort / CRSF / LTM) + an optional
 /// tunneled secondary (e.g. ArduPilot passthrough → "MAVLink"). Set on connect for MSP/MAVLink; for passive
