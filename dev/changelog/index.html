@@ -1911,6 +1911,11 @@ stays <em>Stable releases</em>. <a href="https://github.com/b14ckyy/Kite-GC/pull
 </ul>
 <p><em>Logbook and replay</em></p>
 <ul>
+<li><strong>Database upgrade you can see</strong> — while Kite backs up and upgrades the flight database it
+  shows a notice instead of an empty logbook; afterwards it names the size of the backup and asks
+  whether to delete it (to the recycle bin on desktop), keep it, or be reminded in 14 days.
+  Choosing a database folder with an older database asks before upgrading it. See
+  <a href="../guides/logbook/#the-database-updates-and-the-automatic-backup">Logbook</a>. [#313]</li>
 <li><strong>INAV Blackbox import without a helper program</strong> — Kite decodes INAV Blackbox logs itself;
   imports are faster and no longer lose the frames after a flight-mode change. <a href="https://github.com/b14ckyy/Kite-GC/pull/234">#234</a></li>
 <li><strong>PX4 ULog import</strong> — the logbook imports <code>.ulg</code> logs, split into flights like any other
