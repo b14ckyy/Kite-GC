@@ -234,7 +234,16 @@ Save a plan into Kite's **library** to reuse it across sessions, then open the *
 browse them. Missions are grouped by **location** (named automatically from their coordinates) and can
 be **searched**, **loaded to the map**, **exported** to a file, or **deleted** — with a warning when
 flights still link to a mission you're removing. Saving **de-duplicates by content**, so re-saving an
-unchanged plan won't pile up copies. The library is **shared across the flight stacks** (each mission
+unchanged plan won't pile up copies. **Export** offers two formats: **`.kmission`**, Kite's own file
+with everything the entry holds (name, notes, target system, planned home, vehicle class) for moving it
+to another Kite install, or the flight stack's own format (`.mission` / `.waypoints`) with the waypoints
+only, for other tools. **Import** takes both. Importing a mission the library already has adds
+nothing.
+
+Dropping files onto the window follows one rule: **`.kmission` files are always imported into the
+library** — several at once if you like — while `.mission`, `.waypoints` and `.plan` files are only
+loaded onto the map. A dropped `.kmission` is additionally shown on the map when the map holds no
+mission; with a vehicle connected, only if it belongs to that vehicle's flight stack. The library is **shared across the flight stacks** (each mission
 loads back into the stack it belongs to), and library missions also link to flights in the
 **[logbook](logbook.md)**.
 
