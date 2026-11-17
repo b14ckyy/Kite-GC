@@ -44,6 +44,7 @@
     "idle": "空闲"
   },
   "connection": {
+    "telemetryLost": "遥测丢失 — 已 {time} 无数据",
     "connect": "连接",
     "disconnect": "断开",
     "connecting": "连接中...",

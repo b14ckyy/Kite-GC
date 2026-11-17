@@ -44,6 +44,7 @@
     "idle": "неактивен"
   },
   "connection": {
+    "telemetryLost": "Телеметрията е загубена — няма данни от {time}",
     "connect": "Свържи се",
     "disconnect": "Прекъсни връзката",
     "connecting": "Свързване...",

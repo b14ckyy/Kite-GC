@@ -44,6 +44,7 @@
     "idle": "nečinné"
   },
   "connection": {
+    "telemetryLost": "Telemetria stratená — žiadne dáta {time}",
     "connect": "Pripojiť",
     "disconnect": "Odpojiť",
     "connecting": "Pripája sa...",

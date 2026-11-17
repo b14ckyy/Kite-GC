@@ -29,6 +29,8 @@ export interface StatusTextMsg {
   expiresAt: number;     // epoch ms when this line fades out (per-message lifetime)
   repeats: number;       // how many times this identical text has arrived while on screen (1 = once)
   vehicle?: StatusTextVehicle;
+  /** A GCS notice that stays until its owner clears it (`setPinnedStatus`); `pinned` is the owner's key. */
+  pinned?: string;
 }
 
 const MAX_BUFFER = 12;          // lines kept (the banner shows a few and scrolls to the newest)
@@ -98,7 +100,7 @@ function sweepExpired(): void {
 
 function scheduleSweep(): void {
   if (sweepTimer) { clearTimeout(sweepTimer); sweepTimer = null; }
-  const list = get(statusTexts);
+  const list = get(statusTexts).filter((m) => !m.pinned);
   if (!list.length) return;
   const soonest = Math.min(...list.map((m) => m.expiresAt));
   sweepTimer = setTimeout(sweepExpired, Math.max(0, soonest - Date.now()));
@@ -124,7 +126,9 @@ function push(severity: number, text: string, vehicle?: StatusTextVehicle): bool
       refreshed[idx] = { ...refreshed[idx], severity, level, expiresAt, repeats: refreshed[idx].repeats + 1, vehicle: vehicle ?? refreshed[idx].vehicle };
       return refreshed;
     }
-    return [...list, { id: nextId++, severity, level, text: clean, expiresAt, repeats: 1, vehicle }].slice(-MAX_BUFFER);
+    const pinned = list.filter((m) => m.pinned);
+    const rest = [...list.filter((m) => !m.pinned), { id: nextId++, severity, level, text: clean, expiresAt, repeats: 1, vehicle }];
+    return [...pinned, ...rest.slice(-(MAX_BUFFER - pinned.length))];
   });
   scheduleSweep();
 
@@ -184,6 +188,31 @@ function playTone(level: StatusTextLevel): void {
  *  shown (false: filtered out by the "System Messages" setting). */
 export function pushLocalStatus(severity: number, text: string): boolean {
   return push(severity, text);
+}
+
+/** Show or update the GCS notice `key`: a red line above the messages that never expires and ignores the
+ *  "System Messages" filter (it is not an FC message). No sound — see `playAlarm`. */
+export function setPinnedStatus(key: string, text: string): void {
+  statusTexts.update((list) => {
+    const idx = list.findIndex((m) => m.pinned === key);
+    if (idx === -1) return [{ id: nextId++, severity: 2, level: 'error', text, expiresAt: Infinity, repeats: 1, pinned: key }, ...list];
+    if (list[idx].text === text) return list;
+    const next = [...list];
+    next[idx] = { ...next[idx], text };
+    return next;
+  });
+}
+
+export function clearPinnedStatus(key: string): void {
+  statusTexts.update((list) => (list.some((m) => m.pinned === key) ? list.filter((m) => m.pinned !== key) : list));
+}
+
+/** The loudest cue: three falling notes, for a pinned notice. */
+export function playAlarm(): void {
+  lastSoundAt = Date.now();
+  beep(880, 0, 160, 0.22);
+  beep(660, 200, 160, 0.22);
+  beep(440, 400, 320, 0.22);
 }
 
 /** Start listening for FC STATUSTEXT messages. Safe to call once on app init. */

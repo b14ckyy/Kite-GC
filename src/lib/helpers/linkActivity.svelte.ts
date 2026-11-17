@@ -7,7 +7,8 @@ import type { TelemetryData } from '$lib/stores/telemetry';
 
 export type LinkActivity = 'waiting' | 'live' | 'stale';
 
-const STALE_MS = 5000;
+/** Without telemetry for this long a connected link counts as quiet. */
+export const LINK_STALE_MS = 5000;
 
 /**
  * Data flow on a connected link: `waiting` until the first telemetry, `stale` after 5 s without any.
@@ -26,7 +27,7 @@ export function linkActivity(telem: () => TelemetryData): () => LinkActivity {
     const last = telem().lastUpdate;
     if (!last) return 'waiting';
     const fcOk = conn.current.protocolType !== 'telemetry' || fcAlive.current;
-    return now - last < STALE_MS && fcOk ? 'live' : 'stale';
+    return now - last < LINK_STALE_MS && fcOk ? 'live' : 'stale';
   });
   return () => activity;
 }

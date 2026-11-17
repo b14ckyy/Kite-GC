@@ -12,18 +12,27 @@
 
   const ICON: Record<StatusTextLevel, string> = { error: '⚠', warning: '▲', info: 'ⓘ', debug: '⋯' };
 
+  let pinned = $derived($statusTexts.filter((m) => m.pinned));
+  let lines = $derived($statusTexts.filter((m) => !m.pinned));
+
   let scroller = $state<HTMLDivElement | undefined>(undefined);
   // Keep the newest line in view as messages arrive.
   $effect(() => {
-    void $statusTexts.length;
+    void lines.length;
     if (scroller) scroller.scrollTop = scroller.scrollHeight;
   });
 </script>
 
 {#if $statusTexts.length}
   <div class="msg-banner" role="log" transition:fade={{ duration: 250 }}>
+    {#each pinned as msg (msg.id)}
+      <div class="msg-line error pinned">
+        <span class="m-icon">{ICON.error}</span>
+        <span class="m-text">{msg.text}</span>
+      </div>
+    {/each}
     <div class="msg-lines" bind:this={scroller}>
-      {#each $statusTexts as msg (msg.id)}
+      {#each lines as msg (msg.id)}
         <div class="msg-line {msg.level}">
           <span class="m-icon">{ICON[msg.level]}</span>
           {#if msg.vehicle}
@@ -99,6 +108,17 @@
     white-space: nowrap;
   }
   .m-icon { font-size: 11px; line-height: 1; flex: 0 0 auto; }
+  /* A pinned GCS notice: above the scrolling lines, larger, opaque red. */
+  .msg-line.pinned {
+    padding: 6px 10px;
+    margin-bottom: 2px;
+    font-size: 15px;
+    font-weight: 700;
+    color: #fff;
+    background: rgba(170, 20, 20, 0.92);
+    font-variant-numeric: tabular-nums;
+  }
+  .msg-line.pinned .m-icon { font-size: 14px; color: #fff; }
   .m-text { overflow: hidden; text-overflow: ellipsis; }
   /* Fleet: which vehicle spoke — a dot in its map colour + its name, so a failing craft is obvious. */
   .m-vehicle {
