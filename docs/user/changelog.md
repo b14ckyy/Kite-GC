@@ -264,7 +264,7 @@ inside the box of the feature release they belong to, so the notes for one relea
     - **Weather widget** — the forecast wind at the aircraft's height, shown relative to the nose,
       with gusts, a weather icon, the direction home and, in the wide size, the wind for the next
       30, 60 and 90 minutes. Needs internet. See
-      [Telemetry & display](guides/telemetry-and-display.md).
+      [Telemetry & display](guides/telemetry-and-display.md). [#299]
     - **Resizable widgets** — every flight widget has two or three sizes, switched with a corner
       button in edit mode; the docks adapt to their largest widget. [#101]
     - **Raw telemetry view** — the **≡ Raw** button in the top bar lists every telemetry value in
