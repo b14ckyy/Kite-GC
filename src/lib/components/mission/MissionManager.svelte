@@ -27,7 +27,7 @@
   } from '$lib/stores/mission';
   import {
     arduMission, arduSelectedWpIndex, arduLoadedMissionId, markArduMissionSynced, arduClearUndoHistory,
-    parseWaypoints, parsePlanFile, type ArduWaypoint,
+    parseWaypoints, parsePlanFile, planFirmwareTarget, type ArduWaypoint,
   } from '$lib/stores/missionArdupilot';
   import { frameMissionOnMap } from '$lib/stores/mapCamera';
   import {
@@ -331,7 +331,7 @@
 
   /** After an ArduPilot `.waypoints` file is parsed, ask whether to add it to the library and/or
    *  load it onto the map (mirrors {@link importMission}, over the ArduPilot store). */
-  async function importArduMission(wps: ArduWaypoint[], suggestedName: string) {
+  async function importArduMission(wps: ArduWaypoint[], suggestedName: string, system: 'ardupilot' | 'px4' = 'ardupilot') {
     const existingId = await findArduLibraryMissionId(wps, dbPath()).catch(() => null);
     const ans = await confirmDialog.show({
       title: $t('missionMgr.importTitle'),
@@ -344,14 +344,16 @@
     if (ans == null) return;
     if (ans === 'db') {
       if (existingId == null) {
-        const input = await buildArduMissionInput(wps, { name: suggestedName, format: 'ardupilot' });
+        const input = await buildArduMissionInput(wps, { name: suggestedName, format: system });
         const id = await missionDbSave(input, dbPath());
         void missionDbGeocode(id, lang(), dbPath()).catch(() => {});
       }
       await reload();
       statusMessage = $t('missionMgr.imported');
     } else {
-      if (!(await ensureSystemForFormat('ardupilot'))) return;
+      // ArduPilot and PX4 share the editor: with a vehicle of the other one connected the plan still loads.
+      const locked = get(autopilotLocked) && sameFamily(get(autopilotSystem), system);
+      if (!locked && !(await ensureSystemForFormat(system))) return;
       arduMission.set(wps);
       arduSelectedWpIndex.set(-1);
       arduLoadedMissionId.set(existingId);
@@ -367,9 +369,10 @@
       const stem = path.replace(/^.*[\\/]/, '').replace(/\.[^.]+$/, '');
       const lower = path.toLowerCase();
       if (lower.endsWith('.plan')) {
-        // QGroundControl JSON plan (the PX4 ecosystem's mission file) → the ArduPilot/PX4 stack.
+        // The plan names its firmware: a PX4 plan must not be forced onto the ArduPilot tab (locked while a
+        // PX4 vehicle is connected).
         const text = await invoke<string>('read_text_file', { path });
-        await importArduMission(parsePlanFile(text), stem || autoName());
+        await importArduMission(parsePlanFile(text), stem || autoName(), planFirmwareTarget(text));
       } else if (lower.endsWith('.waypoints') || lower.endsWith('.txt')) {
         const text = await invoke<string>('read_text_file', { path });
         await importArduMission(parseWaypoints(text), stem || autoName());
