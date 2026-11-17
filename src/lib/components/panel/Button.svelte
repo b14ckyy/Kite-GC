@@ -181,6 +181,7 @@
   /* ── Compact (slim inline / auto-generated link chips) ──── */
   .kbtn-compact {
     height: 20px;
+    min-height: 20px;
     padding: 0 8px;
     font-size: 11px;
     font-weight: 600;

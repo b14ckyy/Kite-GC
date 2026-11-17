@@ -433,7 +433,7 @@
     align-items: center;
     gap: 8px;
   }
-  /* The stepper as tall as the button beside it. */
+  /* 26 px + the stepper's 1 px borders = the 28 px Button beside it. */
   .cc-adjust :global(.ns-input) { min-height: 26px; }
   /* Let the button take the remaining width next to the fixed-size stepper. */
   .cc-adjust :global(button) { flex: 1; }
@@ -480,8 +480,14 @@
   .cc-confirm.active :global(.htc) { box-shadow: inset 0 0 0 1px #37a8db; }
   .cc-modegrid {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 5px;
+  }
+  /* Mode names come from the vehicle: a long one is cut, it must not widen its column. */
+  .cc-modegrid :global(.kbtn),
+  .cc-modegrid :global(.htc) {
+    padding: 0 6px;
+    overflow: hidden;
   }
   /* Fold-out bar: a full-width, finger-sized divider that opens the stick-flown modes. */
   .cc-fold {

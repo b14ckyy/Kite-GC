@@ -388,7 +388,7 @@
     overflow: auto;
     padding: 10px;
   }
-  /* The strip is short: the column is as wide as its content, the content area keeps a hairline of padding. */
+  /* The strip is short: its height goes to the chart. */
   .ps-wide-compact .ps-params {
     width: auto;
     padding: 8px;

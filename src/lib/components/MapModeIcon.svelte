@@ -3,7 +3,7 @@
   Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 -->
 
-<!-- "2D" / "3D" drawn as paths for the map's mode button: text would follow the system's font and font size. -->
+<!-- "2D" / "3D" as paths: text would take each platform's font, not the stroke of the other map icons. -->
 <script lang="ts">
   let { mode }: { mode: '2d' | '3d' } = $props();
 </script>

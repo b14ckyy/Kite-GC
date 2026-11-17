@@ -72,7 +72,6 @@
   } = $props();
 
   const PAD = $derived(dense ? { l: 38, r: 8, t: 11, b: 15 } : { l: 54, r: 16, t: 14, b: 32 });
-  /** Baseline of the X labels below the plot. */
   const xLabelDy = $derived(dense ? 11 : 18);
 
   let svgEl: SVGSVGElement;
@@ -444,10 +443,8 @@
     return out;
   });
 
-  // Waypoint number labels: lifted into a band at the TOP of the plot (inside the area) with
-  // a thin dashed connector down to the dot — like the 3D-map markers. Greedily staggered over
-  // a few rows so dense patterns (survey grids) don't overlap; any that still can't fit without
-  // overlapping are dropped (the dot stays). Avoids the old overlap when many WPs sit close in X.
+  // WP numbers in a band at the plot top with a dashed connector to the dot, greedily staggered over
+  // WP_LABEL_ROWS rows; a label that still overlaps is dropped (the dot stays).
   const WP_LABEL_ROWS = 3;
   const WP_LABEL_GAP = 20; // min px between two labels in the same row
   const WP_LABEL_TOP = $derived(PAD.t + 9);

@@ -914,10 +914,8 @@
     flex: 1;
   }
 
-  /* Params slot content (PanelShell .ps-params provides width/padding/border/scroll). The column
-     is 240px (Marc, 2026-09-04: the segmented controls and their spacing dictated the width —
-     tightened so the profile chart gets the room): the band / correction segments and the RF
-     method buttons use a slimmer padding here than elsewhere. */
+  /* The band / correction segments and the RF method buttons take a slimmer padding so they fit the
+     240 px params column. */
   .controls {
     display: flex;
     flex-direction: column;
@@ -943,7 +941,6 @@
     font-size: 12px;
     color: #b8b8b8;
   }
-  /* Compact: a pure terrain-tracking strip — its three buttons and the legend, the rest is chart. */
   .compact-btns {
     display: flex;
     gap: 6px;
