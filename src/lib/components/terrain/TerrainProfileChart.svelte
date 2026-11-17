@@ -37,6 +37,7 @@
     viewEnd = $bindable(null),
     onhover,
     onpick,
+    dense = false,
   }: {
     data: ProfileData | null;
     datum?: 'msl' | 'agl';
@@ -66,9 +67,13 @@
     onhover?: (info: HoverInfo | null) => void;
     /** Click (not drag) on the chart — pin/unpin the map marker at this point */
     onpick?: (p: { lat: number; lon: number }) => void;
+    /** A short strip: small axis labels in a thin margin, the plot takes the height. */
+    dense?: boolean;
   } = $props();
 
-  const PAD = { l: 54, r: 16, t: 14, b: 32 };
+  const PAD = $derived(dense ? { l: 38, r: 8, t: 11, b: 15 } : { l: 54, r: 16, t: 14, b: 32 });
+  /** Baseline of the X labels below the plot. */
+  const xLabelDy = $derived(dense ? 11 : 18);
 
   let svgEl: SVGSVGElement;
   let cw = $state(900);
@@ -445,7 +450,7 @@
   // overlapping are dropped (the dot stays). Avoids the old overlap when many WPs sit close in X.
   const WP_LABEL_ROWS = 3;
   const WP_LABEL_GAP = 20; // min px between two labels in the same row
-  const WP_LABEL_TOP = PAD.t + 9;
+  const WP_LABEL_TOP = $derived(PAD.t + 9);
   const WP_LABEL_ROW_H = 13;
   const wpLabels = $derived.by(() => {
     const pts = [...markerPts].sort((a, b) => a.x - b.x);
@@ -747,6 +752,7 @@
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <svg
     bind:this={svgEl}
+    class:dense
     width={cw}
     height={ch}
     onpointermove={onPointerMove}
@@ -784,10 +790,10 @@
     {#each xTicks as tx}
       {#if tx >= xDomain.a && tx <= xDomain.b}
         <line class="grid" x1={xS(tx)} y1={PAD.t} x2={xS(tx)} y2={baselineY} />
-        <text class="axis-label" x={xS(tx)} y={baselineY + 18} text-anchor="middle">{fmtX(tx)}</text>
+        <text class="axis-label" x={xS(tx)} y={baselineY + xLabelDy} text-anchor="middle">{fmtX(tx)}</text>
       {/if}
     {/each}
-    <text class="axis-unit" x={PAD.l + plotW} y={baselineY + 18} text-anchor="end">
+    <text class="axis-unit" x={PAD.l + plotW} y={baselineY + xLabelDy} text-anchor="end">
       {xConv.unit}
     </text>
 
@@ -909,6 +915,10 @@
   .axis-unit {
     fill: #6e6e6e;
     font-size: 13px;
+  }
+  .dense .axis-label,
+  .dense .axis-unit {
+    font-size: 10px;
   }
   .rf-fill {
     /* pale / dark so the loss field sits quietly behind terrain + the lines */

@@ -69,10 +69,12 @@
 
 <div class="ps ps-{variant}" bind:this={root}>
   {#if variant === 'fullscreen' || variant === 'wide-compact'}
-    <header class="ps-head">
-      <span class="ps-title">{title}</span>
-      {#if headerActions}<div class="ps-head-actions">{@render headerActions()}</div>{/if}
-    </header>
+    {#if title || headerActions}
+      <header class="ps-head">
+        <span class="ps-title">{title}</span>
+        {#if headerActions}<div class="ps-head-actions">{@render headerActions()}</div>{/if}
+      </header>
+    {/if}
     <div class="ps-fs-row">
       {#if params}<aside class="ps-params">{@render params()}</aside>{/if}
       <div class="ps-fs-content">
@@ -385,6 +387,15 @@
     min-width: 0;
     overflow: auto;
     padding: 10px;
+  }
+  /* The strip is short: the column is as wide as its content, the content area keeps a hairline of padding. */
+  .ps-wide-compact .ps-params {
+    width: auto;
+    padding: 8px;
+  }
+  .ps-wide-compact .ps-fs-content {
+    padding: 2px 4px 2px 0;
+    overflow: hidden;
   }
   /* Fullscreen / Wide-Compact bottom bar (e.g. terrain readouts + hover info). */
   .ps-fs-foot {
