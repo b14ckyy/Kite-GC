@@ -1965,6 +1965,10 @@ stays <em>Stable releases</em>. <a href="https://github.com/b14ckyy/Kite-GC/pull
   with gusts, a weather icon, the direction home and, in the wide size, the wind for the next
   30, 60 and 90 minutes. Needs internet. See
   <a href="../guides/telemetry-and-display/">Telemetry &amp; display</a>. [#299]</li>
+<li><strong>Terrain Analysis: Show Map is a tracking strip</strong> — the chart takes the whole height of the
+  strip; beside it are only Show Map, Follow, reset and the legend. See
+  <a href="../guides/terrain-analysis/#map-view-the-chart-on-the-map">Terrain analysis</a>. [#301]</li>
+<li><strong>Vehicle Control: larger buttons and fields</strong>, all at the normal button height. [#301]</li>
 <li><strong>Telemetry lost notice</strong> — when a link that had delivered data is silent for five seconds, a red
   line is pinned above the system messages with a running timer and an alarm tone that repeats
   every minute, until data returns or you disconnect. See
@@ -2097,6 +2101,11 @@ stays <em>Stable releases</em>. <a href="https://github.com/b14ckyy/Kite-GC/pull
 <p><strong>Fixed</strong></p>
 <p>Every fix of 1.0.1 and 1.0.2 is part of 2.0. This list holds what is fixed in 2.0 only.</p>
 <ul>
+<li><strong>Android: text followed the system font size, the boxes around it did not</strong> — with a larger
+  system font, labels ran out of their buttons and digits overlapped the units in number fields;
+  with a smaller one everything was smaller than designed. Text now keeps its size. [#301]</li>
+<li><strong>Full-width buttons were too flat</strong> where they stood alone in a column (Set Home Here and
+  Download Mission in Vehicle Control, Add Source and Add Local Source in the radar settings). [#301]</li>
 <li><strong>Dialogs taller than the window were cut off</strong> at the top and the bottom, with their buttons
   out of reach — on a phone, in a small window or at a high UI scale. Every dialog now stays
   inside the window and scrolls, and its buttons stay in view. [#300]</li>
