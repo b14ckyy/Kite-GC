@@ -73,8 +73,8 @@
     border-radius: 8px;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
     padding: 20px 24px 16px;
-    min-width: 340px;
-    max-width: 480px;
+    min-width: min(390px, 100%);
+    max-width: 530px;
   }
   .dialog-title {
     font-size: 14px;

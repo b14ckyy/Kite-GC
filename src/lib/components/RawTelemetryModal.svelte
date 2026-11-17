@@ -179,8 +179,7 @@
   .dialog-box {
     display: flex;
     flex-direction: column;
-    width: min(1100px, 95vw);
-    max-height: 88vh;
+    width: min(1100px, 100%);
     background: #2e2e2e;
     border: 1px solid rgba(55, 168, 219, 0.45);
     border-radius: 8px;

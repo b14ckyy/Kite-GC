@@ -752,7 +752,7 @@
   }
   .rc-modal {
     background: #2e2e2e; border: 1px solid rgba(55, 168, 219, 0.45); border-radius: 8px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5); padding: 20px 24px 16px; min-width: 340px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5); padding: 20px 24px 16px; min-width: min(390px, 100%);
   }
   .rc-modal-title { font-size: 14px; font-weight: 700; color: #e0e0e0; margin-bottom: 12px; }
   .rc-modal-label { display: block; font-size: 11px; color: #949494; margin-bottom: 5px; }

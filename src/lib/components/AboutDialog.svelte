@@ -104,7 +104,7 @@
     border-radius: 10px;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
     padding: 22px 24px 16px;
-    width: 460px; max-width: calc(100vw - 32px);
+    width: 510px;
     color: #e0e0e0;
     font-family: 'Segoe UI', Tahoma, sans-serif;
   }
