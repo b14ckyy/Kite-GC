@@ -17,7 +17,7 @@
   import { settings } from '$lib/stores/settings';
   import {
     missionDbList, missionDbFlights, missionDbDelete, missionDbSetMeta,
-    missionExportFileFromJson, missionDbGeocode, missionDbSave,
+    missionExportFileFromJson, missionFileWrite, missionDbGeocode, missionDbSave,
     formatDurationSec,
   } from '$lib/stores/flightlog';
   import type { LibraryMission, FlightSummary } from '$lib/stores/flightlogTypes';
@@ -29,15 +29,18 @@
   } from '$lib/stores/mission';
   import {
     arduMission, arduSelectedWpIndex, arduLoadedMissionId, markArduMissionSynced, arduClearUndoHistory,
-    parseWaypoints, parsePlanFile, planFirmwareTarget, type ArduWaypoint,
+    parseWaypoints, parsePlanFile, planFirmwareTarget, planVehicleClass, knownVehicleClass, setArduVehicleClass,
+    type ArduWaypoint,
   } from '$lib/stores/missionArdupilot';
   import { frameMissionOnMap } from '$lib/stores/mapCamera';
   import {
     autopilotSystem, autopilotLocked, setAutopilotSystem, confirmSystemSwitch,
     pendingSystemSwitch, type AutopilotSystem,
   } from '$lib/stores/autopilotContext';
-  import { missionManagerSelectedId, requestOpenFlightId } from '$lib/stores/missionManager';
+  import { missionManagerSelectedId, requestOpenFlightId, missionLibraryRevision } from '$lib/stores/missionManager';
   import { buildMissionInput, findLibraryMissionId } from '$lib/helpers/missionLibrary';
+  import { importMissionFile } from '$lib/helpers/missionFile';
+  import type { VehicleClass } from '$lib/helpers/arduCommandCatalog';
   import { anyCase } from '$lib/helpers/fileFilters';
   import { buildArduMissionInput, findArduLibraryMissionId } from '$lib/helpers/missionLibraryArdu';
   import { convertAltitude, convertDistance, formatConverted } from '$lib/utils/units';
@@ -264,6 +267,9 @@
         );
       } else {
         const wps = JSON.parse(m.waypoints_json) as ArduWaypoint[];
+        // The class the mission was planned for; ignored while connected (the FC decides then).
+        const cls = knownVehicleClass(m.vehicle_class);
+        if (cls) setArduVehicleClass(cls);
         arduMission.set(wps);
         arduSelectedWpIndex.set(-1);
         arduLoadedMissionId.set(m.id);
@@ -277,21 +283,37 @@
     }
   }
 
+  const fileSafeName = (name: string) => (name || 'mission').replace(/[\\/:*?"<>|\x00-\x1f]+/g, ' ').trim() || 'mission';
+
+  /** The counter tells entries apart whose FILE names would be equal (same system, same name once the
+   *  characters a file system refuses are gone). */
+  function exportFileName(m: LibraryMission): string {
+    const sys = m.format === 'ardupilot' ? 'AP' : m.format === 'px4' ? 'PX' : 'IN';
+    const name = fileSafeName(m.name);
+    const twins = missions
+      .filter((x) => fileSafeName(x.name) === name && (x.format || 'inav') === (m.format || 'inav'))
+      .sort((x, y) => x.id - y.id);
+    const counter = twins.length > 1 ? `_${twins.findIndex((x) => x.id === m.id) + 1}` : '';
+    return `${name}_${sys}${counter}`;
+  }
+
   async function exportMission(m: LibraryMission) {
     try {
-      // ArduPilot/PX4 library rows hold ArduWaypoint JSON → QGC WPL 110 `.waypoints`; the Rust
-      // `.mission` (INAV XML) path only understands INAV waypoints.
+      // `.kmission` keeps the whole entry (name, notes, home, data of a newer Kite); the platform format
+      // only the waypoints: `.waypoints` (QGC WPL 110) for ArduPilot / PX4, `.mission` (XML) for INAV.
       const isMav = m.format === 'ardupilot' || m.format === 'px4';
-      const base = (m.name || 'mission').replace(/[^\w\-]+/g, '_');
       const path = await save({
         title: $t('missionMgr.exportTitle'),
-        defaultPath: isMav ? `${base}.waypoints` : `${base}.mission`,
-        filters: isMav
-          ? [{ name: 'Waypoints', extensions: ['waypoints'] }]
-          : [{ name: 'Mission', extensions: ['mission'] }],
+        defaultPath: `${exportFileName(m)}.kmission`,
+        filters: [
+          { name: $t('missionMgr.kmissionFilter'), extensions: ['kmission'] },
+          isMav ? { name: 'Waypoints', extensions: ['waypoints'] } : { name: 'Mission', extensions: ['mission'] },
+        ],
       });
       if (!path) return;
-      if (isMav) {
+      if (/\.kmission$/i.test(path)) {
+        await missionFileWrite(path, m.id, dbPath());
+      } else if (isMav) {
         const wps = JSON.parse(m.waypoints_json) as ArduWaypoint[];
         await invoke<void>('write_text_file', { path, content: serializeWaypoints(wps) });
       } else {
@@ -357,9 +379,7 @@
     }
   }
 
-  /** After an ArduPilot `.waypoints` file is parsed, ask whether to add it to the library and/or
-   *  load it onto the map (mirrors {@link importMission}, over the ArduPilot store). */
-  async function importArduMission(wps: ArduWaypoint[], suggestedName: string, system: 'ardupilot' | 'px4' = 'ardupilot') {
+  async function importArduMission(wps: ArduWaypoint[], suggestedName: string, system: 'ardupilot' | 'px4' = 'ardupilot', vehicleClass: VehicleClass | null = null) {
     const existingId = await findArduLibraryMissionId(wps, dbPath()).catch(() => null);
     const ans = await confirmDialog.show({
       title: $t('missionMgr.importTitle'),
@@ -372,7 +392,7 @@
     if (ans == null) return;
     if (ans === 'db') {
       if (existingId == null) {
-        const input = await buildArduMissionInput(wps, { name: suggestedName, format: system });
+        const input = await buildArduMissionInput(wps, { name: suggestedName, format: system, vehicleClass });
         const id = await missionDbSave(input, dbPath());
         void missionDbGeocode(id, lang(), dbPath()).catch(() => {});
       }
@@ -382,6 +402,7 @@
       // ArduPilot and PX4 share the editor: with a vehicle of the other one connected the plan still loads.
       const locked = get(autopilotLocked) && sameFamily(get(autopilotSystem), system);
       if (!locked && !(await ensureSystemForFormat(system))) return;
+      if (vehicleClass) setArduVehicleClass(vehicleClass);
       arduMission.set(wps);
       arduSelectedWpIndex.set(-1);
       arduLoadedMissionId.set(existingId);
@@ -399,15 +420,22 @@
 
   async function handleImportButton() {
     try {
-      const path = await open({ title: $t('missionMgr.openTitle'), multiple: false, filters: [{ name: 'Mission', extensions: anyCase(['mission', 'waypoints', 'txt', 'plan']) }] });
+      const path = await open({ title: $t('missionMgr.openTitle'), multiple: false, filters: [{ name: 'Mission', extensions: anyCase(['kmission', 'mission', 'waypoints', 'txt', 'plan']) }] });
       if (!path || typeof path !== 'string') return;
       const stem = path.replace(/^.*[\\/]/, '').replace(/\.[^.]+$/, '');
       const lower = path.toLowerCase();
-      if (lower.endsWith('.plan')) {
+      if (lower.endsWith('.kmission')) {
+        const res = await importMissionFile(path, dbPath(), (o) => confirmDialog.show(o), (key) => $t(key));
+        if (!res) return;
+        if (formatFilter !== 'all') formatFilter = 'all'; // the entry may belong to a hidden system
+        await reload();
+        select(res.id);
+        statusMessage = $t(res.added ? 'missionMgr.imported' : 'mission.saveLibAlready');
+      } else if (lower.endsWith('.plan')) {
         // The plan names its firmware: a PX4 plan must not be forced onto the ArduPilot tab (locked while a
         // PX4 vehicle is connected).
         const text = await invoke<string>('read_text_file', { path });
-        await importArduMission(parsePlanFile(text), stem || autoName(), planFirmwareTarget(text));
+        await importArduMission(parsePlanFile(text), stem || autoName(), planFirmwareTarget(text), planVehicleClass(text));
       } else if (lower.endsWith('.waypoints') || lower.endsWith('.txt')) {
         const text = await invoke<string>('read_text_file', { path });
         await importArduMission(parseWaypoints(text), stem || autoName());
@@ -426,9 +454,8 @@
     return `New Mission - ${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
   }
 
-  // No DOM drop zone here: with Tauri's dragDropEnabled the WebView never receives DOM drop
-  // events — file drops arrive as the native `tauri://drag-drop` event, routed in +page.svelte
-  // (a dropped mission file loads to the MAP; importing into the library stays on the button).
+  // No DOM drop zone: with Tauri's dragDropEnabled file drops arrive as the native `tauri://drag-drop`
+  // event, routed in +page.svelte.
 
   // ── Formatters ─────────────────────────────────────────────────────
   function fmtDist(m: number | null): string {
@@ -462,6 +489,15 @@
   }
 
   // Init once: load the list and restore any persisted selection.
+  // The library changed outside this panel (a `.kmission` dropped on the window).
+  let seenRevision = get(missionLibraryRevision);
+  $effect(() => {
+    const rev = $missionLibraryRevision;
+    if (rev === seenRevision) return;
+    seenRevision = rev;
+    void reload();
+  });
+
   let didInit = false;
   $effect(() => {
     if (didInit) return;

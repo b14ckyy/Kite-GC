@@ -21,7 +21,7 @@
     arduUndo, arduRedo, arduCanUndo, arduCanRedo, arduClearUndoHistory,
     arduVehicleClass, setArduVehicleClass,
     MAV_FRAME_GLOBAL, MAV_FRAME_GLOBAL_TERRAIN_ALT,
-    serializeWaypoints, parseWaypoints, parsePlanFile, loadArduMissionFromFile,
+    serializeWaypoints, parseWaypoints, parsePlanFile, planVehicleClass, loadArduMissionFromFile,
     type ArduWaypoint,
     framesForUpload,
   } from '$lib/stores/missionArdupilot';
@@ -189,7 +189,7 @@
       if (!path) return;
       const content = await invoke<string>('read_text_file', { path: typeof path === 'string' ? path : path });
       const wps = parseMissionFile(String(path), content);
-      loadArduMissionFromFile(wps); // fresh selection/undo, FILE provenance, not a library mission
+      loadArduMissionFromFile(wps, /\.plan$/i.test(String(path)) ? planVehicleClass(content) : null);
       statusMessage = $t('mission.loaded', { values: { count: wps.length } });
       frameMissionOnMap();
     } catch (e) {

@@ -10,9 +10,11 @@
 // drops it (mavlink_proto/mission.rs), so the launch/home position is naturally excluded from the
 // dedup hash, exactly like INAV's separate launch point. See docs/active/ARDUPILOT_MISSION_LIBRARY.md.
 
+import { get } from 'svelte/store';
 import type { LibraryMissionInput } from '$lib/stores/flightlogTypes';
 import {
   arduHasLocation,
+  arduVehicleClass,
   MAV_CMD_DO_CHANGE_SPEED,
   MAV_CMD_NAV_LOITER_UNLIM,
   type ArduWaypoint,
@@ -171,6 +173,8 @@ export interface BuildArduMissionOpts {
   notes?: string | null;
   /** Concrete system stored in the DB `format` column ('ardupilot' | 'px4'). */
   format?: string;
+  /** Left out = the class selected in the editor; null = unknown (a file that does not say). */
+  vehicleClass?: string | null;
 }
 
 /** Build the DB save payload for an ArduPilot/PX4 mission (identity hash + canonical items +
@@ -198,5 +202,6 @@ export async function buildArduMissionInput(
     notes: opts.notes ?? null,
     home_lat: null,
     home_lon: null,
+    vehicle_class: opts.vehicleClass !== undefined ? opts.vehicleClass : get(arduVehicleClass),
   };
 }

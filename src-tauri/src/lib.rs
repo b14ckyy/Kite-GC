@@ -75,6 +75,7 @@ use commands::flightlog::{
     vehicle_db_create, vehicle_db_update, vehicle_db_list, vehicle_db_get,
     vehicle_db_find_by_craft_name, vehicle_db_find_by_fc_uid, vehicle_db_delete, vehicle_db_aggregate, vehicle_db_flights,
     vehicle_db_set_baseline, vehicle_file_write, vehicle_file_read,
+    mission_file_write, mission_file_read, mission_db_set_extra,
     vehicle_db_resolve, vehicle_db_link_flights, vehicle_db_link_flights_count, vehicle_db_transfer_flights,
     flight_set_vehicle, vehicle_db_set_fc_uid,
 };
@@ -690,6 +691,9 @@ pub fn run() {
             vehicle_db_set_baseline,
             vehicle_file_write,
             vehicle_file_read,
+            mission_file_write,
+            mission_file_read,
+            mission_db_set_extra,
             vehicle_db_resolve,
             vehicle_db_link_flights,
             vehicle_db_link_flights_count,

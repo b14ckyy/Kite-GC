@@ -29,6 +29,10 @@ export interface LibraryMission {
   /** Planned launch/home reference (degrees) — base for REL altitudes + 3D preview height. */
   home_lat: number | null;
   home_lon: number | null;
+  /** Vehicle class the mission was planned for (ArduPilot / PX4); null = not set. */
+  vehicle_class: string | null;
+  /** A JSON object this version may not understand (data of a newer Kite): handed on, never edited. */
+  extra_json: string | null;
 }
 
 /** Payload for saving a mission to the library (mirrors Rust flightlog::types::MissionInput). */
@@ -50,6 +54,34 @@ export interface LibraryMissionInput {
   notes: string | null;
   home_lat: number | null;
   home_lon: number | null;
+  vehicle_class?: string | null;
+  /** On an overwrite, leaving it out keeps what the entry holds. */
+  extra_json?: string | null;
+  /** Set by a `.kmission` import only: the entry comes from another library. */
+  created_at?: string | null;
+  location_name?: string | null;
+}
+
+/** A `.kmission` file (mirrors the Rust MissionFile): one library entry as it is, statistics excepted. */
+export interface MissionFile {
+  format: string;
+  version: number;
+  exported_at: string;
+  app_version: string;
+  mission: {
+    name: string;
+    format: string;
+    content_hash: string;
+    waypoints: unknown;
+    source_xml?: string | null;
+    home_lat?: number | null;
+    home_lon?: number | null;
+    notes?: string | null;
+    created_at?: string | null;
+    location_name?: string | null;
+    vehicle_class?: string | null;
+    extra?: unknown;
+  };
 }
 
 /** A battery pack in the library (mirrors the Rust BatteryPack). Identity = serial. */

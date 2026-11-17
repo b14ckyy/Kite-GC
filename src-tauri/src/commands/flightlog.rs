@@ -10,7 +10,7 @@ use crate::flightlog::exchange;
 use crate::flightlog::types::{
     BatteryAggregate, BatteryFile, BatteryPack, BatteryPackInput, BlackboxImportProgress,
     BlackboxImportStatus, Flight, FlightSummary, Mission, MissionInput, TelemetryRecord, Vehicle,
-    VehicleAggregate, VehicleFile, VehicleInput, VehicleResolution,
+    MissionFile, MissionFileBody, VehicleAggregate, VehicleFile, VehicleInput, VehicleResolution,
 };
 
 /// Whether the app runs in portable mode (`.portable` marker next to the executable).
@@ -619,6 +619,159 @@ pub fn vehicle_file_read(path: String) -> Result<VehicleFile, String> {
         return Err(format!("Not a vehicle file (format: {})", file.format));
     }
     Ok(file)
+}
+
+/// Current `.kmission` layout. A file with a higher number has a layout this build does not know.
+const KMISSION_VERSION: u32 = 1;
+
+fn mission_to_file(m: Mission, app_version: String) -> Result<MissionFile, String> {
+    use serde_json::value::RawValue;
+    let raw = |what: &str, text: String| {
+        RawValue::from_string(text).map_err(|e| format!("Stored {what} is not valid JSON: {e}"))
+    };
+    Ok(MissionFile {
+        format: "kmission".into(),
+        version: KMISSION_VERSION,
+        exported_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        app_version,
+        mission: MissionFileBody {
+            name: m.name,
+            format: m.format,
+            content_hash: m.content_hash,
+            waypoints: raw("waypoints", m.waypoints_json)?,
+            source_xml: m.source_xml,
+            home_lat: m.home_lat,
+            home_lon: m.home_lon,
+            notes: m.notes,
+            created_at: Some(m.created_at),
+            location_name: m.location_name,
+            vehicle_class: m.vehicle_class,
+            extra: m.extra_json.map(|t| raw("extra data", t)).transpose()?,
+        },
+    })
+}
+
+/// Unknown keys are ignored, never an error.
+fn parse_mission_file(text: &str) -> Result<MissionFile, String> {
+    let file: MissionFile = serde_json::from_str(text).map_err(|e| format!("Parse error: {}", e))?;
+    if file.format != "kmission" {
+        return Err(format!("Not a mission file (format: {})", file.format));
+    }
+    if file.version > KMISSION_VERSION {
+        return Err(format!(
+            "This mission file needs a newer Kite (file version {}, this build reads up to {KMISSION_VERSION})",
+            file.version
+        ));
+    }
+    if !file.mission.waypoints.get().trim_start().starts_with('[') {
+        return Err("Not a mission file (no waypoint list)".into());
+    }
+    Ok(file)
+}
+
+#[tauri::command]
+pub fn mission_file_write(
+    path: String,
+    id: i64,
+    db_path: Option<String>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    let m = db::get_mission(&conn, id)
+        .map_err(|e| format!("Query error: {}", e))?
+        .ok_or_else(|| format!("Mission {id} not found"))?;
+    let file = mission_to_file(m, app.package_info().version.to_string())?;
+    let json = serde_json::to_string_pretty(&file).map_err(|e| format!("Serialize error: {}", e))?;
+    crate::user_file::with_write_path(&path, |p| {
+        std::fs::write(p, &json).map_err(|e| format!("Write error: {}", e))
+    })
+}
+
+/// A `.kmission` as read: `extra_json` repeats `file.mission.extra` as text, so the frontend stores it
+/// without parsing it (JavaScript would round integers above 2^53).
+#[derive(serde::Serialize)]
+pub struct MissionFileRead {
+    pub file: MissionFile,
+    pub extra_json: Option<String>,
+}
+
+#[tauri::command]
+pub fn mission_file_read(path: String) -> Result<MissionFileRead, String> {
+    let text = crate::user_file::with_read_path(&path, |p| {
+        std::fs::read_to_string(p).map_err(|e| format!("Read error: {}", e))
+    })?;
+    let file = parse_mission_file(&text)?;
+    let extra_json = file.mission.extra.as_ref().map(|raw| raw.get().to_string());
+    if extra_json.as_deref().is_some_and(|t| !t.trim_start().starts_with('{')) {
+        return Err("Not a mission file (extra data is not an object)".into());
+    }
+    Ok(MissionFileRead { file, extra_json })
+}
+
+#[tauri::command]
+pub fn mission_db_set_extra(id: i64, extra_json: Option<String>, db_path: Option<String>) -> Result<(), String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::set_mission_extra(&conn, id, extra_json.as_deref()).map_err(|e| format!("Update error: {}", e))
+}
+
+#[cfg(test)]
+mod mission_file_tests {
+    use super::*;
+
+    fn mission(waypoints_json: &str, extra_json: Option<&str>) -> Mission {
+        Mission {
+            id: 7,
+            content_hash: "h".into(),
+            name: "Survey".into(),
+            format: "px4".into(),
+            waypoints_json: waypoints_json.into(),
+            source_xml: None,
+            wp_count: 1,
+            total_distance_m: None,
+            alt_diff_m: None,
+            max_alt_m: None,
+            min_alt_m: None,
+            bndbox_min_lat: None,
+            bndbox_min_lon: None,
+            bndbox_max_lat: None,
+            bndbox_max_lon: None,
+            location_name: Some("Somewhere".into()),
+            created_at: "2026-01-02 03:04:05".into(),
+            notes: Some("n".into()),
+            home_lat: None,
+            home_lon: None,
+            vehicle_class: Some("copter".into()),
+            extra_json: extra_json.map(Into::into),
+        }
+    }
+
+    /// The JSON text of waypoints and extra data goes through write + read character for character:
+    /// `1.0000000000000007` is a double the default float parser hands back one bit off.
+    #[test]
+    fn waypoints_and_extra_pass_through_as_text() {
+        let wps = r#"[{"command":16,"alt":1.0000000000000007,"lat":501234567,"lon":81234567}]"#;
+        let extra = r#"{"z":1.0000000000000007,"a":{"big":123456789012345678901234567890}}"#;
+        let file = mission_to_file(mission(wps, Some(extra)), "2.0.0".into()).unwrap();
+        let text = serde_json::to_string_pretty(&file).unwrap();
+        let back = parse_mission_file(&text).unwrap();
+        assert_eq!(back.mission.waypoints.get(), wps);
+        assert_eq!(back.mission.extra.as_ref().unwrap().get(), extra);
+        assert_eq!(back.mission.vehicle_class.as_deref(), Some("copter"));
+        assert_eq!(back.app_version, "2.0.0");
+    }
+
+    #[test]
+    fn refuses_other_formats_newer_versions_and_a_missing_list() {
+        let body = r#""mission":{"name":"M","format":"inav","waypoints":[]}"#;
+        assert!(parse_mission_file(&format!(r#"{{"format":"kmission","version":1,{body}}}"#)).is_ok());
+        assert!(parse_mission_file(&format!(r#"{{"format":"kvehicle","version":1,{body}}}"#)).is_err());
+        assert!(parse_mission_file(&format!(r#"{{"format":"kmission","version":2,{body}}}"#)).is_err());
+        let no_list = r#"{"format":"kmission","version":1,"mission":{"name":"M","format":"inav","waypoints":{}}}"#;
+        assert!(parse_mission_file(no_list).is_err());
+        // Keys a later version adds are skipped.
+        let more = r#"{"format":"kmission","version":1,"later":true,"mission":{"name":"M","format":"inav","waypoints":[],"later":1}}"#;
+        assert!(parse_mission_file(more).is_ok());
+    }
 }
 
 /// Reverse-geocode a mission's location (bounding-box centroid) and store it; skipped when it already
