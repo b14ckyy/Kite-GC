@@ -1633,9 +1633,8 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
             }));
         }
 
-        // ── PARAM_VALUE → telemetry-ekf-type (AHRS_EKF_TYPE only) ───
-        // Reply to the one-shot AHRS_EKF_TYPE read issued on connect (see params.rs). 2 = EKF2,
-        // 3 = EKF3; anything else is shown as a generic "EKF" label frontend-side.
+        // ── PARAM_VALUE → the one-shot answers of connect (see params.rs) ───
+        // AHRS_EKF_TYPE: 2 = EKF2, 3 = EKF3; anything else shows as a generic "EKF".
         MavMessage::PARAM_VALUE(pv) => {
             let end = pv.param_id.iter().position(|&c| c == 0).unwrap_or(pv.param_id.len());
             let name: String = pv.param_id[..end].iter().map(|&c| c as char).collect();
@@ -1654,13 +1653,12 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
                 let _ = app_handle.emit("telemetry-vehicle", serde_json::json!({
                     "quadplane": quadplane,
                 }));
-                // Annotate the recorded fc_variant so replay/logbook show "QuadPlane" (it reports
-                // MAV_TYPE_FIXED_WING, so the recorded variant would otherwise read plain ArduPlane).
+                // A QuadPlane reports MAV_TYPE_FIXED_WING: the recorder stores it as VTOL.
                 if quadplane {
                     if let Some(ref rec) = recorder {
                         if let Ok(mut r) = rec.lock() { r.set_quadplane(); }
                     }
-                    // The link's stored FcInfo follows (primary vehicle only), unless the user chose a type.
+                    // The link's stored FcInfo follows (primary only, once registered) while it still says Airplane.
                     if primary {
                         if let Ok(mut reg) = tauri::Manager::state::<crate::state::AppState>(app_handle.app()).links.lock() {
                             if let Some(entry) = reg.get_mut(app_handle.link_id()) {

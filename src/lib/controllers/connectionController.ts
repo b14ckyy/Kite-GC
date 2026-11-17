@@ -10,7 +10,7 @@ import type { InavStats } from '$lib/stores/flightlogTypes';
 import { connection, connectionProtocol, fcLinkAlive, availablePorts, bleDevices, detectedPlatformType, hasMsp, isArduPilotLink } from '$lib/stores/connection';
 import { PLATFORM_AIRPLANE, PLATFORM_VTOL } from '$lib/helpers/uavIcons';
 import { isQuadplane } from '$lib/stores/missionArdupilot';
-import { startTelemetryListeners, stopTelemetryListeners, startConnectListeners, stopConnectListeners, resetTelemetry, setFcVariant } from '$lib/stores/telemetry';
+import { startTelemetryListeners, stopTelemetryListeners, startConnectListeners, stopConnectListeners, blackboxOf, resetTelemetry, setFcVariant } from '$lib/stores/telemetry';
 import { startVehicleListeners, activeVehicleId, resetVehicles, refreshLinks, selectVehicle, links, vehicles, type VehicleSummary, type LinkSummary } from '$lib/stores/vehicles';
 import { parseVehicleId } from '$lib/helpers/vehicleId';
 import { startFcModeListeners, clearFcModeLists } from '$lib/stores/fcModes';
@@ -203,17 +203,22 @@ export async function connectFC(params: ConnectParams): Promise<FcInfo> {
   // Phase A: the singleton UI follows the newest link's primary vehicle (the backend only auto-selects
   // when nothing was active, so a second link must be selected explicitly here).
   activeVehicleId.set(res.vehicleId);
-  // The Q_ENABLE answer may have arrived before this result, which still says "airplane".
-  if (info.platform_type === PLATFORM_AIRPLANE && isQuadplane(res.vehicleId)) info.platform_type = PLATFORM_VTOL;
-  // Re-apply the override chosen earlier this session for the same FC (see `platformOverrides`).
+  // The one-shot answers may have arrived before this result, which then lacks them: the backend holds
+  // the handshake's platform type ("airplane" for a QuadPlane) and no logging-backend flag.
+  const handshakeType = info.platform_type;
+  if (handshakeType === PLATFORM_AIRPLANE && isQuadplane(res.vehicleId)) info.platform_type = PLATFORM_VTOL;
+  info.blackbox ??= blackboxOf(res.vehicleId) ?? null;
   detectedPlatformType.set(info.platform_type);
+  // The override chosen earlier this session for the same FC (see `platformOverrides`) wins.
   const remembered = info.fc_uid ? platformOverrides.get(info.fc_uid) : undefined;
-  if (remembered !== undefined && remembered !== info.platform_type) {
+  const target = remembered ?? info.platform_type;
+  if (target !== handshakeType) {
     try {
-      await invoke('set_platform_type', { platformType: remembered });
-      info.platform_type = remembered;
+      await invoke('set_platform_type', { platformType: target });
+      info.platform_type = target;
     } catch (e) {
-      console.warn('[connect] restoring the platform-type override failed', e);
+      console.warn('[connect] setting the platform type failed', e);
+      info.platform_type = handshakeType;
     }
   }
   // MAVLink link to INAV 10.0+ with MSP over MAVLink up (the backend probed it during connect).
@@ -228,19 +233,22 @@ export async function connectFC(params: ConnectParams): Promise<FcInfo> {
     fcInfo: info,
     mspTunnel,
   });
-  // Seed the status-box protocol. MSP/MAVLink are known now; passive telemetry shows a placeholder
-  // until the backend's `telemetry-protocol` event reports the locked sub-protocol.
+  // Passive telemetry shows a placeholder until `telemetry-protocol` reports the locked sub-protocol —
+  // which may already have happened.
   const tr = get(t);
-  connectionProtocol.set({
-    primary: mspTunnel
-      ? tr('statusBox.protocolMspMav')
-      : params.protocolType === 'mavlink'
-        ? tr('statusBox.protocolMavlink')
-        : params.protocolType === 'msp'
-          ? tr('statusBox.protocolMsp')
-          : tr('statusBox.protocolTelemetry'),
-    secondary: null,
-  });
+  const passive = params.protocolType !== 'mavlink' && params.protocolType !== 'msp';
+  if (!passive || get(connectionProtocol).primary === '') {
+    connectionProtocol.set({
+      primary: mspTunnel
+        ? tr('statusBox.protocolMspMav')
+        : params.protocolType === 'mavlink'
+          ? tr('statusBox.protocolMavlink')
+          : params.protocolType === 'msp'
+            ? tr('statusBox.protocolMsp')
+            : tr('statusBox.protocolTelemetry'),
+      secondary: null,
+    });
+  }
   fcLinkAlive.set(true);
   setFcVariant(info.fc_variant);
   await startTelemetryListeners();
@@ -369,6 +377,7 @@ async function applyActiveVehicle(vehicleId: string, linkList: LinkSummary[] = g
     ? secondaryFcInfo(link.fcInfo, v)
     : link.fcInfo;
   if (fcInfo.platform_type === PLATFORM_AIRPLANE && isQuadplane(vehicleId)) fcInfo = { ...fcInfo, platform_type: PLATFORM_VTOL };
+  if (fcInfo.blackbox == null && blackboxOf(vehicleId) !== undefined) fcInfo = { ...fcInfo, blackbox: blackboxOf(vehicleId) ?? null };
   // MSP over MAVLink belongs to the link's handshake (primary) vehicle only — the backend's `with_msp`
   // refuses a secondary vehicle on the same link.
   const mspTunnel = protocolType === 'mavlink' && isPrimary && (fcInfo.features?.msp_tunnel ?? false);
@@ -441,8 +450,8 @@ export async function recoverBackendLinks(): Promise<boolean> {
     await selectVehicle(id).catch(() => activeVehicleId.set(id));
   }
   const wasConnected = get(connection).status === 'connected';
-  // The connection state FIRST, from the list just fetched: behind the ~20 later round trips (listeners,
-  // relays) a failing or hanging step left live widgets under a "Disconnected" status bar.
+  // The connection state FIRST, from the list just fetched: a failing or hanging later step (listeners,
+  // relays) must not leave live widgets under a "Disconnected" status bar.
   await applyActiveVehicle(active, l);
   // After a reload the store holds its default transport kind; take the link's. Only here — a vehicle
   // switch must not change it, the toolbar link's kind is what the Radar and Relay panels ask for.

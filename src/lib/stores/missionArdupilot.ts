@@ -219,8 +219,7 @@ export const arduMissionModified = derived(
 export const arduMissionFcSynced = derived(arduMissionFlags, (f) => f.fc);
 
 // ── Vehicle class (drives the command catalog filter) ─────────────────
-// Online: derived from the FC's variant and locked. Offline: the operator picks it (QuadPlane can't be
-// auto-detected — it reports as ArduPlane — so it is an offline-only choice for now).
+// Online: derived from the FC (variant, MAV_TYPE, Q_ENABLE) and locked. Offline: the operator picks it.
 
 const VEHICLE_CLASSES: VehicleClass[] = ['plane', 'copter', 'quadplane', 'rover', 'boat', 'sub'];
 
@@ -267,8 +266,8 @@ export function detectVehicleClass(variant: string, mavType: number | null | und
   return null;
 }
 
-// Vehicles whose Q_ENABLE answered 1. The answer comes once and may arrive before connect returns, so it
-// is kept for the link's lifetime — the class derived from the HEARTBEAT ("plane") must not replace it.
+// Vehicles whose Q_ENABLE answered 1, kept until every link is closed: the answer comes once, possibly
+// before connect returns, and wins over the class derived from the HEARTBEAT ("plane").
 const _quadplanes = new Set<string>();
 
 /** Whether the FC of this vehicle answered Q_ENABLE = 1 on the current link. */
@@ -276,9 +275,9 @@ export function isQuadplane(vehicleId: string | null | undefined): boolean {
   return _quadplanes.has(vehicleId ?? '');
 }
 
-/** Record the FC's Q_ENABLE = 1 answer for a vehicle (`vehicleId` of the event payload). */
 export function noteQuadplane(payload: { vehicleId?: string }): void {
-  _quadplanes.add(payload.vehicleId ?? '');
+  if (!payload.vehicleId) return;
+  _quadplanes.add(payload.vehicleId);
   if (isActive(payload) && get(arduVehicleClass) === 'plane' && !linkHasMsp(get(connection))) {
     arduVehicleClass.set('quadplane');
   }

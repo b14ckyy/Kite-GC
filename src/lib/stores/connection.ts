@@ -135,12 +135,12 @@ export const hasMsp = derived(connection, linkHasMsp);
 /** Store form of `linkIsArduPilot` — ArduPilot mission panel, vehicle control, fence / rally. */
 export const isArduPilotLink = derived(connection, linkIsArduPilot);
 
-/** Platform type the handshake detected for the current link — `fcInfo.platform_type` diverges from it
- *  once the user overrides the type in the UAV Info panel (the panel shows the detected one as a hint). */
+/** Platform type detected for the current link (handshake, QuadPlane answer) — `fcInfo.platform_type`
+ *  diverges from it once the user overrides the type in the UAV Info panel (which shows it as a hint). */
 export const detectedPlatformType = writable<number>(0);
 
-/** The active vehicle turned out to be a QuadPlane (it reports MAV_TYPE_FIXED_WING): the detected type
- *  becomes VTOL, and the shown one with it unless the user chose another. */
+/** A QuadPlane reports MAV_TYPE_FIXED_WING; its Q_ENABLE answer turns the detected type, and a shown
+ *  Airplane, into VTOL. */
 export function promoteDetectedToVtol(): void {
   if (get(detectedPlatformType) !== PLATFORM_AIRPLANE) return;
   detectedPlatformType.set(PLATFORM_VTOL);

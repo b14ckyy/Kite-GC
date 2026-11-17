@@ -350,6 +350,12 @@ let startingListeners: Promise<void> | null = null;
 // listener is dropped: these listen from before the connect call until the last link is closed.
 let connectUnlisteners: UnlistenFn[] = [];
 let startingConnectListeners: Promise<void> | null = null;
+const blackboxByVehicle = new Map<string, boolean>();
+
+/** The logging-backend answer of a vehicle, if it has come — it may precede the connect result. */
+export function blackboxOf(vehicleId: string): boolean | undefined {
+  return blackboxByVehicle.get(vehicleId);
+}
 
 export function startConnectListeners(): Promise<void> {
   if (connectUnlisteners.length) return Promise.resolve();
@@ -367,9 +373,10 @@ async function registerConnectListeners() {
     // logging backend (ArduPilot LOG_BACKEND_TYPE / PX4 SDLOG_MODE) for the vehicle-library save.
     await listen<{ vehicleId?: string; quadplane?: boolean; blackbox?: boolean }>('telemetry-vehicle', (event) => {
       if (event.payload.quadplane) noteQuadplane(event.payload);
+      const blackbox = event.payload.blackbox;
+      if (blackbox !== undefined && event.payload.vehicleId) blackboxByVehicle.set(event.payload.vehicleId, blackbox);
       if (!isActive(event.payload)) return;
       if (event.payload.quadplane) promoteDetectedToVtol();
-      const blackbox = event.payload.blackbox;
       if (blackbox !== undefined) {
         connection.update((c) => (c.fcInfo ? { ...c, fcInfo: { ...c.fcInfo, blackbox } } : c));
       }
@@ -381,12 +388,18 @@ async function registerConnectListeners() {
       // A real-MSL protocol supersedes any relative ground anchor.
       if (event.payload.msl) groundAnchor.set(null);
     }),
+    // Passive telemetry: the locked protocol (+ optional secondary), sent on change only.
+    await listen<{ primary: string; secondary: string | null }>('telemetry-protocol', (event) => {
+      if (!isActive(event.payload)) return;
+      connectionProtocol.set({ primary: event.payload.primary, secondary: event.payload.secondary });
+    }),
   ];
 }
 
 export function stopConnectListeners() {
   for (const unlisten of connectUnlisteners) unlisten();
   connectUnlisteners = [];
+  blackboxByVehicle.clear();
 }
 
 export function startTelemetryListeners(): Promise<void> {
@@ -396,7 +409,6 @@ export function startTelemetryListeners(): Promise<void> {
 }
 
 async function startTelemetryListenersInner() {
-  // Clean up any existing listeners
   stopTelemetryListeners();
   const fresh: UnlistenFn[] = [];
   unlisteners = fresh;
@@ -536,7 +548,7 @@ async function startTelemetryListenersInner() {
 
   fresh.push(
     await listen<{ arming_flags: number; flight_mode_flags: number; cpu_load: number; sensor_status: number; msp_rc_override?: boolean }>('telemetry-status', (event) => {
-      // flight_mode_flags is now forensic only — the canonical mode comes via telemetry-flightmode.
+      // flight_mode_flags is forensic only; the canonical mode comes via telemetry-flightmode.
       upd(event.payload, (t) => ({
         ...t,
         armingFlags: event.payload.arming_flags,
@@ -620,14 +632,6 @@ async function startTelemetryListenersInner() {
         windSpeedMs: event.payload.speed_ms,
         lastUpdate: Date.now(),
       }));
-    })
-  );
-
-  // Passive-telemetry locked protocol (+ optional secondary) for the connection status box.
-  fresh.push(
-    await listen<{ primary: string; secondary: string | null }>('telemetry-protocol', (event) => {
-      if (!isActive(event.payload)) return;
-      connectionProtocol.set({ primary: event.payload.primary, secondary: event.payload.secondary });
     })
   );
 
