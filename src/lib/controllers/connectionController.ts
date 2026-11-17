@@ -10,6 +10,8 @@ import { connection, connectionProtocol, fcLinkAlive, availablePorts, bleDevices
 import { startTelemetryListeners, stopTelemetryListeners, resetTelemetry } from '$lib/stores/telemetry';
 import { applyRelaysOnConnect, clearRelaysOnDisconnect } from '$lib/controllers/relayController';
 import { loadSafehomeConfig, clearSafehome } from '$lib/stores/safehome';
+import { isQuadplane } from '$lib/stores/missionArdupilot';
+import { PLATFORM_AIRPLANE, PLATFORM_VTOL } from '$lib/helpers/uavIcons';
 import { loadGeozoneConfig, clearGeozones } from '$lib/stores/geozone';
 import { loadFenceConfig, clearFence } from '$lib/stores/fence';
 import { loadRallyConfig, clearRally } from '$lib/stores/rally';
@@ -134,6 +136,8 @@ export async function connectFC(params: ConnectParams): Promise<FcInfo> {
     flightLogRaw: params.flightLogRaw,
     flightLogRawAlways: params.flightLogRawAlways,
   });
+  // The Q_ENABLE answer may have arrived before this result, which still says "airplane".
+  if (info.platform_type === PLATFORM_AIRPLANE && isQuadplane()) info.platform_type = PLATFORM_VTOL;
   connection.set({
     status: "connected",
     protocolType: params.protocolType,
