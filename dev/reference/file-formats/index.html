@@ -1940,6 +1940,12 @@ Kite can save/export it.</p>
 </thead>
 <tbody>
 <tr>
+<td><strong>Kite mission</strong></td>
+<td><code>.kmission</code></td>
+<td>R / W</td>
+<td>One entry of the mission library as it is: waypoints, name, notes, target system, planned home, vehicle class — an INAV entry with several missions included. For moving missions between Kite installs: an older Kite keeps data of a newer one it cannot use yet and has it after the update. Exported and imported in the Mission Manager.</td>
+</tr>
+<tr>
 <td><strong>INAV mission</strong></td>
 <td><code>.mission</code></td>
 <td>R / W</td>
@@ -1959,7 +1965,7 @@ Kite can save/export it.</p>
 </tr>
 </tbody>
 </table>
-<p>You can also drag a mission file straight onto the map. See <strong><a href="../../guides/missions/">Missions</a></strong>.</p>
+<p>You can also drag a mission file straight onto the map; a <code>.kmission</code> goes into the library (and onto the map if that is empty). See <strong><a href="../../guides/missions/">Missions</a></strong>.</p>
 <h2 id="flights-logs">Flights &amp; logs<a class="headerlink" href="#flights-logs" title="Permanent link">&para;</a></h2>
 <h3 id="import">Import<a class="headerlink" href="#import" title="Permanent link">&para;</a></h3>
 <table>

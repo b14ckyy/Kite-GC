@@ -1939,6 +1939,11 @@ stays <em>Stable releases</em>. <a href="https://github.com/b14ckyy/Kite-GC/pull
 <li><strong>Vehicle type override, FC ID and "Save to vehicle library" in the UAV Info panel</strong> — the
   detected type can be changed until you disconnect, the flight controller's hardware ID is
   shown, and the connected craft can be saved as a library vehicle. <a href="https://github.com/b14ckyy/Kite-GC/pull/157">#157</a></li>
+<li><strong>Kite mission file (<code>.kmission</code>)</strong> — the Mission Manager exports a library entry with
+  everything it holds (name, notes, target system, planned home, vehicle class) and imports it on
+  another install; the flight stack's own format stays available. ArduPilot missions now
+  remember the vehicle class they were planned for, and a QGroundControl plan sets it. See
+  <a href="../guides/missions/#the-mission-library-mission-manager">Missions</a>. [#314]</li>
 <li><strong>INAV: several missions as one library entry</strong> — with more than one mission tab in use,
   <em>Save to library</em> can store all of them together; loading the entry brings every tab back. A
   <code>.mission</code> file with several missions now opens into the tabs instead of one long mission. See

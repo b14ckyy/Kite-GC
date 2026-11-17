@@ -2526,9 +2526,16 @@ the aircraft will fly.</p>
 browse them. Missions are grouped by <strong>location</strong> (named automatically from their coordinates) and can
 be <strong>searched</strong>, <strong>loaded to the map</strong>, <strong>exported</strong> to a file, or <strong>deleted</strong> — with a warning when
 flights still link to a mission you're removing. Saving <strong>de-duplicates by content</strong>, so re-saving an
-unchanged plan won't pile up copies. The library is <strong>shared across the flight stacks</strong> (each mission
-loads back into the stack it belongs to), and library missions also link to flights in the
-<strong><a href="../logbook/">logbook</a></strong>.</p>
+unchanged plan won't pile up copies. There are <strong>two export buttons</strong>: <strong><code>.kmission</code></strong>, Kite's own
+file with everything the entry holds (name, notes, target system, planned home, vehicle class) for
+moving it to another Kite install, and the flight stack's own format (<code>.mission</code> / <code>.waypoints</code>) with
+the waypoints only, for other tools. <strong>Import</strong> takes both. Importing a mission the library already has adds
+nothing.</p>
+<p>Dropping files onto the window follows one rule: <strong><code>.kmission</code> files are always imported into the
+library</strong> — several at once if you like — while <code>.mission</code>, <code>.waypoints</code> and <code>.plan</code> files are only
+loaded onto the map. A dropped <code>.kmission</code> is additionally shown on the map when the map holds no
+mission (in either editor); with a vehicle connected, only when it is a mission for that vehicle's
+flight stack. If the drop also contains a plain mission file, that one gets the map.</p>
 <figure>
 <p><img alt="The Mission Manager" src="../../assets/guides/missions/mission_manager.png" /></p>
 <figcaption>
