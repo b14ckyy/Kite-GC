@@ -3325,7 +3325,7 @@
             activeTab = 'logbook';
             settings.patch({ activeTab: 'logbook' });
             vehicleManagerOpen.set(true);
-            vehicleManagerCreatePrefill.set(prefill);
+            vehicleManagerCreatePrefill.set({ ...prefill, platformType: get(connection).fcInfo?.platform_type ?? null });
           }
         } catch (e) {
           console.warn('[end-flight] vehicle link failed', e);

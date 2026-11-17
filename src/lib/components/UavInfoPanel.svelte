@@ -5,13 +5,14 @@
 
 <script lang="ts">
   // UAV Info (`info` variant of the panel framework): read-only FC facts plus two live actions — the
-  // session-only platform-type override (connectionController.setLivePlatformType) and "Save to vehicle
-  // library" for links with an FC identity.
+  // platform-type override until disconnect (setLivePlatformType) and "Save to vehicle library" for
+  // links with an FC identity.
   import { t } from 'svelte-i18n';
   import { get } from 'svelte/store';
   import { untrack } from 'svelte';
   import type { FcInfo } from '$lib/stores/connection';
   import { detectedPlatformType } from '$lib/stores/connection';
+  import { vehicleTypeForPlatform } from '$lib/helpers/vehicleTypes';
   import { setLivePlatformType } from '$lib/controllers/connectionController';
   import { settings } from '$lib/stores/settings';
   import { telemetry } from '$lib/stores/telemetry';
@@ -104,11 +105,6 @@
     if (existingId != null) onOpenVehicle(existingId);
   }
 
-  // INAV mixer platform → vehicle library type.
-  const VEHICLE_TYPE_FOR: Record<number, string> = {
-    0: 'multirotor', 1: 'fixed_wing', 2: 'helicopter', 3: 'multirotor', 4: 'rover', 5: 'boat',
-    6: 'other', 7: 'vtol', 255: 'other',
-  };
   // FC variant → the library's firmware choices (VehicleManager FIRMWARES).
   function firmwareFor(variant: string): string | null {
     if (variant === 'INAV') return 'INAV';
@@ -142,7 +138,7 @@
     const input: VehicleInput = {
       name: craft || info.fc_variant,
       craft_name: craft || null,
-      vehicle_type: VEHICLE_TYPE_FOR[info.platform_type] ?? 'other',
+      vehicle_type: vehicleTypeForPlatform(info.platform_type),
       status: 'active',
       image: null,
       notes: null,

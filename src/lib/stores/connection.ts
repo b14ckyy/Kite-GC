@@ -71,8 +71,8 @@ export interface FcInfo {
   /** MAVLink HEARTBEAT MAV_TYPE (ArduPilot/PX4 only; 0 for MSP). The only reliable QuadPlane signal
    *  (a QuadPlane reports fc_variant "ArduPlane" but a VTOL_* MAV_TYPE). */
   mav_type: number;
-  /** FC hardware id (INAV MSP_UID / MAVLink AUTOPILOT_VERSION uid), null for passive telemetry.
-   *  Informational — reconnect identity for the session's platform-type override. */
+  /** FC hardware id (INAV MSP_UID / MAVLink uid2), null for passive telemetry and synthetic ids.
+   *  Vehicle-library key: flight linking and the platform type on connect. */
   fc_uid: string | null;
   /** Blackbox / dataflash logging enabled on the FC (INAV from the handshake; ArduPilot / PX4 once the
    *  LOG_BACKEND_TYPE / SDLOG_MODE reply arrives via `telemetry-vehicle`). null = unknown. */
@@ -135,15 +135,20 @@ export const hasMsp = derived(connection, linkHasMsp);
 /** Store form of `linkIsArduPilot` — ArduPilot mission panel, vehicle control, fence / rally. */
 export const isArduPilotLink = derived(connection, linkIsArduPilot);
 
-/** Platform type detected for the current link (handshake, QuadPlane answer) — `fcInfo.platform_type`
- *  diverges from it once the user overrides the type in the UAV Info panel (which shows it as a hint). */
+/** Platform type detected for the current link (handshake, QuadPlane answer); UAV Info shows it as a hint
+ *  when the library or the dropdown set another. */
 export const detectedPlatformType = writable<number>(0);
 
-/** A QuadPlane reports MAV_TYPE_FIXED_WING; its Q_ENABLE answer turns the detected type, and a shown
- *  Airplane, into VTOL. */
+/** Who decided the shown platform type of the current link: the detection, the vehicle library (a vehicle
+ *  with this FC id) or the UAV Info dropdown. Only a detected type follows a later detection. */
+export const platformTypeSource = writable<'detected' | 'library' | 'manual'>('detected');
+
+/** A QuadPlane reports MAV_TYPE_FIXED_WING; its Q_ENABLE answer turns the detected type into VTOL, and the
+ *  shown one with it while the detection decides. */
 export function promoteDetectedToVtol(): void {
   if (get(detectedPlatformType) !== PLATFORM_AIRPLANE) return;
   detectedPlatformType.set(PLATFORM_VTOL);
+  if (get(platformTypeSource) !== 'detected') return;
   connection.update((c) => (c.fcInfo?.platform_type === PLATFORM_AIRPLANE
     ? { ...c, fcInfo: { ...c.fcInfo, platform_type: PLATFORM_VTOL } } : c));
 }

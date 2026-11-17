@@ -270,7 +270,7 @@ pub struct Vehicle {
     /// Fallback resolution key against `flights.craft_name` (trimmed; case-insensitive match) for
     /// flights without a matching `fc_uid`. May differ from `name`.
     pub craft_name: Option<String>,
-    /// `fixed_wing` | `flying_wing` | `vtol` | `multirotor` | `helicopter` | `rover` | `boat` | `other`
+    /// `fixed_wing` | `flying_wing` | `vtol` | `multirotor` | `tricopter` | `helicopter` | `rover` | `boat` | `other`
     pub vehicle_type: String,
     /// `active` | `storage` | `retired` | `damaged` | `crashed`
     pub status: String,

@@ -9,6 +9,7 @@
 <script lang="ts">
   import { t } from 'svelte-i18n';
   import { anyCase } from '$lib/helpers/fileFilters';
+  import { vehicleTypeForPlatform } from '$lib/helpers/vehicleTypes';
   import { get } from 'svelte/store';
   import { save, open as openFileDialog } from '@tauri-apps/plugin-dialog';
   import { settings } from '$lib/stores/settings';
@@ -101,7 +102,7 @@
   let formBaseline = $state<InavStats | null>(null);
   let fcStatsBusy = $state(false);
 
-  const VEHICLE_TYPES = ['fixed_wing', 'flying_wing', 'vtol', 'multirotor', 'helicopter', 'rover', 'boat', 'other'];
+  const VEHICLE_TYPES = ['fixed_wing', 'flying_wing', 'vtol', 'multirotor', 'tricopter', 'helicopter', 'rover', 'boat', 'other'];
   const VEHICLE_STATUSES = ['active', 'storage', 'retired', 'damaged', 'crashed'];
   const FIRMWARES = ['INAV', 'Betaflight', 'ArduPilot', 'PX4', 'Other'];
   const ARCHIVED = new Set(['retired', 'damaged', 'crashed']);
@@ -608,8 +609,8 @@
     return { update() { autoResize(el); } };
   }
 
-  // External "create vehicle from this flight" trigger: open straight into the create form with name,
-  // craft name and FC id pre-filled (the flight is linked on save), then consume the one-shot signal.
+  // External "create vehicle from this flight" trigger: the create form with name, craft name, FC id and
+  // type pre-filled (the flight is linked on save); the one-shot signal is consumed.
   $effect(() => {
     const p = $vehicleManagerCreatePrefill;
     if (p == null) return;
@@ -618,6 +619,7 @@
     form.name = name;
     form.craftName = name;
     form.fcUid = p.fcUid ?? '';
+    form.vehicleType = vehicleTypeForPlatform(p.platformType);
     createForFlightId = p.flightId;
     vehicleManagerCreatePrefill.set(null);
   });

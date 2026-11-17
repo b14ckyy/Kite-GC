@@ -8,7 +8,7 @@
 import { writable, get } from 'svelte/store';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
-import { connection, connectionProtocol, fcLinkAlive, promoteDetectedToVtol } from '$lib/stores/connection';
+import { connection, connectionProtocol, fcLinkAlive, platformTypeSource, promoteDetectedToVtol } from '$lib/stores/connection';
 import { isActive, activeVehicleId, vehicles } from '$lib/stores/vehicles';
 import { noteQuadplane } from '$lib/stores/missionArdupilot';
 import type { FlightModeState } from '$lib/helpers/flightModeRegistry';
@@ -376,7 +376,16 @@ async function registerConnectListeners() {
       const blackbox = event.payload.blackbox;
       if (blackbox !== undefined && event.payload.vehicleId) blackboxByVehicle.set(event.payload.vehicleId, blackbox);
       if (!isActive(event.payload)) return;
-      if (event.payload.quadplane) promoteDetectedToVtol();
+      if (event.payload.quadplane) {
+        promoteDetectedToVtol();
+        // The backend raised its own copies (FC info, recorder) to VTOL before it sent this: a library or
+        // manual type goes back in.
+        const shown = get(connection).fcInfo?.platform_type;
+        if (get(platformTypeSource) !== 'detected' && shown !== undefined) {
+          void invoke('set_platform_type', { platformType: shown })
+            .catch((e) => console.warn('[telemetry] restoring the platform type failed', e));
+        }
+      }
       if (blackbox !== undefined) {
         connection.update((c) => (c.fcInfo ? { ...c, fcInfo: { ...c.fcInfo, blackbox } } : c));
       }

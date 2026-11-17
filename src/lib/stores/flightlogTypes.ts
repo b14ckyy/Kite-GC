@@ -121,7 +121,7 @@ export interface Vehicle {
   id: number;
   name: string;
   craft_name: string | null;
-  vehicle_type: string; // fixed_wing | flying_wing | vtol | multirotor | helicopter | rover | boat | other
+  vehicle_type: string; // fixed_wing | flying_wing | vtol | multirotor | tricopter | helicopter | rover | boat | other
   status: string; // active | storage | retired | damaged | crashed
   image: string | null; // base64 data URI
   notes: string | null;

@@ -24,8 +24,11 @@ The vehicle library — your aircraft grouped by type, with search and per-vehic
 Each vehicle is a structured record you can fill in as much (or as little) as you like:
 
 - **Identity** — name, **craft name** (a link key — see below), **type** (fixed-wing, flying-wing,
-  VTOL, multirotor, helicopter, rover, boat, other) and **status** (active, storage, retired, damaged,
-  **crashed**), plus a header **image** and free-form notes.
+  VTOL, multirotor, tricopter, helicopter, rover, boat, other) and **status** (active, storage,
+  retired, damaged, **crashed**), plus a header **image** and free-form notes. The type is more than
+  a label: when the vehicle carries the FC hardware ID of the connected flight controller, it sets
+  the [vehicle type](telemetry-and-display.md) Kite uses on that link — *other* leaves it to the
+  detection.
 - **Airframe** — model, wingspan, length, all-up weight and dry weight.
 - **Propulsion** — motors, propellers, ESC, and a recommended battery (cells / capacity).
 - **Radio, FPV & datalink** — receiver, video transmitter, camera, gimbal camera, datalink.
