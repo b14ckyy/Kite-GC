@@ -1,4 +1,7 @@
 {
+  "export": {
+    "saveToDevice": "Uložiť do zariadenia"
+  },
   "app": {
     "brand": "KiteGC",
     "version": "v{version}"
@@ -1309,6 +1312,7 @@
     "deleteBlackboxConfirm": "Odstrániť pôvodný súbor",
     "deleteBlackboxSuccess": "Pôvodný súbor Blackbox bol odstránený ({filename}). Let zostáva dostupný na prehrávanie.",
     "exportTrack": "Trasa",
+    "exportTrackFormat": "Ktorý formát?",
     "exportTrackTitle": "Export trasy dokončený",
     "exportTrackSuccess": "Trasa letu bola úspešne exportovaná.",
     "importKflight": "Importovať .kflight",

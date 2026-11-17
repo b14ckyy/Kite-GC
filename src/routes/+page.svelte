@@ -7,7 +7,7 @@
   import { onDestroy, onMount, untrack } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
-  import { open, save } from "@tauri-apps/plugin-dialog";
+  import { open } from "@tauri-apps/plugin-dialog";
   import { connection, availablePorts, bleDevices, defaultNetPort, netHostOrLocal, hasMsp, isArduPilotLink } from "$lib/stores/connection";
   import type { FcInfo, PortInfo, BleDeviceInfo, TransportType, ProtocolType } from "$lib/stores/connection";
   import { settings } from "$lib/stores/settings";
@@ -41,6 +41,7 @@
   import { runUpdateCheck, resolveUpdateKind } from "$lib/controllers/updateCheck";
   import { checkDbBackupPrompt, runPendingDbUpgrade, probeDbSchema, formatBackupSize, type DbSchemaState, type DbUpgradeOutcome } from "$lib/controllers/dbBackupPrompt";
   import { importMissionFile } from "$lib/helpers/missionFile";
+  import { exportFile, sharesExports, flightFileStem, clearExportCache, setExportErrorReporter } from "$lib/helpers/exportFile";
   import type { LibraryMission } from "$lib/stores/flightlogTypes";
   import DbUpgradeNotice from "$lib/components/DbUpgradeNotice.svelte";
   import ContextMenu from "$lib/components/ContextMenu.svelte";
@@ -2184,7 +2185,6 @@
   async function exportFlightsToKflight(flightIds: number[]) {
     if (flightIds.length === 0) return;
     try {
-      // Auto-include linked partner flights
       const allIds = new Set(flightIds);
       for (const id of flightIds) {
         const summary = flightSummaries.find((f) => f.id === id);
@@ -2192,13 +2192,18 @@
       }
       const exportIds = [...allIds];
 
-      const outputPath = await save({
+      // One flight (with its linked partner): named after it; several: after their number.
+      const named = flightSummaries.find((f) => f.id === flightIds[0]);
+      const stem = flightIds.length === 1 && named ? flightFileStem(named) : `Flights_${exportIds.length}`;
+      let count = 0;
+      const outputPath = await exportFile({
+        name: `${stem}.kflight`,
         filters: [{ name: $t('logbook.kflightFileFilter'), extensions: ['kflight'] }],
-        defaultPath: exportIds.length === 1 ? `flight_${exportIds[0]}.kflight` : `flights_export.kflight`,
+        write: async (path) => { count = await logbookCtrl.exportSelectedFlights(exportIds, path, flightLogDbPath); },
       });
       if (!outputPath) return;
-      const count = await logbookCtrl.exportSelectedFlights(exportIds, outputPath, flightLogDbPath);
-      await showInfo($t('logbook.exportTitle'), $t('logbook.exportSuccess', { values: { count } }));
+      // The share sheet is the confirmation on mobile; a dialog under it would only be in the way.
+      if (!sharesExports) await showInfo($t('logbook.exportTitle'), $t('logbook.exportSuccess', { values: { count } }));
     } catch (e) {
       errorMsg = String(e);
     }
@@ -2209,20 +2214,17 @@
     const src = selectedFlight.source;
     if (src !== 'blackbox' && src !== 'both') return;
     try {
-      // Keep the stored original's extension; default name <craft>_<date>_<flightId>.<ext> (renamable).
       const orig = blackboxFileInfo?.filename ?? '';
       const dot = orig.lastIndexOf('.');
       const ext = (dot > 0 ? orig.slice(dot + 1) : 'log').toLowerCase();
-      const craft = (selectedFlight.craft_name || 'flight')
-        .trim().replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^_+|_+$/g, '') || 'flight';
-      const date = (selectedFlight.start_time ?? '').slice(0, 10); // YYYY-MM-DD
-      const base = date ? `${craft}_${date}_${selectedFlightId}` : `${craft}_${selectedFlightId}`;
-      const outputPath = await save({
+      const base = flightFileStem(selectedFlight);
+      const flightId = selectedFlightId;
+      const outputPath = await exportFile({
+        name: `${base}.${ext}`,
         filters: [{ name: $t('logbook.blackboxFileFilter'), extensions: [ext] }],
-        defaultPath: `${base}.${ext}`,
+        write: (path) => logbookCtrl.exportBlackbox(flightId, path, activeDbPath),
       });
-      if (!outputPath) return;
-      await logbookCtrl.exportBlackbox(selectedFlightId, outputPath, activeDbPath);
+      if (!outputPath || sharesExports) return;
       const savedName = outputPath.split(/[\\/]/).pop() ?? `${base}.${ext}`;
       await showInfo($t('logbook.exportBlackboxTitle'), $t('logbook.exportBlackboxSuccess', { values: { filename: savedName } }));
     } catch (e) {
@@ -2299,23 +2301,35 @@
     );
   }
 
+  const TRACK_FORMATS = [
+    { name: 'KMZ (Google Earth)', extensions: ['kmz'] },
+    { name: 'KML (Google Earth)', extensions: ['kml'] },
+    { name: 'GPX (GPS Exchange)', extensions: ['gpx'] },
+    { name: 'CSV (Spreadsheet)', extensions: ['csv'] },
+  ];
+
   async function exportTrack() {
     if (!selectedFlightId || !selectedFlight) return;
     try {
-      const craft = selectedFlight.craft_name || 'flight';
-      const date = selectedFlight.start_time ? new Date(selectedFlight.start_time).toISOString().slice(0, 10) : '';
-      const defaultName = `${craft}_${date}`.replace(/\s+/g, '_');
-      const outputPath = await save({
-        filters: [
-          { name: 'KMZ (Google Earth)', extensions: ['kmz'] },
-          { name: 'KML (Google Earth)', extensions: ['kml'] },
-          { name: 'GPX (GPS Exchange)', extensions: ['gpx'] },
-          { name: 'CSV (Spreadsheet)', extensions: ['csv'] },
-        ],
-        defaultPath: `${defaultName}.kmz`,
+      // The backend tells the format from the extension. Desktop picks it in the save dialog; with the
+      // share sheet there is no such dialog, so it is asked for here.
+      let filters = TRACK_FORMATS;
+      if (sharesExports) {
+        const ext = await showDialog({
+          title: $t('logbook.exportTrack'),
+          message: $t('logbook.exportTrackFormat'),
+          buttons: TRACK_FORMATS.map((f) => ({ label: f.extensions[0].toUpperCase(), value: f.extensions[0] })),
+        });
+        if (ext == null) return;
+        filters = TRACK_FORMATS.filter((f) => f.extensions[0] === ext);
+      }
+      const flightId = selectedFlightId;
+      const outputPath = await exportFile({
+        name: `${flightFileStem(selectedFlight)}.${filters[0].extensions[0]}`,
+        filters,
+        write: (path) => logbookCtrl.exportTrack(flightId, path, activeDbPath),
       });
-      if (!outputPath) return;
-      await logbookCtrl.exportTrack(selectedFlightId, outputPath, activeDbPath);
+      if (!outputPath || sharesExports) return;
       await showInfo($t('logbook.exportTrackTitle'), $t('logbook.exportTrackSuccess'));
     } catch (e) {
       errorMsg = String(e);
@@ -3548,6 +3562,10 @@
   // class that CSS gates the expensive widget-bar transitions off (see stores/lowPower.ts). It is a
   // readable store, so it only runs while something subscribes — this is that subscription.
   onMount(() => lowPowerActive.subscribe(() => {}));
+  onMount(() => {
+    clearExportCache();
+    setExportErrorReporter((message) => { errorMsg = message; });
+  });
 
   // Hard-blink indicator mode on WebKitGTK and Android — see stores/pulseBlink.ts for why a looping
   // CSS animation costs a large fraction of a core there (per-frame fixed cost, not per pixel).

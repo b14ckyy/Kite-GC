@@ -1,4 +1,7 @@
 {
+  "export": {
+    "saveToDevice": "Guardar en el dispositivo"
+  },
   "app": {
     "brand": "KiteGC",
     "version": "v{version}"
@@ -1309,6 +1312,7 @@
     "deleteBlackboxConfirm": "Eliminar archivo original",
     "deleteBlackboxSuccess": "Archivo blackbox original eliminado ({filename}). El vuelo sigue disponible para su reproducción.",
     "exportTrack": "Trayectoria",
+    "exportTrackFormat": "¿Qué formato?",
     "exportTrackTitle": "Exportación de trayectoria completada",
     "exportTrackSuccess": "Trayectoria de vuelo exportada correctamente.",
     "importKflight": "Importar .kflight",

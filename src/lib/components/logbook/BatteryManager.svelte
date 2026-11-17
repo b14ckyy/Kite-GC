@@ -13,7 +13,8 @@
   import { t } from 'svelte-i18n';
   import { get } from 'svelte/store';
   import { anyCase } from '$lib/helpers/fileFilters';
-  import { save, open as openFileDialog } from '@tauri-apps/plugin-dialog';
+  import { exportFile } from '$lib/helpers/exportFile';
+  import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
   import { settings } from '$lib/stores/settings';
   import {
     batteryDbList, batteryDbCreate, batteryDbUpdate, batteryDbDelete,
@@ -414,13 +415,13 @@
 
     const labelPart = b.label ? `_${sanitize(b.label)}` : '';
     try {
-      const path = await save({
+      const path = await exportFile({
         title: $t('batteryMgr.exportTitle'),
-        defaultPath: `battery_${sanitize(b.serial)}${labelPart}.kbatt`,
+        name: `battery_${sanitize(b.serial)}${labelPart}.kbatt`,
         filters: [{ name: 'Battery', extensions: ['kbatt'] }],
+        write: (p) => batteryFileWrite(p, file),
       });
       if (!path) return;
-      await batteryFileWrite(path, file);
       statusMessage = $t('batteryMgr.exported');
     } catch (e) {
       statusMessage = $t('batteryMgr.exportFailed', { values: { error: String(e) } });

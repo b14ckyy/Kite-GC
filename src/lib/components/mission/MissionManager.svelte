@@ -12,7 +12,7 @@
 <script lang="ts">
   import { t, locale } from 'svelte-i18n';
   import { get } from 'svelte/store';
-  import { save, open } from '@tauri-apps/plugin-dialog';
+  import { open } from '@tauri-apps/plugin-dialog';
   import { invoke } from '@tauri-apps/api/core';
   import { settings } from '$lib/stores/settings';
   import {
@@ -40,6 +40,7 @@
   import { missionManagerSelectedId, requestOpenFlightId, missionLibraryRevision } from '$lib/stores/missionManager';
   import { buildMissionInput, findLibraryMissionId } from '$lib/helpers/missionLibrary';
   import { importMissionFile } from '$lib/helpers/missionFile';
+  import { exportFile, fileSafeName } from '$lib/helpers/exportFile';
   import type { VehicleClass } from '$lib/helpers/arduCommandCatalog';
   import { openFilters, missionFileKind } from '$lib/helpers/fileFilters';
   import { buildArduMissionInput, findArduLibraryMissionId } from '$lib/helpers/missionLibraryArdu';
@@ -283,15 +284,13 @@
     }
   }
 
-  const fileSafeName = (name: string) => (name || 'mission').replace(/[\\/:*?"<>|\x00-\x1f]+/g, ' ').trim() || 'mission';
-
   /** The counter tells entries apart whose FILE names would be equal (same system, same name once the
    *  characters a file system refuses are gone). */
   function exportFileName(m: LibraryMission): string {
     const sys = m.format === 'ardupilot' ? 'AP' : m.format === 'px4' ? 'PX' : 'IN';
-    const name = fileSafeName(m.name);
+    const name = fileSafeName(m.name, 'mission');
     const twins = missions
-      .filter((x) => fileSafeName(x.name) === name && (x.format || 'inav') === (m.format || 'inav'))
+      .filter((x) => fileSafeName(x.name, 'mission') === name && (x.format || 'inav') === (m.format || 'inav'))
       .sort((x, y) => x.id - y.id);
     const counter = twins.length > 1 ? `_${twins.findIndex((x) => x.id === m.id) + 1}` : '';
     return `${name}_${sys}${counter}`;
@@ -305,22 +304,24 @@
     try {
       const isMav = isMavFormat(m);
       const ext = kind === 'kmission' ? 'kmission' : platformExt(m);
-      const path = await save({
+      const path = await exportFile({
         title: $t('missionMgr.exportTitle'),
-        defaultPath: `${kind === 'kmission' ? exportFileName(m) : fileSafeName(m.name)}.${ext}`,
+        name: `${kind === 'kmission' ? exportFileName(m) : fileSafeName(m.name, 'mission')}.${ext}`,
         filters: [{ name: kind === 'kmission' ? $t('missionMgr.kmissionFilter') : isMav ? 'Waypoints' : 'Mission', extensions: [ext] }],
+        write: async (p) => {
+          if (kind === 'kmission') {
+            await missionFileWrite(p, m.id, dbPath());
+          } else if (isMav) {
+            const wps = JSON.parse(m.waypoints_json) as ArduWaypoint[];
+            await invoke<void>('write_text_file', { path: p, content: serializeWaypoints(wps) });
+          } else {
+            // Library numbering may restart per mission; a `.mission` file numbers through.
+            const wps = (JSON.parse(m.waypoints_json) as Waypoint[]).map((w, i) => ({ ...w, number: i + 1 }));
+            await missionExportFileFromJson(p, JSON.stringify(wps));
+          }
+        },
       });
       if (!path) return;
-      if (kind === 'kmission') {
-        await missionFileWrite(path, m.id, dbPath());
-      } else if (isMav) {
-        const wps = JSON.parse(m.waypoints_json) as ArduWaypoint[];
-        await invoke<void>('write_text_file', { path, content: serializeWaypoints(wps) });
-      } else {
-        // Library numbering may restart per mission; a `.mission` file numbers through.
-        const wps = (JSON.parse(m.waypoints_json) as Waypoint[]).map((w, i) => ({ ...w, number: i + 1 }));
-        await missionExportFileFromJson(path, JSON.stringify(wps));
-      }
       statusMessage = $t('missionMgr.exported');
     } catch (e) {
       statusMessage = $t('missionMgr.exportFailed', { values: { error: String(e) } });

@@ -2690,6 +2690,7 @@ dependencies = [
 name = "kite-gc"
 version = "0.8.0"
 dependencies = [
+ "block2 0.6.2",
  "btleplug",
  "chrono",
  "chrono-tz",
