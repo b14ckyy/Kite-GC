@@ -214,6 +214,11 @@ inside the box of the feature release they belong to, so the notes for one relea
 
     *Logbook and replay*
 
+    - **Android: exports go to the share sheet** — flights, tracks, missions, vehicles and batteries
+      are handed to the system share sheet instead of a save dialog (Android 14 and later also offer
+      *Save to device* there). See [Logbook](guides/logbook.md#exporting).
+    - **Readable file names for exported flights** — vehicle, location, date and time instead of
+      the flight number, on every platform.
     - **Database upgrade you can see** — while Kite backs up and upgrades the flight database it
       shows a notice instead of an empty logbook; afterwards it names the size of the backup and asks
       whether to delete it (to the recycle bin on desktop), keep it, or be reminded in 14 days.

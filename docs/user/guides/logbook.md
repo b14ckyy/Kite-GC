@@ -155,6 +155,16 @@ PX4 ULog note: PX4 doesn't log a throttle *output*, so a replayed `.ulg` flight 
   straight in (not kept as a file), so there's nothing to re-export for those.
 - **Track** — export a flight's path as **KMZ / KML** (Google Earth), **GPX** or **CSV**.
 
+The proposed file name of a single flight is its vehicle name and location where known, followed by the
+flight's date and local time — `Flight_<number>` stands in when neither is known.
+
+!!! note "On Android"
+    An export opens the system **share sheet** instead of a save dialog: send the file to another
+    device or person, a cloud drive, or a file manager. The file keeps the proposed name. From
+    Android 14 the sheet also offers **Save to device**, which opens the system's save dialog. On
+    older versions, share to a file manager app to keep the file on the device — the system's own
+    Files app is not offered as a share target on every device.
+
 ## The database, updates and the automatic backup
 
 All flights live in a single SQLite database (`flights.db`, folder configurable in Settings). When a
