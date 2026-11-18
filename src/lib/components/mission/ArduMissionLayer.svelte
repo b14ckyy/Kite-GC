@@ -55,7 +55,9 @@
   let currentEditing = $state<boolean>(get(arduEditMode));
   let currentHome    = $state<HomePosition>(get(homePosition));
   let currentVehicle = $state<VehicleClass>(get(arduVehicleClass));
-  let currentActiveWp = $state<number>(get(activeWpNumber));
+  // Not reactive state: the active waypoint is one CSS class on its marker and is toggled in place.
+  // A re-render for it would take every marker off the map for a frame.
+  let currentActiveWp = get(activeWpNumber);
   let currentSystem  = $state<AutopilotSystem>(get(autopilotSystem));
   const firmware = $derived<Firmware>(currentSystem === 'px4' ? 'px4' : 'ardupilot');
   let connected      = $state<boolean>(get(connection).status === 'connected');
@@ -66,7 +68,6 @@
   const unsubEditMode = arduEditMode.subscribe(e => { currentEditing = e; });
   const unsubHome     = homePosition.subscribe(h => { currentHome = h; });
   const unsubVehicle  = arduVehicleClass.subscribe(v => { currentVehicle = v; });
-  const unsubActiveWp = activeWpNumber.subscribe(v => { currentActiveWp = v; });
   const unsubSystem   = autopilotSystem.subscribe(s => { currentSystem = s; });
   const unsubConn     = connection.subscribe(c => { connected = c.status === 'connected'; });
 
@@ -75,6 +76,13 @@
   // Location markers by mission index for the current render — a group drag moves the other selected
   // markers live through this map before the store commit on dragend.
   const markersByIdx = new Map<number, L.Marker>();
+  function markActiveWp() {
+    for (const [i, marker] of markersByIdx) {
+      marker.getElement()?.classList.toggle('mission-wp-active', currentActiveWp > 0 && i + 1 === currentActiveWp);
+    }
+  }
+  // Subscribed down here: the store calls back at once, and that needs the marker map.
+  const unsubActiveWp = activeWpNumber.subscribe(v => { currentActiveWp = v; markActiveWp(); });
   // Shared editor-popup lifecycle (content-signature redraw guard lives in the framework module).
   const popupState = newPopupState();
   // Which "Advanced" param sections are expanded, keyed per section ('primary' / 'mod-<idx>'). Persisted
