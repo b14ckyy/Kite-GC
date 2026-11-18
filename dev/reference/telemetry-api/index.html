@@ -2704,8 +2704,34 @@ until the first receiver is listed.</p>
 <td>float · null</td>
 <td>Horizontal dilution of precision; <code>null</code> when the receiver reports none.</td>
 </tr>
+<tr>
+<td><code>vdop</code></td>
+<td>float · null</td>
+<td>Vertical dilution of precision.</td>
+</tr>
+<tr>
+<td><code>hAccM</code>, <code>vAccM</code></td>
+<td>float · null</td>
+<td>Horizontal / vertical position accuracy the receiver estimates, metres.</td>
+</tr>
+<tr>
+<td><code>speedMs</code></td>
+<td>float · null</td>
+<td>This receiver's ground speed, m/s.</td>
+</tr>
+<tr>
+<td><code>courseDeg</code></td>
+<td>float · null</td>
+<td>This receiver's course over ground, degrees.</td>
+</tr>
+<tr>
+<td><code>yawDeg</code></td>
+<td>float · null</td>
+<td>Heading of a dual-antenna receiver, degrees (0 = north).</td>
+</tr>
 </tbody>
 </table>
+<p>The last six are <code>null</code> where the receiver or the firmware does not report the value.</p>
 <h4 id="attitude-sources-all"><code>attitude</code> — sources: all<a class="headerlink" href="#attitude-sources-all" title="Permanent link">&para;</a></h4>
 <table>
 <thead>

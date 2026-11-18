@@ -2167,7 +2167,7 @@ along the bottom. Each widget is self-contained and updates live.</p>
 </tr>
 <tr>
 <td><strong>GPS</strong></td>
-<td>Latitude / longitude, satellite count, fix type (No fix / 2D / 3D / 3D DGPS) and HDOP. On a MAVLink link the position is the autopilot's fused estimate, and the fix type also reads <strong>RTK FLT</strong>, <strong>RTK FIX</strong> and <strong>NO GPS</strong> (a receiver that was detected has stopped reporting). When the autopilot reports <strong>two GPS receivers</strong> (ArduPilot), the fix type, satellite count and HDOP come from the better receiver — the higher fix, then more satellites — and the title becomes a button: <strong>EKF</strong> is this fused view, <strong>CYC</strong> alternates every three seconds between <strong>GPS1</strong> and <strong>GPS2</strong> with each receiver's own position and values. The autopilot does not report which receiver it is navigating on.</td>
+<td>Latitude / longitude, satellite count, fix type (No fix / 2D / 3D / 3D DGPS) and HDOP. On a MAVLink link the position is the autopilot's fused estimate, and the fix type also reads <strong>RTK FLT</strong>, <strong>RTK FIX</strong> and <strong>NO GPS</strong> (a receiver that was detected has stopped reporting). When the autopilot reports <strong>two GPS receivers</strong> (ArduPilot), the fix type, satellite count and HDOP come from the better receiver — the higher fix, then more satellites — and the title becomes a button: <strong>EKF</strong> is this fused view, <strong>CYC</strong> alternates every three seconds between <strong>GPS1</strong> and <strong>GPS2</strong> with each receiver's own position and values. The autopilot does not report which receiver it is navigating on. The receivers' own values are recorded with the flight, so <strong>CYC</strong> works in the replay of a flight recorded by Kite 2.0 as well.</td>
 </tr>
 <tr>
 <td><strong>Home</strong></td>
@@ -2210,7 +2210,8 @@ and apply everywhere — every widget and map read-out follows them.</p>
 </div>
 <h3 id="raw-telemetry">Raw telemetry<a class="headerlink" href="#raw-telemetry" title="Permanent link">&para;</a></h3>
 <p>For the unconverted figures, click <strong>≡ Raw</strong> in the top bar (it appears next to <strong>⇅ Relay</strong> while you
-are connected). A popup lists <strong>every value the telemetry pipeline holds</strong> — GPS, attitude, altitude
+are connected). A popup lists <strong>every value the telemetry pipeline holds</strong> — GPS (the fused position,
+and on a MAVLink link each receiver with its own position, fix, DOP and accuracy values), attitude, altitude
 and speeds, wind, battery (per pack on multi-battery aircraft), RC link, status and flight-mode flags,
 sensor health, EKF and flight-controller identity — each with its name and <strong>raw unit</strong> (metres, m/s,
 degrees, volts, the FC's own RSSI scale). Bitfields are shown as decimal and hex. It is read-only and
