@@ -227,6 +227,13 @@ inside the box of the feature release they belong to, so the notes for one relea
       whether to delete it (to the recycle bin on desktop), keep it, or be reminded in 14 days.
       Choosing a database folder with an older database asks before upgrading it. See
       [Logbook](guides/logbook.md#the-database-updates-and-the-automatic-backup). [#313]
+    - **The flight database moves with its folder** — changing the database folder on Windows,
+      Linux and macOS now asks whether to move the database there. A database already in the new
+      folder can be opened or overwritten, and the previous one backed up into the new folder, kept
+      or deleted. Kite's work files (running recordings, the HI-RES replay cache, logs opened
+      without importing) now always stay in its own data folder, so a database on a slow, removable
+      or network drive does not slow them down.
+      See [Logbook](guides/logbook.md#changing-the-database-folder). [#325]
     - **INAV Blackbox import without a helper program** — Kite decodes INAV Blackbox logs itself;
       imports are faster and no longer lose the frames after a flight-mode change. [#234]
     - **PX4 ULog import** — the logbook imports `.ulg` logs, split into flights like any other
