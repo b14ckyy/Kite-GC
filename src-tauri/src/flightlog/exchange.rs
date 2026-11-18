@@ -18,6 +18,7 @@ const KFLIGHT_SCHEMA_VERSION: u32 = 2;
 /// Application identifier stored in the export header
 const KFLIGHT_APP_ID: &str = "KiteGC";
 
+#[cfg(test)]
 pub fn export_flights(
     source_conn: &Connection,
     flight_ids: &[i64],

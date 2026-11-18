@@ -41,7 +41,7 @@
   import { runUpdateCheck, resolveUpdateKind } from "$lib/controllers/updateCheck";
   import { checkDbBackupPrompt, runPendingDbUpgrade, formatBackupSize, type DbSchemaState, type DbUpgradeOutcome } from "$lib/controllers/dbBackupPrompt";
   import { planDbFolderSwitch, askAboutPreviousDb, type DbFolderPlan } from "$lib/controllers/dbFolderSwitch";
-  import { exportDatabase, importDatabase, exportAllFlights, removeOriginalLogs, type DbTransferUi } from "$lib/controllers/dbTransfer";
+  import { exportDatabase, importDatabase, exportAllFlights, removeOriginalLogs, withExportProgress, type DbTransferUi } from "$lib/controllers/dbTransfer";
   import { importMissionFile } from "$lib/helpers/missionFile";
   import { exportFile, sharesExports, flightFileStem, clearExportCache, setExportErrorReporter } from "$lib/helpers/exportFile";
   import type { LibraryMission } from "$lib/stores/flightlogTypes";
@@ -2275,7 +2275,10 @@
       const outputPath = await exportFile({
         name: `${stem}.kflight`,
         filters: [{ name: $t('logbook.kflightFileFilter'), extensions: ['kflight'] }],
-        write: async (path) => { count = await logbookCtrl.exportSelectedFlights(exportIds, path, flightLogDbPath); },
+        write: async (path) => {
+          count = await withExportProgress(dbTransferUi, $t('logbook.exportBusyTitle'), exportIds.length, () =>
+            logbookCtrl.exportSelectedFlights(exportIds, path, flightLogDbPath));
+        },
       });
       if (!outputPath) return;
       // The share sheet is the confirmation on mobile; a dialog under it would only be in the way.
@@ -2799,25 +2802,60 @@
       idsToDelete.push(bbxId);
     }
 
-    // Consolidate the deleted flights' battery usage into their packs first (opt-in).
-    if (consolidateBattery) {
-      for (const id of idsToDelete) {
-        const f = id === flightId ? selectedFlight : await getFlight(id, flightLogDbPath).catch(() => null);
-        if (!f?.battery_serial) continue;
-        const pack = f.battery_serial === linkedPack?.serial
-          ? linkedPack
-          : await batteryDbFindBySerial(f.battery_serial, flightLogDbPath).catch(() => null);
-        if (!pack) continue;
-        const mah = f.battery_used_mah ?? 0;
-        const cycles = pack.capacity_mah ? mah / pack.capacity_mah : 0;
-        await batteryDbAddUsage(pack.id, f.duration_sec ?? 0, mah, cycles, 0, flightLogDbPath);
-      }
-    }
-
     for (const id of idsToDelete) {
+      if (consolidateBattery) await consolidateBatteryUsage(id);
       await logbookCtrl.removeFlight(id, flightLogDbPath);
     }
 
+    forgetSelectedFlight();
+    await loadLogbook();
+  }
+
+  /** Add a flight's battery usage to its pack's lifetime totals — done before the flight is deleted. */
+  async function consolidateBatteryUsage(flightId: number) {
+    const f = await getFlight(flightId, flightLogDbPath).catch(() => null);
+    if (!f?.battery_serial) return;
+    const pack = await batteryDbFindBySerial(f.battery_serial, flightLogDbPath).catch(() => null);
+    if (!pack) return;
+    const mah = f.battery_used_mah ?? 0;
+    const cycles = pack.capacity_mah ? mah / pack.capacity_mah : 0;
+    await batteryDbAddUsage(pack.id, f.duration_sec ?? 0, mah, cycles, 0, flightLogDbPath);
+  }
+
+  /** Delete exactly the ticked flights; a linked partner that is not ticked stays. */
+  async function removeFlights(ids: number[]) {
+    if (ids.length === 0) return;
+    const count = String(ids.length);
+    const value = await showDialog({
+      title: $t('logbook.deleteManyTitle'),
+      message: $t('logbook.deleteManyWarning', { values: { count } }),
+      buttons: [{ label: $t('logbook.deleteManyConfirm', { values: { count } }), value: 'delete', danger: true }],
+      checkbox: { label: $t('logbook.deleteManyConsolidate') },
+    });
+    if (value !== 'delete') return;
+    const consolidateBattery = confirmDialog.checkboxResult();
+    const progress = (done: number) => {
+      dbTransferNotice = {
+        title: $t('logbook.deleteManyBusyTitle'),
+        message: $t('settings.dbTransfer.flightsBusyMsg', { values: { done: String(done), total: count } }),
+      };
+    };
+    try {
+      if (selectedFlightId != null && ids.includes(selectedFlightId)) forgetSelectedFlight();
+      for (const [i, id] of ids.entries()) {
+        progress(i);
+        if (consolidateBattery) await consolidateBatteryUsage(id);
+        await logbookCtrl.removeFlight(id, flightLogDbPath);
+      }
+    } catch (e) {
+      errorMsg = String(e);
+    } finally {
+      dbTransferNotice = null;
+      await loadLogbook();
+    }
+  }
+
+  function forgetSelectedFlight() {
     resetPlayback();
     selectedFlight = null;
     selectedFlightTrack = [];
@@ -2830,7 +2868,6 @@
     weatherWindDir = '';
     weatherDesc = '';
     weatherEditing = false;
-    await loadLogbook();
   }
 
   async function loadInfo() {
@@ -4518,6 +4555,7 @@
             onSavePilot={saveSelectedFlightPilot}
             onDeleteFlight={removeSelectedFlight}
             onExportFlights={exportFlightsToKflight}
+            onDeleteFlights={(ids) => { void removeFlights(ids); }}
             onExportBlackbox={exportBlackbox}
             onDeleteBlackbox={deleteBlackbox}
             {blackboxFileInfo}

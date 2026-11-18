@@ -171,18 +171,23 @@ pub fn flightlog_export_all(
     let conn = open_db(&custom)?;
     let ids = db::all_flight_ids(&conn).map_err(|e| format!("Query error: {e}"))?;
     let total = ids.len();
-    let mut last = 0;
     let exported = crate::user_file::with_write_path(&output_path, |p| {
-        exchange::export_flights_with(&conn, &ids, p, &mut |done, total| {
-            // One event per percent is plenty for a notice.
-            if done * 100 / total.max(1) != last || done == total {
-                last = done * 100 / total.max(1);
-                let _ = app_handle.emit("flightlog-export-progress", ExportAllResult { exported: done, total });
-            }
-        })
+        exchange::export_flights_with(&conn, &ids, p, &mut export_progress(&app_handle))
     })
     .inspect_err(|e| log::warn!("[flightlog] export of all flights failed: {e}"))?;
     Ok(ExportAllResult { exported, total })
+}
+
+/// Progress callback of a `.kflight` export: event `flightlog-export-progress`, one per percent.
+fn export_progress(app_handle: &tauri::AppHandle) -> impl FnMut(usize, usize) + '_ {
+    let mut last = usize::MAX;
+    move |done, total| {
+        let percent = done * 100 / total.max(1);
+        if percent != last || done == total {
+            last = percent;
+            let _ = app_handle.emit("flightlog-export-progress", ExportAllResult { exported: done, total });
+        }
+    }
 }
 
 // ── Moving the database with its folder (flightlog/db_move.rs) ──
@@ -1424,15 +1429,16 @@ fn compact_refusal(state: &crate::state::AppState) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn flightlog_export(
     flight_ids: Vec<i64>,
     output_path: String,
     db_path: Option<String>,
+    app_handle: tauri::AppHandle,
 ) -> Result<usize, String> {
     let conn = open_db(&db_path.unwrap_or_default())?;
     crate::user_file::with_write_path(&output_path, |p| {
-        exchange::export_flights(&conn, &flight_ids, p)
+        exchange::export_flights_with(&conn, &flight_ids, p, &mut export_progress(&app_handle))
     })
 }
 

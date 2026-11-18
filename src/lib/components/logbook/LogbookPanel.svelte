@@ -26,6 +26,7 @@
   import PanelShell, { type PanelVariant } from '$lib/components/panel/PanelShell.svelte';
   import Button from '$lib/components/panel/Button.svelte';
   import { convertDistance, formatConverted } from '$lib/utils/units';
+  import { longPress } from '$lib/actions/longPress';
   import FlightDetail from './FlightDetail.svelte';
   import BatteryManager from './BatteryManager.svelte';
   import { batteryManagerOpen } from '$lib/stores/batteryManager';
@@ -62,6 +63,7 @@
     onSavePilot,
     onDeleteFlight,
     onExportFlights,
+    onDeleteFlights,
     onExportBlackbox,
     onDeleteBlackbox,
     blackboxFileInfo = null,
@@ -106,6 +108,7 @@
     onSavePilot: (pilotName: string, pilotId: string) => void;
     onDeleteFlight: () => void;
     onExportFlights: (ids: number[]) => void;
+    onDeleteFlights: (ids: number[]) => void;
     onExportBlackbox: () => void;
     onDeleteBlackbox: () => void;
     /** The selected flight's stored original blackbox file (filename + size), or null — accurate BLOB
@@ -148,33 +151,63 @@
   let logbookTreeOpenSecond = $state<Set<string>>(new Set());
   let prevLogbookSortMode = $state<LogbookSortMode>(initialSortMode);
   let searchQuery = $state('');
-  let multiSelectedIds = $state<Set<number>>(new Set());
+  // Select mode: a tap ticks a flight instead of opening it, and the detail column is hidden. The ticks
+  // survive a changed search, so a selection can be collected over several searches; ids of flights
+  // that are gone do not count.
+  let selectMode = $state(false);
+  let tickedIds = $state<Set<number>>(new Set());
+  const multiSelectedIds = $derived.by<Set<number>>(() => {
+    const known = new Set(flightSummaries.map((f) => f.id));
+    return new Set([...tickedIds].filter((id) => known.has(id)));
+  });
+  const selecting = $derived(selectMode && !fileMode);
 
   const hasMultiSelection = $derived(multiSelectedIds.size > 0);
 
+  function setSelectMode(on: boolean) {
+    selectMode = on;
+    if (!on) tickedIds = new Set();
+  }
+
+  function setTicked(ids: number[], on: boolean) {
+    const next = new Set(multiSelectedIds);
+    for (const id of ids) {
+      if (on) next.add(id);
+      else next.delete(id);
+    }
+    tickedIds = next;
+  }
+
   function handleFlightClick(id: number, event: MouseEvent) {
-    if (event.ctrlKey || event.metaKey) {
-      const next = new Set(multiSelectedIds);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      multiSelectedIds = next;
+    if (fileMode) {
+      onSelectFlight(id);
+    } else if (selectMode || event.ctrlKey || event.metaKey) {
+      selectMode = true;
+      setTicked([id], !multiSelectedIds.has(id));
     } else {
-      multiSelectedIds = new Set();
       onSelectFlight(id);
     }
+  }
+
+  /** Long-press on a flight: start selecting with it. While selecting it is a plain tick. */
+  function handleFlightLongPress(id: number) {
+    if (fileMode) return;
+    selectMode = true;
+    setTicked([id], true);
   }
 
   function isMultiSelected(id: number): boolean {
     return multiSelectedIds.has(id);
   }
 
-  function getExportIds(): number[] {
-    if (multiSelectedIds.size > 0) return [...multiSelectedIds];
-    if (selectedFlightId != null) return [selectedFlightId];
-    return [];
+  type TickState = 'none' | 'some' | 'all';
+  function tickState(ids: number[]): TickState {
+    const n = ids.filter((id) => multiSelectedIds.has(id)).length;
+    return n === 0 ? 'none' : n === ids.length ? 'all' : 'some';
+  }
+
+  function toggleTicked(ids: number[]) {
+    setTicked(ids, tickState(ids) !== 'all');
   }
 
   const hasBlackboxFile = $derived(
@@ -200,9 +233,9 @@
   const flightTree = $derived<FlightTree>(buildFlightTree(filteredSummaries, logbookSortMode));
 
   // Shell variant for the flight view (the battery library is its own panel — BatteryManager).
-  const fullView = $derived(selectedFlight != null);
+  const fullView = $derived(selectedFlight != null && !selecting);
   const minimizedInfo = $derived(flightLoggingEnabled && logbookMinimized && selectedFlight != null);
-  const flightDetailColumn = $derived(selectedFlight != null);
+  const flightDetailColumn = $derived(fullView);
   const variant = $derived<PanelVariant>(
     minimizedInfo ? 'info' : (fullView ? 'advanced' : 'compact')
   );
@@ -358,8 +391,8 @@
           {$t('logbook.exportBlackbox')}
         </Button>
       {/if}
-      <Button variant="data" icon="export" disabled={getExportIds().length === 0} onclick={() => onExportFlights(getExportIds())}>
-        {$t('logbook.exportKflight')}{#if hasMultiSelection} ({multiSelectedIds.size}){/if}
+      <Button variant="data" icon="export" disabled={selectedFlightId == null} onclick={() => { if (selectedFlightId != null) onExportFlights([selectedFlightId]); }}>
+        {$t('logbook.exportKflight')}
       </Button>
     {/if}
   </div>
@@ -389,13 +422,42 @@
       {#if searchQuery}
         <button class="logbook-search-clear" onclick={() => searchQuery = ''} title={$t('logbook.searchClear')}>✕</button>
       {/if}
+      {#if !fileMode && flightLoggingEnabled && !dbIncompatible && flightSummaries.length > 0}
+        <Button variant="mode" icon="check" active={selecting} title={$t('logbook.selectTip')} onclick={() => setSelectMode(!selectMode)}>
+          {selecting ? $t('logbook.selectDone') : $t('logbook.select')}
+        </Button>
+      {/if}
     </div>
 
-    <div class="logbook-toolbtns">
-      {@render leftGroup()}
-      {@render importGroup()}
-    </div>
+    {#if selecting}
+      <div class="logbook-toolbtns">
+        <div class="tb-left">
+          <Button variant="standard" onclick={() => setTicked(filteredSummaries.map((f) => f.id), true)}>{$t('logbook.selectAll')}</Button>
+          <Button variant="standard" disabled={!hasMultiSelection} onclick={() => { tickedIds = new Set(); }}>{$t('logbook.selectNone')}</Button>
+        </div>
+        <div class="tb-right">
+          <Button variant="danger" icon="delete" disabled={!hasMultiSelection} onclick={() => onDeleteFlights([...multiSelectedIds])}>
+            {$t('logbook.selectDelete')}{#if hasMultiSelection} ({multiSelectedIds.size}){/if}
+          </Button>
+          <Button variant="data" icon="export" disabled={!hasMultiSelection} onclick={() => onExportFlights([...multiSelectedIds])}>
+            {$t('logbook.exportKflight')}{#if hasMultiSelection} ({multiSelectedIds.size}){/if}
+          </Button>
+        </div>
+      </div>
+    {:else}
+      <div class="logbook-toolbtns">
+        {@render leftGroup()}
+        {@render importGroup()}
+      </div>
+    {/if}
   </div>
+{/snippet}
+
+<!-- Tick box of select mode; on a group header it stands for all flights of the group. -->
+{#snippet tickBox(state: TickState)}
+  <span class="lb-tick" class:on={state === 'all'} class:some={state === 'some'}>
+    {#if state === 'all'}✓{:else if state === 'some'}–{/if}
+  </span>
 {/snippet}
 
 {#snippet detailExportToolbar()}
@@ -444,24 +506,40 @@
     {:else}
       <div class="logbook-list">
         {#each flightTree.groups as top}
+          {@const topIds = top.children.flatMap((c) => c.flights.map((f) => f.id))}
           <div class="logbook-tree-node">
-            <button class="logbook-tree-toggle logbook-tree-toggle-top" onclick={() => toggleTop(top.key)}>
-              <span class="logbook-tree-caret">{isTopOpen(top.key) ? '▾' : '▸'}</span>
-              <span class="logbook-tree-label">{top.key}</span>
-              <span class="logbook-tree-stats">{formatDurationSec(top.sum_duration_sec)}{#if top.sum_distance_m > 0} · {fmtGroupDist(top.sum_distance_m)}{/if}</span>
-              <span class="logbook-tree-count">{top.flight_count}</span>
-            </button>
+            <div class="logbook-tree-head">
+              {#if selecting}
+                <button class="lb-group-tick" title={$t('logbook.selectGroup')} onclick={() => toggleTicked(topIds)}>
+                  {@render tickBox(tickState(topIds))}
+                </button>
+              {/if}
+              <button class="logbook-tree-toggle logbook-tree-toggle-top" onclick={() => toggleTop(top.key)}>
+                <span class="logbook-tree-caret">{isTopOpen(top.key) ? '▾' : '▸'}</span>
+                <span class="logbook-tree-label">{top.key}</span>
+                <span class="logbook-tree-stats">{formatDurationSec(top.sum_duration_sec)}{#if top.sum_distance_m > 0} · {fmtGroupDist(top.sum_distance_m)}{/if}</span>
+                <span class="logbook-tree-count">{top.flight_count}</span>
+              </button>
+            </div>
 
             {#if isTopOpen(top.key)}
               <div class="logbook-tree-children">
                 {#each top.children as second}
+                  {@const secondIds = second.flights.map((f) => f.id)}
                   <div class="logbook-tree-node">
-                    <button class="logbook-tree-toggle logbook-tree-toggle-second" onclick={() => toggleSecond(top.key, second.key)}>
-                      <span class="logbook-tree-caret">{isSecondOpen(top.key, second.key) ? '▾' : '▸'}</span>
-                      <span class="logbook-tree-label">{second.key}</span>
-                      <span class="logbook-tree-stats">{formatDurationSec(second.sum_duration_sec)}{#if second.sum_distance_m > 0} · {fmtGroupDist(second.sum_distance_m)}{/if}</span>
-                      <span class="logbook-tree-count">{second.flights.length}</span>
-                    </button>
+                    <div class="logbook-tree-head logbook-tree-head-second">
+                      {#if selecting}
+                        <button class="lb-group-tick" title={$t('logbook.selectGroup')} onclick={() => toggleTicked(secondIds)}>
+                          {@render tickBox(tickState(secondIds))}
+                        </button>
+                      {/if}
+                      <button class="logbook-tree-toggle logbook-tree-toggle-second" onclick={() => toggleSecond(top.key, second.key)}>
+                        <span class="logbook-tree-caret">{isSecondOpen(top.key, second.key) ? '▾' : '▸'}</span>
+                        <span class="logbook-tree-label">{second.key}</span>
+                        <span class="logbook-tree-stats">{formatDurationSec(second.sum_duration_sec)}{#if second.sum_distance_m > 0} · {fmtGroupDist(second.sum_distance_m)}{/if}</span>
+                        <span class="logbook-tree-count">{second.flights.length}</span>
+                      </button>
+                    </div>
 
                     {#if isSecondOpen(top.key, second.key)}
                       <div class="logbook-tree-flights">
@@ -470,14 +548,19 @@
                             class="logbook-item"
                             class:selected={selectedFlightId === f.id && !hasMultiSelection}
                             class:multi-selected={isMultiSelected(f.id)}
+                            class:ticking={selecting}
                             onclick={(e) => handleFlightClick(f.id, e)}
+                            use:longPress={() => handleFlightLongPress(f.id)}
                             use:revealSelected={selectedFlightId === f.id && !hasMultiSelection}
                           >
-                            <div class="logbook-item-title">{flightListMarker(f)}{formatFlightDateTime(f.start_time, f.utc_offset_min)} <span class="logbook-item-tz">{flightTzLabel(f.utc_offset_min)}</span> <span class="logbook-item-id">#{f.id}</span></div>
-                            <div class="logbook-item-meta">
-                              <span>{f.craft_name || $t('logbook.unnamedCraft')}</span>
-                              <span>{f.location_name || $t('logbook.unknownLocation')}</span>
-                              <span>{formatDurationSec(f.duration_sec)}</span>
+                            {#if selecting}{@render tickBox(isMultiSelected(f.id) ? 'all' : 'none')}{/if}
+                            <div class="logbook-item-text">
+                              <div class="logbook-item-title">{flightListMarker(f)}{formatFlightDateTime(f.start_time, f.utc_offset_min)} <span class="logbook-item-tz">{flightTzLabel(f.utc_offset_min)}</span> <span class="logbook-item-id">#{f.id}</span></div>
+                              <div class="logbook-item-meta">
+                                <span>{f.craft_name || $t('logbook.unnamedCraft')}</span>
+                                <span>{f.location_name || $t('logbook.unknownLocation')}</span>
+                                <span>{formatDurationSec(f.duration_sec)}</span>
+                              </div>
                             </div>
                           </button>
                         {/each}
@@ -734,11 +817,59 @@
   }
 
   .logbook-tree-toggle-second {
-    margin-top: 4px;
-    margin-left: 12px;
-    width: calc(100% - 12px);
     font-size: 11px;
     background: #303030;
+  }
+
+  .logbook-tree-head {
+    display: flex;
+    align-items: stretch;
+    gap: 4px;
+  }
+  .logbook-tree-head .logbook-tree-toggle {
+    flex: 1;
+    min-width: 0;
+  }
+  .logbook-tree-head-second {
+    margin-top: 4px;
+    margin-left: 12px;
+  }
+
+  /* Wide enough for a finger; the box inside stays small. */
+  .lb-group-tick {
+    flex: 0 0 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 1px solid #555;
+    border-radius: 4px;
+    background: #303030;
+    cursor: pointer;
+  }
+  .lb-group-tick:hover {
+    border-color: #37a8db;
+  }
+
+  .lb-tick {
+    flex: 0 0 16px;
+    width: 16px;
+    height: 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #777;
+    border-radius: 3px;
+    background: #2e2e2e;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1;
+  }
+  .lb-tick.on,
+  .lb-tick.some {
+    border-color: #37a8db;
+    background: #37a8db;
   }
 
   .logbook-tree-children {
@@ -789,6 +920,15 @@
     margin-bottom: 4px;
     padding: 6px;
     cursor: pointer;
+  }
+
+  .logbook-item.ticking {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .logbook-item-text {
+    min-width: 0;
   }
 
   .logbook-item:hover {
