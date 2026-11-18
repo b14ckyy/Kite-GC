@@ -852,8 +852,11 @@ async fn enrich_flight_async(flight_id: i64, lat: f64, lon: f64, db_path: String
     let weather = super::weather::fetch_weather(lat, lon).await;
     let location = super::geocode::flight_location(lat, lon, "en").await;
 
-    // Open a fresh connection for the update (recorder's conn is on another thread)
-    let conn = match db::open_database(std::path::Path::new(&db_path)) {
+    // No CREATE: a database moved away meanwhile must not come back as an empty file.
+    let conn = match rusqlite::Connection::open_with_flags(
+        std::path::Path::new(&db_path),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE,
+    ) {
         Ok(c) => c,
         Err(e) => {
             log::warn!("Enrichment: failed to open DB: {}", e);
@@ -985,6 +988,7 @@ pub struct FlightRecorder {
     /// MAVLink link, which reports MSL.
     alt_relative: Option<bool>,
     db_file_path: std::path::PathBuf,
+    sessions_dir: PathBuf,
     /// Base dir for raw logs (raw_logs/*.tlog | *.rawmsp) — separate from the DB folder.
     raw_log_dir: std::path::PathBuf,
     /// Shared MSP raw-log sink (ADR-049): the transport writes the raw serial bytes into it; the
@@ -1081,12 +1085,18 @@ impl FlightRecorder {
             format!("Failed to open flight log database: {}", e)
         })?;
         slots.attach(emitter.key());
+        #[cfg(not(test))]
+        let sessions_dir = db::sessions_dir(portable);
+        // Tests: next to the rig's database, so every rig keeps its sessions to itself.
+        #[cfg(test)]
+        let sessions_dir = db_path.parent().unwrap_or(Path::new(".")).join("sessions");
 
         Ok(Self {
             settings,
             fc_info,
             protocol: protocol.to_string(),
             alt_relative: None,
+            sessions_dir,
             db_file_path: db_path,
             raw_log_dir,
             msp_raw_sink,
@@ -1227,7 +1237,7 @@ impl FlightRecorder {
 
     /// The folder of this recorder's temp sessions (a group's `.kgrp` goes there too).
     pub(crate) fn sessions_dir(&self) -> PathBuf {
-        self.db_file_path.parent().unwrap_or(Path::new(".")).join("sessions")
+        self.sessions_dir.clone()
     }
 
     /// The group flight this recorder is a member of.
@@ -1796,7 +1806,9 @@ impl FlightRecorder {
     /// Move a finalized session into this vehicle's pending entry and tell the frontend to show the
     /// End-Flight summary (Save/Discard). Used by `on_disarm` and the continue-on-reconnect
     /// disarmed-on-first-poll path.
-    fn stash_pending_and_emit_ended(&self, session: PendingSession) {
+    fn stash_pending_and_emit_ended(&self, mut session: PendingSession) {
+        // A session queued before the database folder changed is saved where the database is now.
+        session.db_path = self.db_file_path.clone();
         let ev = RecordingEndedEvent {
             duration_sec: session.flight.duration_sec.unwrap_or(0),
             max_alt_m: session.flight.max_alt_m.unwrap_or(0.0),
@@ -2013,13 +2025,8 @@ impl FlightRecorder {
 
         let now = self.clock.utc();
 
-        // Open the per-session temp store (DB recording only).
         let (temp_db, temp_path) = if self.settings.db_enabled {
-            let sessions_dir = self
-                .db_file_path
-                .parent()
-                .unwrap_or(std::path::Path::new("."))
-                .join("sessions");
+            let sessions_dir = self.sessions_dir.clone();
             // The vehicle key makes the name unique per recorder: two vehicles arming in the same
             // second ("arm all") must never share a file. Not the FC id — it is missing on secondary /
             // passive links and not unique (ArduPilot SITL instances share one).

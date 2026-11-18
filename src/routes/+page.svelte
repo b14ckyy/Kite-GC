@@ -39,7 +39,8 @@
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import UpdateDialog from "$lib/components/UpdateDialog.svelte";
   import { runUpdateCheck, resolveUpdateKind } from "$lib/controllers/updateCheck";
-  import { checkDbBackupPrompt, runPendingDbUpgrade, probeDbSchema, formatBackupSize, type DbSchemaState, type DbUpgradeOutcome } from "$lib/controllers/dbBackupPrompt";
+  import { checkDbBackupPrompt, runPendingDbUpgrade, formatBackupSize, type DbSchemaState, type DbUpgradeOutcome } from "$lib/controllers/dbBackupPrompt";
+  import { planDbFolderSwitch, askAboutPreviousDb, type DbFolderPlan } from "$lib/controllers/dbFolderSwitch";
   import { importMissionFile } from "$lib/helpers/missionFile";
   import { exportFile, sharesExports, flightFileStem, clearExportCache, setExportErrorReporter } from "$lib/helpers/exportFile";
   import type { LibraryMission } from "$lib/stores/flightlogTypes";
@@ -1486,29 +1487,24 @@
     return checkDbBackupPrompt(dbPath, showDialog, (key, values) => $t(key, { values }));
   }
 
-  /** Point Kite at another database folder. A database there in an older format is upgraded only after
-   *  the user agreed; declined, or written by a newer Kite, the folder stays as it was. */
+  let dbMoveBusy = $state<'move' | 'backup' | null>(null);
+
   async function switchFlightLogPath(next: string) {
     if (get(connection).status !== 'disconnected') return; // the buttons are disabled then
     const prev = flightLogDbPath;
-    // Android keeps the database in app storage whatever folder is chosen (it only mirrors there).
-    const state = isAndroid && next.startsWith('content://') ? null : await probeDbSchema(next);
-    if (state && state.from_version > state.to_version) {
-      await showInfo($t('logbook.dbNewerTitle'), $t('settings.dbFolderNewerMsg'));
+    if (next === prev) return;
+    // An import writes to the current database in batches; what it stores after the copy would be lost.
+    if (blackboxImporting) {
+      errorMsg = $t('settings.dbMove.busyImport');
       return;
     }
-    if (state) {
-      const answer = await showDialog({
-        title: $t('settings.dbFolderUpgradeTitle'),
-        message: $t('settings.dbFolderUpgradeMsg', { values: { size: formatBackupSize(state.size_bytes) } }),
-        buttons: [{ label: $t('settings.dbFolderUpgradeYes'), value: 'upgrade', primary: true }],
-      });
-      if (answer !== 'upgrade') return;
-    }
-    flightLogDbPath = next;
-    settings.patch({ flightLogDbPath });
-    // Row ids restart in every database: a selected flight or a loaded library mission of the old one
-    // would be written to an unrelated row of the new one.
+    const tr = (key: string, values?: Record<string, string>) => $t(key, { values });
+    // Android keeps the database in app storage whatever folder is chosen (it only mirrors there).
+    const plan: DbFolderPlan = isAndroid ? { action: 'same' } : await planDbFolderSwitch(prev, next, showDialog, tr);
+    if (plan.action === 'cancel') return;
+
+    // Row ids restart in every database and the hi-res cache is named by them: nothing of the old
+    // folder may stay selected, loaded or cached.
     resetPlayback();
     selectedFlight = null;
     selectedFlightId = null;
@@ -1516,14 +1512,44 @@
     selectedFlightTrackCount = 0;
     loadedMissionId.set(null);
     arduLoadedMissionId.set(null);
-    if (!state) return;
+    void hiresCleanup(prev).catch(() => {});
+    const use = (path: string) => {
+      flightLogDbPath = path;
+      settings.patch({ flightLogDbPath: path });
+    };
+
+    if (plan.action === 'same') {
+      use(next);
+      return;
+    }
+    if (plan.action === 'move') {
+      dbMoveBusy = 'move';
+      try {
+        const outcome = await invoke<{ source_left: boolean }>('flightlog_db_move', { from: prev, to: next, overwrite: plan.overwrite });
+        dbMoveBusy = null;
+        use(next);
+        if (outcome.source_left) {
+          await showInfo($t('settings.dbMove.moveTitle'), $t('settings.dbMove.sourceLeft', { values: { path: prev || defaultFlightLogPath } }));
+        }
+      } catch (e) {
+        dbMoveBusy = null;
+        await showInfo($t('settings.dbMove.failedTitle'), $t('settings.dbMove.failedMsg', { values: { error: String(e) } }));
+      }
+      return;
+    }
+
+    use(next);
+    if (!plan.to.exists) return;
     try {
       if ((await runPendingDbUpgrade(next, (p) => { dbUpgrade = p; })) === 'done') await askAboutDbBackup(next);
     } catch (e) {
       // A database that cannot be upgraded would fail on every access: back to the folder that worked.
-      flightLogDbPath = prev;
-      settings.patch({ flightLogDbPath: prev });
+      use(prev);
       errorMsg = String(e);
+      return;
+    }
+    if (plan.from.exists) {
+      await askAboutPreviousDb(prev, next, plan.from, prev || defaultFlightLogPath, showDialog, tr, (on) => { dbMoveBusy = on ? 'backup' : null; });
     }
   }
 
@@ -1750,8 +1776,8 @@
     if (files.some((f) => BLACKBOX_EXTS.test(f)) && !(await ensureBlackboxDecoder())) return;
 
     if (selectedFlight != null) closePlayer();
-    const dir = openedLogs?.dir ?? (await scratchDir(flightLogDbPath));
-    if (!openedLogs) await scratchClear(flightLogDbPath); // fresh set → start from an empty scratch
+    const dir = openedLogs?.dir ?? (await scratchDir());
+    if (!openedLogs) await scratchClear(); // fresh set → start from an empty scratch
     blackboxImporting = true;
     const failures: string[] = [];
     const added: OpenedFlight[] = [];
@@ -1771,7 +1797,7 @@
         await loadLogbook();
         await selectFlight(added[0].id);
       } else if (!openedLogs) {
-        void scratchClear(flightLogDbPath).catch(() => {});
+        void scratchClear().catch(() => {});
       }
     } finally {
       blackboxImporting = false;
@@ -1788,7 +1814,7 @@
     if (selectedFlight != null) closePlayer();
     if (!openedLogs) return;
     openedLogs = null;
-    await scratchClear(flightLogDbPath).catch(() => {});
+    await scratchClear().catch(() => {});
     if (reload) await loadLogbook();
   }
 
@@ -3550,7 +3576,7 @@
     // Hi-res caches and the opened-file scratch store left by a crash are worthless (always
     // reproducible) — wipe them in passing.
     void hiresCleanup(flightLogDbPath).catch(() => {});
-    void scratchClear(flightLogDbPath).catch(() => {});
+    void scratchClear().catch(() => {});
     try {
       for (let round = 0; round < 10; round++) {
         const orphan = await scanOrphanSessions(flightLogDbPath);
@@ -4508,6 +4534,8 @@
     <ConfirmDialog bind:this={confirmDialog} />
     {#if dbUpgrade}
       <DbUpgradeNotice title={$t('settings.dbUpgradeTitle')} message={$t('settings.dbUpgradeMsg', { values: { size: formatBackupSize(dbUpgrade.size_bytes) } })} />
+    {:else if dbMoveBusy}
+      <DbUpgradeNotice title={$t(`settings.dbMove.${dbMoveBusy}BusyTitle`)} message={$t('settings.dbMove.busyMsg')} />
     {/if}
     <UpdateDialog />
     <CesiumKeyPrompt bind:open={cesiumKeyPromptOpen} onSave={cesiumKeySave} onRemindLater={cesiumKeyRemindLater} onIgnore={cesiumKeyIgnore} />

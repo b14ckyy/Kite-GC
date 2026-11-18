@@ -56,6 +56,16 @@ pub fn cleanup_cache_dir(cache_dir: &Path) {
     }
 }
 
+/// Remove a cache folder that may hold other files: only `hires_*` files go, the folder only if empty.
+pub fn remove_cache_dir(cache_dir: &Path) {
+    for entry in std::fs::read_dir(cache_dir).into_iter().flatten().flatten() {
+        if entry.file_name().to_string_lossy().starts_with("hires_") {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+    let _ = std::fs::remove_dir(cache_dir);
+}
+
 /// Re-parse the flight's archived log at full rate into `<cache_dir>/hires_<flight_id>.db`. Falls back to
 /// the linked partner's blob (as the player does); rows carry `flight_id` 0 (the cache has no `flights`).
 pub fn parse_to_cache<F>(

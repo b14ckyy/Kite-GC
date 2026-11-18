@@ -4,6 +4,7 @@
 // Flight recording (arm → disarm) into SQLite, the logbook and its enrichment (geocode, weather).
 
 pub mod db;
+pub mod db_move;
 pub mod ardupilot;
 pub mod blackbox;
 pub mod decoder;

@@ -17,7 +17,7 @@ use super::types::{
 use crate::msp::hardware_uid;
 use crate::msp::types::INAV_SITL_UID;
 
-const CURRENT_SCHEMA_VERSION: u32 = 22;
+pub(crate) const CURRENT_SCHEMA_VERSION: u32 = 22;
 
 /// Column list (excluding the autoincrement `id`) for `telemetry_records`, shared by the temp-session
 /// copy so the SELECT and INSERT column orders can never drift apart. `flight_id` is first so the
@@ -634,6 +634,13 @@ pub fn resolve_db_path(custom_path: &str, portable: bool) -> PathBuf {
     // Fallback: current directory
     #[allow(unreachable_code)]
     PathBuf::from("flights.db")
+}
+
+/// Where the temp sessions of a recording live: always the app's own data folder, never a database
+/// folder the user chose — they are written all through a flight and must not sit on a removable or
+/// network drive.
+pub fn sessions_dir(portable: bool) -> PathBuf {
+    resolve_db_path("", portable).parent().unwrap_or(Path::new(".")).join("sessions")
 }
 
 /// The raw-log base directory — deliberately NOT the DB folder: raw logs default to `Documents/KiteGC`,
