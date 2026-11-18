@@ -1992,6 +1992,14 @@ stays <em>Stable releases</em>. <a href="https://github.com/b14ckyy/Kite-GC/pull
   with gusts, a weather icon, the direction home and, in the wide size, the wind for the next
   30, 60 and 90 minutes. Needs internet. See
   <a href="../guides/telemetry-and-display/">Telemetry &amp; display</a>. [#299]</li>
+<li><strong>Weather is recorded with the flight</strong> — the forecast wind by height is fetched every five
+  minutes while a flight is recorded, with or without the weather widget, and stored with the
+  flight; in replay the weather widget shows it as it was at the replayed moment. On Android
+  the widget's data now stays current while Kite runs in the background with a connection. [#316]</li>
+<li><strong>Weather requests carry a rounded position</strong> — two decimals, about 1 km: enough for the
+  forecast model, too coarse to follow the aircraft. Two new switches under Settings → Data →
+  Flight Logbook, both on by default: <strong>Record Weather with Flights</strong> and <strong>Auto-Detect Flight
+  Location</strong> (the place-name lookup). See <a href="../privacy/">Privacy</a>. [#316]</li>
 <li><strong>Terrain Analysis: Show Map is a tracking strip</strong> — the chart takes the whole height of the
   strip; beside it are only Show Map, Follow, reset and the legend. See
   <a href="../guides/terrain-analysis/#map-view-the-chart-on-the-map">Terrain analysis</a>. [#301]</li>
