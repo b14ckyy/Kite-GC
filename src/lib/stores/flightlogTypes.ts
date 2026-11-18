@@ -4,7 +4,7 @@
 // All shared types and interfaces for the flight logbook system.
 // Imported by flightlog.ts (store), logbookController.ts, and UI components.
 
-import type { BatteryInstance } from './telemetry';
+import type { BatteryInstance, GpsReceiver } from './telemetry';
 
 /** A reusable mission in the DB library (mirrors Rust flightlog::types::Mission). */
 export interface LibraryMission {
@@ -361,6 +361,28 @@ export interface TelemetryRecord {
   /** Per-instance batteries for this timestamp (multi-battery). Attached on the frontend after loading
    *  the track (joined from battery_records by timestamp); absent for single-battery flights. */
   batteries?: BatteryInstance[];
+  /** The GPS receivers as they stood at this timestamp. Attached on the frontend after loading the
+   *  track (from gps_records); absent for flights without raw receiver samples. */
+  gpsReceivers?: GpsReceiver[];
+}
+
+/** A raw GPS receiver sample row (`gps_records`), as returned by `flightlog_get_gps_records`. */
+export interface GpsRecord {
+  timestamp_ms: number;
+  instance: number;
+  fix_type: number | null;
+  fix_raw: number | null;
+  num_sat: number | null;
+  hdop: number | null;
+  lat: number | null;
+  lon: number | null;
+  alt_msl: number | null;
+  vdop: number | null;
+  h_acc_m: number | null;
+  v_acc_m: number | null;
+  speed_ms: number | null;
+  course_deg: number | null;
+  yaw_deg: number | null;
 }
 
 /** A per-instance battery sample row (`battery_records`), as returned by flightlogGetBatteryRecords. */

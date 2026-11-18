@@ -21,7 +21,8 @@ use super::types::{BatteryRecord, Flight, FlightEvent, FlightLogSettings, Teleme
 use crate::msp::FcInfo;
 use crate::vehicle_registry::emitter::VehicleEmitter;
 use crate::scheduler::telemetry::{
-    AirspeedData, AltitudeData, AnalogData, AttitudeData, BatteryInstanceData, GpsData, GpsStatsData,
+    AirspeedData, AltitudeData, AnalogData, AttitudeData, BatteryInstanceData, GpsData, GpsReceiverData,
+    GpsStatsData,
     LinkStatsData, Misc2Data, NavStatusData, SensorStatusData, StatusData, WindData,
 };
 
@@ -1522,6 +1523,17 @@ impl FlightRecorder {
         flight.weather_seq = seq;
         if let Err(e) = db::insert_weather_record(conn, 0, elapsed_ms, lat, lon, source, data_json) {
             log::warn!("Failed to store the weather answer: {}", e);
+        }
+    }
+
+    /// One raw message of one GPS receiver (1 Hz each): a `gps_records` row while a flight is recorded.
+    pub fn on_gps_receiver(&mut self, data: &GpsReceiverData) {
+        let now = self.clock.instant();
+        let Some(flight) = self.active_flight.as_ref() else { return };
+        let Some(conn) = flight.temp_db.as_ref() else { return };
+        let elapsed_ms = now.saturating_duration_since(flight.start_instant).as_millis() as i64;
+        if let Err(e) = db::insert_gps_record(conn, 0, elapsed_ms, data) {
+            log::warn!("Failed to store a GPS receiver sample: {}", e);
         }
     }
 
@@ -3781,6 +3793,47 @@ mod tests {
             .map(Result::unwrap)
             .collect();
         assert_eq!(rows, vec![(2000, 48.1, "{\"a\":1}".to_string()), (8000, 48.2, "{\"a\":2}".to_string())]);
+    }
+
+    /// Every raw message of a listed receiver becomes one `gps_records` row on the session timeline,
+    /// and nothing is stored before a flight is recorded.
+    #[test]
+    fn gps_receiver_samples_are_stored_per_message() {
+        let rig = Rig::new("gps-receivers");
+        let (mut rec, _) = rig.recorder("L1:S1", fc("Solo", None));
+        let rx = |id: u8, num_sat: u8, yaw_deg: Option<f64>| GpsReceiverData {
+            id,
+            fix_type: 3,
+            fix_raw: 6,
+            num_sat,
+            hdop: Some(0.7),
+            lat: 48.1,
+            lon: 11.5,
+            alt_msl: 520.0,
+            vdop: None,
+            h_acc_m: Some(0.02),
+            v_acc_m: None,
+            speed_ms: Some(12.5),
+            course_deg: Some(90.0),
+            yaw_deg,
+        };
+        rec.on_gps_receiver(&rx(0, 5, None));
+
+        rec.on_gps(&gps(2, 48.1, 11.5));
+        rec.on_status(&status(false));
+        rec.on_status(&status(true));
+        let path = active_path(&rec);
+        rig.advance_s(1);
+        rec.on_gps_receiver(&rx(0, 17, None));
+        rec.on_gps_receiver(&rx(1, 19, Some(271.5)));
+        rig.advance_s(1);
+        rec.on_gps_receiver(&rx(0, 18, None));
+
+        let rows = db::get_flight_gps_records(&Connection::open(&path).unwrap(), 0).unwrap();
+        let seen: Vec<(i64, i64, Option<i64>, Option<f64>)> =
+            rows.iter().map(|r| (r.timestamp_ms, r.instance, r.num_sat, r.yaw_deg)).collect();
+        assert_eq!(seen, vec![(1000, 0, Some(17), None), (1000, 1, Some(19), Some(271.5)), (2000, 0, Some(18), None)]);
+        assert_eq!((rows[0].fix_raw, rows[0].h_acc_m, rows[0].vdop, rows[0].speed_ms), (Some(6), Some(0.02), None, Some(12.5)));
     }
 
     /// A commit while "Compact Database" runs on the main DB fails at once — no busy-timeout wait on the

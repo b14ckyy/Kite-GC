@@ -73,7 +73,7 @@ export function toTelemetryData(r: TelemetryRecord, fcVariant = 'INAV'): Telemet
     // Per-instance batteries joined from battery_records (multi-battery); empty → widget falls back to
     // the primary fields above.
     batteries: r.batteries ?? [],
-    gpsReceivers: [],
+    gpsReceivers: r.gpsReceivers ?? [],
 
     // RC link — from the recorded link-stats fields. dBm (CRSF / INAV 9.1) → % via the same curve as
     // the backend; otherwise normalize the raw RSSI heuristically (≤100 = %, ≤255 = 0–254, else 0–1023).

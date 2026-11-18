@@ -1155,6 +1155,12 @@ fn unified_fix(raw: ::mavlink::ardupilotmega::GpsFixType) -> u8 {
     }
 }
 
+/// `yaw` of GPS_RAW_INT / GPS2_RAW in cdeg: 0 = not provided, u16::MAX = configured but not available,
+/// 36000 = north.
+fn gps_yaw_deg(raw: u16) -> Option<f64> {
+    (1..=36000).contains(&raw).then(|| (raw % 36000) as f64 / 100.0)
+}
+
 /// One GPS_RAW_INT (id 0) or GPS2_RAW (id 1). The FC does not report which receiver it navigates on, so
 /// fix type, sat count and HDOP of `telemetry-gps` come from the better one: higher fix, then more sats.
 fn on_gps_receiver(rx: RawGps, fused: &mut FusedPos, app_handle: &VehicleEmitter, recorder: &Option<FlightRecorderHandle>) {
@@ -1221,8 +1227,15 @@ fn on_gps_receiver(rx: RawGps, fused: &mut FusedPos, app_handle: &VehicleEmitter
         let _ = app_handle.emit("telemetry-gps-stats", serde_json::json!({ "hdop": hdop }));
     }
 
+    // A port that never had a receiver (GPS2_RAW with "no GPS") is not listed and not recorded.
+    let listed = fused.receivers.get(rx.data.id as usize).is_some_and(|r| r.is_some());
     if let Some(ref rec) = recorder {
-        if let Ok(mut r) = rec.lock() { r.on_gps(&data); }
+        if let Ok(mut r) = rec.lock() {
+            if listed {
+                r.on_gps_receiver(&rx.data);
+            }
+            r.on_gps(&data);
+        }
     }
 }
 
@@ -1370,6 +1383,12 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
                     lat: gps.lat as f64 / 1e7,
                     lon: gps.lon as f64 / 1e7,
                     alt_msl: gps.alt as f64 / 1000.0, // mm → m
+                    vdop: (gps.epv != u16::MAX).then(|| gps.epv as f64 / 100.0),
+                    h_acc_m: (gps.h_acc > 0).then(|| gps.h_acc as f64 / 1000.0),
+                    v_acc_m: (gps.v_acc > 0).then(|| gps.v_acc as f64 / 1000.0),
+                    speed_ms: (gps.vel != u16::MAX).then(|| gps.vel as f64 / 100.0),
+                    course_deg: (gps.cog != u16::MAX).then(|| gps.cog as f64 / 100.0),
+                    yaw_deg: gps_yaw_deg(gps.yaw),
                 },
                 ground_speed: gps.vel as f64 / 100.0, // cm/s → m/s
                 course: gps.cog as f64 / 100.0,       // cdeg → deg
@@ -1387,6 +1406,12 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
                     lat: gps.lat as f64 / 1e7,
                     lon: gps.lon as f64 / 1e7,
                     alt_msl: gps.alt as f64 / 1000.0,
+                    vdop: (gps.epv != u16::MAX).then(|| gps.epv as f64 / 100.0),
+                    h_acc_m: (gps.h_acc > 0).then(|| gps.h_acc as f64 / 1000.0),
+                    v_acc_m: (gps.v_acc > 0).then(|| gps.v_acc as f64 / 1000.0),
+                    speed_ms: (gps.vel != u16::MAX).then(|| gps.vel as f64 / 100.0),
+                    course_deg: (gps.cog != u16::MAX).then(|| gps.cog as f64 / 100.0),
+                    yaw_deg: gps_yaw_deg(gps.yaw),
                 },
                 ground_speed: gps.vel as f64 / 100.0,
                 course: gps.cog as f64 / 100.0,

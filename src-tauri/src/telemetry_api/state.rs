@@ -35,6 +35,9 @@ dto! { pub struct GpsStats { pub hdop: f64, #[serde(default)] pub eph: Option<f6
 dto! { pub struct GpsReceiver {
     pub id: u8, pub fix_type: u8, pub fix_raw: u8, pub num_sat: u8, #[serde(default)] pub hdop: Option<f64>,
     pub lat: f64, pub lon: f64, pub alt_msl: f64,
+    #[serde(default)] pub vdop: Option<f64>, #[serde(default)] pub h_acc_m: Option<f64>,
+    #[serde(default)] pub v_acc_m: Option<f64>, #[serde(default)] pub speed_ms: Option<f64>,
+    #[serde(default)] pub course_deg: Option<f64>, #[serde(default)] pub yaw_deg: Option<f64>,
 } }
 dto! { pub struct Altitude { pub altitude: f64, pub vario: f64 } }
 dto! { pub struct AltRef { pub msl: bool } }

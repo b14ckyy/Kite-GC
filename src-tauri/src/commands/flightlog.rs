@@ -215,6 +215,16 @@ pub fn flightlog_get_weather_records(
     db::get_flight_weather_records(&conn, flight_id).map_err(|e| format!("Query error: {}", e))
 }
 
+/// The raw GPS receiver samples recorded with a flight, oldest first. Empty for flights without any.
+#[tauri::command]
+pub fn flightlog_get_gps_records(
+    flight_id: i64,
+    db_path: Option<String>,
+) -> Result<Vec<crate::flightlog::types::GpsRecord>, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::get_flight_gps_records(&conn, flight_id).map_err(|e| format!("Query error: {}", e))
+}
+
 /// Save a mission to the library (dedup by content hash). Returns the mission id.
 #[tauri::command]
 pub fn mission_db_save(mission: MissionInput, db_path: Option<String>) -> Result<i64, String> {

@@ -33,8 +33,8 @@ export {
 
 // ── Tauri command wrappers ───────────────────────────────────────────
 
-import type { FlightSummary, Flight, TelemetryRecord, BatteryRecord, BlackboxImportStatus, KflightImportResult, LibraryMission, LibraryMissionInput, BatteryPack, BatteryPackInput, BatteryAggregate, BatteryFile, Vehicle, VehicleInput, VehicleAggregate, VehicleFile, VehicleResolution, MissionFile } from './flightlogTypes';
-import type { BatteryInstance } from './telemetry';
+import type { FlightSummary, Flight, TelemetryRecord, BatteryRecord, GpsRecord, BlackboxImportStatus, KflightImportResult, LibraryMission, LibraryMissionInput, BatteryPack, BatteryPackInput, BatteryAggregate, BatteryFile, Vehicle, VehicleInput, VehicleAggregate, VehicleFile, VehicleResolution, MissionFile } from './flightlogTypes';
+import type { BatteryInstance, GpsReceiver } from './telemetry';
 
 /** Save a mission to the library (dedup by content hash). Returns the mission id. */
 export async function missionDbSave(mission: LibraryMissionInput, dbPath: string): Promise<number> {
@@ -409,7 +409,54 @@ export async function getFlightTrack(id: number, dbPath: string): Promise<Teleme
       if (list) rec.batteries = list;
     }
   }
+  const gps = await invoke<GpsRecord[]>('flightlog_get_gps_records', {
+    flightId: id,
+    dbPath: dbPath || undefined,
+  });
+  if (gps.length > 0) attachGpsReceivers(track, gps);
   return track;
+}
+
+/** As live: a receiver whose message stopped for this long counts as lost but stays listed. */
+const GPS_RECEIVER_TIMEOUT_MS = 5000;
+
+/** Each track record gets the receivers as they stood at its time: per receiver the newest sample at
+ *  or before it. Both lists are ordered by time; the array is shared until something changes. */
+function attachGpsReceivers(track: TelemetryRecord[], gps: GpsRecord[]): void {
+  const latest = new Map<number, GpsRecord>();
+  let next = 0;
+  let key = '';
+  let current: GpsReceiver[] = [];
+  for (const rec of track) {
+    while (next < gps.length && gps[next].timestamp_ms <= rec.timestamp_ms) {
+      latest.set(gps[next].instance, gps[next]);
+      next++;
+    }
+    if (latest.size === 0) continue;
+    const rows = [...latest.values()].sort((a, b) => a.instance - b.instance);
+    const lost = rows.map((g) => rec.timestamp_ms - g.timestamp_ms > GPS_RECEIVER_TIMEOUT_MS);
+    const k = rows.map((g, i) => `${g.instance}:${g.timestamp_ms}:${lost[i] ? 1 : 0}`).join('|');
+    if (k !== key) {
+      key = k;
+      current = rows.map((g, i) => ({
+        id: g.instance,
+        fixType: lost[i] ? 0 : (g.fix_type ?? 0),
+        fixRaw: lost[i] ? 0 : (g.fix_raw ?? 0),
+        numSat: lost[i] ? 0 : (g.num_sat ?? 0),
+        hdop: lost[i] ? null : g.hdop,
+        lat: g.lat ?? 0,
+        lon: g.lon ?? 0,
+        altMsl: g.alt_msl ?? 0,
+        vdop: g.vdop,
+        hAccM: g.h_acc_m,
+        vAccM: g.v_acc_m,
+        speedMs: g.speed_ms,
+        courseDeg: g.course_deg,
+        yawDeg: g.yaw_deg,
+      }));
+    }
+    rec.gpsReceivers = current;
+  }
 }
 
 export async function deleteFlight(id: number, dbPath: string): Promise<boolean> {
@@ -791,6 +838,8 @@ export async function importKflight(filePath: string, dbPath: string): Promise<K
   });
 }
 
+// Read a `.kflight` without importing it. No caller today (a `.kflight` is always imported); kept for a
+// later preview. They return flight and track only — no mission, weather or GPS receiver rows.
 export async function listKflightFlights(filePath: string): Promise<FlightSummary[]> {
   return invoke<FlightSummary[]>('flightlog_kflight_list', { filePath });
 }

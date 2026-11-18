@@ -81,6 +81,23 @@
         { key: 'temperature', value: b.temperature == null ? NONE : num(b.temperature, 1), unit: '°C' },
       ] });
     }
+    for (const r of telem.gpsReceivers) {
+      g.push({ key: `gps-${r.id}`, rows: [
+        { key: 'lat', value: num(r.lat, 7), unit: '°' },
+        { key: 'lon', value: num(r.lon, 7), unit: '°' },
+        { key: 'altMsl', value: num(r.altMsl), unit: 'm' },
+        { key: 'groundSpeed', value: num(r.speedMs), unit: 'm/s' },
+        { key: 'course', value: num(r.courseDeg, 1), unit: '°' },
+        { key: 'gpsYaw', value: num(r.yawDeg, 1), unit: '°' },
+        { key: 'numSat', value: int(r.numSat), unit: '' },
+        { key: 'fixType', value: int(r.fixType), unit: '' },
+        { key: 'fixRaw', value: int(r.fixRaw), unit: '' },
+        { key: 'gpsHdop', value: num(r.hdop), unit: '' },
+        { key: 'gpsVdop', value: num(r.vdop), unit: '' },
+        { key: 'hAcc', value: num(r.hAccM, 3), unit: 'm' },
+        { key: 'vAcc', value: num(r.vAccM, 3), unit: 'm' },
+      ] });
+    }
     g.push(
       { key: 'link', rows: [
         { key: 'rssiPercent', value: telem.link.rssiPercent == null ? NONE : num(telem.link.rssiPercent, 0), unit: '%' },
@@ -126,6 +143,9 @@
   function groupTitle(key: string): string {
     if (key.startsWith('battery-')) {
       return $t('rawTelemetry.groups.batteryInstance', { values: { id: key.slice('battery-'.length) } });
+    }
+    if (key.startsWith('gps-')) {
+      return $t('rawTelemetry.groups.gpsReceiver', { values: { id: Number(key.slice('gps-'.length)) + 1 } });
     }
     return $t(`rawTelemetry.groups.${key}`);
   }

@@ -39,6 +39,14 @@ export interface GpsReceiver {
   lat: number;
   lon: number;
   altMsl: number;
+  /** Null where the receiver or the firmware does not report it. */
+  vdop: number | null;
+  hAccM: number | null;
+  vAccM: number | null;
+  speedMs: number | null;
+  courseDeg: number | null;
+  /** Heading of a dual-antenna receiver. */
+  yawDeg: number | null;
 }
 
 /** Unified RC-link statistics (RC Link widget). Each field is null when the active protocol can't
@@ -94,7 +102,7 @@ export interface TelemetryData {
   // then falls back to the primary fields above. See docs/active/MULTI_BATTERY.md.
   batteries: BatteryInstance[];
 
-  // Physical GPS receivers (MAVLink). Empty on every other protocol and in replay.
+  // Physical GPS receivers (MAVLink; replay: from `gps_records`). Empty on every other protocol.
   gpsReceivers: GpsReceiver[];
 
   // RC link statistics (RSSI / LQ / SNR — protocol-dependent, see LinkStats)
@@ -505,7 +513,7 @@ async function startTelemetryListenersInner() {
   );
 
   fresh.push(
-    await listen<{ value: { id: number; fix_type: number; fix_raw: number; num_sat: number; hdop: number | null; lat: number; lon: number; alt_msl: number }[] }>(
+    await listen<{ value: { id: number; fix_type: number; fix_raw: number; num_sat: number; hdop: number | null; lat: number; lon: number; alt_msl: number; vdop: number | null; h_acc_m: number | null; v_acc_m: number | null; speed_ms: number | null; course_deg: number | null; yaw_deg: number | null }[] }>(
       'telemetry-gps-receivers',
       (event) => {
         const gpsReceivers: GpsReceiver[] = event.payload.value.map((r) => ({
@@ -517,6 +525,12 @@ async function startTelemetryListenersInner() {
           lat: r.lat,
           lon: r.lon,
           altMsl: r.alt_msl,
+          vdop: r.vdop,
+          hAccM: r.h_acc_m,
+          vAccM: r.v_acc_m,
+          speedMs: r.speed_ms,
+          courseDeg: r.course_deg,
+          yawDeg: r.yaw_deg,
         }));
         upd(event.payload, (t) => ({ ...t, gpsReceivers, lastUpdate: Date.now() }));
       }
