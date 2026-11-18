@@ -453,6 +453,8 @@ inside the box of the feature release they belong to, so the notes for one relea
     Every fix of 1.0.1 and 1.0.2 is part of 2.0. This list holds what is fixed in 2.0 only.
 
     - **Replay: the altitude reference of a flight is handled more robustly.** [#320]
+    - **Map: waypoint markers could blink out for a moment** when the aircraft moved on to the next
+      waypoint — seen on a tablet under load. The active waypoint is now marked in place. [#326]
     - **Replay of imported ArduPilot and PX4 logs showed the wrong GPS fix type** — a plain 3D fix
       read as "3D DGPS". Logs imported from now on are right; re-import an older one to correct
       it. [#322]
