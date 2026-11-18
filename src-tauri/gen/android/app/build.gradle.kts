@@ -13,15 +13,44 @@ val tauriProperties = Properties().apply {
     }
 }
 
-// Optional real signing key. Drop a `key.properties` next to this file with storeFile,
-// storePassword, keyAlias and keyPassword to sign releases for distribution; it is gitignored, so a
-// private key never lands in the repository. Without it, release builds fall back to the debug
-// signing config below — see the `release` build type.
+// Optional release key: a gitignored `key.properties` next to this file (storeFile, storePassword,
+// keyAlias, keyPassword). Without it release builds fall back to the debug signing config.
 val keystoreProperties = Properties().apply {
     val propFile = file("key.properties")
     if (propFile.exists()) {
         propFile.inputStream().use { load(it) }
     }
+}
+
+// versionCode for Google Play from the version name (Tauri's ignores the pre-release part — every 2.0.0-*
+// would be 2000000):  major * 10_000_000 + minor * 100_000 + patch * 1_000 + stage * 10 + build
+//   stage: -bN / -betaN = N (1..39) · -rcN = 40 + N · final = 99 · -dev = 0 (installs, never for Play);
+//          any other suffix stops the build (it would collide with -dev on Play).
+//   build: KITE_ANDROID_BUILD 0..9 (default 0) — a re-upload of the SAME version; Play never takes a code twice.
+//   2.0.0-b1 = 20000010 · 2.0.0-rc1 = 20000410 · 2.0.0 = 20000990 · 2.0.1 = 20001990
+// PERMANENT: a code can never go down again; 2000001 (the first scheme's 2.0.0-b1) is spent on Play.
+fun playVersionCode(name: String, build: Int): Int {
+    val m = Regex("""^(\d+)\.(\d+)\.(\d+)(?:-([A-Za-z]+)\.?(\d+)?)?$""").matchEntire(name)
+        ?: throw GradleException("versionName '$name' is not MAJOR.MINOR.PATCH[-bN|-rcN|-dev]")
+    val major = m.groupValues[1].toInt()
+    val minor = m.groupValues[2].toInt()
+    val patch = m.groupValues[3].toInt()
+    val kind = m.groupValues[4].lowercase()
+    val n = m.groupValues[5].toIntOrNull() ?: 0
+    if (major > 209 || minor > 99 || patch > 99) {
+        throw GradleException("versionName '$name': major must stay below 210, minor and patch below 100, for the versionCode")
+    }
+    if (build !in 0..9) {
+        throw GradleException("KITE_ANDROID_BUILD must be 0..9, got $build")
+    }
+    val stage = when (kind) {
+        "" -> 99
+        "beta", "b" -> if (n in 1..39) n else throw GradleException("versionName '$name': beta number must be 1..39")
+        "rc" -> if (n in 1..39) 40 + n else throw GradleException("versionName '$name': rc number must be 1..39")
+        "dev" -> 0
+        else -> throw GradleException("versionName '$name': unknown pre-release '$kind' (use bN, rcN or dev)")
+    }
+    return major * 10_000_000 + minor * 100_000 + patch * 1_000 + stage * 10 + build
 }
 
 android {
@@ -32,8 +61,14 @@ android {
         applicationId = "com.kitegc.app"
         minSdk = 24
         targetSdk = 36
-        versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
-        versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
+        versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0.0")
+        versionCode = playVersionCode(
+            versionName!!,
+            providers.environmentVariable("KITE_ANDROID_BUILD").orNull?.trim()?.ifEmpty { null }.let { raw ->
+                (raw ?: "0").toIntOrNull()
+                    ?: throw GradleException("KITE_ANDROID_BUILD must be a number 0..9, got '$raw'")
+            },
+        )
     }
     signingConfigs {
         keystoreProperties.getProperty("storeFile")?.let { storePath ->
@@ -47,6 +82,12 @@ android {
     }
     buildTypes {
         getByName("debug") {
+            // KITE_ANDROID_DEV_ID=1: own application id `com.kitegc.app.dev`, so the debug build installs BESIDE
+            // the Play copy with its own data. Opt-in: `tauri android dev` still starts the OTHER copy, so start
+            // the .dev one yourself (phone-emu.ps1 -Device -Beside does). Every debug build is named "Kite Dev".
+            if (providers.environmentVariable("KITE_ANDROID_DEV_ID").orNull?.trim() == "1") {
+                applicationIdSuffix = ".dev"
+            }
             manifestPlaceholders["usesCleartextTraffic"] = "true"
             isDebuggable = true
             isJniDebuggable = true
@@ -58,15 +99,9 @@ android {
             }
         }
         getByName("release") {
-            // An APK with no signature cannot be installed at all — Android rejects it outright as an
-            // invalid package, which is what an unconfigured release build produces. Use the real key
-            // when `key.properties` supplies one, otherwise fall back to the debug config so that a
-            // plain `tauri android build --apk` still yields something installable.
-            //
-            // Debug-signed builds are for testing only: they cannot go on Play, and because the debug
-            // keystore is generated per machine, a build from CI and a build from your laptop have
-            // different signatures — Android then refuses to install one over the other until the old
-            // copy is uninstalled.
+            // An unsigned APK cannot be installed at all, so without `key.properties` fall back to the debug
+            // config. Debug-signed builds are for testing only: not for Play, and the keystore differs per
+            // machine, so a CI build and a local one cannot be installed over each other.
             signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
             isMinifyEnabled = true
             proguardFiles(

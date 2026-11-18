@@ -30,7 +30,18 @@
   let confirmingDiscard = $state(false);
   let resolver: ((v: RecoveryChoice) => void) | null = null;
 
+  // A `show()` while the prompt is open (e.g. a link lost during the startup recovery) waits for it to be
+  // answered instead of replacing its pending choice (§5e M3).
+  const waiting: (() => void)[] = [];
+
   export function show(i: RecoveryInfo, opts: { reason?: RecoveryReason } = {}): Promise<RecoveryChoice> {
+    if (open || resolver) {
+      return new Promise((resolve) => { waiting.push(() => { void present(i, opts).then(resolve); }); });
+    }
+    return present(i, opts);
+  }
+
+  function present(i: RecoveryInfo, opts: { reason?: RecoveryReason }): Promise<RecoveryChoice> {
     info = i;
     reason = opts.reason ?? 'orphan';
     confirmingDiscard = false;
@@ -42,6 +53,7 @@
     open = false;
     confirmingDiscard = false;
     if (resolver) { resolver(c); resolver = null; }
+    waiting.shift()?.();
   }
 
   function fmtTime(s: string): string {
@@ -84,7 +96,7 @@
 
 <style>
   .dialog-backdrop { position: fixed; inset: 0; z-index: 9999; background: rgba(0, 0, 0, 0.55); display: flex; align-items: center; justify-content: center; }
-  .dialog-box { background: #2e2e2e; border: 1px solid rgba(55, 168, 219, 0.45); border-radius: 8px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5); padding: 20px 24px 16px; min-width: 360px; max-width: 480px; }
+  .dialog-box { background: #2e2e2e; border: 1px solid rgba(55, 168, 219, 0.45); border-radius: 8px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5); padding: 20px 24px 16px; min-width: min(410px, 100%); max-width: 530px; }
   .dialog-title { font-size: 14px; font-weight: 700; color: #e0e0e0; margin-bottom: 10px; }
   .rec-note { font-size: 12px; color: #949494; margin-bottom: 14px; }
 

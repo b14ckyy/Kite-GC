@@ -4,30 +4,21 @@
 -->
 
 <script lang="ts" module>
-  /** Live (non-ghost) tiles mounted right now. The phone grid re-creates the tile when a drag
-   *  carries it across a page edge (create-new-then-destroy-old), and the drag ghost is a second
-   *  instance: the "tile gone → send the map home" guard must only fire when the LAST real tile
-   *  goes, or a drop would bounce the map out of the widget every time. */
+  /** Live (non-ghost) tiles mounted. The phone grid re-creates the tile across a page edge (new before old) and
+   *  the drag ghost is a second instance, so the "tile gone → send the map home" guard fires only when the LAST
+   *  real tile goes. */
   let liveTiles = 0;
 </script>
 
 <script lang="ts">
-  // Video widget (wide 2:1, or square in its L/S size states) — a router sink showing the shared
-  // video feed. ALWAYS crop-to-fill, centred (object-fit: cover; the native sink via a `data-nv-cover`
-  // full box, see controllers/nativeVideo.ts): the tile is too small to read an OSD anyway, it is the
-  // quick way to swap the feed into the background — never bars (WIDGET_OVERHAUL.md D2). Standard
-  // widget card with a thin rounded frame around the video. No settings — the NavRail Video panel
-  // owns all control.
-  //
-  // Double-click swaps: the single map instance jumps INTO this tile (locked to a 2D heading-follow
-  // nav view by +page), and the other surfaces show video. To do that, +page overlays the top-level
-  // map onto this tile, so we publish our on-screen rect; when the map is here we render an empty
-  // tile underneath it.
+  // Video widget (2:1, or square in L/S) — a router sink of the shared feed, ALWAYS crop-to-fill (object-fit: cover;
+  // native sink via `data-nv-cover`, WIDGET_OVERHAUL.md D2). Double-click swaps the single map INTO this tile:
+  // +page overlays it here, so we publish our on-screen rect and render an empty tile beneath.
   import { t } from 'svelte-i18n';
   import { onMount, onDestroy } from 'svelte';
   import { videoStream, videoState, bindVideoEl, setMapLocation, setWidgetRect, reportMjpegError, reportImgSize, fpsProbe } from '$lib/stores/video';
   import { canvasSink, mjpegSink } from '$lib/controllers/mjpegSink';
-  import { nativeSurface, activeNativeSurfaces } from '$lib/controllers/nativeVideo';
+  import { nativeSurface, activeNativeSurfaces, MAX_SURFACES } from '$lib/controllers/nativeVideo';
   import { doubleTap, mouseDoubleClick } from '$lib/helpers/doubleTap';
   import VideoReconnectOverlay from '$lib/components/video/VideoReconnectOverlay.svelte';
 
@@ -55,10 +46,9 @@
     const r = cardEl.getBoundingClientRect();
     setWidgetRect({ x: r.left, y: r.top, w: r.width, h: r.height });
   }
-  // The phone grid MOVES the tile without resizing it (page scroll, a re-pack after an activation
-  // settles with a transition, an edit-mode drag) — a rect measured mid-motion landed the map half
-  // a tile off. While the map is here, track the tile per frame (one rect read; setWidgetRect is a
-  // no-op when nothing moved), so the map rides along with a scroll or a drag without lag.
+  // The phone grid MOVES the tile without resizing it (scroll, re-pack transition, drag), so while the map is here
+  // track the tile per frame (one rect read; setWidgetRect no-ops when nothing moved) — a mid-motion rect put the
+  // map half a tile off.
   $effect(() => {
     if (!mapHere || ghost) return;
     let raf = 0;
@@ -101,17 +91,18 @@
 
   function swapHere() {
     if ($videoState.status !== 'live' || mapHere) return;
+    // Behind the floating window on a one-output sink (the tile shows only as its dock's last widget): the
+    // docks would send the map straight back to the window.
+    if (MAX_SURFACES === 1 && $videoState.nativeSink && $videoState.floating) return;
     setMapLocation('widget');
   }
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <!-- svelte-ignore a11y_click_events_have_key_events -->
-<!-- Deliberately NOT a data-nv-clip target: the card has a backdrop-filter, and per-frame
-     clip-path churn on a backdrop-filtered element made the whole tile flicker during window
-     resizes (and stick invisible on a settled hairline overlap). While this tile holds the
-     native video, its glass is switched off and the bezel is painted by ring-only properties
-     (border + box-shadow) instead of a clipped background — nothing paints behind the hole. -->
+<!-- Deliberately NOT a data-nv-clip target: per-frame clip-path churn on a backdrop-filtered card flickers the
+     tile during resizes. While it holds the native video its glass is off and the bezel is ring-only
+     (border + box-shadow) — nothing paints behind the hole. -->
 <div
   bind:this={cardEl}
   class="widget-card"
@@ -169,7 +160,8 @@
     box-sizing: border-box;
     position: relative; /* anchor for the reconnect overlay */
     background: rgba(30, 30, 30, 0.75);
-    backdrop-filter: blur(10px);
+    backdrop-filter: var(--glass-blur, blur(6px));
+    -webkit-backdrop-filter: var(--glass-blur, blur(6px));
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 8px;
     padding: 3px;
@@ -237,6 +229,14 @@
     font-size: 12px;
     text-align: center;
   }
+  /* A switch between surfaces leaves this one unserved for a few frames — the note is for the lasting state. */
+  .native-hole span {
+    animation: nv-note-late 0.01s 0.6s both;
+  }
+  @keyframes nv-note-late {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
   .native-hole.armed {
     background: transparent;
     /* Opaque ring in the card's 3 px padding gap — box-shadow paints only OUTSIDE the
@@ -248,5 +248,6 @@
   .widget-card.nv-armed {
     background: transparent;
     backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
 </style>

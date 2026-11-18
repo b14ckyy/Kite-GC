@@ -26,16 +26,22 @@ use super::OutputSink;
 const WRITE_TIMEOUT: Duration = Duration::from_millis(200);
 
 pub struct TcpSink {
+    /// The bound address — with the real port, also when `open(0)` let the OS choose it.
     addr: String,
+    port: u16,
     clients: Arc<Mutex<Vec<TcpStream>>>,
     running: Arc<AtomicBool>,
 }
 
 impl TcpSink {
     /// Bind a TCP server on `0.0.0.0:<port>` (reachable on the LAN) and start accepting clients.
+    /// Port 0 lets the OS pick a free one; `port()` tells which.
     pub fn open(port: u16) -> Result<Self, String> {
         let addr = format!("0.0.0.0:{port}");
         let listener = TcpListener::bind(&addr).map_err(|e| format!("TCP relay bind {addr} failed: {e}"))?;
+        let local = listener.local_addr().map_err(|e| format!("TCP relay local_addr failed: {e}"))?;
+        let addr = local.to_string();
+        let port = local.port();
         listener
             .set_nonblocking(true)
             .map_err(|e| format!("TCP relay set_nonblocking failed: {e}"))?;
@@ -73,7 +79,13 @@ impl TcpSink {
             }
         });
 
-        Ok(Self { addr, clients, running })
+        Ok(Self { addr, port, clients, running })
+    }
+
+    /// The port the server listens on — the requested one, or the OS's choice after `open(0)`.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn port(&self) -> u16 {
+        self.port
     }
 }
 
@@ -120,19 +132,15 @@ mod tests {
     use std::net::TcpStream;
     use std::time::Instant;
 
-    /// Ask the OS for a free port, then release it — the sink binds it a moment later.
-    fn free_port() -> u16 {
-        let probe = TcpListener::bind("127.0.0.1:0").expect("probe bind");
-        probe.local_addr().expect("probe addr").port()
-    }
-
     /// A client that connects and never reads is the case that used to park the dispatch thread
     /// forever: once its receive buffer is full, an unbounded `write_all` blocks and every other
     /// relay waits behind it. With the write budget the sink drops that client and returns.
     #[test]
     fn a_client_that_never_reads_is_dropped_instead_of_blocking_the_sink() {
-        let port = free_port();
-        let mut sink = TcpSink::open(port).expect("sink bind");
+        // Port 0: the OS picks a free port and the sink reports it — no probe-and-release window in
+        // which another process (or a parallel test) could grab it (seen on the macOS runner).
+        let mut sink = TcpSink::open(0).expect("sink bind");
+        let port = sink.port();
 
         // Connect and then never read a byte.
         let client = TcpStream::connect(("127.0.0.1", port)).expect("client connect");

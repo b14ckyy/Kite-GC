@@ -125,24 +125,20 @@ where
     f(Path::new(src))
 }
 
-/// A scratch path under app-private storage, unique per call.
+/// A scratch path under app-private storage (Android) or the OS temp dir (desktop), unique per call.
 ///
 /// Named from the process id and a monotonic counter rather than a random source: two exports in the
-/// same session must not collide, and pulling in a RNG for a filename would be silly. The directory
-/// is app-private, so nothing else can see these while they exist.
-#[cfg(target_os = "android")]
-fn temp_path(kind: &str) -> Result<PathBuf, String> {
+/// same session must not collide, and pulling in a RNG for a filename would be silly. On Android the
+/// directory is app-private, so nothing else can see these while they exist.
+pub(crate) fn temp_path(kind: &str) -> Result<PathBuf, String> {
     use std::sync::atomic::{AtomicU64, Ordering};
     static SEQ: AtomicU64 = AtomicU64::new(0);
 
+    #[cfg(target_os = "android")]
     let dir = crate::android::app_data_dir().join("tmp");
+    #[cfg(not(target_os = "android"))]
+    let dir = std::env::temp_dir().join("kite-gc");
     std::fs::create_dir_all(&dir).map_err(|e| format!("creating the temp dir: {e}"))?;
     let n = SEQ.fetch_add(1, Ordering::Relaxed);
     Ok(dir.join(format!("{kind}-{}-{n}", std::process::id())))
-}
-
-#[cfg(not(target_os = "android"))]
-#[allow(dead_code)]
-fn temp_path(_kind: &str) -> Result<PathBuf, String> {
-    unreachable!("temp files are only needed for Android content URIs")
 }

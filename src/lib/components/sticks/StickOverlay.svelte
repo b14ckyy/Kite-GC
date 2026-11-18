@@ -70,8 +70,8 @@
     gap: 10px;
     padding: 3px 8px;
     background: rgba(30, 30, 30, 0.5);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: var(--glass-blur, blur(6px));
+    -webkit-backdrop-filter: var(--glass-blur, blur(6px));
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 6px;
     font-size: 10px;

@@ -10,29 +10,32 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import { get } from 'svelte/store';
-  import { save, open } from '@tauri-apps/plugin-dialog';
+  import { open } from '@tauri-apps/plugin-dialog';
   import { invoke } from '@tauri-apps/api/core';
   import { t, locale } from 'svelte-i18n';
   import {
     arduMission, arduSelectedWpIndex, arduSelectedWpIndices, arduEditMode, arduLoadedMissionId,
     arduMissionClear, arduSelectWpSingle, arduToggleWpSelection, arduSelectWpRange,
-    arduClearWpSelection, arduRemoveSelectedWps, groupArduMission, markArduMissionSynced,
+    arduClearWpSelection, arduRemoveSelectedWps, arduSelectAllWps, arduMoveGroup, groupArduMission, markArduMissionSynced,
     arduMissionFlags, arduMissionModified, downloadArduMissionFromFc,
     arduUndo, arduRedo, arduCanUndo, arduCanRedo, arduClearUndoHistory,
     arduVehicleClass, setArduVehicleClass,
     MAV_FRAME_GLOBAL, MAV_FRAME_GLOBAL_TERRAIN_ALT,
-    serializeWaypoints, parseWaypoints, parsePlanFile, loadArduMissionFromFile,
+    serializeWaypoints, parseWaypoints, parsePlanFile, planVehicleClass, loadArduMissionFromFile,
     type ArduWaypoint,
+    framesForUpload,
   } from '$lib/stores/missionArdupilot';
   import { onMissionDownloadProgress, onMissionUploadProgress } from '$lib/stores/mission';
   import { cmdName, cmdShort, cmdHasLocation, cmdDef, cmdValidForVehicle, cmdValidForPx4, enumLabel, type VehicleClass } from '$lib/helpers/arduCommandCatalog';
   import { buildArduWaypointMenu } from '$lib/helpers/arduWaypointMenu';
-  import { anyCase } from '$lib/helpers/fileFilters';
+  import { openFilters } from '$lib/helpers/fileFilters';
+  import { exportFile } from '$lib/helpers/exportFile';
   import { contextMenu } from '$lib/actions/contextMenu';
   import { arduWpDetailLines } from '$lib/helpers/missionWpDetails';
   import { frameMissionOnMap } from '$lib/stores/mapCamera';
-  import { connection } from '$lib/stores/connection';
+  import { connection, linkIsArduPilot } from '$lib/stores/connection';
   import { settings } from '$lib/stores/settings';
+  import { activeVehicleId } from '$lib/stores/vehicles';
   import { autopilotSystem, type AutopilotSystem } from '$lib/stores/autopilotContext';
   import { missionManagerOpen } from '$lib/stores/missionManager';
   import { buildArduMissionInput, computeArduMissionStats } from '$lib/helpers/missionLibraryArdu';
@@ -92,7 +95,33 @@
     const k = e.key.toLowerCase();
     if (k === 'z' && !e.shiftKey) { e.preventDefault(); arduUndo(); }
     else if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); arduRedo(); }
+    else if (k === 'a') { e.preventDefault(); arduSelectAllWps(); } // then drag any marker = move the whole mission
   }
+
+  // List drag-reorder (edit mode): drag an anchor row onto another; the whole group (the location
+  // command + its modifiers) lands before or after the target group depending on the drop half.
+  let dragFromIdx = $state(-1);
+  let dropAtIdx = $state(-1);
+  let dropAfter = $state(false);
+  function onRowDragStart(e: DragEvent, idx: number) {
+    if (!currentEditing) { e.preventDefault(); return; }
+    dragFromIdx = idx;
+    if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(idx)); }
+  }
+  function onRowDragOver(e: DragEvent, idx: number) {
+    if (dragFromIdx < 0) return;
+    e.preventDefault();
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    dropAfter = e.clientY > r.top + r.height / 2;
+    dropAtIdx = idx;
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+  }
+  function onRowDrop(e: DragEvent, idx: number) {
+    e.preventDefault();
+    if (dragFromIdx >= 0 && dragFromIdx !== idx) arduMoveGroup(dragFromIdx, idx, dropAfter);
+    onRowDragEnd();
+  }
+  function onRowDragEnd() { dragFromIdx = -1; dropAtIdx = -1; }
 
   const unsubMission  = arduMission.subscribe(m => { currentMission = m; });
   const unsubSelIdx   = arduSelectedWpIndex.subscribe(i => { currentSelIdx = i; });
@@ -129,21 +158,20 @@
   }
   const invalidCount = $derived(currentMission.filter((w) => cmdInvalid(w.command)).length);
 
-  const isMavlinkConnected = $derived(
-    currentConn.status === 'connected' && currentConn.protocolType === 'mavlink'
-  );
+  // FC transfers need a MAVLink link to ArduPilot/PX4 — not an INAV MSP-over-MAVLink link.
+  const isMavlinkConnected = $derived(linkIsArduPilot(currentConn));
 
   onDestroy(() => { unsubMission(); unsubSelIdx(); unsubSel(); unsubEditMode(); unsubConn(); unsubVehicle(); unsubSystem(); });
 
   async function handleSaveFile() {
     try {
-      const path = await save({
+      const path = await exportFile({
         title: $t('mission.saveMissionTitle'),
-        defaultPath: 'mission.waypoints',
+        name: 'mission.waypoints',
         filters: [{ name: 'Waypoints', extensions: ['waypoints'] }],
+        write: (p) => invoke<void>('write_text_file', { path: p, content: serializeWaypoints(get(arduMission)) }),
       });
       if (!path) return;
-      await invoke<void>('write_text_file', { path, content: serializeWaypoints(get(arduMission)) });
       statusMessage = $t('mission.missionSaved');
     } catch (e) {
       statusMessage = $t('mission.saveFailed', { values: { error: String(e) } });
@@ -157,22 +185,20 @@
         multiple: false,
         // .plan = QGroundControl's JSON plan (the only format QGC saves — the PX4 ecosystem's
         // mission files); .waypoints/.txt = the QGC WPL 110 text format (Mission Planner et al).
-        filters: [{ name: 'Missions', extensions: anyCase(['waypoints', 'txt', 'plan']) }],
+        filters: openFilters('Missions', ['waypoints', 'txt', 'plan']),
       });
       if (!path) return;
-      const content = await invoke<string>('read_text_file', { path: typeof path === 'string' ? path : path });
-      const wps = parseMissionFile(String(path), content);
-      loadArduMissionFromFile(wps); // fresh selection/undo, FILE provenance, not a library mission
+      const content = await invoke<string>('read_text_file', { path });
+      // By content, not by name: an Android document URI need not end in the file name. A plan is JSON,
+      // WPL text never starts with a brace.
+      const isPlan = content.trimStart().startsWith('{');
+      const wps = isPlan ? parsePlanFile(content) : parseWaypoints(content);
+      loadArduMissionFromFile(wps, isPlan ? planVehicleClass(content) : null);
       statusMessage = $t('mission.loaded', { values: { count: wps.length } });
       frameMissionOnMap();
     } catch (e) {
       statusMessage = $t('mission.openFailed', { values: { error: String(e) } });
     }
-  }
-
-  /** Route by extension: .plan → the QGC JSON plan parser, everything else → QGC WPL text. */
-  function parseMissionFile(name: string, content: string): ArduWaypoint[] {
-    return /\.plan$/i.test(name) ? parsePlanFile(content) : parseWaypoints(content);
   }
 
   // No DOM drop zone here: with Tauri's dragDropEnabled the WebView never receives DOM drop
@@ -246,7 +272,18 @@
     }
   }
 
-  function handleClear() { arduMissionClear(); statusMessage = $t('mission.missionCleared'); }
+  async function handleClear() {
+    if (currentMission.length === 0) return;
+    // Same confirm as the INAV panel — a clear wipes the whole plan (undoable with Ctrl+Z).
+    const ans = await confirmDialog.show({
+      title: $t('mission.clearConfirmTitle'),
+      message: $t('mission.clearConfirmMsg'),
+      buttons: [{ label: $t('mission.clearConfirmYes'), value: 'clear', danger: true }],
+    });
+    if (ans !== 'clear') return;
+    arduMissionClear();
+    statusMessage = $t('mission.missionCleared');
+  }
   // List selection (mirrors the INAV panel). Plain click = single; Ctrl/⌘ = toggle; Shift = range; a tap
   // on the number badge toggles. Multi-select gestures are edit-mode only.
   function onRowClick(e: MouseEvent, i: number) {
@@ -297,6 +334,17 @@
   async function handleFcUpload() {
     const wps = get(arduMission);
     if (wps.length === 0) { statusMessage = $t('mission.noWpToUpload'); return; }
+    // Commands the connected vehicle type doesn't support get rejected or silently skipped by the FC —
+    // say so before sending rather than after.
+    const invalid = wps.filter((w) => cmdInvalid(w.command)).length;
+    if (invalid > 0) {
+      const ans = await confirmDialog.show({
+        title: $t('mission.uploadInvalidTitle'),
+        message: $t('mission.uploadInvalidMsg', { values: { count: String(invalid) } }),
+        buttons: [{ label: $t('mission.uploadInvalidYes'), value: 'upload', danger: true }],
+      });
+      if (ans !== 'upload') return;
+    }
     statusMessage = $t('arduMission.uploading');
     // Live "x of n" status as the FC pulls each item (mirrors the download counter).
     const un = await onMissionUploadProgress(({ current, total }) => {
@@ -305,7 +353,8 @@
         : $t('arduMission.uploading');
     });
     try {
-      await invoke<void>('ardu_mission_upload', { waypoints: wps });
+      // Action items travel in MAV_FRAME_MISSION (see framesForUpload); the planner keeps its own frames.
+      await invoke<void>('ardu_mission_upload', { waypoints: framesForUpload(wps), vehicleId: get(activeVehicleId) });
       markArduMissionSynced('fc', wps); // FC now holds exactly this mission
       statusMessage = $t('mission.uploaded', { values: { count: wps.length } });
     } catch (e) {
@@ -382,11 +431,10 @@
       <Button variant="standard" icon="undo" disabled={!$arduCanUndo} onclick={() => arduUndo()} title={$t('mission.undo')} />
       <Button variant="standard" icon="redo" disabled={!$arduCanRedo} onclick={() => arduRedo()} title={$t('mission.redo')} />
     {/if}
-    {#if !currentEditing}
-      <Button variant="standard" icon="library" onclick={() => missionManagerOpen.set(true)} title={$t('mission.missionManager')}>
-        {$t('mission.missionManager')}
-      </Button>
-    {/if}
+    <!-- Always reachable (also while editing) — it is where saved missions are loaded, exported and deleted. -->
+    <Button variant="standard" icon="library" onclick={() => missionManagerOpen.set(true)} title={$t('mission.missionManager')}>
+      {$t('mission.missionManager')}
+    </Button>
     <div class="tb-spacer"></div>
     {#if showVehicleSelect}
       <select
@@ -434,7 +482,16 @@
         <tbody>
           {#each groups as g}
             {#if g.anchor}
-              <tr class="wp-row" class:selected={currentSel.has(g.anchorIdx)} onclick={(e) => onRowClick(e, g.anchorIdx)} use:contextMenu={() => wpMenuFor(g.anchorIdx)}>
+              <tr class="wp-row" class:selected={currentSel.has(g.anchorIdx)}
+                  class:drop-before={dropAtIdx === g.anchorIdx && !dropAfter && dragFromIdx !== g.anchorIdx}
+                  class:drop-after={dropAtIdx === g.anchorIdx && dropAfter && dragFromIdx !== g.anchorIdx}
+                  class:dragging={dragFromIdx === g.anchorIdx}
+                  draggable={currentEditing}
+                  ondragstart={(e) => onRowDragStart(e, g.anchorIdx)}
+                  ondragover={(e) => onRowDragOver(e, g.anchorIdx)}
+                  ondrop={(e) => onRowDrop(e, g.anchorIdx)}
+                  ondragend={onRowDragEnd}
+                  onclick={(e) => onRowClick(e, g.anchorIdx)} use:contextMenu={() => wpMenuFor(g.anchorIdx)}>
                 <!-- svelte-ignore a11y_click_events_have_key_events -->
                 <!-- svelte-ignore a11y_no_static_element_interactions -->
                 <td class="col-num"><span class="wp-num-badge" onclick={(e) => onBadgeClick(e, g.anchorIdx)}>{g.anchorIdx + 1}</span></td>
@@ -462,6 +519,9 @@
           {/each}
         </tbody>
       </table>
+      {#if currentEditing}
+        <div class="wp-empty wp-hint">{$t('mission.dragReorderHint')} · {$t('mission.selectAllHint')}</div>
+      {/if}
     {/if}
   </div>
 {/snippet}
@@ -555,6 +615,10 @@
   .wp-row { cursor: pointer; border-bottom: 1px solid #2a2a2a; color: #ccc; }
   .wp-row:hover { background: #2a2a2a; }
   .wp-row.selected { background: #1a3a5c; color: #fff; }
+  .wp-row.dragging { opacity: 0.45; }
+  .wp-row.drop-before td { box-shadow: inset 0 2px 0 #37a8db; }
+  .wp-row.drop-after td { box-shadow: inset 0 -2px 0 #37a8db; }
+  .wp-hint { padding: 8px 6px 2px; font-size: 11px; text-align: left; line-height: 1.4; }
   .wp-row td { padding: 4px 5px; white-space: nowrap; }
   .col-num { width: 30px; text-align: center; }
   .col-type { width: 40px; }

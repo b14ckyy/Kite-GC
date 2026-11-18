@@ -4,28 +4,43 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { get } from 'svelte/store';
+import { t } from 'svelte-i18n';
 import type { FcInfo, PortInfo, BleDeviceInfo, TransportType, ProtocolType } from '$lib/stores/connection';
 import type { InavStats } from '$lib/stores/flightlogTypes';
-import { connection, connectionProtocol, fcLinkAlive, availablePorts, bleDevices, detectedPlatformType } from '$lib/stores/connection';
-import { startTelemetryListeners, stopTelemetryListeners, resetTelemetry } from '$lib/stores/telemetry';
+import { connection, connectionProtocol, fcLinkAlive, availablePorts, bleDevices, detectedPlatformType, platformTypeSource, hasMsp, isArduPilotLink } from '$lib/stores/connection';
+import { PLATFORM_AIRPLANE, PLATFORM_VTOL } from '$lib/helpers/uavIcons';
+import { platformForVehicleType } from '$lib/helpers/vehicleTypes';
+import { vehicleDbFindByFcUid } from '$lib/stores/flightlog';
+import { settings } from '$lib/stores/settings';
+import { isQuadplane } from '$lib/stores/missionArdupilot';
+import { startTelemetryListeners, stopTelemetryListeners, startConnectListeners, stopConnectListeners, blackboxOf, resetTelemetry, setFcVariant } from '$lib/stores/telemetry';
+import { startVehicleListeners, activeVehicleId, resetVehicles, refreshLinks, selectVehicle, links, vehicles, type VehicleSummary, type LinkSummary } from '$lib/stores/vehicles';
+import { parseVehicleId } from '$lib/helpers/vehicleId';
+import { startFcModeListeners, clearFcModeLists } from '$lib/stores/fcModes';
+import { homePosition, vehicleHomes, clearVehicleHomes } from '$lib/stores/home';
+import { launchPoint } from '$lib/stores/mission';
 import { applyRelaysOnConnect, clearRelaysOnDisconnect } from '$lib/controllers/relayController';
 import { loadSafehomeConfig, clearSafehome } from '$lib/stores/safehome';
 import { loadGeozoneConfig, clearGeozones } from '$lib/stores/geozone';
 import { loadFenceConfig, clearFence } from '$lib/stores/fence';
 import { loadRallyConfig, clearRally } from '$lib/stores/rally';
+import { loadPx4RcInMode, px4RcInMode, px4RcInModeError } from '$lib/stores/rcFcConfig';
+import { rcPlatform } from '$lib/stores/rcPlatform';
 
-/** Session-only memory of the platform-type override, keyed by the FC hardware id (MSP / MAVLink).
- *  RAM only by design: a Kite restart forgets it; passive telemetry has no id and never lands here. */
-const platformOverrides = new Map<string, number>();
+/** Undefined without a library vehicle for this FC id, for type "other", or when the lookup fails.
+ *  ArduPilot SITL (per machine) and PX4 SITL (sysid > 1) report shared ids and do match. */
+async function libraryPlatformType(fcUid: string | null | undefined): Promise<number | undefined> {
+  if (!fcUid) return undefined;
+  const vehicle = await vehicleDbFindByFcUid(fcUid, get(settings).flightLogDbPath).catch((e) => {
+    console.warn('[connect] vehicle library lookup failed', e);
+    return null;
+  });
+  return vehicle ? platformForVehicleType(vehicle.vehicle_type) : undefined;
+}
 
-/**
- * Refresh the list of serial ports via Tauri and return the port that should be selected.
- *
- * Diffs against the previously known list so live polling behaves like a desktop configurator:
- *  - first population: keep the restored/last port if present, else the first one;
- *  - a newly appeared port (hotplug) is auto-selected;
- *  - if the selected port vanished (unplug) and nothing new appeared, it is deselected.
- */
+/** Refresh the serial port list and return the port to select. Diffs against the known list: first
+ *  population keeps the restored port (else the first); a new (hotplugged) port is auto-selected; a vanished
+ *  selected port is deselected when nothing new appeared. */
 export async function refreshSerialPorts(currentPort: string): Promise<string> {
   const prev = get(availablePorts);
   const result = await invoke<PortInfo[]>("list_serial_ports");
@@ -68,11 +83,8 @@ export function clearBleDevices(): void {
 
 let bleUnlisten: UnlistenFn | null = null;
 
-// Discovery events are batched before they reach the store. Devices arrive one event at a time —
-// a burst of them in the first seconds of a scan, then RSSI/name updates from backends that report
-// those (desktop) — and every store write re-renders the device <select>. On Android that tears the
-// native picker popup down and rebuilds it per event, which reads as flicker while it is open; on
-// desktop it is merely wasted renders. One write per window, and only when something changed.
+// Discovery events are batched: every store write re-renders the device <select>, and on Android that
+// rebuilds an open native picker popup per event (flicker). One write per window, only on a change.
 const BLE_FLUSH_MS = 600;
 let blePending = new Map<string, BleDeviceInfo>();
 let bleFlushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -149,11 +161,18 @@ export interface ConnectParams {
   flightLogRawAlways: boolean;
 }
 
-/**
- * Connect to the flight controller via Tauri, update stores, start listeners.
- */
-export async function connectFC(params: ConnectParams): Promise<FcInfo> {
-  const info = await invoke<FcInfo>("connect", {
+/** What the backend's `connect` returns: registry ids of the new link / its primary vehicle + the
+ *  handshake info. */
+export interface ConnectResult {
+  linkId: number;
+  vehicleId: string;
+  fcInfo: FcInfo;
+}
+
+/** The backend `connect` argument object for a set of connect params (shared by the first-link and
+ *  additional-link paths). */
+function connectArgs(params: ConnectParams): Record<string, unknown> {
+  return {
     protocol: params.protocolType,
     transportType: params.transportType,
     port: params.port ?? null,
@@ -172,18 +191,50 @@ export async function connectFC(params: ConnectParams): Promise<FcInfo> {
     flightLogRawPath: params.flightLogRawPath,
     flightLogRaw: params.flightLogRaw,
     flightLogRawAlways: params.flightLogRawAlways,
-  });
-  // Re-apply the override chosen earlier this session for the same FC (see `platformOverrides`).
+  };
+}
+
+export async function connectFC(params: ConnectParams): Promise<FcInfo> {
+  // Registry events first, so the backend's active-vehicle announcement (emitted as soon as the link is
+  // registered, before `connect` returns) is not missed.
+  await startVehicleListeners();
+  await startFcModeListeners();
+  await startConnectListeners();
+  let res: ConnectResult;
+  try {
+    res = await invoke<ConnectResult>("connect", connectArgs(params));
+  } catch (e) {
+    // Other links may still be up (multi-vehicle) — keep the mirror truthful for the caller's recovery.
+    await refreshLinks().catch(() => {});
+    throw e;
+  }
+  void refreshLinks().catch(() => {});
+  const info = res.fcInfo;
+  // The singleton UI follows the newest link's primary (local store; the backend activated it if nothing was active).
+  activeVehicleId.set(res.vehicleId);
+  // Awaited before the one-shot answers are read: one arriving during the lookup must not be missed.
+  const fromLibrary = await libraryPlatformType(info.fc_uid);
+  // The one-shot answers may come before this result, which then still carries the handshake type (Airplane
+  // for a QuadPlane) and no logging-backend flag.
+  const handshakeType = info.platform_type;
+  if (handshakeType === PLATFORM_AIRPLANE && isQuadplane(res.vehicleId)) info.platform_type = PLATFORM_VTOL;
+  info.blackbox ??= blackboxOf(res.vehicleId) ?? null;
   detectedPlatformType.set(info.platform_type);
-  const remembered = info.fc_uid ? platformOverrides.get(info.fc_uid) : undefined;
-  if (remembered !== undefined && remembered !== info.platform_type) {
+  platformTypeSource.set(fromLibrary !== undefined ? 'library' : 'detected');
+  const target = fromLibrary ?? info.platform_type;
+  // A QuadPlane's backend copy may already be VTOL, whatever the handshake said.
+  if (target !== handshakeType || isQuadplane(res.vehicleId)) {
     try {
-      await invoke('set_platform_type', { platformType: remembered });
-      info.platform_type = remembered;
+      await invoke('set_platform_type', { platformType: target });
+      info.platform_type = target;
     } catch (e) {
-      console.warn('[connect] restoring the platform-type override failed', e);
+      console.warn('[connect] setting the platform type failed', e);
+      info.platform_type = handshakeType;
+      platformTypeSource.set('detected');
     }
   }
+  // MAVLink link to INAV 10.0+ with MSP over MAVLink up (the backend probed it during connect).
+  const mspTunnel = params.protocolType === 'mavlink' && (info.features?.msp_tunnel ?? false);
   connection.set({
     status: "connected",
     protocolType: params.protocolType,
@@ -192,47 +243,287 @@ export async function connectFC(params: ConnectParams): Promise<FcInfo> {
     baudRate: params.baudRate ?? 0,
     errorMessage: "",
     fcInfo: info,
+    mspTunnel,
   });
-  // Seed the status-box protocol. MSP/MAVLink are known now; passive telemetry shows a placeholder
-  // until the backend's `telemetry-protocol` event reports the locked sub-protocol.
-  connectionProtocol.set({
-    primary: params.protocolType === 'mavlink' ? 'MAVLink' : params.protocolType === 'msp' ? 'MSP' : 'Telemetry',
-    secondary: null,
-  });
+  // Passive telemetry shows a placeholder until `telemetry-protocol` reports the locked sub-protocol —
+  // which may already have happened.
+  const tr = get(t);
+  const passive = params.protocolType !== 'mavlink' && params.protocolType !== 'msp';
+  if (!passive || get(connectionProtocol).primary === '') {
+    connectionProtocol.set({
+      primary: mspTunnel
+        ? tr('statusBox.protocolMspMav')
+        : params.protocolType === 'mavlink'
+          ? tr('statusBox.protocolMavlink')
+          : params.protocolType === 'msp'
+            ? tr('statusBox.protocolMsp')
+            : tr('statusBox.protocolTelemetry'),
+      secondary: null,
+    });
+  }
   fcLinkAlive.set(true);
+  setFcVariant(info.fc_variant);
   await startTelemetryListeners();
   // Auto-start the saved telemetry relays (push telemetry → no handshake needed).
   await applyRelaysOnConnect();
-  // INAV/MSP: always download safehomes + autoland config for the map overlay (fire-and-forget; the
-  // store updates when the ~18 MSP reads complete). See docs/active/AUTOLAND_SAFEHOME.md.
-  if (params.protocolType === 'msp') {
+  // INAV/MSP (direct or MSP over MAVLink): always download safehomes + autoland config for the map
+  // overlay (fire-and-forget; the store updates when the ~18 MSP reads complete). See
+  // docs/active/AUTOLAND_SAFEHOME.md.
+  if (get(hasMsp)) {
     void loadSafehomeConfig();
     // Geozones (INAV ≥8.0; the backend returns has_geozones=false on older FCs). See docs/active/GEOZONES.md.
     void loadGeozoneConfig();
   }
-  // ArduPilot/PX4 geofence + rally points over MAVLink (MAV_MISSION_TYPE_FENCE/RALLY). Both ride the
-  // mission microprotocol (strict request→response) — run them SEQUENTIALLY so the two downloads don't
-  // collide. See docs/active/GEOFENCE.md.
-  if (params.protocolType === 'mavlink') {
-    void (async () => { await loadFenceConfig(); await loadRallyConfig(); })();
+  // ArduPilot/PX4 geofence + rally over MAVLink (docs/active/GEOFENCE.md) ride the mission microprotocol, so
+  // they run SEQUENTIALLY, then PX4's COM_RC_IN_MODE (same single param-receiver slot). Not on an
+  // MSP-over-MAVLink link: that FC is INAV (geozones).
+  if (get(isArduPilotLink)) {
+    const px4 = get(rcPlatform) === 'px4';
+    void (async () => {
+      await loadFenceConfig();
+      await loadRallyConfig();
+      if (px4) await loadPx4RcInMode();
+    })();
   }
   return info;
 }
 
-/**
- * Disconnect from the flight controller, stop listeners, reset telemetry.
- */
+/** Open an ADDITIONAL link while one is up (multi-vehicle). Leaves the singleton connection state and the
+ *  active vehicle alone; the new vehicle is switched to explicitly via `switchVehicle`. */
+export async function connectLink(params: ConnectParams): Promise<ConnectResult> {
+  await startVehicleListeners();
+  await startFcModeListeners();
+  await startConnectListeners();
+  const res = await invoke<ConnectResult>("connect", connectArgs(params));
+  await refreshLinks();
+  return res;
+}
+
+/** Close one link. The last link goes through the full `disconnectFC` teardown; otherwise only that link
+ *  stops and, if the active vehicle lived on it, the UI re-targets the vehicle the backend moved to. */
+export async function disconnectLink(linkId: number, baudRate: number): Promise<void> {
+  const remaining = get(links).filter((l) => l.linkId !== linkId);
+  if (remaining.length === 0) {
+    await disconnectFC(baudRate);
+    return;
+  }
+  const activeBefore = get(activeVehicleId);
+  const wasActiveLink = activeBefore != null && parseVehicleId(activeBefore)?.link === linkId;
+  await invoke("disconnect", { linkId });
+  await refreshLinks();
+  if (wasActiveLink) {
+    // The backend already announced the new active vehicle (`active-vehicle-changed`).
+    const now = get(activeVehicleId);
+    if (now) await applyActiveVehicle(now);
+  }
+}
+
+/** Make `vehicleId` the vehicle the widgets / control panel follow. */
+export async function switchVehicle(vehicleId: string): Promise<void> {
+  await selectVehicle(vehicleId);
+  await applyActiveVehicle(vehicleId);
+}
+
+/** The FC info shown for a secondary vehicle: the link's, with the vehicle's own identity — and none of
+ *  the primary's hardware facts (FC id, version, board, hardware revision) when its own are unknown. */
+function secondaryFcInfo(linkInfo: FcInfo, v: VehicleSummary): FcInfo {
+  return {
+    ...linkInfo,
+    fc_variant: v.fcVariant,
+    platform_type: v.platformType,
+    mav_type: v.mavType,
+    craft_name: '',
+    fc_uid: v.fcUid,
+    fc_version: v.fcVersion ?? '',
+    board_id: '',
+    hardware_revision: 0,
+  };
+}
+
+// A secondary's own identity arrives after its discovery (its AUTOPILOT_VERSION answer): refresh the FC
+// info shown while it is the active vehicle.
+vehicles.subscribe((known) => {
+  const id = get(activeVehicleId);
+  const v = id ? known.get(id) : undefined;
+  if (!v || v.primary) return;
+  const c = get(connection);
+  if (!c.fcInfo) return;
+  const fcVersion = v.fcVersion ?? '';
+  if (c.fcInfo.fc_uid === v.fcUid && c.fcInfo.fc_version === fcVersion) return;
+  connection.update((x) => (x.fcInfo ? { ...x, fcInfo: { ...x.fcInfo, fc_uid: v.fcUid, fc_version: fcVersion } } : x));
+});
+
+/** Re-target every singleton store at the (already selected) active vehicle: drop the previous
+ *  vehicle's telemetry/config, describe the new link in the connection store, reload its FC-side
+ *  config (fence/rally or safehome/geozone). */
+async function applyActiveVehicle(vehicleId: string, linkList: LinkSummary[] = get(links)): Promise<void> {
+  const link = linkList.find((l) => l.linkId === parseVehicleId(vehicleId)?.link);
+  // (The telemetry store re-seeds itself from the new vehicle's cached state — see stores/telemetry.)
+  // Home: the new vehicle's FC home if we have seen one; otherwise the previous vehicle's locked home
+  // must not masquerade as this one's — demote it to a manual reference (same as on disconnect).
+  const home = get(vehicleHomes).get(vehicleId);
+  if (home) {
+    homePosition.set({ lat: home.lat, lon: home.lon, alt: home.alt, set: true, source: 'fc' });
+    launchPoint.set({ lat: home.lat, lng: home.lon });
+  } else {
+    const h = get(homePosition);
+    if (h.source === 'fc') homePosition.set({ ...h, source: 'manual' });
+  }
+  clearSafehome();
+  clearGeozones();
+  clearFence();
+  clearRally();
+  if (!link) {
+    // Must not stay silent: without the link the UI keeps whatever status it had (see recoverBackendLinks).
+    recoveryLog('warn', `applyActiveVehicle: no link for ${vehicleId} among ${linkList.length} link(s)`);
+    return;
+  }
+  const protocolType: ProtocolType =
+    link.protocol === 'MAVLink' ? 'mavlink' : link.protocol === 'MSP' ? 'msp' : 'telemetry';
+  // A secondary on a shared MAVLink link has no handshake: describe it from its HEARTBEAT identity and own
+  // AUTOPILOT_VERSION on top of the link's FcInfo — never the primary's FC id/version/board. Primary-ness comes
+  // from the link, not the `vehicles` store (a not-yet-announced vehicle isn't automatically primary).
+  const isPrimary = vehicleId === link.primaryVehicleId;
+  const v = get(vehicles).get(vehicleId);
+  // Awaited before anything is read: a second switch or a one-shot answer may come during the lookup.
+  const fromLibrary = await libraryPlatformType(isPrimary || !v ? link.fcInfo.fc_uid : v.fcUid);
+  if (get(activeVehicleId) !== vehicleId) return;
+  let fcInfo: FcInfo = !isPrimary && v
+    ? secondaryFcInfo(link.fcInfo, v)
+    : link.fcInfo;
+  if (fcInfo.platform_type === PLATFORM_AIRPLANE && isQuadplane(vehicleId)) fcInfo = { ...fcInfo, platform_type: PLATFORM_VTOL };
+  if (fcInfo.blackbox == null && blackboxOf(vehicleId) !== undefined) fcInfo = { ...fcInfo, blackbox: blackboxOf(vehicleId) ?? null };
+  // The HEARTBEAT type where known: the link's FcInfo of a primary may carry an earlier override.
+  const heartbeatType = v?.platformType ?? fcInfo.platform_type;
+  detectedPlatformType.set(heartbeatType === PLATFORM_AIRPLANE && isQuadplane(vehicleId) ? PLATFORM_VTOL : heartbeatType);
+  platformTypeSource.set(fromLibrary !== undefined ? 'library' : 'detected');
+  if (fromLibrary !== undefined && fromLibrary !== fcInfo.platform_type) {
+    try {
+      await invoke('set_platform_type', { platformType: fromLibrary });
+      fcInfo = { ...fcInfo, platform_type: fromLibrary };
+    } catch (e) {
+      console.warn('[vehicle] setting the library platform type failed', e);
+    }
+  }
+  // MSP over MAVLink belongs to the link's handshake (primary) vehicle only — the backend's `with_msp`
+  // refuses a secondary vehicle on the same link.
+  const mspTunnel = protocolType === 'mavlink' && isPrimary && (fcInfo.features?.msp_tunnel ?? false);
+  connection.update((c) => ({ ...c, status: 'connected', protocolType, port: link.transport, fcInfo, mspTunnel }));
+  // Same status-box labels as connectFC.
+  const tr = get(t);
+  connectionProtocol.set({
+    primary: mspTunnel
+      ? tr('statusBox.protocolMspMav')
+      : protocolType === 'mavlink'
+        ? tr('statusBox.protocolMavlink')
+        : protocolType === 'msp'
+          ? tr('statusBox.protocolMsp')
+          : tr('statusBox.protocolTelemetry'),
+    secondary: null,
+  });
+  fcLinkAlive.set(true);
+  setFcVariant(fcInfo.fc_variant);
+  px4RcInMode.set(null);
+  px4RcInModeError.set(null);
+  // Same config loads as connectFC, for the new active vehicle: INAV (direct MSP or MSP over MAVLink)
+  // → safehomes + geozones; ArduPilot/PX4 → fence, rally, then PX4's COM_RC_IN_MODE, SEQUENTIALLY.
+  if (get(hasMsp)) {
+    void loadSafehomeConfig();
+    void loadGeozoneConfig();
+  }
+  if (get(isArduPilotLink)) {
+    const px4 = get(rcPlatform) === 'px4';
+    void (async () => {
+      await loadFenceConfig();
+      await loadRallyConfig();
+      if (px4) await loadPx4RcInMode();
+    })();
+  }
+}
+
+/** Diagnostics of the link recovery go to the app log, which must show why the UI and the backend
+ *  disagreed. */
+function recoveryLog(level: 'info' | 'warn', message: string): void {
+  void invoke('log_frontend', { level, area: 'ui', message }).catch(() => {});
+}
+
+/** The transport kind of a link from the backend's description (`Serial(COM7)`, `TCP(host:port)`,
+ *  `UDP(host:port)`, `BLE(…)`); null when it names none of the four. */
+function transportTypeOf(description: string): TransportType | null {
+  const kind = description.split('(')[0].trim().toLowerCase();
+  return kind === 'serial' || kind === 'tcp' || kind === 'udp' || kind === 'ble' ? kind : null;
+}
+
+/** Bring the singleton UI in line with what the backend holds — after a failed connect (other links may be
+ *  open) and at startup (reload while connected). Returns whether any link is up. */
+export async function recoverBackendLinks(): Promise<boolean> {
+  await startVehicleListeners();
+  await startFcModeListeners();
+  await startConnectListeners();
+  const l = await refreshLinks().catch(() => [] as Awaited<ReturnType<typeof refreshLinks>>);
+  if (l.length === 0) return false;
+  // The vehicle list is built from live `vehicle-discovered` events; after a reload ask for a replay.
+  await invoke('announce_vehicles').catch(() => {});
+  // Which vehicle the UI follows: the store's, else the backend's — and if neither names a vehicle on
+  // one of the links just listed, the first link's primary. A link is up, so there is always one.
+  const onAListedLink = (id: string | null): id is string => !!id && l.some((x) => x.linkId === parseVehicleId(id)?.link);
+  let active: string | null = get(activeVehicleId);
+  if (!onAListedLink(active)) active = await invoke<string | null>('get_active_vehicle').catch(() => null);
+  if (!onAListedLink(active)) active = l[0].primaryVehicleId;
+  // Through the backend, so both sides follow the same vehicle (a no-op there when it already is the
+  // active one); the store alone only if that call fails.
+  if (get(activeVehicleId) !== active) {
+    const id = active;
+    await selectVehicle(id).catch(() => activeVehicleId.set(id));
+  }
+  const wasConnected = get(connection).status === 'connected';
+  // The connection state FIRST, from the list just fetched: a failing or hanging later step (listeners,
+  // relays) must not leave live widgets under a "Disconnected" status bar.
+  await applyActiveVehicle(active, l);
+  // After a reload the store holds its default transport kind; take the link's. Only here — a vehicle
+  // switch must not change it, the toolbar link's kind is what the Radar and Relay panels ask for.
+  if (!wasConnected) {
+    const kind = transportTypeOf(l.find((x) => x.linkId === parseVehicleId(active)?.link)?.transport ?? '');
+    if (kind) connection.update((c) => ({ ...c, transportType: kind }));
+  }
+  // Always (re)arm the live feed: this runs after a page reload or a UI state that drifted, where the
+  // module-level listeners may be gone even though the store still says "connected". From here on a
+  // failing step is reported and the rest still runs.
+  try {
+    await startTelemetryListeners();
+  } catch (e) {
+    recoveryLog('warn', `recoverBackendLinks: arming the telemetry listeners failed: ${e}`);
+  }
+  if (!wasConnected) {
+    try {
+      await applyRelaysOnConnect();
+    } catch (e) {
+      recoveryLog('warn', `recoverBackendLinks: applying the relays failed: ${e}`);
+    }
+  }
+  recoveryLog('info', `recoverBackendLinks: ${l.length} link(s), active ${active} — connection state applied, telemetry listeners armed`);
+  return true;
+}
+
 export async function disconnectFC(baudRate: number): Promise<void> {
   await clearRelaysOnDisconnect();
   clearSafehome();
   clearGeozones();
   clearFence();
   clearRally();
+  px4RcInMode.set(null);
+  px4RcInModeError.set(null);
   stopTelemetryListeners();
+  stopConnectListeners();
+  platformTypeSource.set('detected');
   resetTelemetry();
+  clearFcModeLists();
   connectionProtocol.set({ primary: '', secondary: null });
   fcLinkAlive.set(true);
-  await invoke("disconnect");
+  // linkId null = every link (the single connect/disconnect toggle's semantics).
+  await invoke("disconnect", { linkId: null });
+  resetVehicles();
+  clearVehicleHomes();
   connection.set({
     status: "disconnected",
     protocolType: 'msp',
@@ -241,6 +532,7 @@ export async function disconnectFC(baudRate: number): Promise<void> {
     baudRate,
     errorMessage: "",
     fcInfo: null,
+    mspTunnel: false,
   });
 }
 
@@ -250,14 +542,13 @@ export async function setInavCraftName(name: string): Promise<void> {
   await invoke("inav_set_craft_name", { name });
 }
 
-/** Live platform-type override (UAV Info panel dropdown). Applied to the backend (FC info + the flight
- *  recorder, so the flights of this link are stored with the chosen type), mirrored into the store, and
- *  remembered per FC hardware id for a reconnect within this session. Never persisted. */
+/** UAV Info dropdown: the backend applies it to the active vehicle's FC info and recorder (the running flight
+ *  too). Only the link keeps it; no reconnect restores it. */
 export async function setLivePlatformType(platformType: number): Promise<void> {
+  // Before the invoke: a QuadPlane answer in between must not follow the detection.
+  platformTypeSource.set('manual');
   await invoke('set_platform_type', { platformType });
   connection.update((c) => (c.fcInfo ? { ...c, fcInfo: { ...c.fcInfo, platform_type: platformType } } : c));
-  const uid = get(connection).fcInfo?.fc_uid;
-  if (uid) platformOverrides.set(uid, platformType);
 }
 
 /** Read the INAV lifetime flight statistics from the FC `stats` settings (INAV/MSP only). */

@@ -4,13 +4,9 @@
 -->
 
 <script lang="ts">
-  // Flight Logbook on the new panel framework (docs/active/PANEL_FRAMEWORK.md). Three live formats:
-  //   • info     — minimized flight card (click to expand)
-  //   • compact  — the (flight or battery) list only
-  //   • advanced — flight list + FlightDetail (1:2 split); the Battery Manager subview uses
-  //                advanced as a wide *single* column (it renders its own list/detail split).
-  // Pure presentation port of LogbookPanel: identical tree/search/multi-select/battery logic,
-  // reusing the same stores/controllers — only the chrome moves onto PanelShell.
+  // Flight Logbook on the panel framework (docs/active/PANEL_FRAMEWORK.md), three variants: info (flight card),
+  // compact (flight or battery list), advanced (list + FlightDetail 1:2; the Battery Manager uses it as one wide
+  // column with its own split).
   import { untrack } from 'svelte';
   import { t } from 'svelte-i18n';
   import type { InterfaceSettings } from '$lib/stores/settings';
@@ -181,7 +177,11 @@
   const filteredSummaries = $derived.by<FlightSummary[]>(() => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return flightSummaries;
+    // "#170" finds exactly that flight; a bare number matches the flight id as well as the text fields.
+    const idQuery = /^#?\d+$/.test(q) ? Number(q.replace('#', '')) : null;
+    if (idQuery != null && q.startsWith('#')) return flightSummaries.filter((f) => f.id === idQuery);
     return flightSummaries.filter((f) => {
+      if (f.id === idQuery) return true;
       const craft = (f.craft_name || '').toLowerCase();
       const location = (f.location_name || '').toLowerCase();
       const date = (f.start_time || '').toLowerCase();

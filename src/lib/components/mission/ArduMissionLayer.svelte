@@ -17,7 +17,7 @@
   import {
     arduMission, arduSelectedWpIndex, arduSelectedWpIndices, arduEditMode, arduVehicleClass,
     arduSelectWpSingle, arduToggleWpSelection, arduClearWpSelection,
-    arduUpdateWp, arduRemoveWp, arduAddWp, arduRecordUndo,
+    arduUpdateWp, arduRemoveWp, arduAddWp, arduRecordUndo, arduTranslateWps,
     groupArduMission, groupEndIndex, type ArduGroup,
     MAV_CMD_NAV_WAYPOINT,
     MAV_FRAME_GLOBAL, MAV_FRAME_GLOBAL_RELATIVE_ALT, MAV_FRAME_GLOBAL_TERRAIN_ALT,
@@ -37,10 +37,10 @@
   import { connection } from '$lib/stores/connection';
   import { arduWpDetailLines } from '$lib/helpers/missionWpDetails';
   import {
-    newPopupState, renderEditorPopup, closeEditorPopup,
+    newPopupState, renderEditorPopup, closeEditorPopup, deferWhileStepping,
     numInputHtml, enumSelectHtml, paramRow, canonicalLabel, actionsHtml, modifierSection,
-    addModifierSelect, attachNumBtnEvents, disablePopupPropagation,
-  } from '$lib/helpers/missionEditorPopup';
+    addModifierSelect, disablePopupPropagation,
+  } from '$lib/helpers/missionEditorPopup.svelte';
   import { iconForArduWp } from '$lib/helpers/missionIconsArdupilot';
   import { settings } from '$lib/stores/settings';
   import { homePosition, type HomePosition } from '$lib/stores/home';
@@ -72,6 +72,9 @@
 
   // svelte-ignore state_referenced_locally
   const missionGroup = L.layerGroup().addTo(map);
+  // Location markers by mission index for the current render — a group drag moves the other selected
+  // markers live through this map before the store commit on dragend.
+  const markersByIdx = new Map<number, L.Marker>();
   // Shared editor-popup lifecycle (content-signature redraw guard lives in the framework module).
   const popupState = newPopupState();
   // Which "Advanced" param sections are expanded, keyed per section ('primary' / 'mod-<idx>'). Persisted
@@ -127,7 +130,7 @@
       return enumSelectHtml(dataAttr, options, value);
     }
     const step = spec.decimals && spec.decimals > 0 ? Math.pow(10, -spec.decimals) : 1;
-    return numInputHtml(dataAttr, value, { step, min: spec.min, max: spec.max });
+    return numInputHtml(dataAttr, value, { step, min: spec.min, max: spec.max, decimals: spec.decimals ?? 0, unit: spec.units });
   }
 
   function paramRowsHtml(wp: ArduWaypoint, target: 'primary' | 'mod', modIdx = -1): string {
@@ -145,7 +148,8 @@
       const dataAttr = target === 'primary'
         ? `data-target="primary" data-pidx="${pidx}"`
         : `data-target="mod" data-modidx="${modIdx}" data-pidx="${pidx}"`;
-      const row = paramRow(spec.label, paramFieldHtml(spec, value, dataAttr), { unit: spec.units, tooltip: spec.tooltip });
+      const isEnum = !!(spec.enumStrings && spec.enumValues);
+      const row = paramRow(spec.label, paramFieldHtml(spec, value, dataAttr), { unit: isEnum ? spec.units : undefined, tooltip: spec.tooltip });
       if (spec.advanced) advanced += row; else normal += row;
     }
     // Advanced (rare) params collapse under an expander, QGC-style — common fields stay uncluttered.
@@ -198,9 +202,7 @@
 
     if (def?.specifiesCoordinate) {
       html += `<div class="wpe-row"><label>${$t('missionLayer.alt')}</label>`
-        + `<div class="wpe-num-ctrl"><button class="wpe-num-btn" data-numdir="-1">−</button>`
-        + `<input type="number" data-field="alt" value="${wp.alt}" step="1" min="0"/>`
-        + `<button class="wpe-num-btn" data-numdir="1">+</button></div>`
+        + numInputHtml('data-field="alt"', wp.alt, { step: 1, min: 0, decimals: 0, unit: 'm' })
         + `<button data-field="frameToggle" class="wpe-toggle">${frameLabel(wp.frame)}</button></div>`;
       // Takeoff coords are hidden only for a connected coordinate-less "take off in place" (it uses the
       // FC home); shown when the takeoff has a real coordinate (PX4 / fixed-wing) or while planning
@@ -358,8 +360,6 @@
       });
     });
 
-    attachNumBtnEvents(el);
-
     el.querySelector('button[data-action="moveUp"]')?.addEventListener('click', () => moveGroup(group, -1));
     el.querySelector('button[data-action="moveDown"]')?.addEventListener('click', () => moveGroup(group, 1));
     el.querySelector('button[data-action="remove"]')?.addEventListener('click', () => {
@@ -431,6 +431,7 @@
     const selGroup = groups.find(g => g.anchorIdx === selIdx || g.modifiers.some(m => m.idx === selIdx)) ?? null;
 
     missionGroup.clearLayers(); // markers/lines only — the editor popup is a separate map layer
+    markersByIdx.clear();
     if (wps.length === 0) { closeEditorPopup(map, popupState); return; }
     // While the survey pattern generator is open the existing mission stays VISIBLE (so the operator
     // can plan where the pattern attaches) but its waypoints go non-interactive — no drag / popup /
@@ -465,6 +466,7 @@
           draggable,
           title: `WP${displayNum}: ${cmdName(wp.command)}`,
         }).addTo(missionGroup);
+        markersByIdx.set(i, marker);
 
         // Edit mode: a plain tap toggles the WP in/out of the selection (touch-friendly multi-select,
         // no modifier key) — mirrors the INAV layer. View mode: tap selects / re-tap deselects.
@@ -481,8 +483,43 @@
           openContextMenu(e.originalEvent.clientX, e.originalEvent.clientY, buildArduWaypointMenu());
         });
         if (draggable) {
+          // Group drag: when the dragged marker is part of a multi-selection, every other selected
+          // marker follows live (same offset) and the store commit moves them all in ONE undo step —
+          // Ctrl+A then drag = move the whole mission.
+          let groupStart: Map<number, L.LatLng> | null = null;
+          let selfStart: L.LatLng | null = null;
+          marker.on('dragstart', () => {
+            const sel = get(arduSelectedWpIndices);
+            if (sel.has(i) && sel.size > 1) {
+              selfStart = marker.getLatLng();
+              groupStart = new Map();
+              for (const j of sel) {
+                if (j === i) continue;
+                const m = markersByIdx.get(j);
+                if (m) groupStart.set(j, m.getLatLng());
+              }
+            } else {
+              groupStart = null;
+              selfStart = null;
+            }
+          });
+          marker.on('drag', () => {
+            if (!groupStart || !selfStart) return;
+            const p = marker.getLatLng();
+            const dLat = p.lat - selfStart.lat;
+            const dLng = p.lng - selfStart.lng;
+            for (const [j, s] of groupStart) markersByIdx.get(j)?.setLatLng([s.lat + dLat, s.lng + dLng]);
+          });
           marker.on('dragend', () => {
             const pos = marker.getLatLng();
+            if (groupStart && selfStart) {
+              const dLat = Math.round((pos.lat - selfStart.lat) * 1e7);
+              const dLon = Math.round((pos.lng - selfStart.lng) * 1e7);
+              arduTranslateWps(new Set(get(arduSelectedWpIndices)), dLat, dLon);
+              groupStart = null;
+              selfStart = null;
+              return;
+            }
             const cur = get(arduMission)[i];
             if (cur) arduUpdateWp(i, { ...cur, lat: Math.round(pos.lat * 1e7), lon: Math.round(pos.lng * 1e7) });
           });
@@ -586,7 +623,19 @@
         map, popupState, g.anchorIdx, anchorLatLng,
         buildGroupEditorHtml(g, wps.length, vehicle),
         (popup) => attachGroupEditorEvents(popup, g),
-        { popupOptions: { maxWidth: 260, minWidth: 200 } },
+        {
+          // Leaflet's autoPan only fits the popup into the map container, which spans the full
+          // window under the panels — the WP ends up behind the mission panel. Off, like the INAV
+          // layer, and centred in the visible area ourselves on popup creation only.
+          popupOptions: { maxWidth: 310, minWidth: 230, autoPan: false },
+          // Biased right (clears the mission panel on the left) and below centre (the popup opens
+          // upward). The map is unzoomed, so this pixel math is independent of the UI scale.
+          onCreate: (_popup, ll) => {
+            const size = map.getSize();
+            const wpPt = map.latLngToContainerPoint(ll);
+            map.panBy(wpPt.subtract(L.point(size.x * 0.55, size.y * 0.6)), { animate: true });
+          },
+        },
       );
     } else {
       closeEditorPopup(map, popupState);
@@ -620,7 +669,8 @@
   $effect(() => {
     void activeSurveyPattern.isActive; // re-render (clear / restore) when entering or leaving pattern mode
     void currentSelSet; // re-render when the multi-selection changes (red icons follow set membership)
-    renderMission(currentWps, currentSelIdx, currentEditing, currentHome, currentVehicle, currentActiveWp, connected);
+    const render = () => renderMission(currentWps, currentSelIdx, currentEditing, currentHome, currentVehicle, currentActiveWp, connected);
+    if (!deferWhileStepping(popupState, render)) render();
   });
 
   onDestroy(() => {

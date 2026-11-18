@@ -3,33 +3,43 @@
   Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 -->
 
-<!-- StatusTextToasts.svelte
-     FC system messages (MAVLink STATUSTEXT) as a single compact banner at the top edge: one line per
-     message, colour-coded by severity, newest at the bottom; the field scrolls to the latest. Each
-     message expires individually 20 s after it arrived (the store drops lines one by one); the banner
-     disappears once the last line is gone. Verbosity is controlled by settings.systemMessages; audio
-     cue is played in the store.
--->
+<!-- StatusTextToasts — FC system messages as one top-edge banner (expiry, filter and sound live in the store);
+     pinned GCS notices sit above the scrolling lines. -->
 <script lang="ts">
   import { fade } from 'svelte/transition';
   import { statusTexts, type StatusTextLevel } from '$lib/stores/statusText';
 
-  const ICON: Record<StatusTextLevel, string> = { error: '⚠', warning: '▲', info: 'ⓘ' };
+  const ICON: Record<StatusTextLevel, string> = { error: '⚠', warning: '▲', info: 'ⓘ', debug: '⋯' };
+
+  let pinned = $derived($statusTexts.filter((m) => m.pinned));
+  let lines = $derived($statusTexts.filter((m) => !m.pinned));
 
   let scroller = $state<HTMLDivElement | undefined>(undefined);
   // Keep the newest line in view as messages arrive.
+  let lineCount = $derived(lines.length);
   $effect(() => {
-    void $statusTexts.length;
+    void lineCount;
     if (scroller) scroller.scrollTop = scroller.scrollHeight;
   });
 </script>
 
 {#if $statusTexts.length}
   <div class="msg-banner" role="log" transition:fade={{ duration: 250 }}>
+    {#each pinned as msg (msg.id)}
+      <div class="msg-line error pinned">
+        <span class="m-icon">{ICON.error}</span>
+        <span class="m-text">{msg.text}</span>
+      </div>
+    {/each}
     <div class="msg-lines" bind:this={scroller}>
-      {#each $statusTexts as msg (msg.id)}
+      {#each lines as msg (msg.id)}
         <div class="msg-line {msg.level}">
           <span class="m-icon">{ICON[msg.level]}</span>
+          {#if msg.vehicle}
+            <span class="m-vehicle" style:--vc={msg.vehicle.color} title={msg.vehicle.name}>
+              <span class="m-vdot"></span>{msg.vehicle.name}
+            </span>
+          {/if}
           <span class="m-text">{msg.text}</span>
           {#if msg.repeats > 1}<span class="m-count">×{msg.repeats}</span>{/if}
         </div>
@@ -42,10 +52,8 @@
   .msg-banner {
     position: absolute;
     top: 56px;
-    /* Centre within the area to the RIGHT of any open left-docked panel (issue #10). --toast-dock-inset
-       is the panel's viewport right edge (0 when none); left + right + margin:auto centres the
-       fixed-width banner in that band, and the max-width cap keeps it inside the band on narrow screens
-       so it can never slide back over the panel. */
+    /* Centre to the RIGHT of an open left-docked panel: --toast-dock-inset is its viewport right edge (0 when
+       none); left + right + margin:auto centre the banner in that band, max-width keeps it off the panel. */
     left: calc(var(--toast-dock-inset, 0px) + 8px);
     right: 8px;
     margin-inline: auto;
@@ -53,7 +61,8 @@
     width: max-content;
     max-width: min(640px, calc(100vw - var(--toast-dock-inset, 0px) - 32px));
     background: rgba(30, 30, 30, 0.82);
-    backdrop-filter: blur(10px);
+    backdrop-filter: var(--glass-blur, blur(6px));
+    -webkit-backdrop-filter: var(--glass-blur, blur(6px));
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 6px;
     box-shadow: 0 3px 12px rgba(0, 0, 0, 0.5);
@@ -62,18 +71,14 @@
     font-family: 'Segoe UI', Tahoma, sans-serif;
   }
 
-  /* Mobile: the phone toolbar wraps onto several rows while disconnected/expanded, so a fixed 56px
-     lands *inside* it and the messages cover the connection banner. Track the live bar height instead —
-     the same --toolbar-h the map layer and nav-rail follow. The parent .app-toasts layer is already
-     offset by --safe-top and --toolbar-h includes that same inset (the toolbar pads itself down into
-     the visible strip), so subtract it here or the status-bar strip is counted twice. */
+  /* Mobile: the wrapping toolbar's height varies, so track --toolbar-h; .app-toasts is already offset by
+     --safe-top, which --toolbar-h includes too — subtract it to not count the status-bar strip twice. */
   :global(html.is-mobile) .msg-banner {
     top: calc(var(--toolbar-h, 53px) - var(--safe-top, 0px) + 8px);
   }
-  /* Phone: the parent .app-toasts IS the band between the corner buttons and already sits at
-     --safe-top, so start in the buttons' row and let the band — not the viewport — cap the width.
-     --toast-dock-inset is a viewport x; the band's own left edge (--toast-band-left) comes off it
-     first, so a banner beside an open panel still centres in what is left of the band. */
+  /* Phone: the parent .app-toasts IS the band between the corner buttons (at --safe-top), so the band caps the
+     width. --toast-dock-inset is a viewport x: subtract the band's left edge (--toast-band-left) first, so a
+     banner beside an open panel centres in what is left. */
   :global(html.is-phone) .msg-banner {
     top: 8px;
     left: calc(max(var(--toast-dock-inset, 0px) - var(--toast-band-left, 0px), 0px) + 8px);
@@ -103,12 +108,48 @@
     white-space: nowrap;
   }
   .m-icon { font-size: 11px; line-height: 1; flex: 0 0 auto; }
+  .msg-line.pinned {
+    padding: 6px 10px;
+    margin-bottom: 2px;
+    font-size: 15px;
+    font-weight: 700;
+    color: #fff;
+    background: rgba(170, 20, 20, 0.92);
+    font-variant-numeric: tabular-nums;
+  }
+  .msg-line.pinned .m-icon { font-size: 14px; color: #fff; }
   .m-text { overflow: hidden; text-overflow: ellipsis; }
+  /* Fleet: which vehicle spoke — a dot in its map colour + its name, so a failing craft is obvious. */
+  .m-vehicle {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    flex: 0 0 auto;
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding: 0 6px 0 4px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.08);
+    font-size: 11px;
+    font-weight: 600;
+    color: #e0e0e0;
+  }
+  .m-vdot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--vc, #888);
+    box-shadow: 0 0 3px var(--vc, #888);
+    flex: 0 0 auto;
+  }
   /* Repeat tally for a message the FC keeps re-sending. Dimmed so it reads as metadata, not content. */
   .m-count { flex: 0 0 auto; margin-left: auto; padding-left: 8px; font-size: 11px; opacity: 0.55; font-variant-numeric: tabular-nums; }
 
   .msg-line.info    { color: #cfe7f3; }
   .msg-line.info .m-icon { color: #37a8db; }
+  .msg-line.debug   { color: #b4b4b4; }
+  .msg-line.debug .m-icon { color: #949494; }
   .msg-line.warning { color: #f6e3b0; }
   .msg-line.warning .m-icon { color: #f4c020; }
   .msg-line.error   { color: #f6c9c9; background: rgba(120, 30, 30, 0.45); }

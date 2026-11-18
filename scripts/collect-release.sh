@@ -5,20 +5,21 @@
 #
 #     KiteGC_<OS>_<Arch>_<Version>_<Type>.<ext>
 #     KiteGC_Android_<abi>_<Version>_installer.apk      (when an Android release build exists)
+#     KiteGC_Android_<abi>_<Version>_playstore.aab      (`just build-android-aab`, for Google Play)
 #
 #   Type = installer   (.deb / .rpm / .dmg; the Android .apk)
 #        | standalone  (.AppImage / .app-as-zip — self-contained runnable app)
 #        | portable     (the bare CLI binary, zipped with an empty `.portable` marker so the
 #                        download keeps its data in a data/ folder next to the executable)
+#        | update       (macOS only: the .app as .tar.gz — what the in-app updater downloads)
 #
-# One naming source shared by local builds (`just build*`) AND the GitHub release workflow, so the
-# filenames are identical everywhere. The release/ folder is git-ignored and refreshed on every
-# run — `--keep` adds to it instead.
+# Updater signatures (`<unified name>.sig`) are NOT produced here: the maintainer signs the collected
+# artifacts locally with scripts/make-update-manifest.sh, so the signing key never leaves his machines.
 #
-# `--android-only` collects the APKs alone (implies --keep). `just build-android` uses it: an
-# Android build leaves the DESKTOP outputs of an earlier build untouched in target/release, and
-# collecting them would republish a stale binary under the current version number (found on the
-# Windows side 2026-09-04: a 1.0.0-rc2 kite-gc.exe came out as a 1.1.0-dev portable zip).
+# Shared by the local `just build*` recipes AND the GitHub release workflow, so the names are identical
+# everywhere. release/ is git-ignored and refreshed on every run — `--keep` adds to it instead.
+# `--android-only` (implies --keep) collects only the APKs and the Play bundle: the desktop outputs of an
+# earlier build still sit in target/release and would be republished under the current version number.
 # ============================================================
 set -e
 
@@ -59,12 +60,8 @@ name() { printf '%s_%s_%s_%s_%s.%s' "$APP" "$OS" "$ARCH" "$VERSION" "$1" "$2"; }
 mkdir -p "$OUT"
 collected=()
 
-# Copy the NEWEST file matching <glob> under the unified name <type>.<ext>.
-# "Newest" (not first) matters: Tauri never prunes its bundle dir, so stale artifacts from
-# earlier builds — often a *lower* version that sorts first alphabetically — pile up next to
-# the fresh one. A plain first-match glob would grab that stale file and rename it to the
-# current version, shipping an old build under a new name. Pick by mtime instead; the cleanup
-# after the collection block then removes the raw outputs so the pile-up can't recur.
+# Copy the NEWEST file matching <glob> under the unified name <type>.<ext> — Tauri never prunes its
+# bundle dir, and a first-match glob would ship a stale, lower version under the current name.
 grab_file() { # <glob> <type> <ext>
     local newest dest
     newest="$(ls -1dt $1 2>/dev/null | head -n1)"
@@ -93,12 +90,16 @@ if [ "$ANDROID_ONLY" = 1 ]; then
 elif [ "$OS" = "macOS" ]; then
     BUNDLE="$TARGET/universal-apple-darwin/release/bundle"
     grab_file "$BUNDLE/dmg/*.dmg" installer dmg
-    # .app is a bundle (directory) → zip with ditto so the bundle structure/symlinks stay intact.
-    # Pick the NEWEST .app (same stale-pile-up reasoning as grab_file above).
+    # A bundle: zip with ditto to keep its structure/symlinks; the NEWEST .app (see grab_file).
     app="$(ls -1dt "$BUNDLE"/macos/*.app 2>/dev/null | head -n1)"
     if [ -n "$app" ] && [ -e "$app" ]; then
         dest="$(name standalone zip)"
         (cd "$(dirname "$app")" && ditto -c -k --keepParent "$(basename "$app")" "$OUT/$dest")
+        collected+=("$dest")
+        # The updater archive: the .app as .tar.gz with the bundle at the top level (the Tauri updater's
+        # layout). Built here so a signed build needs no updater key; make-update-manifest.sh signs it.
+        dest="$(name update tar.gz)"
+        tar -czf "$OUT/$dest" -C "$(dirname "$app")" "$(basename "$app")"
         collected+=("$dest")
     fi
 else
@@ -110,11 +111,8 @@ else
     zip_portable "$REL/kite-gc" kite-gc
 fi
 
-# Now that the fresh outputs live in release/ under our unified names, delete the raw bundle
-# outputs we just consumed. Tauri never prunes this dir itself, so leaving them is exactly what
-# lets stale, wrongly-versioned artifacts accumulate and get mis-collected next time. Removing
-# them (both the packages and Tauri's staging dirs beside them) keeps the source clean. The bare
-# CLI binary at $REL/kite-gc is a cargo output, not a bundle artifact — it stays.
+# Delete the consumed raw bundle outputs (and Tauri's staging dirs) so stale artifacts cannot pile up
+# and be mis-collected next time. $REL/kite-gc is a cargo output and stays.
 if [ ${#collected[@]} -gt 0 ] && [ "$ANDROID_ONLY" != 1 ]; then
     if [ "$OS" = "macOS" ]; then
         rm -rf "$BUNDLE/dmg" "$BUNDLE/macos"
@@ -123,9 +121,7 @@ if [ ${#collected[@]} -gt 0 ] && [ "$ANDROID_ONLY" != 1 ]; then
     fi
 fi
 
-# Android: `tauri android build --apk` leaves one release APK per ABI folder under the Gradle
-# outputs (universal / arm64 / armv7 / x86_64 / x86). Same rules as above: newest file per folder,
-# then the raw output is deleted so a stale APK can't be re-collected under a newer version.
+# Android: one release APK per ABI folder — newest per folder, raw output deleted afterwards.
 APK_ROOT="$ROOT/src-tauri/gen/android/app/build/outputs/apk"
 for abi_dir in "$APK_ROOT"/*/; do
     [ -d "$abi_dir" ] || continue
@@ -139,10 +135,25 @@ for abi_dir in "$APK_ROOT"/*/; do
     collected+=("$dest")
 done
 
+# Android App Bundle for Google Play: `tauri android build --aab` leaves it under
+# outputs/bundle/<abi>Release/. Same handling as the APKs.
+AAB_ROOT="$ROOT/src-tauri/gen/android/app/build/outputs/bundle"
+for abi_dir in "$AAB_ROOT"/*Release/; do
+    [ -d "$abi_dir" ] || continue
+    aab="$(ls -1dt "$abi_dir"*.aab 2>/dev/null | head -n1)"
+    [ -n "$aab" ] && [ -e "$aab" ] || continue
+    abi="$(basename "$abi_dir")"; abi="${abi%Release}"
+    case "$abi" in x86_64) abi="x64" ;; esac
+    dest="${APP}_Android_${abi}_${VERSION}_playstore.aab"
+    cp -f "$aab" "$OUT/$dest"
+    rm -rf "$abi_dir"
+    collected+=("$dest")
+done
+
 echo ""
 if [ ${#collected[@]} -eq 0 ]; then
     if [ "$ANDROID_ONLY" = 1 ]; then
-        echo "[collect-release] No APK found under $APK_ROOT — did the build succeed?"
+        echo "[collect-release] No APK or AAB found under $(dirname "$APK_ROOT") — did the build succeed?"
     else
         echo "[collect-release] No build outputs found under $TARGET — did the build succeed?"
     fi

@@ -25,8 +25,8 @@ Linux and macOS.
 
 ```powershell
 winget install OpenJS.NodeJS.LTS
-winget install Casey.Just.Just
-# Rust: install from https://rustup.rs/
+winget install Casey.Just
+winget install Rustlang.Rustup    # or the installer from https://rustup.rs/
 ```
 
 !!! warning "Restart your terminal"
@@ -86,9 +86,14 @@ certificate: an "Apple Development" certificate cannot notarize. Credentials are
 environment / keychain and never committed. List your identities with
 `security find-identity -v -p codesigning`.
 
+A release needs all three files from `release/`: the `.dmg`, the standalone `.zip` and the updater
+`_update.tar.gz`. `just notarize-macos` staples the ticket to the disk image and to the app in the other two, so a first
+launch works without a network connection. `scripts/make-update-manifest.sh` refuses an updater
+archive without that ticket, which keeps the unsigned CI build out of the in-app updater.
+
 ### Android
 
-Mobile is **not part of the 1.0 line** — nothing mobile builds from `master`, and both mobile ports
+Mobile is **not part of the 1.0 line** — nothing mobile builds on `release/1.0.x`, and both mobile ports
 target a release after 1.0. The iOS / iPadOS port lives on `development` (see the iOS notes above);
 Android is described here.
 
@@ -163,6 +168,39 @@ keyPassword=…
 
 It is gitignored, so the key never lands in the repository.
 
+#### Version code and the Play bundle
+
+Android orders builds by an integer `versionCode`, and Google Play accepts an upload only with a higher
+one than before. `app/build.gradle.kts` derives it from the version name in `package.json`
+(`playVersionCode`):
+
+```text
+major * 10_000_000 + minor * 100_000 + patch * 1_000 + stage * 10 + build
+stage: -bN (or -betaN) = N (1–39) · -rcN = 40 + N (N 1–39) · final = 99 · -dev = 0
+build: 0–9, from the environment variable KITE_ANDROID_BUILD (unset or empty = 0)
+```
+
+So `2.0.0-b1` is 20000010, `2.0.0-rc1` 20000410, `2.0.0` 20000990 and `2.0.1` 20001990. A version name
+outside this pattern stops the build with a message: another suffix, a beta or rc without a number or
+with one outside 1–39, a minor or patch above 99, a major above 209, or a `KITE_ANDROID_BUILD` that is not
+a digit.
+
+Play never takes a code twice, not even after an upload was rejected or became invalid. The **build**
+digit is for that case: set `KITE_ANDROID_BUILD=1` (then 2, …; in PowerShell `$env:KITE_ANDROID_BUILD = 1`)
+to upload the same version again. Build the APK of that release **locally with the same value**
+(`just build-android`) — Android refuses to install a lower code over a higher one, and the GitHub
+workflow always builds with 0. The file names in `release/` do not carry the digit.
+
+The **App Bundle** that Google Play takes is built locally only — the GitHub workflow keeps building the
+APK:
+
+```bash
+just build-android-aab    # release/KiteGC_Android_<abi>_<version>_playstore.aab
+```
+
+Without `key.properties` the bundle is debug-signed, and Play refuses it. The bundle is for the Play
+Console only; it does not belong on the GitHub release.
+
 #### Building locally
 
 1. **JDK 17** — `sudo apt install openjdk-17-jdk` (or Temurin on Windows/macOS).
@@ -177,6 +215,13 @@ npm ci
 npm run tauri android build -- --apk --target aarch64   # APK in src-tauri/gen/android/app/build/outputs/apk
 npm run tauri android dev                               # on-device dev build with hot reload
 ```
+
+A debug build is signed with your local debug key, so Android refuses to install it over a copy that
+came from Google Play. Set `KITE_ANDROID_DEV_ID=1` for the build and it gets its own application id
+(`com.kitegc.app.dev`, shown as "Kite Dev") and installs **beside** the Play copy, with its own
+data. `tauri android dev` then starts the app by the id in `tauri.conf.json` — the Play copy — so
+start the dev copy yourself (`adb shell am start -n com.kitegc.app.dev/com.kitegc.app.MainActivity`);
+on Windows `tools/helpers/phone-emu.ps1 -Device -Beside` does both.
 
 `src-tauri/gen/android` is **committed** — it is the Android app project (manifest, Gradle build,
 icons, the Rust Gradle plugin), edited by hand. Do **not** run `tauri android init`: it would
@@ -209,11 +254,11 @@ up itself, so only the bare `cargo check` needs it. (On Windows the prebuilt dir
 | Flight log, missions, fleet & battery manager | ✅ works | SQLite in app-private storage (`android::app_data_dir`). |
 | Maps, terrain, weather | ✅ works | Network + the same tile cache as desktop. |
 | Widget layout editing by touch | ✅ works | Drag widgets between the docks with a finger in edit mode, same as with a mouse on desktop. |
-| Screen stays on while connected | ✅ works | Like a navigation app: the display does not time out while a telemetry link is active; disconnected, the normal OS timeout applies. |
+| Screen stays on while armed | ✅ works | The display does not time out while the aircraft is armed, during a continuous raw recording, with a telemetry feed that carries no arming state, or always with *Stay awake without connection*; otherwise the normal OS timeout applies. |
 | Bluetooth LE | ✅ works | Native GATT via `BleSerial.kt`; the same serial profiles as desktop. Listen-only mode (the GATT dump) is not implemented yet. |
 | Joystick / HID RC control | ❌ not implemented | The backend is per-OS (WGI / evdev / IOKit); Android has none, so no device is ever listed. |
 | Log import (.kflight / .rawmsp / .tlog) | ✅ works | Parsed in-process. A `.kflight` brings the flight, its track and its records; the archived original log files inside it (INAV blackbox, ArduPilot dataflash) are left behind — the mobile database never stores originals. ArduPilot `.bin` and PX4 `.ulg` import are desktop-only. |
-| Blackbox import (.txt / .bbl / .bfl) | ❌ impossible | Needs the external `blackbox_decode` tool, and Android forbids executing a downloaded binary. Import on a desktop and bring flights over as `.kflight`. |
+| Blackbox import (.txt / .bbl / .bfl) | ❌ desktop-only | Not offered, like ArduPilot `.bin` and PX4 `.ulg` — the mobile database keeps no original log files. Import on a desktop and bring flights over as `.kflight`. |
 | Video: camera / OTG capture device | ✅ works (tablets) | The WebView's own capture path (`getUserMedia`), no helper involved. Hidden on phones until the phone UI decides. |
 | Video: RTSP (MJPEG / H.264 / HEVC) | ✅ works | Runs entirely on Kite's built-in RTSP client — no engine helpers (an Android app cannot spawn them, so the desktop engines are not offered). H.264/HEVC decode in device hardware onto a native surface below the WebView; MJPEG rides the multipart path. Native capture (ffmpeg) is not offered — the OS's own capture devices arrive through the camera kind. |
 | Custom database / raw-log folder | ✅ mirror | Browse grants ONE folder via the system picker (scoped storage — no permission). The app keeps working app-private (SQLite and the raw writers need real paths, which a SAF grant cannot provide) and **mirrors into the folder at session end**: raw logs as files, the database as an atomic snapshot. That copy survives an uninstall. |
@@ -254,8 +299,14 @@ KiteGC_<OS>_<arch>_<version>_<type>.<ext>
 ```
 
 - **Type** = `installer` (`.exe` / `.deb` / `.rpm` / `.dmg`, and the Android `.apk`), `standalone`
-  (`.AppImage`, or the macOS `.app` zipped), or `portable` (the bare executable zipped **with an empty
-  `.portable` marker**).
+  (`.AppImage`, or the macOS `.app` zipped), `portable` (the bare executable zipped **with an empty
+  `.portable` marker**), or `update` (macOS only: the `.app` as `.tar.gz`, what the in-app updater
+  downloads).
+- **In-app updates** (*Update and Restart* in the update notice) need a `.sig` beside each installer
+  and a `latest.json` manifest on the GitHub release. Both are produced by the maintainer over the
+  collected `release/` folder (`just update-manifest`, i.e. `scripts/make-update-manifest.sh`) with a
+  signing key that is not in the repository — a local build works without it, it just cannot be
+  offered as an update.
 - The naming logic lives in `scripts/collect-release.*` and is shared by local builds and the GitHub
   release workflow (`.github/workflows/release.yml`), so filenames match everywhere.
 - `just build-android` drops its APK into the same folder as `KiteGC_Android_<abi>_<version>_installer.apk`
@@ -297,13 +348,12 @@ are not run in CI.
 
 These are things to know when **running** the packaged Linux app (not build errors):
 
-- **Three helpers are fetched at runtime, not bundled**: `blackbox_decode` (Blackbox import shells out
-  to INAV's decoder), `ffmpeg` (the classic video image path) and `mediamtx` (the classic RTSP → WebRTC
-  engine) — the native RTSP client needs neither. Kite
-  looks for each next to the executable, then in its own app-data `bin/` directory, then on `PATH`, and
-  offers to download it on first use. Each failure is local to its feature — without `blackbox_decode`
-  only Blackbox import is affected, live recording and replay still work. On macOS `ffmpeg` is bundled
-  as a universal sidecar instead; the other two are fetched the same way as everywhere else.
+- **Two helpers are fetched at runtime, not bundled**: `ffmpeg` (the classic video image path) and
+  `mediamtx` (the classic RTSP → WebRTC engine) — the native RTSP client needs neither. Kite looks for
+  each next to the executable, then in its own app-data `bin/` directory, then on `PATH`, and offers to
+  download it on first use. Each failure is local to its feature. On macOS `ffmpeg` is bundled as a
+  universal sidecar instead; `mediamtx` is fetched the same way as everywhere else. INAV Blackbox logs
+  are decoded in-process — no helper.
 - **Serial permissions:** add yourself to the `dialout` group (`sudo usermod -aG dialout "$USER"`, then
   log out/in). Some distros use `uucp`.
 - **Blank 3D globe / WebView (WebKitGTK):** the 3D map runs in WebKitGTK, which is more fragile than

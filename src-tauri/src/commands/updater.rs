@@ -1,0 +1,226 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
+//! "Update and Restart": installed copies go through the Tauri updater, pointed at the accepted release's
+//! own `latest.json` so the release shown and the one installed can never differ; portable copies swap
+//! their binary (Windows can only rename a running exe → `<exe>.old`). Mobile has no in-app updating.
+
+use serde::Serialize;
+use tauri::AppHandle;
+
+const PROGRESS_EVENT: &str = "update-progress";
+const REPO: &str = "b14ckyy/Kite-GC";
+
+/// How the running copy can be updated — drives which button the update dialog shows.
+#[derive(Serialize, Clone, Copy, PartialEq)]
+#[serde(rename_all = "lowercase")]
+#[allow(dead_code)] // each build constructs only its own variant
+pub enum UpdateKind {
+    /// Installed via a package the Tauri updater handles.
+    Installer,
+    /// Portable ZIP — own binary swap.
+    Portable,
+    /// Installed by a store (Google Play, the App Store) — the store updates it; link to the listing.
+    Store,
+    /// Android APK installed by hand — link to the GitHub release page.
+    Sideload,
+}
+
+/// Download / install progress, emitted as `update-progress` while `install_update` runs.
+#[derive(Serialize, Clone)]
+pub struct UpdateProgress {
+    pub downloaded: u64,
+    /// Content length when the server sent one.
+    pub total: Option<u64>,
+    /// `download` while bytes arrive, `install` once the package is being applied.
+    pub phase: &'static str,
+}
+
+#[tauri::command]
+pub fn update_kind() -> UpdateKind {
+    #[cfg(target_os = "ios")]
+    {
+        UpdateKind::Store
+    }
+    #[cfg(target_os = "android")]
+    {
+        // A failed lookup counts as an APK: the notice keeps working, with the release page.
+        let play = crate::android::install_source::is_play_store().unwrap_or_else(|e| {
+            log::warn!("Update: install source lookup failed, treating as APK: {e}");
+            false
+        });
+        log::info!("Update: installed {}", if play { "from Google Play" } else { "as APK" });
+        if play {
+            UpdateKind::Store
+        } else {
+            UpdateKind::Sideload
+        }
+    }
+    #[cfg(desktop)]
+    {
+        if crate::is_portable() {
+            UpdateKind::Portable
+        } else {
+            UpdateKind::Installer
+        }
+    }
+}
+
+/// Install release `tag` and relaunch; does not return on success (Windows: the installer relaunches,
+/// elsewhere `AppHandle::restart`). Errors come back as plain text for the dialog.
+#[tauri::command(async)]
+pub async fn install_update(app: AppHandle, tag: String, version: String) -> Result<(), String> {
+    #[cfg(mobile)]
+    {
+        let _ = (app, tag, version);
+        Err("In-app updates are not available on this platform".to_string())
+    }
+    #[cfg(desktop)]
+    {
+        log::info!("Update: installing {tag} ({})", if crate::is_portable() { "portable" } else { "installer" });
+        if crate::is_portable() {
+            install_portable(&app, &tag, &version).await
+        } else {
+            install_bundle(&app, &tag).await
+        }
+    }
+}
+
+#[cfg(desktop)]
+fn emit_progress(app: &AppHandle, downloaded: u64, total: Option<u64>, phase: &'static str) {
+    use tauri::Emitter;
+    let _ = app.emit(PROGRESS_EVENT, UpdateProgress { downloaded, total, phase });
+}
+
+/// Installed copy → the Tauri updater against the release's own manifest.
+#[cfg(desktop)]
+async fn install_bundle(app: &AppHandle, tag: &str) -> Result<(), String> {
+    use tauri_plugin_updater::UpdaterExt;
+
+    let manifest = tauri::Url::parse(&format!("https://github.com/{REPO}/releases/download/{tag}/latest.json"))
+        .map_err(|e| format!("Bad manifest URL: {e}"))?;
+    let updater = app
+        .updater_builder()
+        .endpoints(vec![manifest])
+        .map_err(|e| format!("Updater setup failed: {e}"))?
+        // The plugin's clients default to `tauri-plugin-updater/<ver>`; a request header wins over
+        // that default, for the manifest check and the package download alike.
+        .header("User-Agent", crate::user_agent::user_agent("update"))
+        .map_err(|e| format!("Updater setup failed: {e}"))?
+        .build()
+        .map_err(|e| format!("Updater setup failed: {e}"))?;
+    let update = updater
+        .check()
+        .await
+        .map_err(|e| format!("Update manifest failed: {e}"))?
+        .ok_or_else(|| format!("Release {tag} carries no update package for this platform"))?;
+
+    let mut downloaded = 0u64;
+    let on_chunk = {
+        let app = app.clone();
+        move |chunk: usize, total: Option<u64>| {
+            downloaded += chunk as u64;
+            emit_progress(&app, downloaded, total, "download");
+        }
+    };
+    let on_finished = {
+        let app = app.clone();
+        move || emit_progress(&app, 0, None, "install")
+    };
+    update
+        .download_and_install(on_chunk, on_finished)
+        .await
+        .map_err(|e| format!("Update failed: {e}"))?;
+    log::info!("Update: {tag} installed, restarting");
+    app.restart()
+}
+
+/// Portable copy → download the portable ZIP and swap the binary.
+#[cfg(desktop)]
+async fn install_portable(app: &AppHandle, tag: &str, version: &str) -> Result<(), String> {
+    use std::io::Read;
+
+    let (os, bin) = if cfg!(windows) {
+        ("Windows", "kite-gc.exe")
+    } else if cfg!(target_os = "linux") {
+        ("Linux", "kite-gc")
+    } else {
+        return Err("Portable updates are not available on this platform".to_string());
+    };
+    let arch = match std::env::consts::ARCH {
+        "x86_64" => "x64",
+        "aarch64" => "arm64",
+        other => return Err(format!("No portable build for {other}")),
+    };
+    let exe = std::env::current_exe().map_err(|e| format!("Cannot locate the running executable: {e}"))?;
+    let dir = exe.parent().ok_or("Cannot locate the running executable")?.to_path_buf();
+
+    // Same unified name the collect scripts produce (KiteGC_<OS>_<Arch>_<Version>_portable.zip).
+    let asset = format!("KiteGC_{os}_{arch}_{version}_portable.zip");
+    let url = crate::github_release::asset_url(REPO, tag, &asset);
+    let client = reqwest::Client::builder()
+        .user_agent(crate::user_agent::user_agent("update"))
+        .build()
+        .map_err(|e| format!("HTTP client error: {e}"))?;
+    let mut resp = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("Download failed: {e}"))?
+        .error_for_status()
+        .map_err(|e| format!("Download failed: {e}"))?;
+    let total = resp.content_length();
+    let mut archive = Vec::with_capacity(total.unwrap_or(0) as usize);
+    while let Some(chunk) = resp.chunk().await.map_err(|e| format!("Download failed: {e}"))? {
+        archive.extend_from_slice(&chunk);
+        emit_progress(app, archive.len() as u64, total, "download");
+    }
+    emit_progress(app, archive.len() as u64, total, "install");
+
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(archive)).map_err(|e| format!("Bad portable archive: {e}"))?;
+    let mut entry = zip.by_name(bin).map_err(|e| format!("Bad portable archive: {e}"))?;
+    let mut binary = Vec::with_capacity(entry.size() as usize);
+    entry.read_to_end(&mut binary).map_err(|e| format!("Bad portable archive: {e}"))?;
+    drop(entry);
+
+    // Write beside the running file, then swap by rename (atomic on both platforms; the only way to
+    // replace a running executable on Windows).
+    let fresh = dir.join(format!("{bin}.new"));
+    std::fs::write(&fresh, &binary).map_err(|e| format!("Cannot write the new executable: {e}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&fresh, std::fs::Permissions::from_mode(0o755));
+    }
+    #[cfg(windows)]
+    {
+        let stale = stale_path(&exe);
+        let _ = std::fs::remove_file(&stale);
+        std::fs::rename(&exe, &stale).map_err(|e| format!("Cannot move the running executable aside: {e}"))?;
+    }
+    std::fs::rename(&fresh, &exe).map_err(|e| format!("Cannot replace the executable: {e}"))?;
+    log::info!("Update: portable {tag} in place, restarting");
+    app.restart()
+}
+
+/// `<exe>.old` — where the Windows portable swap parks the previous executable.
+#[cfg(desktop)]
+fn stale_path(exe: &std::path::Path) -> std::path::PathBuf {
+    let name = exe.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    exe.with_file_name(format!("{name}.old"))
+}
+
+/// Delete the previous executable a portable update left behind. Called at startup; if the old process
+/// has not fully exited yet the delete fails silently and the next start gets it.
+#[cfg(desktop)]
+pub fn remove_stale_executable() {
+    if let Ok(exe) = std::env::current_exe() {
+        let stale = stale_path(&exe);
+        if stale.exists() {
+            match std::fs::remove_file(&stale) {
+                Ok(()) => log::info!("Update: removed {}", stale.display()),
+                Err(e) => log::debug!("Update: {} not removed yet: {e}", stale.display()),
+            }
+        }
+    }
+}

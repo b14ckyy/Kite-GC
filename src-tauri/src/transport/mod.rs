@@ -1,21 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Transport Module
-// Abstracts communication transports: Serial, TCP/UDP, BLE, etc.
-//
-// Two-layer architecture:
-// 1. ByteTransport — protocol-agnostic byte-level I/O (read/write/close)
-// 2. Protocol layers (MspTransport, MavlinkHandler) — built on top of ByteTransport
+// Transports: `ByteTransport` (protocol-agnostic byte I/O) for serial / TCP / UDP / BLE, with the
+// protocol layers (MspTransport, MAVLink handler) on top.
 
-// Platform seam. Each transport module exists on EVERY target under one name, and this block is the
-// only place that picks an implementation — callers use `transport::serial` / `transport::ble` and
-// never carry a target cfg of their own (the same way video/ keeps its per-OS backends internal).
-//   serial: serialport-backed on desktop. iOS has no serial access of any kind, so it gets a
-//           stand-in with the same surface — opens fail cleanly, the port list is empty. Android
-//           talks USB serial through the platform's USB Host API (UsbSerial.kt + the JNI shim).
-//   ble:    btleplug on desktop, CoreBluetooth (objc2) on iOS, the platform GATT stack via a
-//           Kotlin bridge on Android (BleSerial.kt) — same public surface on all three.
+// Platform seam: every transport module exists on EVERY target under one name, chosen only here — callers
+// never carry a target cfg. iOS gets a serial stand-in (opens fail, empty list); Android serial is USB
+// Host (UsbSerial.kt); BLE is btleplug / CoreBluetooth / BleSerial.kt behind one surface.
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod serial;
 #[cfg(target_os = "ios")]
@@ -25,6 +16,8 @@ pub mod serial;
 #[path = "serial_android.rs"]
 pub mod serial;
 pub mod tcp;
+/// MSP over MAVLink TUNNEL (INAV 10.0+) — a byte transport riding on the running MAVLink handler.
+pub mod tunnel;
 pub mod udp;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod ble;
@@ -40,8 +33,6 @@ pub mod ble_profiles;
 use std::fmt;
 
 use crate::msp::MspMessage;
-
-// ── Transport Error ──────────────────────────────────────────────
 
 /// Error type for byte-level transport operations
 #[derive(Debug)]
@@ -75,18 +66,60 @@ impl From<std::io::Error> for TransportError {
             std::io::ErrorKind::ConnectionReset
             | std::io::ErrorKind::ConnectionAborted
             | std::io::ErrorKind::BrokenPipe
+            // ENOTCONN: what macOS answers on every read of a TCP socket whose peer is gone once a
+            // write has failed with EPIPE. Other systems report the same loss as a reset or as EOF.
+            | std::io::ErrorKind::NotConnected
             | std::io::ErrorKind::UnexpectedEof => TransportError::Disconnected,
             _ => TransportError::Io(e.to_string()),
         }
     }
 }
 
-// ── ByteTransport Trait ──────────────────────────────────────────
+/// Keeps a read loop from flooding the log and spinning on a read error that is not a known link loss —
+/// a broken socket fails at once, on every pass. Later errors are logged at most every `LOG_INTERVAL`, and
+/// the loop pauses only while errors follow back to back, so one odd error on a working link costs nothing.
+pub struct ReadErrorThrottle {
+    last_error: Option<std::time::Instant>,
+    last_log: Option<std::time::Instant>,
+    unreported: u64,
+}
 
-/// Protocol-agnostic byte-level transport.
-///
-/// All communication hardware (Serial, TCP, UDP, BLE) implements this trait.
-/// Protocol layers (MSP, MAVLink) are built on top.
+impl ReadErrorThrottle {
+    const LOG_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
+    /// Errors closer together than this come from a read that fails without waiting.
+    const RAPID: std::time::Duration = std::time::Duration::from_millis(10);
+    const BACKOFF: std::time::Duration = std::time::Duration::from_millis(50);
+
+    pub fn new() -> Self {
+        Self { last_error: None, last_log: None, unreported: 0 }
+    }
+
+    /// Account for one read error: returns the line to log now, if any, and whether to pause.
+    fn note(&mut self, what: &str, e: &TransportError, now: std::time::Instant) -> (Option<String>, bool) {
+        let rapid = self.last_error.map_or(false, |t| now.duration_since(t) < Self::RAPID);
+        self.last_error = Some(now);
+        self.unreported += 1;
+        let due = self.last_log.map_or(true, |t| now.duration_since(t) >= Self::LOG_INTERVAL);
+        let line = due.then(|| {
+            let n = std::mem::take(&mut self.unreported);
+            self.last_log = Some(now);
+            if n > 1 { format!("{what}: {e} ({n} since the last report)") } else { format!("{what}: {e}") }
+        });
+        (line, rapid)
+    }
+
+    /// Call from the read loop's catch-all error arm. `what` leads the log line ("MAVLink read error").
+    pub fn on_error(&mut self, what: &str, e: &TransportError) {
+        let (line, pause) = self.note(what, e, std::time::Instant::now());
+        if let Some(line) = line {
+            log::warn!("{line}");
+        }
+        if pause {
+            std::thread::sleep(Self::BACKOFF);
+        }
+    }
+}
+
 pub trait ByteTransport: Send {
     /// Read bytes into buffer. Returns number of bytes read.
     /// May return 0 on timeout (non-fatal) or TransportError on failure.
@@ -95,16 +128,20 @@ pub trait ByteTransport: Send {
     /// Write all bytes to the transport.
     fn write_bytes(&mut self, data: &[u8]) -> Result<(), TransportError>;
 
-    /// Set the read/recv timeout for subsequent `read_bytes` calls. Lets a read-driven protocol loop
-    /// tighten its cadence on demand: the MAVLink handler shortens it while streaming RC overrides so the
-    /// send rate isn't quantized by the (deliberately coarse) idle read timeout. Default: no-op — the
-    /// transport keeps its built-in timeout.
+    /// Set the read timeout for later `read_bytes` calls, e.g. shortened by the MAVLink handler while
+    /// streaming RC overrides. Default: no-op.
     fn set_read_timeout(&mut self, timeout: std::time::Duration) {
         let _ = timeout;
     }
 
     /// Human-readable description (for logging)
     fn description(&self) -> String;
+
+    /// Optional transport-side context worth showing next to a protocol failure (e.g. "the local UDP
+    /// port was taken by another program"). Default: nothing to add.
+    fn diagnostic_note(&self) -> Option<String> {
+        None
+    }
 }
 
 // ── Legacy Transport Trait ───────────────────────────────────────
@@ -123,10 +160,8 @@ pub trait Transport: Send {
         self.msp_request(code, payload)
     }
 
-    /// Send an MSP v2 frame **without** waiting for the reply (fire-and-forget). Used for the RC
-    /// injection stream (SET_RAW_RC / SET_AUX_RC), where blocking on each ACK would jitter the RC rate,
-    /// and by the pipelined scheduler for every request (the reply is matched later in `poll_incoming`).
-    /// Default: delegate to `msp_request` and drop the reply.
+    /// Send an MSP v2 frame WITHOUT waiting for the reply: the RC stream (blocking per ACK jitters the rate)
+    /// and the pipelined scheduler (replies matched in `poll_incoming`). Default: `msp_request`, reply dropped.
     fn msp_send(&mut self, code: u16, payload: &[u8]) -> Result<(), String> {
         self.msp_request(code, payload).map(|_| ())
     }
@@ -138,11 +173,8 @@ pub trait Transport: Send {
         self.msp_send(code, payload)
     }
 
-    /// Read whatever bytes are currently available (one read, bounded by the transport's read timeout),
-    /// feed them through the MSP parser, and return every complete frame decoded — solicited *and*
-    /// unsolicited. The **pipelined** scheduler owns response↔request matching (by MSP code), so it sends
-    /// requests fire-and-forget via `msp_send` and drains replies here, keeping many requests in flight
-    /// instead of blocking one at a time in `msp_request`. Default: none (non-MSP transports).
+    /// Decode every complete frame among the currently available bytes (one bounded read), solicited or not
+    /// — the pipelined scheduler matches replies to requests by code. Default: none (non-MSP transports).
     fn poll_incoming(&mut self) -> Result<Vec<MspMessage>, String> {
         Ok(Vec::new())
     }
@@ -157,20 +189,22 @@ pub trait Transport: Send {
     /// Human-readable description of this transport (for logging)
     fn description(&self) -> String;
 
-    /// True once a **fatal** transport failure has occurred — the device is gone (write failed, or a
-    /// `Disconnected`/IO read error), as opposed to a mere response timeout (an OTA stall, where the
-    /// device is still attached). The scheduler tears the connection down on this; it never reacts to
-    /// timeouts. Default `false` for transports that don't track it.
+    /// True once a FATAL transport failure occurred (device gone), as opposed to a response timeout (OTA
+    /// stall, device still attached). The scheduler tears down only on this, never on timeouts.
     fn is_connection_lost(&self) -> bool {
         false
     }
 
-    /// The OS error that caused `is_connection_lost` to flip, verbatim. The distinction it carries is the
-    /// one a log reader needs and cannot otherwise get: a removed device ("device is not connected") reads
-    /// completely differently from a recoverable comm error we currently treat as fatal anyway (Windows
-    /// `ERROR_OPERATION_ABORTED` after a framing/overrun error). `None` before any failure.
+    /// The OS error behind `is_connection_lost`, verbatim — a removed device reads differently from a
+    /// recoverable comm error treated as fatal (Windows `ERROR_OPERATION_ABORTED`).
     fn connection_lost_reason(&self) -> Option<String> {
         None
+    }
+
+    /// MSP frames dropped on a checksum mismatch so far (the MSP-tunnel Debug Monitor tab shows it —
+    /// a lost TUNNEL chunk surfaces exactly this way). Default 0.
+    fn checksum_errors(&self) -> u32 {
+        0
     }
 }
 
@@ -199,6 +233,63 @@ impl fmt::Display for TransportType {
             TransportType::Tcp => write!(f, "TCP"),
             TransportType::Udp => write!(f, "UDP"),
             TransportType::Ble => write!(f, "BLE"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_closed_socket_is_a_lost_link_whatever_the_os_calls_it() {
+        for kind in [
+            std::io::ErrorKind::ConnectionReset,
+            std::io::ErrorKind::ConnectionAborted,
+            std::io::ErrorKind::BrokenPipe,
+            std::io::ErrorKind::NotConnected,
+            std::io::ErrorKind::UnexpectedEof,
+        ] {
+            let e = TransportError::from(std::io::Error::from(kind));
+            assert!(matches!(e, TransportError::Disconnected), "{kind:?} -> {e}");
+        }
+    }
+
+    #[test]
+    fn a_read_timeout_is_not_a_lost_link() {
+        for kind in [std::io::ErrorKind::TimedOut, std::io::ErrorKind::WouldBlock] {
+            assert!(matches!(TransportError::from(std::io::Error::from(kind)), TransportError::Timeout));
+        }
+    }
+
+    #[test]
+    fn a_repeating_read_error_is_logged_once_per_interval_and_pauses_the_loop() {
+        let mut t = ReadErrorThrottle::new();
+        let e = TransportError::Io("boom".into());
+        let t0 = std::time::Instant::now();
+        // The first error: logged at once, no pause.
+        let (line, pause) = t.note("read error", &e, t0);
+        assert_eq!(line.as_deref(), Some("read error: Transport I/O error: boom"));
+        assert!(!pause);
+        // A burst right behind it: silent, and the loop pauses.
+        for i in 1..=1000u64 {
+            let (line, pause) = t.note("read error", &e, t0 + std::time::Duration::from_micros(i));
+            assert!(line.is_none());
+            assert!(pause);
+        }
+        // After the interval: one line with the count.
+        let (line, _) = t.note("read error", &e, t0 + std::time::Duration::from_secs(6));
+        assert_eq!(line.as_deref(), Some("read error: Transport I/O error: boom (1001 since the last report)"));
+    }
+
+    #[test]
+    fn a_single_read_error_now_and_then_does_not_pause_the_loop() {
+        let mut t = ReadErrorThrottle::new();
+        let e = TransportError::Io("odd".into());
+        let t0 = std::time::Instant::now();
+        for i in 0..5u64 {
+            let (_, pause) = t.note("read error", &e, t0 + std::time::Duration::from_millis(200 * i));
+            assert!(!pause);
         }
     }
 }

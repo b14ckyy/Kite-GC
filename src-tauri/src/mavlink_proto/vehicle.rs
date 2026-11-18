@@ -1,14 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-//! HEARTBEAT `autopilot` + `mavtype` → (fc_variant, platform_type), shared by the live handshake and
-//! the tlog importer. It lived in both and drifted, so the same vehicle was identified differently
-//! live and after import.
-//!
-//! `fc_variant` is not a label: `flightmode::classify_ardupilot` picks the mode table from it (looks
-//! for "plane", else Copter), and the tables disagree on nearly every number — mode 19 is QLOITER on
-//! a Plane and AVOID_ADSB on a Copter. A wrong variant yields a plausible wrong mode name, not a
-//! missing one.
+//! HEARTBEAT `autopilot` + `mavtype` → (fc_variant, platform_type), shared by the live handshake and the
+//! tlog importer. `fc_variant` is not a label: it picks the ArduPilot mode table, and a wrong variant
+//! yields a plausible WRONG mode name (mode 19: QLOITER on a Plane, AVOID_ADSB on a Copter).
 
 use ::mavlink::ardupilotmega::{MavAutopilot, MavType};
 
@@ -32,10 +27,8 @@ fn is_vtol(t: MavType) -> bool {
     matches!(t as u8, 19..=25)
 }
 
-/// A QuadPlane runs ArduPlane and uses the Plane mode table. Some report `MAV_TYPE_FIXED_WING` (those
-/// the `Q_ENABLE` probe in `commands/connection.rs` catches), but ArduPlane reports the specific VTOL
-/// type when the frame class says so — and those never reached the probe, because it only runs for
-/// fixed-wing. That was issue #40.
+/// A QuadPlane runs ArduPlane and uses the Plane mode table — also when ArduPlane reports a specific VTOL
+/// MAV_TYPE instead of `MAV_TYPE_FIXED_WING` (the `Q_ENABLE` probe only runs for fixed-wing).
 fn ardupilot_variant(t: MavType) -> &'static str {
     match t {
         MavType::MAV_TYPE_FIXED_WING => "ArduPlane",
@@ -100,7 +93,7 @@ mod tests {
         }
     }
 
-    /// Issue #40 end to end: the reported tiltrotor sat in custom_mode 19 and Kite showed "Avoid ADSB".
+    /// A VTOL tiltrotor in custom_mode 19 is QLOITER (Plane table), not "Avoid ADSB".
     #[test]
     fn vtol_mode_19_resolves_as_qloiter_not_avoid_adsb() {
         let (variant, _) = identify(
@@ -110,8 +103,7 @@ mod tests {
         assert_eq!(crate::flightmode::classify_mavlink(19, &variant).primary, "qloiter");
     }
 
-    /// Multirotors used to map to platform 2, which is *Helicopter* in the enum — so every ArduPilot
-    /// and PX4 copter was labelled a helicopter and fell through to the generic arrow.
+    /// Multirotors map to the multirotor platform, not to 2 (*Helicopter* in the enum).
     #[test]
     fn multirotors_are_multirotors() {
         for t in [
@@ -132,8 +124,7 @@ mod tests {
         assert_eq!(identify(ap, MavType::MAV_TYPE_HELICOPTER).1, platform::HELICOPTER);
     }
 
-    /// Rover/sub used to emit platform 10 / 12, which are not in the enum — the logbook showed
-    /// "Unknown (10)". A boat was identified as ArduCopter.
+    /// Rover / boat / sub map to enum values (not 10 / 12), and a boat is ArduRover, not ArduCopter.
     #[test]
     fn surface_vehicles_use_the_rover_table_and_real_platform_types() {
         let ap = MavAutopilot::MAV_AUTOPILOT_ARDUPILOTMEGA;

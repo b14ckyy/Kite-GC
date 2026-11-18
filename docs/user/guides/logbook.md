@@ -13,6 +13,8 @@ background and splits it into flights by **arm → disarm**. When a flight ends 
 **post-flight summary** where you can:
 
 - **Save or discard** the flight,
+- check the **vehicle** the flight was recognised as, or pick another one or none (see
+  **[Vehicles](vehicles.md#linking-flights)**),
 - enter the **battery** you flew (one or several serials, comma-separated — see **[Batteries](batteries.md)**),
 - add **notes**, and
 - **link the mission** that was loaded.
@@ -29,7 +31,9 @@ The post-flight summary — save or discard, link the battery (one or several se
 ## The flight list
 
 Flights are grouped into a collapsible tree you can re-organise with the **sort** selector — by
-**aircraft**, **location** and **date** in the order you prefer — and narrow with the **search** box.
+**aircraft**, **location** and **date** in the order you prefer — and narrow with the **search** box
+(it looks in the aircraft name, location, date and notes; a flight number such as `#170` finds exactly
+that flight).
 Each entry shows the essentials (date, aircraft, location, duration, distance); pick one to open its
 details.
 
@@ -38,7 +42,11 @@ details.
 The detail panel shows everything about the selected flight:
 
 - **Stats** — duration, max altitude / speed / distance, and more.
-- **Aircraft** — the craft name, soft-linked to its entry in the **[Vehicle library](vehicles.md)**.
+- **Craft** — the craft name the flight was recorded with; the ✎ button corrects it without changing
+  the vehicle link.
+- **Vehicle** — the **[Vehicle library](vehicles.md)** entry the flight belongs to (a click opens it).
+  The ✎ button picks another vehicle or none; a flight without one offers **Add vehicle**, which creates
+  the vehicle pre-filled from the flight and links the flight to it.
 - **Battery** — the linked pack(s), each as its own chip (open it in the Battery Manager, or shown as
   *not in library*); edit to add or change serials. See **[Batteries](batteries.md)**.
 - **Mission** — the linked mission, openable in the Mission Manager.
@@ -111,22 +119,31 @@ Use **Import** to pull in logs from outside Kite (one file or a batch). Supporte
 
 | Format | From |
 |---|---|
-| **INAV Blackbox** (`.bbl`, `.txt`) | INAV onboard flash (`.bbl`) or SD-card (`.txt`) blackbox |
-| **ArduPilot Dataflash** (`.bin`) | ArduPilot onboard logs |
+| **INAV Blackbox** (`.bbl`, `.bfl`, `.txt`) | INAV onboard flash (`.bbl` / `.bfl`) or SD-card (`.txt`) blackbox |
+| **ArduPilot Dataflash** (`.bin`) | ArduPilot (4.1 or newer) onboard logs |
 | **PX4 ULog** (`.ulg`) | PX4 onboard flash / SD-card logs |
 | **MAVLink telemetry** (`.tlog`) | a MAVLink ground-station recording |
 | **MWPTools raw-MSP** (`.rawmsp`) | mwp's raw telemetry capture |
 | **Kite flight** (`.kflight`) | a flight exported from another Kite install |
 
-A progress bar tracks the import. INAV Blackbox needs the **`blackbox_decode`** helper, which Kite
-fetches automatically the first time you import one. A `.bbl` pulled from the flight controller's
-flash usually holds **several flights** — one per arm / disarm cycle. Kite detects that and offers to
-import them all, each as its own logbook entry. Imported telemetry logs (`.tlog` / `.rawmsp`) are
+A progress bar tracks the import. Kite decodes INAV Blackbox logs itself and accepts only those: a
+Blackbox log written by another firmware (Betaflight, for example) is refused with a message that
+names the firmware. A `.bbl` pulled from the flight controller's flash usually holds **several
+flights** — one per arm / disarm cycle. Kite detects that and offers to import them all, each as its
+own logbook entry. A log in the file that cannot be read does not stop the others: Kite imports the
+rest and then lists which logs failed and why. Imported telemetry logs (`.tlog` / `.rawmsp`) are
 treated as telemetry recordings and **split into separate flights on the arm / disarm markers** in the
 log, the same way a live recording is.
 
 PX4 ULog note: PX4 doesn't log a throttle *output*, so a replayed `.ulg` flight shows the FC's
 **thrust setpoint** as the throttle value.
+
+!!! note "On Android, iPhone and iPad"
+    The mobile app imports **`.kflight`**, **`.tlog`** and **`.rawmsp`** files only. Onboard logs —
+    INAV Blackbox, ArduPilot Dataflash, PX4 ULog — are imported on a desktop install and moved over as
+    `.kflight`. The mobile database keeps no original log files (an imported `.kflight` brings the
+    flight, its track and its records, but not the stored original), so **HI-RES** replay and the
+    original-log export are desktop features, and so is the **Open** button.
 
 ## Exporting
 
@@ -138,6 +155,16 @@ PX4 ULog note: PX4 doesn't log a throttle *output*, so a replayed `.ulg` flight 
   straight in (not kept as a file), so there's nothing to re-export for those.
 - **Track** — export a flight's path as **KMZ / KML** (Google Earth), **GPX** or **CSV**.
 
+The proposed file name of a single flight is its vehicle name and location where known, followed by the
+flight's date and local time — `Flight_<number>` stands in when neither is known.
+
+!!! note "On Android"
+    An export opens the system **share sheet** instead of a save dialog: send the file to another
+    device or person, a cloud drive, or a file manager. The file keeps the proposed name. From
+    Android 14 the sheet also offers **Save to device**, which opens the system's save dialog. On
+    older versions, share to a file manager app to keep the file on the device — the system's own
+    Files app is not offered as a share target on every device.
+
 ## The database, updates and the automatic backup
 
 All flights live in a single SQLite database (`flights.db`, folder configurable in Settings). When a
@@ -146,6 +173,21 @@ database file (`flights.pre-migration-backup.db`) — automatically, before anyt
 the **latest** backup is kept (with blackbox logs the file can be several GB), and Settings shows it
 with its size and a **Delete** button once it exists. To keep a copy permanently, move the file
 somewhere else yourself.
+
+While the backup and the upgrade run, Kite shows a notice — with a large database that takes several
+minutes; do not close Kite during it. It happens once, at the first start of the new version.
+
+After an upgrade Kite **asks what to do with the backup** and names its size: **Delete now**, **Keep**
+(it is not asked about again) or **Remind me in 14 days** (the question comes back at the first start
+after that). On Windows, Linux and macOS *Delete* moves the file to the recycle bin / trash where the
+drive has one; on a drive without (USB flash drives, on Linux every drive other than the one with your
+home folder) it is deleted right away. Kite never removes the backup on its own; only the next upgrade
+replaces it with a new one.
+
+**Choosing another database folder** that already holds a database in an older format asks first
+whether to upgrade it — decline, and the folder setting stays as it was. A database written by a newer
+Kite is refused the same way. The folder cannot be changed while a vehicle is connected. Switching the folder closes the flight that is open in the logbook and
+forgets which library mission the map mission came from: both belong to the previous database.
 
 If you ever **downgrade** Kite after such an upgrade, the older version refuses to touch the newer
 database: the logbook shows a notice (and the database stays untouched) until you either install the

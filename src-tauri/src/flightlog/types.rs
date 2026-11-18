@@ -6,26 +6,34 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-/// Settings controlling flight recording behavior.
-/// Passed from frontend on connect.
+/// Settings controlling flight recording, passed from the frontend on connect.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(Default)]
 pub struct FlightLogSettings {
-    /// Whether flight recording is enabled
     pub enabled: bool,
-    /// Whether to write flights/telemetry to the database
     pub db_enabled: bool,
     /// Custom database directory (empty string = default AppData)
     pub db_path: String,
     /// Custom raw-log directory (empty string = default Documents/KiteGC). Separate from `db_path`.
     pub raw_log_path: String,
-    /// Whether to also write raw text log files
     pub raw_enabled: bool,
     /// Continuous raw logging: start recording on connect, not just on arm.
     /// Raw logs include pre-arm data; DB still only records armed segments.
     pub raw_always: bool,
 }
 
+
+/// One answer of the weather service as stored with a flight (row in `weather_records`).
+#[derive(Debug, Clone, Serialize)]
+pub struct WeatherRecord {
+    /// Session time the answer reached the recorder.
+    pub timestamp_ms: i64,
+    pub lat: Option<f64>,
+    pub lon: Option<f64>,
+    pub source: Option<String>,
+    /// The widget's `WindAloft`, as JSON text.
+    pub data_json: String,
+}
 
 /// A single recorded flight (row in `flights` table)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,29 +50,24 @@ pub struct Flight {
     pub platform_type: u8,
     /// Protocol used (e.g. "MSP")
     pub protocol: String,
-    /// Start position
     pub start_lat: Option<f64>,
     pub start_lon: Option<f64>,
-    /// Reverse-geocoded location name
     pub location_name: Option<String>,
-    /// Weather at flight start
     pub weather_temp_c: Option<f64>,
     pub weather_wind_ms: Option<f64>,
     pub weather_wind_deg: Option<i32>,
     pub weather_desc: Option<String>,
-    /// Flight statistics
     pub max_alt_m: Option<f64>,
     pub max_speed_ms: Option<f64>,
     pub max_distance_m: Option<f64>,
     pub total_distance_m: Option<f64>,
     pub battery_used_mah: Option<u32>,
-    /// User notes
     pub notes: Option<String>,
     /// ID of the linked flight (e.g. live ↔ blackbox association)
     pub linked_flight_id: Option<i64>,
-    /// Pilot / operator name (manually editable; future login system can prefill)
+    /// Pilot / operator name (manually editable)
     pub pilot_name: Option<String>,
-    /// Pilot / operator ID (manually editable; future login system can prefill)
+    /// Pilot / operator ID (manually editable)
     pub pilot_id: Option<String>,
     /// Serial of the battery pack flown (soft link — resolved to a `battery_packs` row by
     /// serial match at read time; may reference a serial with no pack row → "not in library")
@@ -73,16 +76,71 @@ pub struct Flight {
     /// `start_time` is always true UTC; this offset shifts it to flight-local time for display.
     /// `None` (old rows / no GPS) → display in UTC.
     pub utc_offset_min: Option<i32>,
-    /// Hardware id of the FC that flew (MSP_UID / MAVLink AUTOPILOT_VERSION uid). Informational only —
-    /// flights link to vehicles by craft name, never by this. `None` for imports and passive telemetry.
+    /// Hardware id of the FC that flew (MSP_UID / MAVLink AUTOPILOT_VERSION uid2), as flown — never
+    /// rewritten. `None` for imports, passive telemetry and the known synthetic ids (INAV SITL, an all-zero
+    /// id — see `msp::hardware_uid`).
     #[serde(default)]
     pub fc_uid: Option<String>,
+    /// Group flight this flight is a member of (`flight_groups.id`, schema v20). `None` = a single
+    /// flight. Changeable (unlink / relink); the group id itself never changes.
+    #[serde(default)]
+    pub group_id: Option<String>,
+    /// Library vehicle of the flight (`vehicles.id`, `ON DELETE SET NULL`), resolved on store unless set
+    /// explicitly (`db::resolve_vehicle_id`); changeable afterwards. `None` = not in the library.
+    #[serde(default)]
+    pub vehicle_id: Option<i64>,
 }
 
-/// A reusable mission stored in the library (row in `missions` table).
-/// Identity is `content_hash` (the same hash the frontend provenance uses), so the
-/// same mission is stored once and shared across any number of flights.
-/// All geometry metadata is computed by the frontend at save time.
+/// A group flight (row in `flight_groups`, schema v20): the header that ties the member flights of a
+/// multi-vehicle flight together — time span, place, timezone, weather, notes; no track, no telemetry,
+/// no battery, no vehicle. Aggregates (member count, sums) are derived on query, never stored.
+#[allow(dead_code)] // group flights: callers arrive with GROUP_FLIGHTS.md steps 3-7
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FlightGroup {
+    /// Immutable id (16 hex chars, a hash of the anchor's start time + position).
+    pub id: String,
+    /// Group start = the earliest arm among the member recordings (true UTC, like `Flight`).
+    pub start_time: DateTime<Utc>,
+    pub end_time: Option<DateTime<Utc>>,
+    /// Local UTC offset (minutes, east-positive) at the flight location (ADR-048).
+    pub utc_offset_min: Option<i32>,
+    /// Anchor model's position at its arm.
+    pub start_lat: Option<f64>,
+    pub start_lon: Option<f64>,
+    /// Anchor model's GPS altitude (MSL) at its arm.
+    pub start_alt_m: Option<f64>,
+    pub location_name: Option<String>,
+    pub weather_temp_c: Option<f64>,
+    pub weather_wind_ms: Option<f64>,
+    pub weather_wind_deg: Option<i32>,
+    pub weather_desc: Option<String>,
+    pub notes: Option<String>,
+    /// Set by the database on insert (ignored by `insert_flight_group`).
+    #[serde(default)]
+    pub created_at: String,
+}
+
+/// A timeline event of a flight (row in `flight_events`, schema v20) — arm / disarm in Phase 1; the
+/// column set leaves room for STATUSTEXT, disarm reasons, … from later producers.
+#[allow(dead_code)] // group flights: callers arrive with GROUP_FLIGHTS.md steps 3-7
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FlightEvent {
+    pub id: i64,
+    pub flight_id: i64,
+    /// Same time base as `telemetry_records.timestamp_ms` (ms since the flight start).
+    pub timestamp_ms: i64,
+    /// Wall-clock UTC epoch ms, when known.
+    pub wall_ms: Option<i64>,
+    /// `arm` | `disarm` | … .
+    pub kind: String,
+    pub code: Option<i64>,
+    pub text: Option<String>,
+    /// `live` | the importer's name.
+    pub source: Option<String>,
+}
+
+/// A reusable mission in the library (row in `missions`). Identity is `content_hash` (the frontend's
+/// provenance hash), so a mission is stored once; geometry metadata is computed by the frontend.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Mission {
     pub id: i64,
@@ -112,9 +170,14 @@ pub struct Mission {
     /// 3D mission preview's height. Mirrors the `.mission` `<mwp>` meta written on file export.
     pub home_lat: Option<f64>,
     pub home_lon: Option<f64>,
+    /// Vehicle class the mission was planned for (ArduPilot / PX4: `plane`, `copter`, …); None = not set.
+    pub vehicle_class: Option<String>,
+    /// A JSON object of data this version may not know. Never parsed here: stored and handed on as it
+    /// came, or a newer version's data would be lost.
+    pub extra_json: Option<String>,
 }
 
-/// Payload for saving a mission to the library (no `id` / `created_at` — assigned by the DB).
+/// Payload for saving a mission to the library (no `id` — assigned by the DB).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MissionInput {
     pub content_hash: String,
@@ -134,13 +197,22 @@ pub struct MissionInput {
     pub notes: Option<String>,
     pub home_lat: Option<f64>,
     pub home_lon: Option<f64>,
+    #[serde(default)]
+    pub vehicle_class: Option<String>,
+    /// See `Mission::extra_json`. On an overwrite `None` keeps what the row holds.
+    #[serde(default)]
+    pub extra_json: Option<String>,
+    /// Only a `.kmission` import sets these two (the row comes from another library); else the DB's
+    /// own time and the geocoder fill them.
+    #[serde(default)]
+    pub created_at: Option<String>,
+    #[serde(default)]
+    pub location_name: Option<String>,
 }
 
-/// A reusable battery pack stored in the library (row in `battery_packs` table).
-/// Identity is the user-defined `serial`. Flights soft-link by serial (no FK).
-/// The `base_*` fields are a persistent consumption baseline that is never auto-updated —
-/// only ever *added to* (manual usage editor / flight-deletion transfer). The displayed
-/// lifetime = baseline + Σ(linked flights), computed on read (see BATTERY_MANAGEMENT.md).
+/// A battery pack in the library (row in `battery_packs`), identified by the user's `serial`; flights
+/// soft-link by serial. `base_*` is a persistent baseline, never auto-updated, only added to; lifetime =
+/// baseline + Σ(linked flights), computed on read (BATTERY_MANAGEMENT.md).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BatteryPack {
     pub id: i64,
@@ -216,27 +288,23 @@ pub struct BatteryAggregate {
     pub last_used: Option<String>,
 }
 
-// ── Vehicle library ─────────────────────────────────────────────────
-
-/// A vehicle/aircraft stored in the library (row in `vehicles` table). Flights soft-link by
-/// `craft_name` (no FK) — the same craft name already recorded per flight. INAV provides the
-/// craft name automatically; ArduPilot/PX4 are linked manually post-flight.
-/// Records (max flight time / distance / altitude) are NOT stored here — they are derived live
-/// from the linked flights (see `VehicleAggregate`), so they stay correct after relink/delete.
+/// A vehicle/aircraft stored in the library (row in `vehicles` table); flights link by
+/// `flights.vehicle_id`. Records (max flight time / distance / altitude) are NOT stored here — they
+/// are derived live from the linked flights (`VehicleAggregate`), so they stay correct after relink/delete.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Vehicle {
     pub id: i64,
     pub name: String,
-    /// Soft-link key to `flights.craft_name` (trimmed; case-insensitive match). May differ from `name`.
+    /// Fallback resolution key against `flights.craft_name` (trimmed; case-insensitive match) for
+    /// flights without a matching `fc_uid`. May differ from `name`.
     pub craft_name: Option<String>,
-    /// `fixed_wing` | `flying_wing` | `vtol` | `multirotor` | `helicopter` | `rover` | `boat` | `other`
+    /// `fixed_wing` | `flying_wing` | `vtol` | `multirotor` | `tricopter` | `helicopter` | `rover` | `boat` | `other`
     pub vehicle_type: String,
     /// `active` | `storage` | `retired` | `damaged` | `crashed`
     pub status: String,
     /// Optional image as a base64 data URI (self-contained → travels with `.kvehicle` export).
     pub image: Option<String>,
     pub notes: Option<String>,
-    // Airframe
     pub model: Option<String>,
     pub wingspan_mm: Option<i64>,
     pub length_mm: Option<i64>,
@@ -268,8 +336,8 @@ pub struct Vehicle {
     pub fc_firmware: Option<String>,
     pub fc_firmware_version: Option<String>,
     pub blackbox_available: bool,
-    /// FC hardware id (see `Flight::fc_uid`) — prefilled when the vehicle is created from the connected
-    /// FC, freely editable, never used for linking.
+    /// FC hardware id (see `Flight::fc_uid`) — prefilled from the connected FC, freely editable (an FC swap
+    /// = a new UID). The first key when a flight is resolved to its vehicle.
     pub fc_uid: Option<String>,
     // Persistent lifetime baseline (adopted on request from the INAV FC `stats` feature). Additive to
     // the logged flights — the displayed lifetime = baseline + Σ(linked flights). Never auto-updated.
@@ -351,7 +419,20 @@ pub struct InavStats {
     pub total_energy: i64,
 }
 
-/// Aggregated contribution of the flights linked to a vehicle (by craft name). Totals + the
+/// How a flight's identity resolves to a library vehicle (the End-Flight screen's vehicle pick).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct VehicleResolution {
+    /// The resolved vehicle, `None` when nothing matches.
+    pub vehicle: Option<Vehicle>,
+    /// `"uid"` | `"craft"` | `None` (no match).
+    pub matched_by: Option<String>,
+    /// Matched by craft name, but the vehicle stores a different hardware FC id while the flight has
+    /// one: either the FC was swapped or a second aircraft carries the same craft name — the UI asks
+    /// which. The automatic link (`db::resolve_vehicle_id`) leaves such a flight unlinked.
+    pub uid_conflict: bool,
+}
+
+/// Aggregated contribution of the flights linked to a vehicle (`flights.vehicle_id`). Totals + the
 /// per-flight records (max flight time / distance / altitude, each with the achieving flight id).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct VehicleAggregate {
@@ -397,6 +478,9 @@ pub struct TelemetryRecord {
     pub roll: Option<f64>,
     pub pitch: Option<f64>,
     pub yaw: Option<f64>, // FC fused heading (degrees, decimals preserved)
+    /// GPS fix as received: live recordings use `GpsData::fix_type`'s scale (0 none / 1 2D / 2 3D / 3 RTK),
+    /// except older passive-link recordings (0 / 2 2D / 3 3D); DataFlash and ULog keep the raw status, the
+    /// INAV blackbox importer writes 3 whenever sats are logged.
     pub fix_type: Option<u8>,
     pub num_sat: Option<u8>,
     pub cpu_load: Option<u16>,
@@ -404,17 +488,14 @@ pub struct TelemetryRecord {
     pub link_quality: Option<u8>,
     /// Barometric altitude in meters (`BaroAlt`)
     pub baro_alt_m: Option<f64>,
-    /// GPS quality/accuracy metrics
     pub gps_hdop: Option<f64>,
     pub gps_eph: Option<f64>,
     pub gps_epv: Option<f64>,
-    /// Mission/navigation context
     pub active_wp_number: Option<i32>,
     pub active_flight_mode_flags: Option<i64>,
     pub state_flags: Option<i64>,
     pub nav_state: Option<i32>,
     pub nav_flags: Option<i64>,
-    /// RX / hardware health context
     pub rx_signal_received: Option<u8>,
     pub hw_health_status: Option<i64>,
     pub baro_temperature: Option<f64>,
@@ -425,9 +506,7 @@ pub struct TelemetryRecord {
     /// Raw/processed RC channel arrays encoded as JSON
     pub rc_data_json: Option<String>,
     pub rc_command_json: Option<String>,
-    /// INAV navigation filter fused position (navPos[0..2])
-    /// These provide sensor-fused lat/lon/alt from the EKF,
-    /// smoother than raw GPS, used for track display & export.
+    /// INAV nav-filter fused position (navPos) — smoother than raw GPS, for track display & export.
     pub nav_lat: Option<f64>,
     pub nav_lon: Option<f64>,
     pub nav_alt_m: Option<f64>,
@@ -440,12 +519,15 @@ pub struct TelemetryRecord {
     /// SNR (dB) and raw uplink RSSI (dBm) when the protocol provides them (CRSF / INAV 9.1+).
     pub link_snr: Option<i8>,
     pub link_rssi_dbm: Option<i16>,
+    /// Wall-clock UTC epoch ms of the sample (live recordings from schema v20; `None` for imports and
+    /// older rows). Not sent to the frontend until a reader needs it (group replay).
+    #[serde(default, skip_serializing)]
+    pub wall_ms: Option<i64>,
 }
 
-/// A single per-instance battery sample (row in `battery_records`). ArduPilot/PX4 can run several
-/// battery monitors at once (e.g. a forward fixed-wing pack + a VTOL lift pack); each is identified by
-/// `instance` (0..9). INAV is single-battery and uses the denormalised columns on `telemetry_records`
-/// instead, so it produces no rows here. See docs/active/MULTI_BATTERY.md.
+/// A per-instance battery sample (row in `battery_records`): ArduPilot/PX4 can run several monitors
+/// (`instance` 0..9). INAV is single-battery and uses the columns on `telemetry_records` instead
+/// (docs/active/MULTI_BATTERY.md).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BatteryRecord {
     pub id: i64,
@@ -479,6 +561,12 @@ pub struct FlightSummary {
     pub notes: Option<String>,
     /// Local UTC offset (minutes, east-positive) at the flight location, DST-aware (ADR-048).
     pub utc_offset_min: Option<i32>,
+    /// Group flight membership (see `Flight::group_id`).
+    #[serde(default)]
+    pub group_id: Option<String>,
+    /// Library vehicle (see `Flight::vehicle_id`).
+    #[serde(default)]
+    pub vehicle_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -486,7 +574,6 @@ pub struct FlightSummary {
 // DuplicateDetected carries a full Flight; boxing would ripple through all match/construction sites
 #[allow(clippy::large_enum_variant)]
 pub enum BlackboxImportStatus {
-    /// Import successful
     #[serde(rename = "success")]
     Success {
         flight_id: i64,
@@ -518,3 +605,46 @@ pub struct BlackboxImportProgress {
     pub message: String,
 }
 
+/// A library mission exported to a `.kmission` file (one mission, or one INAV mission set, per file):
+/// the row as it is, so another library rebuilds it — statistics excepted, the importer computes them.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MissionFile {
+    /// Always "kmission" (validated on import).
+    pub format: String,
+    pub version: u32,
+    #[serde(default)]
+    pub exported_at: String,
+    #[serde(default)]
+    pub app_version: String,
+    pub mission: MissionFileBody,
+}
+
+/// `waypoints` and `extra` stay raw JSON text: parsed into a `Value` and written again, a float can come
+/// back one bit off — a new content hash for an ArduPilot / PX4 mission, changed data of a newer Kite.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MissionFileBody {
+    pub name: String,
+    /// `inav` | `ardupilot` | `px4`
+    pub format: String,
+    /// Informational: the importer derives the identity from the waypoints.
+    #[serde(default)]
+    pub content_hash: String,
+    pub waypoints: Box<serde_json::value::RawValue>,
+    #[serde(default)]
+    pub source_xml: Option<String>,
+    #[serde(default)]
+    pub home_lat: Option<f64>,
+    #[serde(default)]
+    pub home_lon: Option<f64>,
+    #[serde(default)]
+    pub notes: Option<String>,
+    #[serde(default)]
+    pub created_at: Option<String>,
+    #[serde(default)]
+    pub location_name: Option<String>,
+    #[serde(default)]
+    pub vehicle_class: Option<String>,
+    /// `Mission::extra_json`, embedded.
+    #[serde(default)]
+    pub extra: Option<Box<serde_json::value::RawValue>>,
+}

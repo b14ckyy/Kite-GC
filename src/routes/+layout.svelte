@@ -9,24 +9,36 @@
   import { isLoading } from 'svelte-i18n';
   import { settings } from '$lib/stores/settings';
   import { get } from 'svelte/store';
+  import { invoke } from '@tauri-apps/api/core';
 
   // Initialize i18n with the persisted locale (or browser default)
   const saved = get(settings);
   initI18n(saved.locale);
 
-  // Block FRAME-level zoom gestures app-wide. A trackpad pinch (or Ctrl/Cmd +/-) otherwise zooms the
-  // whole WebView — scaling the widgets out of view — instead of the map. The map keeps its own
-  // zoom: preventDefault() stops only the browser's page zoom; it does NOT stop propagation, so the
-  // map's wheel/pinch handlers still receive the event and zoom the map.
-  //   - Chromium / WebView2 (Windows): a trackpad pinch arrives as `wheel` with `ctrlKey` set.
-  //   - macOS / WKWebView: a trackpad pinch fires the WebKit `gesture*` events.
-  //   - Ctrl/Cmd +/-/0/= keyboard zoom.
-  // NOTE: Linux/WebKitGTK handles the pinch natively in GTK and ignores preventDefault entirely, so the
-  // frame zoom there is suppressed in the Rust setup hook (lib.rs, pins the WebView zoom-level at 1.0).
+  // Block FRAME-level zoom app-wide (trackpad pinch, Ctrl/Cmd +/-) — it scales the whole WebView; preventDefault
+  // stops only the page zoom, so the map's own handlers still zoom. WebView2 sends a pinch as ctrl+wheel, WKWebView
+  // as gesture* events; WebKitGTK ignores preventDefault, so lib.rs pins its zoom level at 1.0 instead.
   onMount(() => {
+    // Uncaught frontend errors go to the backend file log (log_frontend) — a release build has no console.
+    const report = (kind: string, detail: unknown) => {
+      const msg = detail instanceof Error ? `${detail.message}
+${detail.stack ?? ''}` : String(detail);
+      void invoke('log_frontend', { level: 'error', area: 'ui', message: `${kind}: ${msg}` }).catch(() => {});
+    };
+    const onError = (e: ErrorEvent) => report('uncaught', e.error ?? e.message);
+    const onRejection = (e: PromiseRejectionEvent) => report('unhandled rejection', e.reason);
+    window.addEventListener('error', onError);
+    window.addEventListener('unhandledrejection', onRejection);
+
     const onWheel = (e: WheelEvent) => { if (e.ctrlKey) e.preventDefault(); };
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && ['+', '-', '=', '0'].includes(e.key)) e.preventDefault();
+      // Block the WebView's page reload (F5, Ctrl/Cmd+R) in a release build: it restarts only the frontend,
+      // and the live track, the mission in the editor and Kite's RC stream would be gone. `e.code` covers
+      // layouts whose R key types another letter; never with Alt (AltGr + R is a character on some layouts).
+      const reloadKey = e.key === 'F5' || e.key === 'BrowserRefresh'
+        || ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key.toLowerCase() === 'r' || e.code === 'KeyR'));
+      if (!import.meta.env.DEV && reloadKey) e.preventDefault();
     };
     const onGesture: EventListener = (e) => e.preventDefault();
     const gestureEvents = ['gesturestart', 'gesturechange', 'gestureend'];
@@ -36,6 +48,8 @@
     for (const name of gestureEvents) window.addEventListener(name, onGesture, { passive: false });
 
     return () => {
+      window.removeEventListener('error', onError);
+      window.removeEventListener('unhandledrejection', onRejection);
       window.removeEventListener('wheel', onWheel, { capture: true });
       window.removeEventListener('keydown', onKey, { capture: true });
       for (const name of gestureEvents) window.removeEventListener(name, onGesture);

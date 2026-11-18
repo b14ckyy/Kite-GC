@@ -3,7 +3,7 @@
 
 // Mission Commands — Tauri command handlers for mission planning operations
 
-use tauri::{Emitter, State};
+use tauri::{Emitter, Manager, State};
 
 use crate::mavlink_proto::{self, ArduWaypoint};
 use crate::mission::store::{MissionStore, mission_from_xml, mission_to_xml};
@@ -25,7 +25,7 @@ fn apply_alt_mode(wp: &mut Waypoint, alt_mode: Option<u8>) {
     }
 }
 use crate::msp::types::{MSP_WP, MSP_WP_GETINFO, MSP_WP_MISSION_LOAD, MSP_WP_MISSION_SAVE, MSP_SET_WP};
-use crate::state::{ActiveProtocol, AppState};
+use crate::state::{with_msp, with_msp_blocking, AppState};
 
 /// Waypoint-transfer progress, emitted as `mission-download-progress` / `mission-upload-progress`
 /// during an FC download/upload (both MSP and MAVLink) so the Mission Manager shows an "x of n"
@@ -51,9 +51,8 @@ pub fn mission_clear(store: State<'_, MissionStore>) {
     store.clear();
 }
 
-/// Replace the entire active-mission waypoint list in one call. Preserves
-/// every field (including `alt_mode`). Used by undo/redo restore, where the
-/// snapshot is already a valid, numbered mission.
+/// Replace the entire active-mission waypoint list in one call. Preserves every field (including
+/// `alt_mode`) and does not renumber: the caller passes a numbered, flagged list.
 #[tauri::command]
 pub fn mission_set(waypoints: Vec<Waypoint>, store: State<'_, MissionStore>) -> Mission {
     store.set_waypoints(waypoints);
@@ -158,55 +157,47 @@ pub fn mission_reorder_wp(from: usize, to: usize, store: State<'_, MissionStore>
 }
 
 /// Download mission from FC via MSP
-/// `(async)` runs off the main thread — each MSP_WP request blocks on the scheduler, so a large
-/// mission over a slow telemetry link would otherwise freeze the UI (same fix as the MAVLink path).
-#[tauri::command(async)]
-pub fn mission_download(
-    from_eeprom: bool,
-    app: tauri::AppHandle,
-    state: State<'_, AppState>,
-    store: State<'_, MissionStore>,
-) -> Result<Mission, String> {
-    let proto = state.protocol.lock().map_err(|e| e.to_string())?;
-    let handle = match proto.as_ref() {
-        Some(ActiveProtocol::Msp(h)) => h,
-        Some(ActiveProtocol::Mavlink(_)) => return Err("Mission download not supported via MAVLink yet".into()),
-        Some(ActiveProtocol::PassiveTelemetry(_)) => return Err("Mission download not available in telemetry monitoring mode".into()),
-        None => return Err("Not connected".into()),
-    };
+/// Runs on a blocking worker (`with_msp_blocking`) — each MSP_WP request blocks on the scheduler, so a
+/// large mission over a slow telemetry link would otherwise freeze the UI / park an async worker.
+#[tauri::command]
+pub async fn mission_download(from_eeprom: bool, app: tauri::AppHandle) -> Result<Mission, String> {
+    // Direct MSP or the MSP-over-MAVLink tunnel (INAV 10.0+); a plain MAVLink link uses ardu_mission_*.
+    with_msp_blocking(&app, move |app, handle| {
+        let store = app.state::<MissionStore>();
+        // Optional: load from EEPROM first
+        if from_eeprom {
+            handle.msp_request(MSP_WP_MISSION_LOAD, &[0])?;
+        }
 
-    // Optional: load from EEPROM first
-    if from_eeprom {
-        handle.msp_request(MSP_WP_MISSION_LOAD, &[0])?;
-    }
+        // Get mission info
+        let info_payload = handle.msp_request(MSP_WP_GETINFO, &[])?;
+        let info = codec::decode_wp_getinfo(&info_payload)?;
 
-    // Get mission info
-    let info_payload = handle.msp_request(MSP_WP_GETINFO, &[])?;
-    let info = codec::decode_wp_getinfo(&info_payload)?;
+        log::info!(
+            "MSP mission download start: max={}, valid={}, count={}",
+            info.max_waypoints, info.is_valid, info.wp_count
+        );
 
-    log::info!(
-        "MSP mission download start: max={}, valid={}, count={}",
-        info.max_waypoints, info.is_valid, info.wp_count
-    );
+        // Download each waypoint
+        let mut mission = Mission::new();
+        mission.info = info.clone();
 
-    // Download each waypoint
-    let mut mission = Mission::new();
-    mission.info = info.clone();
+        let total = info.wp_count as u16;
+        let _ = app.emit(MISSION_DOWNLOAD_PROGRESS, MissionTransferProgress { current: 0, total });
+        for i in 1..=info.wp_count {
+            let wp_payload = handle.msp_request(MSP_WP, &[i])?;
+            let wp = codec::decode_wp(&wp_payload)?;
+            log::debug!("MSP download WP {i}/{total}: {wp:?}");
+            mission.waypoints.push(wp);
+            let _ = app.emit(MISSION_DOWNLOAD_PROGRESS, MissionTransferProgress { current: i as u16, total });
+        }
+        mission.dirty = false;
+        log::info!("MSP mission download complete: {} waypoints", mission.waypoints.len());
 
-    let total = info.wp_count as u16;
-    let _ = app.emit(MISSION_DOWNLOAD_PROGRESS, MissionTransferProgress { current: 0, total });
-    for i in 1..=info.wp_count {
-        let wp_payload = handle.msp_request(MSP_WP, &[i])?;
-        let wp = codec::decode_wp(&wp_payload)?;
-        log::debug!("MSP download WP {i}/{total}: {wp:?}");
-        mission.waypoints.push(wp);
-        let _ = app.emit(MISSION_DOWNLOAD_PROGRESS, MissionTransferProgress { current: i as u16, total });
-    }
-    mission.dirty = false;
-    log::info!("MSP mission download complete: {} waypoints", mission.waypoints.len());
-
-    store.set(mission.clone());
-    Ok(mission)
+        store.set(mission.clone());
+        Ok(mission)
+    })
+    .await
 }
 
 /// Query the FC's mission info (MSP_WP_GETINFO) without downloading the waypoints.
@@ -214,15 +205,10 @@ pub fn mission_download(
 /// `(async)` — the MSP_WP_GETINFO request blocks on the scheduler; keep it off the main thread.
 #[tauri::command(async)]
 pub fn mission_fc_info(state: State<'_, AppState>) -> Result<MissionInfo, String> {
-    let proto = state.protocol.lock().map_err(|e| e.to_string())?;
-    let handle = match proto.as_ref() {
-        Some(ActiveProtocol::Msp(h)) => h,
-        Some(ActiveProtocol::Mavlink(_)) => return Err("Mission info not supported via MAVLink yet".into()),
-        Some(ActiveProtocol::PassiveTelemetry(_)) => return Err("Mission info not available in telemetry monitoring mode".into()),
-        None => return Err("Not connected".into()),
-    };
-    let info_payload = handle.msp_request(MSP_WP_GETINFO, &[])?;
-    codec::decode_wp_getinfo(&info_payload)
+    with_msp(&state, |handle| {
+        let info_payload = handle.msp_request(MSP_WP_GETINFO, &[])?;
+        codec::decode_wp_getinfo(&info_payload)
+    })
 }
 
 /// Upload mission to FC via MSP (AGL waypoints resolved to AMSL first)
@@ -230,7 +216,6 @@ pub fn mission_fc_info(state: State<'_, AppState>) -> Result<MissionInfo, String
 pub async fn mission_upload(
     save_eeprom: bool,
     app: tauri::AppHandle,
-    state: State<'_, AppState>,
     store: State<'_, MissionStore>,
     terrain: State<'_, TerrainProvider>,
 ) -> Result<Mission, String> {
@@ -242,49 +227,43 @@ pub async fn mission_upload(
     // Resolve AGL → AMSL before touching the serial handle (async terrain lookup).
     let resolved = resolve_agl(&mission, &terrain).await;
 
-    let proto = state.protocol.lock().map_err(|e| e.to_string())?;
-    let handle = match proto.as_ref() {
-        Some(ActiveProtocol::Msp(h)) => h,
-        Some(ActiveProtocol::Mavlink(_)) => return Err("Mission upload not supported via MAVLink yet".into()),
-        Some(ActiveProtocol::PassiveTelemetry(_)) => return Err("Mission upload not available in telemetry monitoring mode".into()),
-        None => return Err("Not connected".into()),
-    };
+    with_msp_blocking(&app, move |app, handle| {
+        let store = app.state::<MissionStore>();
+        let total = resolved.waypoints.len();
+        log::info!("MSP mission upload start: {total} waypoints, save_eeprom={save_eeprom}");
 
-    let total = resolved.waypoints.len();
-    log::info!("MSP mission upload start: {total} waypoints, save_eeprom={save_eeprom}");
+        // Upload each waypoint, emitting live "x of n" progress (mirrors the download counter).
+        let _ = app.emit(MISSION_UPLOAD_PROGRESS, MissionTransferProgress { current: 0, total: total as u16 });
+        for (i, wp) in resolved.waypoints.iter().enumerate() {
+            log::debug!("MSP upload WP {}/{}: {wp:?}", i + 1, total);
+            let payload = codec::encode_wp(wp);
+            handle.msp_request(MSP_SET_WP, &payload)?;
+            let _ = app.emit(MISSION_UPLOAD_PROGRESS, MissionTransferProgress { current: (i + 1) as u16, total: total as u16 });
+        }
 
-    // Upload each waypoint, emitting live "x of n" progress (mirrors the download counter).
-    let _ = app.emit(MISSION_UPLOAD_PROGRESS, MissionTransferProgress { current: 0, total: total as u16 });
-    for (i, wp) in resolved.waypoints.iter().enumerate() {
-        log::debug!("MSP upload WP {}/{}: {wp:?}", i + 1, total);
-        let payload = codec::encode_wp(wp);
-        handle.msp_request(MSP_SET_WP, &payload)?;
-        let _ = app.emit(MISSION_UPLOAD_PROGRESS, MissionTransferProgress { current: (i + 1) as u16, total: total as u16 });
-    }
+        // Optional: save to EEPROM (mission ID byte reserved → 0).
+        if save_eeprom {
+            handle.msp_request(MSP_WP_MISSION_SAVE, &[0])?;
+        }
 
-    // Optional: save to EEPROM (mission ID byte reserved → 0).
-    if save_eeprom {
-        handle.msp_request(MSP_WP_MISSION_SAVE, &[0])?;
-    }
+        // Verify by reading back mission info
+        let info_payload = handle.msp_request(MSP_WP_GETINFO, &[])?;
+        let info = codec::decode_wp_getinfo(&info_payload)?;
+        log::info!(
+            "MSP mission upload complete: FC reports valid={} wpCount={}{}",
+            info.is_valid, info.wp_count, if save_eeprom { " (EEPROM saved)" } else { "" }
+        );
+        store.set_info(info);
+        store.mark_clean();
 
-    // Verify by reading back mission info
-    let info_payload = handle.msp_request(MSP_WP_GETINFO, &[])?;
-    let info = codec::decode_wp_getinfo(&info_payload)?;
-    log::info!(
-        "MSP mission upload complete: FC reports valid={} wpCount={}{}",
-        info.is_valid, info.wp_count, if save_eeprom { " (EEPROM saved)" } else { "" }
-    );
-    store.set_info(info);
-    store.mark_clean();
-
-    Ok(store.snapshot())
+        Ok(store.snapshot())
+    })
+    .await
 }
 
-/// Concatenate per-mission waypoint lists into one INAV multi-mission sequence: global 1-based
-/// numbering and each segment's last WP flagged `WP_FLAG_LAST` (0xA5) — or `WP_FLAG_FBH` (0x48) kept
-/// when that last WP is already a fly-by-home — with every other WP `WP_FLAG_NORMAL`. INAV stores all
-/// missions as one list split on those terminator flags, so a stray mid-segment terminator would break
-/// the boundaries; mid-segment flags are therefore forced to NORMAL. Empty missions are skipped.
+/// One INAV multi-mission list, numbered through. INAV ends a mission on 0xA5 only: a stray one inside is
+/// cleared, fly-by-home (0x48) stays inside. On the last WP that byte is taken, so fly-by-home goes as
+/// lat/lon 0, INAV's other home marker. Resolve AGL before this: (0,0) has no terrain.
 fn assemble_multi_mission(missions: &[Vec<Waypoint>]) -> Vec<Waypoint> {
     let mut out: Vec<Waypoint> = Vec::new();
     for seg in missions {
@@ -294,11 +273,15 @@ fn assemble_multi_mission(missions: &[Vec<Waypoint>]) -> Vec<Waypoint> {
         let last = seg.len() - 1;
         for (i, wp) in seg.iter().enumerate() {
             let mut w = wp.clone();
-            w.flag = if i == last {
-                if w.flag == WP_FLAG_FBH { WP_FLAG_FBH } else { WP_FLAG_LAST }
-            } else {
-                WP_FLAG_NORMAL
-            };
+            if i == last {
+                if w.flag == WP_FLAG_FBH {
+                    w.lat = 0;
+                    w.lon = 0;
+                }
+                w.flag = WP_FLAG_LAST;
+            } else if w.flag == WP_FLAG_LAST {
+                w.flag = WP_FLAG_NORMAL;
+            }
             out.push(w);
         }
     }
@@ -320,69 +303,64 @@ pub async fn mission_upload_multi(
     missions: Vec<Vec<Waypoint>>,
     save_eeprom: bool,
     app: tauri::AppHandle,
-    state: State<'_, AppState>,
-    store: State<'_, MissionStore>,
     terrain: State<'_, TerrainProvider>,
 ) -> Result<Mission, String> {
-    let combined = assemble_multi_mission(&missions);
+    // AGL → AMSL per mission, before the serial handle is taken (async terrain lookup) and before the
+    // assembly moves a final fly-by-home to lat/lon 0.
+    let mut amsl: Vec<Vec<Waypoint>> = Vec::with_capacity(missions.len());
+    for seg in &missions {
+        let m = Mission { waypoints: seg.clone(), info: MissionInfo::default(), dirty: false, home: None };
+        amsl.push(resolve_agl(&m, &terrain).await.waypoints);
+    }
+    let combined = assemble_multi_mission(&amsl);
     if combined.is_empty() {
         return Err("No waypoints to upload".into());
     }
+    let mission_count = missions.iter().filter(|m| !m.is_empty()).count();
+    let resolved = Mission { waypoints: combined, info: MissionInfo::default(), dirty: false, home: None };
 
-    // Resolve AGL → AMSL before touching the serial handle (async terrain lookup).
-    let mission = Mission { waypoints: combined, info: MissionInfo::default(), dirty: false, home: None };
-    let resolved = resolve_agl(&mission, &terrain).await;
+    with_msp_blocking(&app, move |app, handle| {
+        let store = app.state::<MissionStore>();
+        let total = resolved.waypoints.len();
+        log::info!(
+            "MSP multi-mission upload start: {} mission(s), {total} waypoints, save_eeprom={save_eeprom}",
+            mission_count
+        );
+        let _ = app.emit(MISSION_UPLOAD_PROGRESS, MissionTransferProgress { current: 0, total: total as u16 });
+        for (i, wp) in resolved.waypoints.iter().enumerate() {
+            log::debug!("MSP upload WP {}/{}: {wp:?}", i + 1, total);
+            handle.msp_request(MSP_SET_WP, &codec::encode_wp(wp))?;
+            let _ = app.emit(MISSION_UPLOAD_PROGRESS, MissionTransferProgress { current: (i + 1) as u16, total: total as u16 });
+        }
 
-    let proto = state.protocol.lock().map_err(|e| e.to_string())?;
-    let handle = match proto.as_ref() {
-        Some(ActiveProtocol::Msp(h)) => h,
-        Some(ActiveProtocol::Mavlink(_)) => return Err("Mission upload not supported via MAVLink yet".into()),
-        Some(ActiveProtocol::PassiveTelemetry(_)) => return Err("Mission upload not available in telemetry monitoring mode".into()),
-        None => return Err("Not connected".into()),
-    };
+        // Optional: save to EEPROM (mission ID byte reserved → 0).
+        if save_eeprom {
+            handle.msp_request(MSP_WP_MISSION_SAVE, &[0])?;
+        }
 
-    let total = resolved.waypoints.len();
-    log::info!(
-        "MSP multi-mission upload start: {} mission(s), {total} waypoints, save_eeprom={save_eeprom}",
-        missions.iter().filter(|m| !m.is_empty()).count()
-    );
-    let _ = app.emit(MISSION_UPLOAD_PROGRESS, MissionTransferProgress { current: 0, total: total as u16 });
-    for (i, wp) in resolved.waypoints.iter().enumerate() {
-        log::debug!("MSP upload WP {}/{}: {wp:?}", i + 1, total);
-        handle.msp_request(MSP_SET_WP, &codec::encode_wp(wp))?;
-        let _ = app.emit(MISSION_UPLOAD_PROGRESS, MissionTransferProgress { current: (i + 1) as u16, total: total as u16 });
-    }
+        let info_payload = handle.msp_request(MSP_WP_GETINFO, &[])?;
+        let info = codec::decode_wp_getinfo(&info_payload)?;
+        log::info!(
+            "MSP multi-mission upload complete: FC reports valid={} wpCount={}{}",
+            info.is_valid, info.wp_count, if save_eeprom { " (EEPROM saved)" } else { "" }
+        );
+        store.set_info(info);
+        store.mark_clean();
 
-    // Optional: save to EEPROM (mission ID byte reserved → 0).
-    if save_eeprom {
-        handle.msp_request(MSP_WP_MISSION_SAVE, &[0])?;
-    }
-
-    let info_payload = handle.msp_request(MSP_WP_GETINFO, &[])?;
-    let info = codec::decode_wp_getinfo(&info_payload)?;
-    log::info!(
-        "MSP multi-mission upload complete: FC reports valid={} wpCount={}{}",
-        info.is_valid, info.wp_count, if save_eeprom { " (EEPROM saved)" } else { "" }
-    );
-    store.set_info(info);
-    store.mark_clean();
-
-    Ok(store.snapshot())
+        Ok(store.snapshot())
+    })
+    .await
 }
 
 /// Read the FC's active multi-mission index (`nav_wp_multi_mission_index`). Defaults to 1 when the
-/// setting is absent (single-mission / older firmware). `(async)` — the setting read blocks on the
+/// setting is absent (single-mission / older firmware); a failed read (timeout, link gone) is an error —
+/// never a silent 1 while the FC flies another mission. `(async)` — the setting read blocks on the
 /// scheduler.
 #[tauri::command(async)]
 pub fn mission_get_active_index(state: State<'_, AppState>) -> Result<u8, String> {
-    let proto = state.protocol.lock().map_err(|e| e.to_string())?;
-    let handle = match proto.as_ref() {
-        Some(ActiveProtocol::Msp(h)) => h,
-        Some(ActiveProtocol::Mavlink(_)) => return Err("Mission info not supported via MAVLink yet".into()),
-        Some(ActiveProtocol::PassiveTelemetry(_)) => return Err("Mission info not available in telemetry monitoring mode".into()),
-        None => return Err("Not connected".into()),
-    };
-    Ok(crate::commands::fc_settings::read_uint_setting(handle, "nav_wp_multi_mission_index").unwrap_or(1) as u8)
+    with_msp(&state, |handle| {
+        Ok(crate::commands::fc_settings::try_read_uint_setting(handle, "nav_wp_multi_mission_index")?.unwrap_or(1) as u8)
+    })
 }
 
 /// Resolve AGL waypoints to AMSL for export. INAV/.mission only understand
@@ -434,8 +412,7 @@ pub async fn mission_save_file_from_json(
     let mission = Mission { waypoints, info: MissionInfo::default(), dirty: false, home: None };
     let resolved = resolve_agl(&mission, &terrain).await;
     let xml = mission_to_xml(&resolved);
-    std::fs::write(&path, xml).map_err(|e| format!("Failed to save: {e}"))?;
-    Ok(())
+    crate::user_file::with_write_path(&path, |p| std::fs::write(p, &xml).map_err(|e| format!("Failed to save: {e}")))
 }
 
 /// Import mission from MW XML string
@@ -486,19 +463,12 @@ pub fn mission_load_file(path: String, store: State<'_, MissionStore>) -> Result
 /// MISSION_ITEM (up to seconds each over a slow SiK link). A plain sync command would run on the
 /// main thread and freeze the whole UI for the duration of the download.
 #[tauri::command(async)]
-pub fn ardu_mission_download(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<Vec<ArduWaypoint>, String> {
-    // Clone the command sender + sysid while holding the mutex briefly.
-    // The actual protocol exchange runs after the lock is released.
-    let (cmd_tx, fc_sysid, reserve_home) = {
-        let proto = state.protocol.lock().map_err(|e| e.to_string())?;
-        match proto.as_ref() {
-            // PX4 has no home mission-slot (item 0 is a real waypoint); ArduPilot reserves slot 0 for home.
-            Some(ActiveProtocol::Mavlink(h)) => (h.cmd_tx_clone(), h.fc_sysid, !h.fc_variant.eq_ignore_ascii_case("px4")),
-            Some(ActiveProtocol::Msp(_)) => return Err("FC is not running MAVLink".into()),
-            Some(ActiveProtocol::PassiveTelemetry(_)) => return Err("FC is not running MAVLink".into()),
-            None => return Err("Not connected".into()),
-        }
-    };
+pub fn ardu_mission_download(vehicle_id: Option<String>, app: tauri::AppHandle, state: State<'_, AppState>) -> Result<Vec<ArduWaypoint>, String> {
+    // Resolve the target (frontend "L1:S1" key, None = active vehicle) while holding the registry
+    // mutex briefly. The actual protocol exchange runs after the lock is released.
+    // PX4 has no home mission-slot (item 0 is a real waypoint); ArduPilot reserves slot 0 for home.
+    let t = state.mav_target(vehicle_id.as_deref())?;
+    let (cmd_tx, fc_sysid, reserve_home) = (t.cmd_tx, t.sysid, !t.fc_variant.eq_ignore_ascii_case("px4"));
     mavlink_proto::mission::download(
         &cmd_tx,
         fc_sysid,
@@ -515,6 +485,7 @@ pub fn ardu_mission_download(app: tauri::AppHandle, state: State<'_, AppState>) 
 /// `ardu_mission_download`).
 #[tauri::command(async)]
 pub fn ardu_mission_upload(
+    vehicle_id: Option<String>,
     waypoints: Vec<ArduWaypoint>,
     app: tauri::AppHandle,
     state: State<'_, AppState>,
@@ -522,22 +493,16 @@ pub fn ardu_mission_upload(
     if waypoints.is_empty() {
         return Err("No waypoints to upload".into());
     }
-    let (cmd_tx, fc_sysid, reserve_home) = {
-        let proto = state.protocol.lock().map_err(|e| e.to_string())?;
-        match proto.as_ref() {
-            // PX4 has no home mission-slot (item 0 is a real waypoint); ArduPilot reserves slot 0 for home.
-            Some(ActiveProtocol::Mavlink(h)) => (h.cmd_tx_clone(), h.fc_sysid, !h.fc_variant.eq_ignore_ascii_case("px4")),
-            Some(ActiveProtocol::Msp(_)) => return Err("FC is not running MAVLink".into()),
-            Some(ActiveProtocol::PassiveTelemetry(_)) => return Err("FC is not running MAVLink".into()),
-            None => return Err("Not connected".into()),
-        }
-    };
+    // PX4 has no home mission-slot (item 0 is a real waypoint); ArduPilot reserves slot 0 for home.
+    let t = state.mav_target(vehicle_id.as_deref())?;
+    let (cmd_tx, fc_sysid, reserve_home) = (t.cmd_tx, t.sysid, !t.fc_variant.eq_ignore_ascii_case("px4"));
     mavlink_proto::mission::upload(
         &cmd_tx,
         fc_sysid,
         &waypoints,
         reserve_home,
         ::mavlink::ardupilotmega::MavMissionType::MAV_MISSION_TYPE_MISSION,
+        !reserve_home, // PX4 (no home slot) → unset yaw goes out as NaN, see wp_to_item
         |current, total| {
             let _ = app.emit(MISSION_UPLOAD_PROGRESS, MissionTransferProgress { current, total });
         },
@@ -592,21 +557,23 @@ mod tests {
     }
 
     #[test]
-    fn assemble_multi_mission_preserves_fbh_last_and_skips_empty() {
-        // An empty mission is skipped; a fly-by-home last WP keeps its 0x48 terminator; a stray
-        // mid-segment terminator is forced back to NORMAL so it doesn't split the segment.
+    fn assemble_multi_mission_fbh_and_empty() {
+        let mut fbh_last = Waypoint::new(0, WpAction::Land, 501234567, 81234567, 0);
+        fbh_last.flag = WP_FLAG_FBH;
         let m1 = vec![
-            wp(WpAction::Waypoint, WP_FLAG_LAST), // mid-segment stray terminator → must clear
-            wp(WpAction::Land, WP_FLAG_FBH),      // last, FBH → keep 0x48
+            wp(WpAction::Waypoint, WP_FLAG_LAST), // stray terminator inside → cleared
+            wp(WpAction::Waypoint, WP_FLAG_FBH),  // fly-by-home inside → kept
+            fbh_last,                             // fly-by-home last → 0xA5 at lat/lon 0
         ];
         let empty: Vec<Waypoint> = vec![];
-        let m2 = vec![wp(WpAction::Waypoint, WP_FLAG_NORMAL)]; // single WP → becomes last (0xA5)
+        let m2 = vec![wp(WpAction::Waypoint, WP_FLAG_NORMAL)];
         let out = assemble_multi_mission(&[m1, empty, m2]);
 
-        assert_eq!(out.len(), 3);
-        assert_eq!(out[0].flag, WP_FLAG_NORMAL); // stray mid terminator cleared
-        assert_eq!(out[1].flag, WP_FLAG_FBH); // FBH preserved
-        assert_eq!(out[2].flag, WP_FLAG_LAST); // single WP of m2 terminates it
-        assert_eq!(out.iter().map(|w| w.number).collect::<Vec<_>>(), vec![1, 2, 3]);
+        assert_eq!(out.len(), 4);
+        assert_eq!(out[0].flag, WP_FLAG_NORMAL);
+        assert_eq!(out[1].flag, WP_FLAG_FBH);
+        assert_eq!((out[2].flag, out[2].lat, out[2].lon), (WP_FLAG_LAST, 0, 0));
+        assert_eq!(out[3].flag, WP_FLAG_LAST);
+        assert_eq!(out.iter().map(|w| w.number).collect::<Vec<_>>(), vec![1, 2, 3, 4]);
     }
 }

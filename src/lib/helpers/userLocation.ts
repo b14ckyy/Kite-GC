@@ -1,21 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Physical location of the user (for Night-Mode "auto" sunset timing). It does NOT need to be
-// precise — city-level is plenty. Sources, in order: a persisted last-known value (restored on
-// launch), an OS/browser geo check (on start + a manual button), and a connected UAV's GPS fix.
-// It deliberately never tracks the live map/camera — orbiting the globe must not change it.
-//
-// The OS check is per-platform: Windows (WebView2) and Linux (WebKitGTK) use the Web Geolocation
-// API, while macOS goes through native CoreLocation (location_macos.rs) because WKWebView ships no
-// Geolocation API at all, so `navigator.geolocation` can never resolve there.
+// Physical location of the user (Night-Mode "auto" sunset timing; city-level is plenty): a persisted last value
+// plus an OS geo check, never the map camera or the aircraft GPS. macOS uses native CoreLocation
+// (location_macos.rs) — WKWebView has no Geolocation API; the other desktops use the Web API.
 
 import { writable, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { telemetry } from '$lib/stores/telemetry';
 import { homePosition } from '$lib/stores/home';
-import { connection } from '$lib/stores/connection';
 import { settings } from '$lib/stores/settings';
 import { isValidGpsCoordinate } from '$lib/helpers/telemetry';
 import { isMobile, isMacOS } from '$lib/platform';
@@ -23,13 +16,12 @@ import { isMobile, isMacOS } from '$lib/platform';
 export interface LatLon { lat: number; lon: number; }
 
 // Seed from the persisted value so Night-Mode auto is correct immediately on launch,
-// before any fresh geo/UAV fix arrives.
+// before any fresh OS geo fix arrives.
 export const userGeoLocation = writable<LatLon | null>(get(settings).userLocation ?? null);
-/** Accuracy radius (m) of the last OS fix, or null (persisted/UAV sources carry none). Used by the GCS
+/** Accuracy radius (m) of the last OS fix, or null (the persisted value carries none). Used by the GCS
  *  marker's on-select accuracy circle. */
 export const userGeoAccuracyM = writable<number | null>(null);
 
-const GPS_HDOP_MAX = 10; // coarse location only — any usable fix qualifies
 const GEO_OPTS: PositionOptions = { enableHighAccuracy: false, timeout: 8000, maximumAge: 3_600_000 };
 
 /** Update the live store and persist for the next session. */
@@ -40,18 +32,16 @@ export function setUserLocation(lat: number, lon: number, source: string, accura
   console.log(`[geo] user location set via ${source}: ${lat.toFixed(3)}, ${lon.toFixed(3)}`);
 }
 
-/** Mobile (iOS/Android): native CoreLocation/Android location via the Tauri plugin. The OS permission
- *  prompt is labelled with the app name + Info.plist usage string, not the WebView origin ("localhost"
- *  is all the Web geolocation prompt can show). Loaded lazily so the plugin JS never reaches the desktop
- *  bundle's startup path. */
-async function runGeoCheckNative(): Promise<void> {
+/** Mobile: native location via the Tauri plugin, so the OS permission prompt carries the app name, not the
+ *  WebView origin ("localhost"). Loaded lazily so the plugin JS stays off the desktop startup path. */
+async function runGeoCheckNative(): Promise<boolean> {
   try {
     const geo = await import('@tauri-apps/plugin-geolocation');
     let perm = await geo.checkPermissions();
     if (perm.location !== 'granted') perm = await geo.requestPermissions(['location']);
     if (perm.location !== 'granted') {
       console.warn('[geo] native location permission not granted:', perm.location);
-      return;
+      return false;
     }
     // The plugin's PositionOptions has no optional fields, so pass an explicit literal (same values
     // as GEO_OPTS: coarse fix, 8 s timeout, up to a 1 h cached position).
@@ -60,15 +50,17 @@ async function runGeoCheckNative(): Promise<void> {
       pos.coords.latitude, pos.coords.longitude, 'os-geolocation-native',
       Number.isFinite(pos.coords.accuracy) ? pos.coords.accuracy : null,
     );
+    return true;
   } catch (err) {
     console.warn('[geo] native geolocation failed, keeping last known:', err);
+    return false;
   }
 }
 
 /** macOS: read the newest CoreLocation fix from the backend (location_macos.rs). WKWebView has no
  *  Geolocation API at all, so the Web path below can never resolve there. The native module is the
  *  only source, and it pushes an `os-location` event as well for the live updates. */
-async function runGeoCheckMacOs(): Promise<void> {
+async function runGeoCheckMacOs(): Promise<boolean> {
   try {
     // Start first, and on every manual check. The backend gives up when Location Services are off
     // system-wide, so without this a user who turns them on (or grants the permission) after launch
@@ -80,30 +72,45 @@ async function runGeoCheckMacOs(): Promise<void> {
     if (fix) setUserLocation(fix.lat, fix.lon, 'os-corelocation', fix.accuracy_m);
     // No fix yet is normal, not an error: CoreLocation is still resolving, or the permission prompt
     // is unanswered. The event listener below delivers it whenever it arrives.
+    return fix != null;
   } catch (err) {
     console.warn('[geo] CoreLocation read failed, keeping last known:', err);
+    return false;
   }
 }
 
-function runGeoCheck(): void {
-  // On mobile the vehicle's own GPS is the primary source (see the telemetry subscription below); the OS
-  // check is a best-effort head start before a UAV connects. Route it through the native plugin so the
-  // permission dialog carries the app's name.
-  if (isMobile) { void runGeoCheckNative(); return; }
+/** Windows (WebView2) / Linux (WebKitGTK): the Web Geolocation API. Resolves once it has answered. */
+function runGeoCheckWeb(): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      console.warn('[geo] navigator.geolocation unavailable');
+      resolve(false);
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setUserLocation(
+          pos.coords.latitude, pos.coords.longitude, 'os-geolocation',
+          Number.isFinite(pos.coords.accuracy) ? pos.coords.accuracy : null,
+        );
+        resolve(true);
+      },
+      (err) => {
+        console.warn('[geo] geolocation failed, keeping last known:', err.message);
+        resolve(false);
+      },
+      GEO_OPTS,
+    );
+  });
+}
+
+/** One OS check on the platform's path; true when it delivered a fix (stored via setUserLocation). */
+function runGeoCheck(): Promise<boolean> {
+  // On mobile the OS check goes through the native plugin, so the permission dialog carries the app's name.
+  if (isMobile) return runGeoCheckNative();
   // macOS desktop (isMacOS excludes iOS): native CoreLocation, see runGeoCheckMacOs.
-  if (isMacOS) { void runGeoCheckMacOs(); return; }
-  if (typeof navigator === 'undefined' || !navigator.geolocation) {
-    console.warn('[geo] navigator.geolocation unavailable');
-    return;
-  }
-  navigator.geolocation.getCurrentPosition(
-    (pos) => setUserLocation(
-      pos.coords.latitude, pos.coords.longitude, 'os-geolocation',
-      Number.isFinite(pos.coords.accuracy) ? pos.coords.accuracy : null,
-    ),
-    (err) => console.warn('[geo] geolocation failed, keeping last known:', err.message),
-    GEO_OPTS,
-  );
+  if (isMacOS) return runGeoCheckMacOs();
+  return runGeoCheckWeb();
 }
 
 let autoChecked = false;
@@ -111,41 +118,51 @@ let autoChecked = false;
 export function ensureUserLocation(): void {
   if (autoChecked) return;
   autoChecked = true;
-  runGeoCheck();
+  void runGeoCheck();
 }
 
 /** Manual trigger (settings button) — always runs a fresh OS geo check. */
 export function requestUserLocation(): void {
-  runGeoCheck();
+  void runGeoCheck();
 }
 
-// ── macOS: live CoreLocation updates ──
-// The native module emits on every fix that moved more than its jitter threshold, which is what makes
-// `gcsMode: continuous` track on macOS, where there is no watchPosition to drive it. Subscribed at
-// import; the backend only emits when it has an authorised, valid fix.
+/** How long "to my location" waits on macOS for CoreLocation to deliver a first fix by event. */
+const MACOS_FIRST_FIX_WAIT_MS = 10_000;
+
+/** A fresh OS geo check that reports its outcome (map search "to my location"): the fix (stored as usual), or
+ *  null when denied / unavailable. On macOS a first fix may still arrive by event — waited up to
+ *  MACOS_FIRST_FIX_WAIT_MS. */
+export async function locateUserOnce(): Promise<LatLon | null> {
+  if (await runGeoCheck()) return get(userGeoLocation);
+  if (!isMacOS) return null;
+  return new Promise((resolve) => {
+    let settled = false;
+    let unsub: (() => void) | null = null;
+    const finish = (v: LatLon | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      unsub?.();
+      resolve(v);
+    };
+    const timer = setTimeout(() => finish(null), MACOS_FIRST_FIX_WAIT_MS);
+    const before = get(userGeoLocation);
+    unsub = userGeoLocation.subscribe((v) => {
+      if (v && v !== before) finish(v);
+    });
+  });
+}
+
+// ── macOS: live CoreLocation updates ── emitted per fix that moved past the jitter threshold, which drives
+// `gcsMode: continuous` on macOS (no watchPosition). Subscribed at import; emitted only with an authorised fix.
 if (isMacOS) {
   void listen<{ lat: number; lon: number; accuracy_m: number | null }>('os-location', (e) => {
     setUserLocation(e.payload.lat, e.payload.lon, 'os-corelocation', e.payload.accuracy_m);
   });
 }
 
-// ── Auto-update from a connected UAV's GPS (coarse is fine) ──
-// Capture one good fix per connection so we don't thrash localStorage every telemetry frame.
-let uavFixCaptured = false;
-connection.subscribe((c) => { if (c.status !== 'connected') uavFixCaptured = false; });
-telemetry.subscribe((t) => {
-  if (uavFixCaptured) return;
-  const hdopOk = t.gpsHdop <= 0 || t.gpsHdop < GPS_HDOP_MAX; // 0 = unknown → accept
-  if (t.fixType >= 3 && hdopOk && isValidGpsCoordinate(t.lat, t.lon)) {
-    uavFixCaptured = true;
-    setUserLocation(t.lat, t.lon, 'uav-gps');
-  }
-});
-
-/**
- * Best estimate of where the user physically is (for sunset timing).
- * Priority: stored/last-known geo → home position → persisted map centre. Never the live camera.
- */
+/** Best estimate of where the user physically is (sunset timing): stored geo → home position → persisted map
+ *  centre. Never the live camera. */
 export function resolveUserLocation(): LatLon {
   const geo = get(userGeoLocation);
   if (geo) return geo;

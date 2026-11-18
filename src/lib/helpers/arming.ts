@@ -69,7 +69,7 @@ export interface ArmingStatus {
 /**
  * Derive the arming traffic-light from telemetry + (for MAVLink) the latest prearm STATUSTEXT.
  * `isInav` selects the interpretation (INAV armingFlags bitfield vs MAVLink prearm signals) — pass it
- * from the `autopilotSystem` store, NOT telem.fcVariant (which is never updated frontend-side).
+ * from the `autopilotSystem` store, NOT telem.fcVariant (a display value seeded once per connect).
  * Returns null when there is no live telemetry (indicator hidden).
  */
 export function armingStatus(t: TelemetryData, prearmText: string | null, isInav: boolean): ArmingStatus | null {

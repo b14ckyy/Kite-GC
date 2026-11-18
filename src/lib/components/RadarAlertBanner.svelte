@@ -4,14 +4,14 @@
 -->
 
 <script lang="ts">
-  // Conflict-alert banner pinned to the top of the map (Plan C / C1). Two stacked banners:
-  //   • Warning (red, white text + black outline): collision alarm + evade action; minimal vehicle list.
-  //   • Caution (yellow, black text): proximity advisory + detailed vehicle list + hold/increase hint.
-  // Both list all affected contacts (a zone may hold several). Clicking a row selects that contact.
+  // Conflict-alert banner pinned to the top of the map (Plan C / C1): Warning (red: collision + evade, minimal
+  // list) and Caution (yellow: proximity + detailed list), each listing every affected contact; a row click
+  // selects that contact.
   import { t } from 'svelte-i18n';
   import { radarAlerts, type ContactAlert } from '$lib/controllers/radarAlerts';
   import { radarSelection } from '$lib/stores/radarTracking';
   import { contactTypeKey } from '$lib/helpers/radar3d';
+  import { compassPointKey } from '$lib/helpers/compassPoint';
   import { convertSpeed, convertAltitude, convertDistance, formatConverted, speedDigits } from '$lib/utils/units';
   import type { InterfaceSettings } from '$lib/stores/settings';
 
@@ -22,8 +22,7 @@
   // Worst (nearest-CPA) warning drives the evade callout in the headline (list is sorted worst-first).
   const lead = $derived(warnings.find((a) => a.evadeBearingDeg != null) ?? warnings[0]);
 
-  const COMPASS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
-  const compass = (deg: number) => COMPASS[Math.round(deg / 45) % 8];
+  const compass = (deg: number) => $t(compassPointKey(deg));
 
   const fmtSpeed = (ms: number | null) =>
     ms == null ? '—' : formatConverted(convertSpeed(ms, interfaceSettings.speedUnit), speedDigits(interfaceSettings.speedUnit));
@@ -111,10 +110,8 @@
     pointer-events: none;
   }
 
-  /* Mobile: the phone toolbar wraps onto several rows, so the fixed offset above lands inside it and
-     the alert covers the connection bar. Track the live bar height (same --toolbar-h the map layer and
-     nav-rail follow); the parent .app-toasts layer is already offset by --safe-top, which --toolbar-h
-     also includes, so subtract it to avoid counting the status-bar strip twice. */
+  /* Mobile: the wrapping toolbar's height varies, so track --toolbar-h; .app-toasts is already offset by
+     --safe-top, which --toolbar-h includes too — subtract it to not count the status-bar strip twice. */
   :global(html.is-mobile) .alert-stack {
     top: calc(var(--toolbar-h, 53px) - var(--safe-top, 0px) + 8px);
   }

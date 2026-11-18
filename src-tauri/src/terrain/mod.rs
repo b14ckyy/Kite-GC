@@ -1,14 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Terrain elevation provider — Copernicus DEM GLO-30.
-//
-// Source: AWS Open Data `copernicus-dem-30m` (Cloud Optimized GeoTIFF, 1°×1°
-// tiles, Float32, EGM2008 geoid ≈ MSL, no API key). Used locally only for
-// AGL waypoint planning, terrain clearance, AGL widget and LOS analysis.
-//
-// Because GLO-30 is geoid-referenced (≈ MSL) it is directly comparable with
-// the FC's MSL GPS altitude and INAV AMSL waypoints — no geoid conversion.
+// Terrain elevation — Copernicus DEM GLO-30 (AWS Open Data COGs, 1°×1° Float32 tiles, no API key).
+// Geoid-referenced (EGM2008 ≈ MSL), so directly comparable with the FC's MSL GPS altitude.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::Cursor;
@@ -39,15 +33,17 @@ struct TileData {
 }
 
 impl TileData {
-    /// Bilinear sample at lat/lon. Returns None if outside the tile.
+    /// Bilinear sample at lat/lon; None outside the tile. Bounded by the tile's EXTENT (PixelIsPoint: the last
+    /// sample is one pixel short of the next tile's first) — in that strip both indices clamp to the edge
+    /// sample, well within the DEM's own error.
     fn sample(&self, lat: f64, lon: f64) -> Option<f32> {
         let col = (lon - self.origin_lon) / self.px_lon;
         let row = (self.origin_lat - lat) / self.px_lat;
-        if col < 0.0 || row < 0.0 || col > (self.width - 1) as f64 || row > (self.height - 1) as f64 {
+        if col < 0.0 || row < 0.0 || col >= self.width as f64 || row >= self.height as f64 {
             return None;
         }
-        let c0 = col.floor() as usize;
-        let r0 = row.floor() as usize;
+        let c0 = (col.floor() as usize).min(self.width - 1);
+        let r0 = (row.floor() as usize).min(self.height - 1);
         let c1 = (c0 + 1).min(self.width - 1);
         let r1 = (r0 + 1).min(self.height - 1);
         let fc = col - c0 as f64;
@@ -102,7 +98,7 @@ impl TerrainProvider {
         std::fs::create_dir_all(&cache_dir).ok();
         TerrainProvider {
             client: reqwest::Client::builder()
-                .user_agent("KiteGC/terrain")
+                .user_agent(crate::user_agent::user_agent("terrain"))
                 // Bound every DEM fetch: a stalled connection must NOT hang forever while
                 // holding `load_lock` (which serializes all tile loads) — that would freeze
                 // every terrain call (both HUD widgets + mission + geoid) for the whole replay.
@@ -214,11 +210,8 @@ impl TerrainProvider {
         removed
     }
 
-    /// Elevation (metres ≈ MSL) at each lat/lon, in input order. A batched
-    /// `elevation()` so a caller resolving many points (e.g. every mission
-    /// waypoint) pays a single IPC round-trip instead of one per point. Loads
-    /// stay serialized via `elevation()`'s `load_lock`, so points sharing a tile
-    /// reuse the same load rather than racing duplicate 42 MB downloads.
+    /// Elevations (m ≈ MSL) of many points in one IPC round-trip; loads stay serialized via `elevation()`'s
+    /// `load_lock`, so points sharing a tile never race duplicate 42 MB downloads.
     pub async fn elevations(&self, points: &[(f64, f64)]) -> Vec<Option<f32>> {
         let mut out = Vec::with_capacity(points.len());
         for &(lat, lon) in points {
@@ -515,6 +508,32 @@ mod tests {
         assert_eq!(tile_name(47.5, 11.2), "Copernicus_DSM_COG_10_N47_00_E011_00_DEM");
         assert_eq!(tile_name(-0.5, -4.3), "Copernicus_DSM_COG_10_S01_00_W005_00_DEM");
         assert_eq!(tile_name(0.0, 0.0), "Copernicus_DSM_COG_10_N00_00_E000_00_DEM");
+    }
+
+    /// 4×4 tile with 0.25° pixels covering exactly 1°: the last sample sits at
+    /// 0.75°, the tile's extent ends at 1.0°.
+    fn quarter_degree_tile() -> TileData {
+        let mut grid = vec![0.0f32; 16];
+        for (i, v) in grid.iter_mut().enumerate() {
+            *v = 100.0 + i as f32; // every sample distinct
+        }
+        TileData { width: 4, height: 4, grid, origin_lon: 11.0, origin_lat: 48.0, px_lon: 0.25, px_lat: 0.25 }
+    }
+
+    #[test]
+    fn sample_covers_the_last_pixel_strip() {
+        let t = quarter_degree_tile();
+        // Beyond the last sample but inside the tile's extent → the edge sample, not a hole.
+        assert_eq!(t.sample(47.05, 11.9), Some(115.0));
+        // The edges of that strip clamp too.
+        assert_eq!(t.sample(48.0, 11.9), Some(103.0));
+        assert_eq!(t.sample(47.05, 11.0), Some(112.0));
+        // On the next tile's first sample → not ours.
+        assert_eq!(t.sample(47.05, 12.0), None);
+        assert_eq!(t.sample(47.0, 11.5), None);
+        assert_eq!(t.sample(48.1, 11.5), None);
+        // Ordinary interior point still interpolates.
+        assert_eq!(t.sample(47.875, 11.125), Some(102.5));
     }
 
     #[test]

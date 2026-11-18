@@ -17,9 +17,8 @@
 
   // svelte-ignore state_referenced_locally
   let variant = $state<PanelVariant>(initial);
-  // Re-sync to the tab's initial when the rail switches panels (the shell instance persists
-  // now — no remount — so width/height/top can animate between panels). The switcher below
-  // overrides locally until the next tab switch.
+  // Re-sync to the tab's initial on a rail switch (the shell persists, so width/height/top animate); the
+  // switcher below overrides locally until the next tab switch.
   $effect(() => { variant = initial; });
 
   const variants: PanelVariant[] = ['info', 'compact', 'advanced', 'wide-compact', 'fullscreen'];
@@ -112,7 +111,8 @@
     padding: 3px;
     border-radius: 6px;
     background: rgba(0, 0, 0, 0.55);
-    backdrop-filter: blur(8px);
+    backdrop-filter: var(--panel-blur, blur(10px));
+    -webkit-backdrop-filter: var(--panel-blur, blur(10px));
   }
   .pg-sw {
     padding: 2px 7px; font-size: 10px; border: 1px solid #555; border-radius: 4px;

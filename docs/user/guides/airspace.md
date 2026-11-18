@@ -14,7 +14,7 @@ Open it from the **Airspace** tool on the navigation rail.
 ## Setting it up (OpenAIP)
 
 The aeronautical data comes from **[OpenAIP](https://www.openaip.net/)**, which needs a free account and
-an API key. In **Settings → Data**:
+an API key. In **Settings → Map → Providers**:
 
 1. **Enable** the airspace feature (this reveals the Airspace tool on the navigation rail).
 2. Set the **provider** to **OpenAIP**.

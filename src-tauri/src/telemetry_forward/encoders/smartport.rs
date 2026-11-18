@@ -8,6 +8,7 @@
 
 use super::super::cache::TelemetryCache;
 use super::Encoder;
+use crate::scheduler::telemetry::FIX_3D;
 
 // ── FrSky S.Port appIDs (mirror decoders/frsky.rs) ────────────────────────────
 const ID_ALTITUDE: u16 = 0x0100;
@@ -82,7 +83,8 @@ impl Encoder for SmartportEncoder {
             frame(ID_GPS_ALT, ((g.alt_msl * 100.0).round() as i32) as u32, &mut out);
             frame(ID_SPEED, (g.ground_speed * 1944.0).round() as u32, &mut out); // m/s → knots*1000
             frame(ID_FPV, (g.course * 10.0).round() as u32, &mut out);
-            let is3d = g.fix_type >= 3;
+            // GPS_FIX bit (1000s digit) for a 3D fix or better on the unified scale (`scheduler::telemetry::FIX_*`).
+            let is3d = g.fix_type >= FIX_3D;
             frame(ID_GNSS, g.num_sat as u32 + if is3d { 1000 } else { 0 }, &mut out);
         }
         if let Some(asp) = cache.airspeed.as_ref() {

@@ -21,6 +21,7 @@ use ::mavlink::MavHeader;
 use super::super::cache::TelemetryCache;
 use super::Encoder;
 use crate::mavlink_proto::codec::{serialize_v2, MavSequence};
+use crate::scheduler::telemetry::{FIX_2D, FIX_3D, FIX_DGPS};
 
 const ARMED_FLAG: u32 = 0x04;
 const HEARTBEAT_INTERVAL_MS: u128 = 1000;
@@ -81,9 +82,11 @@ impl Encoder for MavlinkEncoder {
         }
 
         if let Some(g) = cache.gps.as_ref() {
+            // Unified fix scale (`scheduler::telemetry::FIX_*`) → MAVLink GPS_FIX_TYPE.
             let fix = match g.fix_type {
-                3 => GpsFixType::GPS_FIX_TYPE_3D_FIX,
-                2 => GpsFixType::GPS_FIX_TYPE_2D_FIX,
+                FIX_DGPS => GpsFixType::GPS_FIX_TYPE_DGPS,
+                FIX_3D => GpsFixType::GPS_FIX_TYPE_3D_FIX,
+                FIX_2D => GpsFixType::GPS_FIX_TYPE_2D_FIX,
                 _ => GpsFixType::GPS_FIX_TYPE_NO_GPS,
             };
             let lat = (g.lat * 1e7).round() as i32;

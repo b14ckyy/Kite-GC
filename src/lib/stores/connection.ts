@@ -4,7 +4,8 @@
 // Connection state store
 // Manages the reactive state of the FC connection across the UI
 
-import { writable } from 'svelte/store';
+import { derived, get, writable } from 'svelte/store';
+import { PLATFORM_AIRPLANE, PLATFORM_VTOL } from '$lib/helpers/uavIcons';
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
@@ -12,11 +13,9 @@ export type TransportType = 'serial' | 'tcp' | 'udp' | 'ble';
 
 export type ProtocolType = 'msp' | 'mavlink' | 'telemetry';
 
-/** Standard network port per protocol + transport, the way the baud rate has a standard per protocol.
- *  MAVLink is UDP 14550 by GCS convention or TCP 5760 (ArduPilot SITL); MSP over TCP is INAV SITL's
- *  5761. There is no standard MSP UDP port, so that entry is only a starting point. `telemetry` is
- *  passive and has no port of its own, which is why it is absent: `defaultNetPort` then returns
- *  undefined and callers leave the port alone. */
+/** Standard network port per protocol + transport: MAVLink UDP 14550 (GCS convention) / TCP 5760 (ArduPilot
+ *  SITL), MSP TCP 5761 (INAV SITL); MSP UDP has no standard, only a starting point. `telemetry` has no port, so
+ *  `defaultNetPort` returns undefined and callers leave the port alone. */
 const NET_PORT_DEFAULTS: Record<string, number> = {
   'mavlink:udp': 14550,
   'mavlink:tcp': 5760,
@@ -27,6 +26,14 @@ const NET_PORT_DEFAULTS: Record<string, number> = {
 /** The port Kite would fill in for this selection, or undefined if it has no standard one. */
 export function defaultNetPort(protocol: string, transport: string): number | undefined {
   return NET_PORT_DEFAULTS[`${protocol}:${transport}`];
+}
+
+/** The address a network link uses: blank or "localhost" → the literal IPv4 loopback (the TCP transport takes
+ *  IP literals only, and "localhost" may resolve to `::1`); any other host trimmed (touch keyboards append a
+ *  space). */
+export function netHostOrLocal(host: string): string {
+  const h = host.trim();
+  return h === '' || h.toLowerCase() === 'localhost' ? '127.0.0.1' : h;
 }
 
 export interface InavVersion {
@@ -44,6 +51,10 @@ export interface FeatureSet {
   msp_rc: boolean;
   aux_rc: boolean;
   adsb_msp: boolean;
+  /** Firmware can serve MSP over MAVLink TUNNEL (INAV ≥ 10.0) — capability only. */
+  msp_tunnel_capable: boolean;
+  /** THIS link runs MSP over MAVLink (the tunnel probe + INAV handshake through it succeeded). */
+  msp_tunnel: boolean;
 }
 
 export interface FcInfo {
@@ -60,8 +71,8 @@ export interface FcInfo {
   /** MAVLink HEARTBEAT MAV_TYPE (ArduPilot/PX4 only; 0 for MSP). The only reliable QuadPlane signal
    *  (a QuadPlane reports fc_variant "ArduPlane" but a VTOL_* MAV_TYPE). */
   mav_type: number;
-  /** FC hardware id (INAV MSP_UID / MAVLink AUTOPILOT_VERSION uid), null for passive telemetry.
-   *  Informational — reconnect identity for the session's platform-type override. */
+  /** FC hardware id (INAV MSP_UID / MAVLink uid2), null for passive telemetry and synthetic ids.
+   *  Vehicle-library key: flight linking and the platform type on connect. */
   fc_uid: string | null;
   /** Blackbox / dataflash logging enabled on the FC (INAV from the handshake; ArduPilot / PX4 once the
    *  LOG_BACKEND_TYPE / SDLOG_MODE reply arrives via `telemetry-vehicle`). null = unknown. */
@@ -89,6 +100,8 @@ export interface ConnectionInfo {
   baudRate: number;
   errorMessage: string;
   fcInfo: FcInfo | null;
+  /** MAVLink link to INAV 10.0+ with MSP over MAVLink up (`fcInfo.features.msp_tunnel`). */
+  mspTunnel: boolean;
 }
 
 export const connection = writable<ConnectionInfo>({
@@ -99,16 +112,50 @@ export const connection = writable<ConnectionInfo>({
   baudRate: 115200,
   errorMessage: '',
   fcInfo: null,
+  mspTunnel: false,
 });
 
-/** Platform type the handshake detected for the current link — `fcInfo.platform_type` diverges from it
- *  once the user overrides the type in the UAV Info panel (the panel shows the detected one as a hint). */
+// ── Link capabilities: THE frontend answer to "what does this link carry" ── gate UI on these, never on
+// `protocolType` alone: a MAVLink link with MSP over MAVLink (`mspTunnel`) serves the whole INAV/MSP surface
+// and must not reach the ArduPilot/PX4 paths. Backend counterpart: `state::with_msp`.
+
+/** The connected link carries MSP to an INAV FC — a direct MSP link, or MSP over MAVLink. */
+export function linkHasMsp(c: ConnectionInfo): boolean {
+  return c.status === 'connected' && (c.protocolType === 'msp' || c.mspTunnel);
+}
+
+/** The connected link is MAVLink to an ArduPilot/PX4-style autopilot (no MSP tunnel). */
+export function linkIsArduPilot(c: ConnectionInfo): boolean {
+  return c.status === 'connected' && c.protocolType === 'mavlink' && !c.mspTunnel;
+}
+
+/** Store form of `linkHasMsp` — INAV mission transfers, safehomes, geozones, craft name, stats. */
+export const hasMsp = derived(connection, linkHasMsp);
+
+/** Store form of `linkIsArduPilot` — ArduPilot mission panel, vehicle control, fence / rally. */
+export const isArduPilotLink = derived(connection, linkIsArduPilot);
+
+/** Platform type detected for the current link (handshake, QuadPlane answer); UAV Info shows it as a hint
+ *  when the library or the dropdown set another. */
 export const detectedPlatformType = writable<number>(0);
 
-/// Active protocol for the connection status box: the primary protocol name (MSP / MAVLink / SmartPort /
-/// CRSF / LTM) and an optional secondary tunneled inside it (e.g. ArduPilot passthrough → "MAVLink").
-/// Set from `protocolType` on connect for MSP/MAVLink; for passive telemetry the backend's
-/// `telemetry-protocol` event fills it once the sub-protocol locks.
+/** Who decided the shown platform type of the current link: the detection, the vehicle library (a vehicle
+ *  with this FC id) or the UAV Info dropdown. Only a detected type follows a later detection. */
+export const platformTypeSource = writable<'detected' | 'library' | 'manual'>('detected');
+
+/** A QuadPlane reports MAV_TYPE_FIXED_WING; its Q_ENABLE answer turns the detected type into VTOL, and the
+ *  shown one with it while the detection decides. */
+export function promoteDetectedToVtol(): void {
+  if (get(detectedPlatformType) !== PLATFORM_AIRPLANE) return;
+  detectedPlatformType.set(PLATFORM_VTOL);
+  if (get(platformTypeSource) !== 'detected') return;
+  connection.update((c) => (c.fcInfo?.platform_type === PLATFORM_AIRPLANE
+    ? { ...c, fcInfo: { ...c.fcInfo, platform_type: PLATFORM_VTOL } } : c));
+}
+
+/// Active protocol for the status box: primary name (MSP / MAVLink / SmartPort / CRSF / LTM) + an optional
+/// tunneled secondary (e.g. ArduPilot passthrough → "MAVLink"). Set on connect for MSP/MAVLink; for passive
+/// telemetry by the backend's `telemetry-protocol` event once the sub-protocol locks.
 export const connectionProtocol = writable<{ primary: string; secondary: string | null }>({
   primary: '',
   secondary: null,

@@ -1,40 +1,17 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later
      Copyright (C) 2026 Marc Hoffmann (b14ckyy) -->
 
-<!-- Blurred map backdrop for the unobstructed fullscreen video mode: a second, bare Leaflet
-     instance (base tile layer only — no markers, no UAV icon, no overlays) that follows the
-     UAV at a slow tick and fills the area around the aspect-exact video box with a thematic
-     ground picture instead of flat grey. Cheap by construction:
-
-       * the map renders at HALF resolution (52% box scaled ×2, with a 2% bleed so the blur
-         never shows a faded edge) — tile decode, raster and the blur pass all run on a
-         quarter of the pixels,
-       * position updates are discrete (1 Hz, no pan animation) — the blur re-rasterises only
-         on those ticks, not per frame (the fullscreen-video-blur idea died on exactly that
-         60 Hz fixed cost),
-       * pointer-events are off; Leaflet runs without any interaction handlers.
-
-     The wrapper carries `data-nv-clip`, so while the native decode sink is live the surface
-     router cuts its hole into this layer too (same opt-in the main `.layer-map` uses —
-     without it the backdrop would paint OVER the hardware video below the WebView).
-
-     Attribution: hidden here — the backdrop shows the SAME provider the visible map instance
-     (mini frame) is already attributing on screen, and the imagery is decorative/blurred.
-
-     Follow source, in priority order: the blackbox-replay position while a replay plays (a
-     replayed model is a valid UAV position — the backdrop follows it like the mini map
-     does), else the live UAV while there is a GPS fix, else the GCS location, else the
-     component shows nothing (the app background stays). Fixed zoom — detail is irrelevant
-     under the blur, and a lower zoom keeps the follow ticks from pulling fresh tiles
-     constantly. -->
+<!-- Blurred map backdrop for unobstructed fullscreen video: a second, bare Leaflet instance at HALF resolution
+     (upscaled, 2% bleed), discrete 1 Hz follow (replay pos → UAV fix → GCS), fixed zoom, no interaction. Carries
+     data-nv-clip so the native sink's hole is cut into it; attribution hidden (the visible map attributes). -->
 
 <script lang="ts">
   import { onMount } from 'svelte';
   import L from 'leaflet';
   import { get } from 'svelte/store';
-  import { cachedTileLayer } from '$lib/cache/CachedTileLayer';
-  import { getProviderById } from '$lib/config/mapProviders';
-  import { settings } from '$lib/stores/settings';
+  import { cachedTileLayer, providerLayerOptions } from '$lib/cache/CachedTileLayer';
+  import type { MapProvider } from '$lib/config/mapProviders';
+  import { watchMapProvider } from '$lib/stores/customMaps';
   import { telemetry } from '$lib/stores/telemetry';
   import { gcsLocation } from '$lib/stores/gcsLocation';
 
@@ -53,11 +30,9 @@
   let map: L.Map | null = null;
   let base: L.TileLayer | null = null;
   let last: { lat: number; lon: number } | null = null;
-  /** Provider id the current base layer was built for — rebuilding tears the whole layer
-   *  down (visible grey flash + fade-in), so it must happen ONLY on a real change. The
-   *  settings store emits on every map interaction (the main map persists its view state
-   *  through it), not just on provider switches. */
-  let appliedProviderId = '';
+  /** Provider to show — a layer rebuild flashes grey, so only on a real change: `watchMapProvider` reports
+   *  exactly those (the settings store emits on every map interaction). */
+  let provider: MapProvider | null = null;
 
   function target(): { lat: number; lon: number } | null {
     if (replayPos) return replayPos;
@@ -66,14 +41,13 @@
     return get(gcsLocation);
   }
 
-  function applyBase(providerId: string): void {
-    if (!map) return;
+  function applyBase(): void {
+    if (!map || !provider) return;
     if (base) map.removeLayer(base);
-    const p = getProviderById(providerId);
-    appliedProviderId = providerId;
+    const p = provider;
     // Base imagery only — label/hybrid overlays are unreadable under the blur and would
     // only double the tile traffic.
-    base = cachedTileLayer(p.url, { maxZoom: p.maxZoom }).addTo(map);
+    base = cachedTileLayer(p.url, { maxZoom: p.maxZoom, ...providerLayerOptions(p) }).addTo(map);
   }
 
   function tick(): void {
@@ -92,7 +66,7 @@
         zoomAnimation: false,
         markerZoomAnimation: false,
       }).setView([pos.lat, pos.lon], ZOOM);
-      applyBase(get(settings).mapProvider);
+      applyBase();
       last = pos;
       return;
     }
@@ -102,11 +76,13 @@
   }
 
   onMount(() => {
+    // Before the first tick: the map is created there and builds its base from `provider`.
+    const unsubProvider = watchMapProvider((p) => {
+      provider = p;
+      applyBase();
+    });
     tick();
     const timer = setInterval(tick, TICK_MS);
-    const unsubProvider = settings.subscribe((s) => {
-      if (map && s.mapProvider && s.mapProvider !== appliedProviderId) applyBase(s.mapProvider);
-    });
     // Leaflet sizes itself from the container once — dock resizes / window resizes change
     // the wrapper, so re-measure (cheap; pan:false keeps the centre).
     const ro = new ResizeObserver(() => map?.invalidateSize({ pan: false }));

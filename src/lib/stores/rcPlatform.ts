@@ -22,8 +22,15 @@ function platformFromConnection(
   status: string,
   protocol: string,
   fcVariant: string | undefined,
+  mspTunnel: boolean,
 ): RcPlatform | null {
   if (status !== 'connected') return null;
+  // MSP over MAVLink (INAV 10.0+): no RC platform for now. The INAV platform means the MSP RC stream,
+  // which only a direct MSP link runs, and the ArduPilot adapter must not run against INAV (INAV only
+  // honours RC_CHANNELS_OVERRIDE through its MAVLink receiver driver). The RC tab is hidden on such a link
+  // (+page `rcTabAvailable`) until Stage 3 — MAVLink-RX mode ('inav-mavlink'), see Dev-Docs
+  // active/MSP_OVER_MAVLINK.md.
+  if (mspTunnel) return null;
   if (protocol === 'msp') return 'inav';
   if (protocol === 'mavlink') return fcVariant?.toUpperCase().includes('PX4') ? 'px4' : 'ardupilot';
   return null;
@@ -32,7 +39,7 @@ function platformFromConnection(
 /** The effective platform: the connected FC's (locked) when connected, otherwise the offline choice. */
 export const rcPlatform = derived([connection, settings], ([$c, $s]): RcPlatform => {
   return (
-    platformFromConnection($c.status, $c.protocolType, $c.fcInfo?.fc_variant) ??
+    platformFromConnection($c.status, $c.protocolType, $c.fcInfo?.fc_variant, $c.mspTunnel) ??
     $s.rcControl.platform
   );
 });

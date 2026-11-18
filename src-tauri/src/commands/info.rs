@@ -16,3 +16,17 @@ pub fn get_app_version(app: tauri::AppHandle) -> String {
 pub fn is_debug_mode() -> bool {
     crate::debug_mode::enabled()
 }
+
+/// True when the multi-vehicle (fleet) features are on (see `fleet_mode`); loaded once at startup
+/// (`stores/fleetMode`).
+#[tauri::command]
+pub fn is_fleet_mode() -> bool {
+    crate::fleet_mode::enabled()
+}
+
+/// True when a fleet session records every vehicle (KITE_FLEET_RECORDING); otherwise only the first
+/// vehicle is recorded and the frontend says so once a second one appears.
+#[tauri::command]
+pub fn is_fleet_group_recording() -> bool {
+    crate::fleet_mode::group_recording()
+}

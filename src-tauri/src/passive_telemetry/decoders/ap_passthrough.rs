@@ -1,22 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// ArduPilot Passthrough ("Yaapu") decoder — the AP-specific telemetry layer carried over either FrSky
-// S.Port (DIY appIDs 0x5000–0x500D) or CRSF (AP_CUSTOM_TELEM frame 0x80/0x7F). Both carriers transport
-// the SAME bit-packed `{appID:u16, data:u32}` packets, so this one decoder is fed from both (see
-// docs/active/RADIO_TELEMETRY.md "ArduPilot Passthrough").
-//
-// It is a level-2 sub-decoder: the FrSky/CRSF host decoder parses the carrier framing and routes the
-// passthrough packets here, while continuing to decode the standard sensors/frames itself. This decoder
-// therefore emits ONLY the AP-unique data that the native path can't provide — flight mode (real AP
-// modes via classify_ardupilot), armed, EKF health, and status-text messages — leaving GPS / battery /
-// attitude to the native decoder (no overlap, no field fights).
-//
-// v1 scope: AP_STATUS (0x5001), TEXT (0x5000 S.Port chunked + CRSF 0xF1 status-text sub-frame), PARAM
-// (0x5007 → vehicle variant, bonus), WAYPOINT (0x500D number). The metric fields that use ArduPilot's
-// `prep_number` compact encoding (HDOP, home distance, speeds, rangefinder, terrain, …) are a v2.
+// ArduPilot Passthrough ("Yaapu") decoder: the same `{appID:u16, data:u32}` packets over FrSky S.Port
+// (0x5000–0x500D) or CRSF (0x80/0x7F), fed by both host decoders. Emits ONLY the AP-unique data (mode,
+// armed, EKF, status text, variant, WP); GPS / battery / attitude stay with the native decoder.
 
-use tauri::{AppHandle, Emitter};
+use crate::vehicle_registry::emitter::VehicleEmitter;
 
 use crate::flightlog::recorder::FlightRecorderHandle;
 use crate::flightmode::{classify_ardupilot, FlightModeState};
@@ -32,12 +21,14 @@ const ID_PARAM: u16 = 0x5007;
 const ID_WAYPOINT: u16 = 0x500D;
 
 /// Best-effort map of the PARAM frame-type value (≈ MAV_TYPE) to the variant string `classify_ardupilot`
-/// expects ("plane" → plane table, else copter). Bonus only — verify against a real AP source.
+/// expects (plane / rover / sub table, else copter). Bonus only — verify against a real AP source.
 fn variant_from_frame_type(mav_type: u32) -> &'static str {
     match mav_type {
         1 => "plane",                         // FIXED_WING
         19..=25 => "plane", // VTOL variants
-        _ => "copter",                        // quad/hexa/octo/heli/tri/... (rover unhandled → copter)
+        10 | 11 => "rover",                   // GROUND_ROVER, SURFACE_BOAT (Rover firmware)
+        12 => "sub",                          // SUBMARINE
+        _ => "copter",                        // quad/hexa/octo/heli/tri/...
     }
 }
 
@@ -179,7 +170,7 @@ impl ApPassthroughDecoder {
 
     /// Emit the AP-unique telemetry: status (armed), flight mode (real AP modes), EKF health, status-text
     /// + waypoint number. GPS/battery/attitude are NOT emitted here — the native host decoder owns those.
-    pub fn publish(&mut self, app: &AppHandle, recorder: Option<&FlightRecorderHandle>) {
+    pub fn publish(&mut self, app: &VehicleEmitter, recorder: Option<&FlightRecorderHandle>) {
         let s = &self.state;
 
         if s.seen_status {
@@ -223,5 +214,20 @@ impl ApPassthroughDecoder {
                 serde_json::json!({ "severity": severity, "text": text }),
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Rover, boat and sub frame types must not use the Copter table (Rover Hold ≠ "Guided", Sub Manual ≠ "Avoid ADSB").
+    #[test]
+    fn surface_and_sub_frame_types_select_their_mode_tables() {
+        assert_eq!(classify_ardupilot(4, variant_from_frame_type(10)).primary, "rover_hold");
+        assert_eq!(classify_ardupilot(4, variant_from_frame_type(11)).primary, "rover_hold");
+        assert_eq!(classify_ardupilot(19, variant_from_frame_type(12)).primary, "manual");
+        assert_eq!(classify_ardupilot(19, variant_from_frame_type(1)).primary, "qloiter");
+        assert_eq!(classify_ardupilot(4, variant_from_frame_type(2)).primary, "guided");
     }
 }

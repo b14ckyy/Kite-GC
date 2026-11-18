@@ -6,6 +6,7 @@
 <script lang="ts">
   import { t } from 'svelte-i18n';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
+  import { compassPointKey } from '$lib/helpers/compassPoint';
 
   let {
     weatherTempC = $bindable(),
@@ -37,8 +38,7 @@
   }
 
   function windDegToLabel(deg: number): string {
-    const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
-    return dirs[Math.round(deg / 45) % 8];
+    return $t(compassPointKey(deg));
   }
 
   // Bridge between string bindable props and NumberStepper numbers
@@ -63,14 +63,9 @@
         {#if weatherWindDir && !standardWindDirValues.includes(weatherWindDir)}
           <option value={weatherWindDir}>{weatherWindDir}° ({windDegToLabel(Number(weatherWindDir))})</option>
         {/if}
-        <option value="0">N</option>
-        <option value="45">NE</option>
-        <option value="90">E</option>
-        <option value="135">SE</option>
-        <option value="180">S</option>
-        <option value="225">SW</option>
-        <option value="270">W</option>
-        <option value="315">NW</option>
+        {#each standardWindDirValues as v (v)}
+          <option value={v}>{windDegToLabel(Number(v))}</option>
+        {/each}
       </select>
     </label>
     <label class="weather-field">

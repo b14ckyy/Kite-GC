@@ -12,6 +12,7 @@
   <a href="https://b14ckyy.github.io/Kite-GC/"><img alt="Documentation" src="https://img.shields.io/badge/docs-online-37a8db"></a>
   <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-555">
   <a href="https://github.com/b14ckyy/Kite-GC/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/b14ckyy/Kite-GC?label=release&color=59aa29"></a>
+  <a href="https://discord.gg/3FM7EWhkg9"><img alt="Discord" src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white"></a>
   <a href="https://paypal.me/b14ckyy"><img alt="Donate via PayPal" src="https://img.shields.io/badge/Donate-PayPal-00457C?logo=paypal&logoColor=white"></a>
 </p>
 
@@ -19,14 +20,15 @@
 ## Development state
 
 **Kite 1.0 is released** — the first stable version, after a summer of betas and release candidates.
-Work on 1.1 (mobile, native video decode, and more) continues on the integration trunk:
+Work on 2.0 (mobile, native video decode, a new flight-database schema, and more) continues on the
+integration trunk:
 
 - **All changes** → pull request against **`development`**, the always-current trunk. Features and
   fixes alike land there and reach `master` as tested snapshots — so `master` builds are what you
   install if you want to try the development state.
 - **A fix for the released 1.0** → pull request against **`release/1.0.x`**, the maintenance branch cut
   from the `v1.0.0` tag. Patch releases are tagged from it, and it is merged forward into `development`.
-  1.0 stays maintained until 1.2.0 ships — see
+  1.0 stays maintained until 2.1.0 ships — see
   **[Release support](https://b14ckyy.github.io/Kite-GC/release-support/)** for the policy.
 
 Nobody commits to either branch directly — see
@@ -51,6 +53,8 @@ Built with [Tauri 2.0](https://tauri.app/) (Rust backend) and [Svelte 5](https:/
   <b><a href="https://b14ckyy.github.io/Kite-GC/">📖 Documentation</a></b>
   &nbsp;·&nbsp;
   <b><a href="https://github.com/b14ckyy/Kite-GC/releases">⬇️ Download</a></b>
+  &nbsp;·&nbsp;
+  <b><a href="https://discord.gg/3FM7EWhkg9">💬 Discord</a></b>
 </p>
 
 ## Highlights
@@ -75,7 +79,7 @@ Everything you'd expect from a ground station:
 - **Mission planning** — create, upload, download and edit missions; undo/redo; a survey-pattern
   generator; terrain-following / AGL waypoints.
 - **Vehicle control** — arm/disarm, flight-mode changes, takeoff/RTL/loiter and more (ArduPilot/PX4).
-- **Comfort** — a multi-language interface (English, German, French, Bulgarian and Chinese) with persistent
+- **Comfort** — a multi-language interface (English, German, French, Bulgarian, Chinese, Slovak and Spanish) with persistent
   window, layout and settings between sessions.
 
 ## What makes Kite special
@@ -109,7 +113,7 @@ Everything you'd expect from a ground station:
 - **Link modes:** live control link, **passive** listen-only telemetry, or a **relay** that
   re-broadcasts to other ground stations.
 - **Platforms:** Windows, macOS (universal, signed and notarized) and Linux (x86-64 / ARM64).
-  Android and iOS / iPadOS are in development on `development` and target the 1.1 release.
+  Android and iOS / iPadOS are in development on `development` and target the 2.0 release.
 
 ## Download
 
@@ -133,6 +137,19 @@ Full documentation is online at **[b14ckyy.github.io/Kite-GC](https://b14ckyy.gi
   [Architecture](https://b14ckyy.github.io/Kite-GC/for-developers/architecture/) ·
   [Building from source](https://b14ckyy.github.io/Kite-GC/for-developers/building/) ·
   [Contributing](https://b14ckyy.github.io/Kite-GC/for-developers/contributing/)
+
+## Community
+
+Questions, setups, flight videos, or just want to talk ground stations? The Kite community meets on
+Discord (English):
+
+<p align="center">
+  <a href="https://discord.gg/3FM7EWhkg9"><img alt="Join the Kite Discord" src="https://img.shields.io/badge/Discord-join%20the%20Kite%20server-5865F2?logo=discord&logoColor=white&style=for-the-badge"></a>
+</p>
+
+Ask in `#help` when something does not work — a confirmed bug then becomes a
+[GitHub issue](https://github.com/b14ckyy/Kite-GC/issues) (see
+[Reporting a problem](https://b14ckyy.github.io/Kite-GC/troubleshooting/reporting-issues/) for what to include).
 
 ## Support development
 
@@ -180,6 +197,7 @@ Windows, macOS and Linux for every pull request. Recommended IDE:
 [Svelte](https://marketplace.visualstudio.com/items?itemName=svelte.svelte-vscode),
 [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) and
 [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer) extensions.
+Contributors meet in `#development` on the [Discord](https://discord.gg/3FM7EWhkg9).
 
 ## License
 

@@ -1,16 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Raw-log parser → logbook (ADR-049). Imports recorded raw serial logs (.rawmsp = mwptools v2 MSP,
-// .tlog = MAVLink) into the DB as LIVE flights.
-//
-//   - Decode the raw frames back through the existing parsers (MSP `MspParser` + `decode_telemetry`,
-//     MAVLink `MavParser` + typed `MavMessage`) into a stream of telemetry samples + an armed flag.
-//   - Split the stream into individual flights at arm/disarm, applying the same 5 s grace as live
-//     recording (a re-arm within 5 s = one flight) — and, unlike live recording, FILL the grace gap
-//     (the raw log has those bytes; they're real flight data).
-//   - Store each flight as `source = "live"` (NOT blackbox → no live↔blackbox auto-linking), running a
-//     duplicate check (craft + start_time window) so re-importing an already-recorded flight is skipped.
+// Raw-log parser → logbook (ADR-049): .rawmsp (mwptools v2 MSP) and .tlog (MAVLink) replayed through the
+// live parsers and split into LIVE flights at arm/disarm with the recorder's 5 s grace — FILLED here, as
+// the raw log has those bytes. Stored as `source = "live"` (no blackbox auto-linking), duplicates skipped.
 
 use std::path::Path;
 
@@ -23,7 +16,7 @@ use ::mavlink::ardupilotmega::{GpsFixType, MavAutopilot, MavMessage, MavModeFlag
 use super::db;
 use super::timezone;
 use super::types::{Flight, TelemetryRecord};
-use crate::mavlink_proto::parser::MavParser;
+use crate::mavlink_proto::parser::{MavParser, Parsed};
 use crate::msp::{
     MspParser, MSPV2_INAV_AIR_SPEED, MSPV2_INAV_ANALOG, MSPV2_INAV_MIXER, MSPV2_INAV_STATUS,
     MSP_ALTITUDE, MSP_ATTITUDE, MSP_BOARD_INFO, MSP_FC_VARIANT, MSP_FC_VERSION, MSP_GPSSTATISTICS,
@@ -39,7 +32,6 @@ const ARMED_FLAG: u32 = 0x04;
 /// this many ms is treated as already present and skipped.
 const DEDUP_WINDOW_MS: i64 = 15_000;
 
-/// Result of a raw-log import.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RawImportResult {
@@ -152,14 +144,12 @@ fn snap_to_record(s: &Snap, t_ms: i64) -> TelemetryRecord {
         mode_modifiers: s.mode_modifiers.clone(),
         link_snr: None,
         link_rssi_dbm: None,
+        wall_ms: None,
     }
 }
 
-// ── MSP (.rawmsp, mwptools v2) ───────────────────────────────────────────────
-
-/// Decode an mwptools v2 raw log. Returns (samples, craft_name, fc_variant, platform_type). `base_ms`
-/// anchors the relative per-record offsets to an absolute epoch (from the filename's local time).
-/// MSP raw logs don't carry the vehicle/platform type, so `platform_type` is 0 (unknown).
+/// Decode an mwptools v2 raw log; `base_ms` anchors the per-record offsets to an absolute epoch (from
+/// the filename's local time). MSP raw logs carry no platform type (0 = unknown).
 fn decode_rawmsp(bytes: &[u8], base_ms: i64) -> (Vec<Sample>, Identity) {
     let mut i = if bytes.starts_with(b"v2\n") { 3 } else { 0 };
     let mut parser = MspParser::new();
@@ -284,8 +274,6 @@ fn update_from_msp(code: u16, payload: &[u8], s: &mut Snap, armed: &mut bool, id
     }
 }
 
-// ── MAVLink (.tlog) ──────────────────────────────────────────────────────────
-
 /// Decode a MAVLink tlog: a sequence of `[u64 BE µs][raw frame]`. Returns (samples, identity).
 fn decode_tlog(bytes: &[u8]) -> (Vec<Sample>, Identity) {
     let mut parser = MavParser::new();
@@ -311,15 +299,19 @@ fn decode_tlog(bytes: &[u8]) -> (Vec<Sample>, Identity) {
             let b = bytes[i];
             i += 1;
             guard += 1;
-            if let Some(frame) = parser.push(b) {
+            let parsed = parser.push_any(b);
+            // TUNNEL (#385) — Kite's own MSP-over-MAVLink traffic, recorded into every tlog of a tunnel
+            // link. A complete record like any other (so the importer stays on the frame boundary), but
+            // not telemetry: skipped.
+            if matches!(parsed, Some(Parsed::Tunnel { .. })) {
                 got = true;
-                // A tlog carries every component on the link, not just the autopilot. Peripherals that
-                // share the vehicle's system id — a camera on component 100, a gimbal on 154 — publish
-                // their own HEARTBEATs with their own `custom_mode`, so consuming all of them makes the
-                // replayed flight mode flap between senders once a second, and lets a peripheral's
-                // `autopilot` field overwrite `variant`, which selects the mode table. Lock onto the
-                // autopilot the way the live handshake does and ignore heartbeats from anything else.
-                // Other message types stay unfiltered, matching the live handler.
+                continue;
+            }
+            if let Some(Parsed::Msg(frame)) = parsed {
+                got = true;
+                // A tlog carries every component: peripherals on the vehicle's sysid (camera, gimbal) send their own
+                // HEARTBEATs, which would make the mode flap and overwrite `variant` (the mode table). Lock onto the
+                // autopilot like the live handshake; other message types stay unfiltered, as in the live handler.
                 let mut consume = true;
                 if let MavMessage::HEARTBEAT(hb) = &frame.message {
                     let id = (frame.header.system_id, frame.header.component_id);
@@ -336,6 +328,11 @@ fn decode_tlog(bytes: &[u8]) -> (Vec<Sample>, Identity) {
                         variant = v;
                         platform = p;
                     }
+                } else if let Some((sysid, _)) = fc_id {
+                    // A tlog of a link shared by several vehicles (fleet mode) carries every vehicle's
+                    // frames: once the autopilot is locked, another system id's telemetry is not this
+                    // flight's — merged, it would replay as one garbled track.
+                    consume = frame.header.system_id == sysid;
                 }
                 if consume && update_from_mav(&frame.message, &mut snap, &mut armed, &variant) {
                     samples.push(Sample { t_ms, rec: snap_to_record(&snap, t_ms), armed });
@@ -377,12 +374,9 @@ fn update_from_mav(msg: &MavMessage, s: &mut Snap, armed: &mut bool, variant: &s
             s.lon = Some(g.lon as f64 / 1e7);
             s.alt_gps = Some(g.alt as f64 / 1000.0);
             s.alt_baro = Some(g.relative_alt as f64 / 1000.0);
-            // `heading` is the course-over-ground column (see `TelemetryRecord`); the FC's own heading
-            // is stored separately as `yaw` from ATTITUDE. `g.hdg` is the vehicle HEADING, not the
-            // course — writing it here made a replayed flight report a course identical to its heading,
-            // so the compass showed no crab angle while the map model, rotated by `yaw`, correctly drew
-            // one. Derive the course from the fused velocity like the live handler does; below walking
-            // pace that is just atan2 of velocity noise, so hold the previous value.
+            // `heading` is the course-over-ground column (the FC heading is `yaw` from ATTITUDE); `g.hdg` is the
+            // HEADING and would hide every crab angle. Course from the fused velocity, like the live handler; below
+            // walking pace that is velocity noise, so the previous value is held.
             let ground_speed = ((g.vx as f64).powi(2) + (g.vy as f64).powi(2)).sqrt() / 100.0;
             if ground_speed > 0.5 {
                 s.heading = Some((g.vy as f64).atan2(g.vx as f64).to_degrees().rem_euclid(360.0));
@@ -412,10 +406,8 @@ fn update_from_mav(msg: &MavMessage, s: &mut Snap, armed: &mut bool, variant: &s
             false
         }
         MavMessage::WIND(w) => {
-            // ArduPilot's EKF wind estimate: `direction` is the bearing the wind blows FROM. Store the
-            // vector it blows TOWARD as north/east components, matching what the live recorder writes
-            // (`Recorder::on_wind`), so an imported flight drives the compass exactly like a recorded
-            // one. `speed_z` has no column, same as live.
+            // ArduPilot WIND `direction` is where the wind blows FROM; store the TOWARD vector as N/E components,
+            // exactly as the live recorder does (`Recorder::on_wind`). `speed_z` has no column.
             let toward = (w.direction as f64 + 180.0).to_radians();
             s.wind_n = Some(w.speed as f64 * toward.cos());
             s.wind_e = Some(w.speed as f64 * toward.sin());
@@ -447,8 +439,6 @@ fn update_from_mav(msg: &MavMessage, s: &mut Snap, armed: &mut bool, variant: &s
         _ => false,
     }
 }
-
-// ── Splitting + import ───────────────────────────────────────────────────────
 
 /// Split the sample stream into per-flight index ranges by arm/disarm, merging runs whose disarmed
 /// gap is ≤ 5 s (grace) into one flight — the in-between (disarmed) samples are kept (grace fill).
@@ -540,7 +530,6 @@ pub fn import_raw_log_with_progress<F: Fn(u8, &str, &str)>(
         return Err("No armed flight segments found in the raw log".into());
     }
 
-    // Existing flights for the duplicate check (craft + start_time window).
     let existing = db::list_flights(conn).unwrap_or_default();
 
     let mut result = RawImportResult { imported: 0, skipped: 0, flight_ids: Vec::new() };
@@ -553,7 +542,6 @@ pub fn import_raw_log_with_progress<F: Fn(u8, &str, &str)>(
         let start_time = Utc.timestamp_millis_opt(first_t).single().unwrap_or_else(Utc::now);
         let end_time = Utc.timestamp_millis_opt(last_t).single();
 
-        // Duplicate check: same craft + start within the window → skip.
         let dup = existing.iter().any(|e| {
             e.craft_name == craft_name
                 && (e.start_time.timestamp_millis() - first_t).abs() <= DEDUP_WINDOW_MS
@@ -563,7 +551,6 @@ pub fn import_raw_log_with_progress<F: Fn(u8, &str, &str)>(
             continue;
         }
 
-        // Stats + start coordinates.
         let mut max_alt = 0.0f64;
         let mut max_speed = 0.0f64;
         let mut max_distance = 0.0f64;
@@ -632,6 +619,8 @@ pub fn import_raw_log_with_progress<F: Fn(u8, &str, &str)>(
             board_id: id.board.clone(),
             platform_type: id.platform_type,
             fc_uid: None,
+            group_id: None,
+            vehicle_id: None,
             protocol: protocol.to_string(),
             start_lat,
             start_lon,
@@ -656,7 +645,6 @@ pub fn import_raw_log_with_progress<F: Fn(u8, &str, &str)>(
         let flight_id = db::insert_flight(conn, &flight)
             .map_err(|e| format!("Failed to insert parsed flight: {}", e))?;
 
-        // Rebase telemetry timestamps to the flight start and write them.
         let rows: Vec<TelemetryRecord> = seg
             .iter()
             .map(|s| {
@@ -711,10 +699,8 @@ mod tests {
         out
     }
 
-    /// A SIYI-style link publishes HEARTBEATs from a camera and a gimbal under the vehicle's own
-    /// system id. Only the autopilot's may drive the flight mode and the vehicle identity — otherwise
-    /// the replayed mode flaps between all three senders once a second, and the peripherals'
-    /// `MAV_AUTOPILOT_INVALID` overwrites the variant that selects the mode table.
+    /// Camera and gimbal HEARTBEATs under the vehicle's own sysid (a SIYI-style link) must not drive the
+    /// flight mode or the variant — only the autopilot's do.
     #[test]
     fn peripheral_heartbeats_do_not_drive_mode_or_identity() {
         let log = tlog(vec![
@@ -737,6 +723,61 @@ mod tests {
         let sample = samples.last().expect("ATTITUDE should emit a sample");
         assert_eq!(sample.rec.mode_primary.as_deref(), Some("guided"));
         assert!(sample.armed, "the autopilot heartbeat is armed");
+    }
+
+    /// A tlog of a link shared by two vehicles (fleet mode): once the first autopilot is locked from its
+    /// HEARTBEAT, the other vehicle's telemetry is skipped — only the first vehicle's samples remain.
+    #[test]
+    fn a_second_vehicle_in_the_tlog_is_skipped() {
+        let att = |roll: f32| MavMessage::ATTITUDE(ATTITUDE_DATA { roll, ..Default::default() });
+        let log = tlog(vec![
+            (1, 1, heartbeat(MavType::MAV_TYPE_FIXED_WING, MavAutopilot::MAV_AUTOPILOT_ARDUPILOTMEGA, 15)),
+            (2, 1, heartbeat(MavType::MAV_TYPE_QUADROTOR, MavAutopilot::MAV_AUTOPILOT_PX4, 0)),
+            (1, 1, att(0.1)),
+            (2, 1, att(0.9)),
+            (1, 1, att(0.2)),
+            (2, 1, att(0.8)),
+        ]);
+        let (samples, identity) = decode_tlog(&log);
+        assert_eq!(identity.fc_variant.as_deref(), Some("ArduPlane"));
+        let rolls: Vec<f64> = samples.iter().map(|s| (s.rec.roll.unwrap() * 100.0).round() / 100.0).collect();
+        let expected: Vec<f64> = [0.1f32, 0.2].iter().map(|r| (r.to_degrees() as f64 * 100.0).round() / 100.0).collect();
+        assert_eq!(rolls, expected);
+        assert_eq!(samples.iter().map(|s| s.t_ms).collect::<Vec<_>>(), [3000, 5000]);
+    }
+
+    /// A tunnel link records Kite's MSP-over-MAVLink TUNNEL frames (INAV 10.0+) into the tlog. The typed
+    /// parser skips them; the importer must still treat each as one complete record, or it reads on
+    /// into the next record's timestamp and loses the frame boundary for the rest of the log.
+    #[test]
+    fn tunnel_frames_in_a_tlog_keep_the_importer_in_sync() {
+        use crate::mavlink_proto::{codec, tunnel};
+        let mut log = tlog(vec![(
+            1,
+            1,
+            heartbeat(MavType::MAV_TYPE_FIXED_WING, MavAutopilot::MAV_AUTOPILOT_ARDUPILOTMEGA, 15),
+        )]);
+        let mut seq = MavSequence::new();
+        for (n, from) in [(255u8, 190u8), (1, 1)].into_iter().enumerate() {
+            log.extend_from_slice(&((n as u64 + 2) * 1_000_000).to_be_bytes());
+            let header = MavHeader { system_id: from.0, component_id: from.1, sequence: 0 };
+            let payload = tunnel::encode_chunk(1, 1, &[0x24, 0x58, 0x3C, 0x00, 0x01, 0x00, 0x00, 0x00, 0x8F]);
+            log.extend_from_slice(&codec::serialize_raw_v2(
+                &header,
+                tunnel::TUNNEL_MSG_ID,
+                tunnel::TUNNEL_CRC_EXTRA,
+                &payload,
+                &mut seq,
+            ));
+        }
+        log.extend_from_slice(&4_000_000u64.to_be_bytes());
+        let att_header = MavHeader { system_id: 1, component_id: 1, sequence: 0 };
+        log.extend_from_slice(&serialize_v2(&att_header, &MavMessage::ATTITUDE(ATTITUDE_DATA::default()), &mut seq));
+
+        let (samples, identity) = decode_tlog(&log);
+        assert_eq!(identity.fc_variant.as_deref(), Some("ArduPlane"));
+        assert_eq!(samples.len(), 1, "the ATTITUDE after the TUNNEL records must still be decoded");
+        assert_eq!(samples[0].t_ms, 4000);
     }
 
     /// The `heading` column is course over ground, not the vehicle heading — `GLOBAL_POSITION_INT.hdg`

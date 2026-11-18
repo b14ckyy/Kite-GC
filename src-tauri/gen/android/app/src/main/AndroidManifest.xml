@@ -29,7 +29,7 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
     <!-- No WAKE_LOCK here on purpose: the screen is kept awake with the window flag
-         FLAG_KEEP_SCREEN_ON (ScreenLock, only while a telemetry link is active), which needs no
+         FLAG_KEEP_SCREEN_ON (ScreenLock; the rule is in link_presence.rs), which needs no
          permission, is scoped to this window and is released the moment the app leaves the
          foreground. -->
 

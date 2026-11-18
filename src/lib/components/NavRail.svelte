@@ -65,6 +65,11 @@
 </div>
 
 <style>
+  /* Mobile: its own compositor layer, permanently — see the zone rule in +page.svelte (the floating
+     video window slides past it and would promote / demote it, a frame without the rail). */
+  :global(html.is-mobile) .nav-rail {
+    will-change: transform;
+  }
   .nav-rail {
     position: absolute;
     top: 65px;
@@ -74,16 +79,9 @@
     gap: 0;
     z-index: 100;
     transition: left 0.3s ease;
-    /* Bound the rail to the space between the toolbar and the status bar and let it scroll, instead
-       of overflowing and being silently clipped by `.ui-root`'s `overflow: hidden`.
-       With every tab enabled the open rail is 42 + 4 + 10x38 + 9x2 = 444px, so it needs ~539 logical
-       pixels of height; at a UI scale of 1.5 that is 808 real pixels and at 2.0 it is 1078, and any
-       window shorter than that silently drops the last icons off the bottom edge with no scrollbar
-       and no other indication that they exist.
-       Expressed in the chrome's own logical pixels: `.ui-scale` is exactly `100vh / --ui-scale` tall,
-       so this stays correct at every UI scale without depending on which ancestor is the offset
-       parent (65px = toolbar 53 + 12 gap, 30px = status bar 24 + 6 gap). The scrollbar is hidden so
-       the rail keeps its exact 42px width and current look; it scrolls by wheel/drag. */
+    /* Bound the rail between toolbar and status bar and let it scroll (hidden scrollbar, exact 42px width) —
+       otherwise `.ui-root`'s overflow clips the last icons silently on short windows / high UI scale. In logical
+       px: `.ui-scale` is 100vh / --ui-scale tall (65 = toolbar 53 + 12, 30 = status bar 24 + 6). */
     max-height: calc(100vh / var(--ui-scale, 1) - 65px - 30px);
     overflow-y: auto;
     overflow-x: hidden;
@@ -104,10 +102,8 @@
   :global(html.is-mobile) .nav-rail.open {
     left: calc(12px + var(--safe-left, 0px));
   }
-  /* Phone: no toolbar (Dev-Docs archive/PHONE_UI.md D3) — the burger IS the top-left corner. Lifted
-     above the widget column (z-index 100) so the open rail never hides behind it. The rail stops
-     above the bottom-left chip row (arming / sensors / Debug: 26px + 8px margin + 8px gap) and
-     scrolls when the tabs need more. */
+  /* Phone: no toolbar (Dev-Docs archive/PHONE_UI.md D3) — the burger IS the top-left corner, lifted above the
+     widget column (z 100). The rail stops above the bottom-left chip row (26 + 8 + 8px) and scrolls. */
   :global(html.is-phone) .nav-rail {
     z-index: 120;
     top: calc(8px + var(--safe-top, 0px));
@@ -137,11 +133,12 @@
     align-items: center;
     justify-content: center;
     transition: background-color 0.2s;
-    backdrop-filter: blur(8px);
+    backdrop-filter: var(--glass-blur, blur(6px));
+    -webkit-backdrop-filter: var(--glass-blur, blur(6px));
   }
 
   .hamburger-btn:hover {
-    background: rgba(55, 168, 219, 0.25);
+    background: var(--btn-active-bg);
   }
 
   .hamburger-icon {
@@ -202,7 +199,8 @@
     justify-content: center;
     overflow: hidden;
     transition: width 0.3s ease, background-color 0.2s;
-    backdrop-filter: blur(8px);
+    backdrop-filter: var(--glass-blur, blur(6px));
+    -webkit-backdrop-filter: var(--glass-blur, blur(6px));
     white-space: nowrap;
   }
 

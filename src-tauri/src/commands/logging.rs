@@ -20,6 +20,14 @@ pub fn get_log_path() -> Option<String> {
     logging::log_path().map(|p| p.to_string_lossy().to_string())
 }
 
+/// The day-files in the log folder, newest first, the active one flagged. Feeds the mobile "Share
+/// log" picker: the folder is app-private there, so the share sheet is the only way off the device,
+/// and the file a tester needs after a restart is usually yesterday's — see `logging::log_files`.
+#[tauri::command]
+pub fn list_log_files() -> Result<Vec<logging::LogFileInfo>, String> {
+    Ok(logging::log_files())
+}
+
 /// Record a one-line settings snapshot in the current session's log header. Called once by the
 /// frontend after it loads the persisted settings (the backend can't see them at startup).
 #[tauri::command]

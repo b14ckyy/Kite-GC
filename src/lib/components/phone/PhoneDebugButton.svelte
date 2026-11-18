@@ -33,8 +33,8 @@
     color: #949494;
     font-size: 10px;
     cursor: pointer;
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: var(--glass-blur, blur(6px));
+    -webkit-backdrop-filter: var(--glass-blur, blur(6px));
     pointer-events: auto;
   }
   .debug-btn.open {

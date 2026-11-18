@@ -62,9 +62,7 @@ pub const MSP_UID: u16 = 160;
 // pub const MSP_GPS_SV_INFO: u16 = 164;
 
 // ── Mission / Waypoint MSP v1 command codes ─────────────────────────
-// INAV: LOAD = 18 (load mission from NVRAM → RAM), SAVE = 19 (save RAM → NVRAM). These were previously
-// swapped here, so "EEPROM Save" actually sent LOAD (overwrote the upload with the old EEPROM, wrote
-// nothing) and "EEPROM Load" sent SAVE — i.e. mission EEPROM save never persisted.
+// INAV: LOAD = 18 (NVRAM → RAM), SAVE = 19 (RAM → NVRAM) — do not swap them.
 pub const MSP_WP_MISSION_LOAD: u16 = 18;
 pub const MSP_WP_MISSION_SAVE: u16 = 19;
 pub const MSP_WP_GETINFO: u16 = 20;
@@ -148,10 +146,9 @@ pub struct FcInfo {
     /// a QuadPlane reports fc_variant "ArduPlane" but a VTOL_* MAV_TYPE.
     #[serde(default)]
     pub mav_type: u8,
-    /// Hardware identity of the flight controller where the protocol exposes one: INAV = MSP_UID (the
-    /// 96-bit MCU serial, 24 hex chars), MAVLink = AUTOPILOT_VERSION uid2 (or uid). `None` for passive
-    /// telemetry. Informational: lets the live platform-type override survive a reconnect to the same
-    /// FC and is stored with each flight — linking stays on the craft name.
+    /// Hardware identity of the flight controller: INAV = MSP_UID (96-bit MCU serial), MAVLink =
+    /// AUTOPILOT_VERSION uid2. Always passed through [`hardware_uid`]; `None` for passive telemetry and
+    /// a simulator's synthetic id. The first key when a flight is linked to its library vehicle.
     #[serde(default)]
     pub fc_uid: Option<String>,
     /// Whether the FC logs to a blackbox / dataflash: INAV `MSP_BLACKBOX_CONFIG` device != NONE (set in
@@ -159,4 +156,48 @@ pub struct FcInfo {
     /// handler once the param reply arrives). `None` = not known. Seeds the vehicle library entry.
     #[serde(default)]
     pub blackbox: Option<bool>,
+}
+
+/// MSP_UID of every INAV SITL instance (`U_ID_0/1/2` = 0, 1, 2 as little-endian u32 words, rendered
+/// the way the MSP handshake renders MSP_UID) — the same on every host, so it identifies no aircraft.
+pub(crate) const INAV_SITL_UID: &str = "000000000100000002000000";
+
+/// The FC hardware id worth storing: `None` for an empty or all-zero id (an unfilled MAVLink `uid2`)
+/// and for INAV SITL's constant MSP_UID — they would link every simulator (or every INAV board over
+/// plain MAVLink) to the same library vehicle. Other ids pass through trimmed.
+pub fn hardware_uid(raw: &str) -> Option<String> {
+    let uid = raw.trim();
+    if uid.is_empty() || uid.chars().all(|c| c == '0') || uid.eq_ignore_ascii_case(INAV_SITL_UID) {
+        return None;
+    }
+    Some(uid.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::hardware_uid;
+
+    #[test]
+    fn hardware_uid_drops_synthetic_ids() {
+        // INAV SITL's MSP_UID (U_ID_0/1/2 = 0, 1, 2), in both cases.
+        assert_eq!(hardware_uid("000000000100000002000000"), None);
+        assert_eq!(hardware_uid(" 000000000100000002000000 "), None);
+        // An all-zero MAVLink uid2 (18 bytes) / any all-zero id, and an empty one.
+        assert_eq!(hardware_uid(&"00".repeat(18)), None);
+        assert_eq!(hardware_uid("0000000000000000"), None);
+        assert_eq!(hardware_uid(""), None);
+        assert_eq!(hardware_uid("   "), None);
+    }
+
+    #[test]
+    fn hardware_uid_keeps_real_ids() {
+        // A real STM32 MSP_UID, a PX4 SITL uid2 at sysid 2 (byte 0 = sysid - 1), an ArduPilot SITL uid2
+        // (hostname text) — all kept, trimmed.
+        assert_eq!(hardware_uid("2F0034000B51333133373735").as_deref(), Some("2F0034000B51333133373735"));
+        let px4_sitl_sysid2 = format!("01{}", "00".repeat(17));
+        assert_eq!(hardware_uid(&px4_sitl_sysid2), Some(px4_sitl_sysid2.clone()));
+        assert_eq!(hardware_uid(" 4D415243 ").as_deref(), Some("4D415243"));
+        // The SITL constant with one word changed is a different id.
+        assert_eq!(hardware_uid("000000000100000003000000").as_deref(), Some("000000000100000003000000"));
+    }
 }

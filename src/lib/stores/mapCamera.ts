@@ -22,3 +22,14 @@ export const frameMissionSignal = { subscribe: _frameMission.subscribe };
 export function frameMissionOnMap(): void {
   _frameMission.update((n) => n + 1);
 }
+
+const _frameFleet = writable(0);
+
+/** Monotonic counter; maps frame every connected vehicle (or the selected ones, when 2+ are selected)
+ *  once when it increments. Acted on in free pan/look and in the fleet camera mode. */
+export const frameFleetSignal = { subscribe: _frameFleet.subscribe };
+
+/** Fire from the fleet panel's "Frame fleet" button. */
+export function frameFleetOnMap(): void {
+  _frameFleet.update((n) => n + 1);
+}

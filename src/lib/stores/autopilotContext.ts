@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
 import { writable, derived, get, type Readable } from 'svelte/store';
-import { connection } from './connection';
+import { connection, linkHasMsp } from './connection';
 import { settings } from './settings';
 import {
   mission, missionResetMemory, resetMultiMission, getTotalWpCount,
@@ -136,10 +136,14 @@ connection.subscribe(conn => {
     return;
   }
   if (conn.status !== 'connected' || !conn.fcInfo) return;
-  if (conn.fcInfo.fc_variant === _lastDetectedVariant) return;
-  _lastDetectedVariant = conn.fcInfo.fc_variant;
+  // A link that carries MSP (direct, or MSP over MAVLink to INAV 10.0+) IS INAV — the planner follows
+  // that explicitly, not the variant string; every other link maps its variant.
+  const mspLink = linkHasMsp(conn);
+  const key = mspLink ? 'msp' : conn.fcInfo.fc_variant;
+  if (key === _lastDetectedVariant) return;
+  _lastDetectedVariant = key;
 
-  const detected = variantToSystem(conn.fcInfo.fc_variant);
+  const detected = mspLink ? 'inav' : variantToSystem(conn.fcInfo.fc_variant);
   if (!detected) return;
 
   const current = get(_system);

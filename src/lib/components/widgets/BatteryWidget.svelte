@@ -3,10 +3,9 @@
   Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 -->
 
-<!-- Battery widget — voltage bar, voltage, current + power, mAh. Multi-battery aware (ArduPilot/PX4):
-     shows one monitor instance with an AUTO selector (highest current draw, with a low-battery safety
-     override) and manual pinning. Single-battery setups (INAV) show the one battery. See
-     docs/active/MULTI_BATTERY.md. -->
+<!-- Battery widget — voltage bar, voltage, current + power, mAh. Multi-battery (ArduPilot/PX4): one instance
+     with AUTO selection (highest draw, low-battery override) or manual pinning; INAV shows its one battery.
+     See docs/active/MULTI_BATTERY.md. -->
 <script lang="ts">
   import type { TelemetryData, BatteryInstance } from "$lib/stores/telemetry";
   import { settings } from "$lib/stores/settings";
@@ -122,11 +121,15 @@
       ? (multi ? `${$t('widgetLabels.auto')} ${shownId + 1}` : '')
       : `${shownId + 1}`
   );
+  // The second battery widget instance reads "BAT 2", so two of them side by side can be told apart.
+  let title = $derived(
+    widgetId === 'battery2' ? `${$t('widgetLabels.bat')} 2` : $t('widgetLabels.bat')
+  );
 </script>
 
 <div class="widget-card" class:alert style="--ws: {size}px">
   <button class="w-label" class:clickable={multi} onclick={cycle} disabled={!multi} type="button">
-    {$t('widgetLabels.bat')}{#if multi}<span class="chip">{chip}</span>{/if}
+    {title}{#if multi}<span class="chip">{chip}</span>{/if}
   </button>
 
   <!-- Voltage bar — only shown when battery % is available from FC -->
@@ -153,7 +156,8 @@
     align-items: center;
     justify-content: flex-start;
     background: rgba(30, 30, 30, 0.75);
-    backdrop-filter: blur(10px);
+    backdrop-filter: var(--glass-blur, blur(6px));
+    -webkit-backdrop-filter: var(--glass-blur, blur(6px));
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: calc(var(--ws) * 0.08);
     gap: calc(var(--ws) * 0.02);

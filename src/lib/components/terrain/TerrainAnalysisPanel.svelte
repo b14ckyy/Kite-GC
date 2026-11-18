@@ -387,7 +387,7 @@
   const previewPath = $derived(correction ? correction.previewPath : null);
   // Terrain Correction / Check + Add WP work for ALL autopilots: edits write back to the active mission
   // store (INAV → mission; ArduPilot/PX4 → arduMission via the srcIdx map).
-  const showCorrection = $derived($terrainAnalysis.viewMode === 'waypoint' && !$terrainAnalysis.compact);
+  const showCorrection = $derived($terrainAnalysis.viewMode === 'waypoint');
   const canAddWp = $derived($terrainCursor.placed != null && placedDist != null && data != null);
 
   // Combined 3-way correction control: 'off' disables it, 'follow'/'check' enable + set the mode
@@ -619,10 +619,33 @@
   });
 </script>
 
-{#snippet headerActions()}
+{#snippet mapButton()}
   <Button variant="mode" active={$terrainAnalysis.compact} icon="map" onclick={toggleCompact} title={$t('terrain.showMapHint')}>
     {$t('terrain.showMap')}
   </Button>
+{/snippet}
+
+{#snippet viewButtons()}
+  {#if live}
+    <Button variant="mode" active={$terrainAnalysis.follow} onclick={toggleFollow} title={$t('terrain.followHint')}>
+      {$t('terrain.follow')}
+    </Button>
+  {/if}
+  <Button variant="standard" icon="refresh" onclick={resetTerrainView} title={$t('terrain.resetView')} />
+{/snippet}
+
+{#snippet legend()}
+  <div class="legend">
+    <span class="lg"><i class="sw path"></i>{$t('terrain.path')}</span>
+    <span class="lg"><i class="sw terrain"></i>{$t('terrain.terrain')}</span>
+    <span class="lg"><i class="sw floor"></i>{$t('terrain.clearanceFloor')}</span>
+    <span class="lg"><i class="sw unsafe"></i>{$t('terrain.unsafe')}</span>
+    {#if rssiShown}<span class="lg"><i class="sw rssi"></i>{$t('terrain.rssi')}</span>{/if}
+  </div>
+{/snippet}
+
+{#snippet headerActions()}
+  {@render mapButton()}
   <SegmentedToggle
     options={[{ value: 'waypoint', label: $t('terrain.waypointMode') }, { value: 'track', label: $t('terrain.trackMode') }]}
     value={$terrainAnalysis.viewMode}
@@ -633,17 +656,21 @@
     value={$terrainAnalysis.datum}
     onchange={(v) => setDatum(v as 'msl' | 'agl')}
   />
-  {#if live}
-    <Button variant="mode" active={$terrainAnalysis.follow} onclick={toggleFollow} title={$t('terrain.followHint')}>
-      {$t('terrain.follow')}
-    </Button>
-  {/if}
-  <Button variant="standard" icon="refresh" onclick={resetTerrainView} title={$t('terrain.resetView')} />
+  {@render viewButtons()}
 {/snippet}
 
 {#snippet params()}
+  {#if $terrainAnalysis.compact}
   <div class="controls">
-    <div class="ctrl" class:ctrl-row={$terrainAnalysis.compact}>
+    <div class="compact-btns">
+      {@render mapButton()}
+      {@render viewButtons()}
+    </div>
+    {@render legend()}
+  </div>
+  {:else}
+  <div class="controls">
+    <div class="ctrl">
         <span>{$t('terrain.groundClearance')}</span>
         <UnitStepper
           bind:value={groundClearance}
@@ -656,15 +683,8 @@
         />
       </div>
 
-      <div class="legend">
-        <span class="lg"><i class="sw path"></i>{$t('terrain.path')}</span>
-        <span class="lg"><i class="sw terrain"></i>{$t('terrain.terrain')}</span>
-        <span class="lg"><i class="sw floor"></i>{$t('terrain.clearanceFloor')}</span>
-        <span class="lg"><i class="sw unsafe"></i>{$t('terrain.unsafe')}</span>
-        {#if rssiShown}<span class="lg"><i class="sw rssi"></i>{$t('terrain.rssi')}</span>{/if}
-      </div>
+      {@render legend()}
 
-      {#if !$terrainAnalysis.compact}
       <div class="rf-section">
         <span class="rf-head">{$t('terrain.rfTitle')}</span>
         <div class="rf-methods">
@@ -723,7 +743,6 @@
         {/if}
         <p class="rf-note">{$t('terrain.rfDisclaimer')}</p>
       </div>
-      {/if}
 
       {#if showCorrection}
         <div class="correction">
@@ -798,8 +817,9 @@
         </div>
       {/if}
 
-      {#if !$terrainAnalysis.compact}<p class="hint">{$t('terrain.zoomHint')}</p>{/if}
+      <p class="hint">{$t('terrain.zoomHint')}</p>
     </div>
+  {/if}
   {/snippet}
 
   {#snippet body()}
@@ -826,6 +846,7 @@
           bind:viewEnd={$terrainAnalysis.viewEnd}
           onhover={onChartHover}
           onpick={onChartPick}
+          dense={$terrainAnalysis.compact}
         />
       {:else if data && !terrainAvailable}
         <div class="state warn">{$t('terrain.terrainUnavailable')}</div>
@@ -881,11 +902,11 @@
 
   <PanelShell
     variant={$terrainAnalysis.compact ? 'wide-compact' : 'fullscreen'}
-    title={$t('terrain.title')}
-    {headerActions}
+    title={$terrainAnalysis.compact ? '' : $t('terrain.title')}
+    headerActions={$terrainAnalysis.compact ? undefined : headerActions}
     {params}
     {body}
-    {footer}
+    footer={$terrainAnalysis.compact ? undefined : footer}
   />
 
 <style>
@@ -893,10 +914,8 @@
     flex: 1;
   }
 
-  /* Params slot content (PanelShell .ps-params provides width/padding/border/scroll). The column
-     is 240px (Marc, 2026-09-04: the segmented controls and their spacing dictated the width —
-     tightened so the profile chart gets the room): the band / correction segments and the RF
-     method buttons use a slimmer padding here than elsewhere. */
+  /* The band / correction segments and the RF method buttons take a slimmer padding so they fit the
+     240 px params column. */
   .controls {
     display: flex;
     flex-direction: column;
@@ -922,13 +941,9 @@
     font-size: 12px;
     color: #b8b8b8;
   }
-  /* Compact (wide) mode: label + stepper on one row to save vertical space so the params
-     column needs no scrollbar (correction + hint are hidden in compact). */
-  .ctrl.ctrl-row {
-    flex-direction: row;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
+  .compact-btns {
+    display: flex;
+    gap: 6px;
   }
   /* Climb + Descent angle side by side (there's room in the params column). */
   .ctrl-2col {

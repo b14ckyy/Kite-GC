@@ -3,6 +3,7 @@
 
 // Widget registry — defines all available widgets, their shape family, default size and metadata
 
+import { hasVideo } from '$lib/platform';
 
 /** Shape family: `square` tiles keep 1:1, `wide` ones are 2:1 in their wide state. */
 export type WidgetShape = 'square' | 'wide';
@@ -34,12 +35,13 @@ const ALL_WIDGET_DEFS: WidgetDef[] = [
   { id: 'flightMode',   label: 'Flight Mode',    labelKey: 'widgets.flightMode',   shape: 'square', defaultSize: 'S' },
   { id: 'liveAgl',      label: 'Live AGL',       labelKey: 'widgets.liveAgl',      shape: 'wide',   defaultSize: 'W' },
   { id: 'terrainRadar', label: 'Terrain Radar',  labelKey: 'widgets.terrainRadar', shape: 'square', defaultSize: 'L' },
+  { id: 'weather',      label: 'Weather',        labelKey: 'widgets.weather',      shape: 'wide',   defaultSize: 'L' },
   { id: 'videoFeed',    label: 'Video',          labelKey: 'widgets.video',        shape: 'wide',   defaultSize: 'W' },
 ];
 
 // Every platform, the phone included since PHONE_VIDEO.md D5 (the video widget is off by default
-// there and takes a W = 2×1 slot, crop-to-fill).
-export const WIDGET_DEFS: WidgetDef[] = ALL_WIDGET_DEFS;
+// there and takes a W = 2×1 slot, crop-to-fill). Not on iPhone, which has no video (`hasVideo`).
+export const WIDGET_DEFS: WidgetDef[] = hasVideo ? ALL_WIDGET_DEFS : ALL_WIDGET_DEFS.filter((w) => w.id !== 'videoFeed');
 
 export const WIDGET_MAP = new Map(WIDGET_DEFS.map(w => [w.id, w]));
 

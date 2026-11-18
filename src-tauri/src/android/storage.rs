@@ -48,9 +48,10 @@ pub fn pick_folder() -> Result<Option<String>, String> {
     Ok(Some(path))
 }
 
-/// Hand a file to the system share sheet (mail, messengers, a text editor…). Fire-and-forget —
-/// the sheet is the user's from there on.
-pub fn share_file(path: &str, mime: &str) -> Result<(), String> {
+/// Hand a file to the system share sheet (mail, messengers, a file manager…). Fire-and-forget — the
+/// sheet is the user's from there on. A non-empty `save_label` adds a "save to device" action to the
+/// sheet where Android has such actions (14+); a tap on it is fetched with `take_save_request`.
+pub fn share_file(path: &str, mime: &str, save_label: &str) -> Result<(), String> {
     let mut env = jvm::env()?;
     let class = jvm::app_class(&mut env, BRIDGE)?;
     let j_path = env
@@ -59,12 +60,15 @@ pub fn share_file(path: &str, mime: &str) -> Result<(), String> {
     let j_mime = env
         .new_string(mime)
         .map_err(|e| format!("building the mime string: {e}"))?;
+    let j_label = env
+        .new_string(save_label)
+        .map_err(|e| format!("building the label string: {e}"))?;
     let r = env
         .call_static_method(
             &class,
             "shareFile",
-            "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
-            &[(&j_path).into(), (&j_mime).into()],
+            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+            &[(&j_path).into(), (&j_mime).into(), (&j_label).into()],
         )
         .and_then(|v| v.l());
     let err = jvm::check(&mut env, r, "StorageAccess.shareFile")?;
@@ -76,6 +80,22 @@ pub fn share_file(path: &str, mime: &str) -> Result<(), String> {
         .map(String::from)
         .map_err(|e| format!("reading the share error: {e}"))?;
     Err(msg)
+}
+
+/// The shared file the user asked to save to the device (the sheet's own action), once.
+pub fn take_save_request() -> Result<Option<String>, String> {
+    let mut env = jvm::env()?;
+    let class = jvm::app_class(&mut env, BRIDGE)?;
+    let r = env
+        .call_static_method(&class, "takeSaveRequest", "()Ljava/lang/String;", &[])
+        .and_then(|v| v.l());
+    let value = jvm::check(&mut env, r, "StorageAccess.takeSaveRequest")?;
+    if value.is_null() {
+        return Ok(None);
+    }
+    env.get_string(&JString::from(value))
+        .map(|s| Some(String::from(s)))
+        .map_err(|e| format!("reading the save request: {e}"))
 }
 
 /// Mirror every regular file in `src_dir` into the granted tree at `tree_uri` — files already

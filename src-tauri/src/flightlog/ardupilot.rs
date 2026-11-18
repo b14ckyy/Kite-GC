@@ -781,6 +781,7 @@ fn normalized_to_telemetry(r: &NormalizedRecord, timestamp_ms: i64, fc_variant: 
         mode_modifiers,
         link_snr: None,
         link_rssi_dbm: None,
+        wall_ms: None,
         airspeed_ms: r.airspeed_ms,
         throttle_pct: r.throttle_pct,
     }
@@ -981,6 +982,8 @@ where
         board_id: String::new(),
         platform_type,
         fc_uid: None,
+        group_id: None,
+        vehicle_id: None,
         protocol: "DATAFLASH".into(),
         start_lat,
         start_lon,
@@ -1049,6 +1052,16 @@ where
     })
 }
 
+/// Whether a `GPS` message comes from the receiver the autopilot is flying on. ArduPilot 4.x logs
+/// every receiver as `GPS` with instance `I` (plus a virtual blended instance with GPS_BLEND) and
+/// sets `U` = 1 on the one in use, which can switch mid-flight. Logs without `U`: instance 0 only.
+fn is_primary_gps(msg: &ParsedMsg) -> bool {
+    match msg.get_u64("U") {
+        Some(used) => used == 1,
+        None => msg.get_u64("I").unwrap_or(0) == 0,
+    }
+}
+
 /// Process a single parsed message, updating state and optionally emitting GPS rows.
 /// Extracted from `decode_to_normalized_csv` so both CSV and DB paths share the same logic.
 fn process_message(
@@ -1059,7 +1072,9 @@ fn process_message(
 ) {
     match msg.type_name.as_str() {
         // ── GPS ──────────────────────────────────────────────────────────
-        "GPS" | "GPS2" => {
+        // Only the primary receiver becomes a track row — with two receivers the track would
+        // otherwise interleave both positions. Legacy GPS2 (pre-4.0 second receiver) is skipped.
+        "GPS" if is_primary_gps(msg) => {
             let time_us = msg.get_u64("TimeUS").unwrap_or(0);
             let fix = msg.get_f64("Status").map(|v| v as u8);
             let lat = msg.get_f64("Lat");
@@ -1465,5 +1480,115 @@ fn csv_escape(s: &str) -> String {
         format!("\"{}\"", s.replace('"', "\"\""))
     } else {
         s.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A `GPS` message with a valid 3D fix. `inst`/`used` = None leaves the field out (old logs).
+    fn gps_msg(name: &str, time_us: u64, inst: Option<u64>, used: Option<u64>, lat: f64) -> ParsedMsg {
+        let mut fields = vec![("TimeUS".to_string(), DFValue::UInt(time_us))];
+        if let Some(i) = inst {
+            fields.push(("I".to_string(), DFValue::UInt(i)));
+        }
+        fields.push(("Status".to_string(), DFValue::UInt(3)));
+        fields.push(("GMS".to_string(), DFValue::UInt(time_us / 1000)));
+        fields.push(("GWk".to_string(), DFValue::UInt(2400)));
+        fields.push(("Lat".to_string(), DFValue::Float(lat)));
+        fields.push(("Lng".to_string(), DFValue::Float(8.0)));
+        if let Some(u) = used {
+            fields.push(("U".to_string(), DFValue::UInt(u)));
+        }
+        ParsedMsg { type_name: name.to_string(), fields }
+    }
+
+    fn run(msgs: &[ParsedMsg]) -> (DecoderState, Vec<NormalizedRecord>) {
+        let mut state = DecoderState::default();
+        let mut stats = DecodeStats::default();
+        let mut rows = Vec::new();
+        for m in msgs {
+            process_message(m, &mut state, &mut stats, &mut rows);
+        }
+        (state, rows)
+    }
+
+    #[test]
+    fn two_receivers_emit_only_the_used_one() {
+        let (state, rows) = run(&[
+            gps_msg("GPS", 1_000_000, Some(0), Some(1), 50.0),
+            gps_msg("GPS", 1_000_000, Some(1), Some(0), 50.001),
+        ]);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].lat, Some(50.0));
+        assert_eq!(state.gps_ref_time_us, Some(1_000_000));
+    }
+
+    #[test]
+    fn primary_switch_follows_the_used_flag() {
+        let (state, rows) = run(&[
+            gps_msg("GPS", 2_000_000, Some(0), Some(0), 50.0),
+            gps_msg("GPS", 2_000_100, Some(1), Some(1), 50.001),
+        ]);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].lat, Some(50.001));
+        // The GPS time reference comes from the used receiver only.
+        assert_eq!(state.gps_ref_time_us, Some(2_000_100));
+    }
+
+    #[test]
+    fn unused_blended_and_legacy_second_receiver_are_skipped() {
+        let (_, rows) = run(&[gps_msg("GPS", 1_000_000, Some(2), Some(0), 50.0)]);
+        assert!(rows.is_empty());
+        let (_, rows) = run(&[gps_msg("GPS2", 1_000_000, None, None, 50.0)]);
+        assert!(rows.is_empty());
+        // Logs with I but without U: instance 0 only.
+        let (_, rows) = run(&[
+            gps_msg("GPS", 1_000_000, Some(1), None, 50.001),
+            gps_msg("GPS", 1_000_000, Some(2), None, 50.002),
+        ]);
+        assert!(rows.is_empty());
+    }
+
+    #[test]
+    fn legacy_gps_without_instance_is_emitted() {
+        let (_, rows) = run(&[gps_msg("GPS", 1_000_000, None, None, 50.0)]);
+        assert_eq!(rows.len(), 1);
+        let (_, rows) = run(&[gps_msg("GPS", 1_000_000, Some(0), None, 50.0)]);
+        assert_eq!(rows.len(), 1);
+    }
+
+    /// Regression check on a real two-GPS DataFlash log: before the fix both receivers were interleaved
+    /// (ArduPlane 4.3.3 reference log: max step 232 m over ~41800 rows; fixed: 7.3 m over 20923 rows).
+    /// Ignored by default — point `KITE_DATAFLASH_TEST_LOG` at a `.bin` from an aircraft with two
+    /// receivers and run `cargo test real_two_gps_log -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn real_two_gps_log_has_a_smooth_track() {
+        let Ok(path) = std::env::var("KITE_DATAFLASH_TEST_LOG") else {
+            eprintln!("KITE_DATAFLASH_TEST_LOG not set — skipping");
+            return;
+        };
+        let data = std::fs::read(&path).unwrap_or_else(|e| panic!("cannot read {path}: {e}"));
+        let mut scanner = DataFlashScanner::new(&data);
+        let mut state = DecoderState::default();
+        let mut stats = DecodeStats::default();
+        let mut rows = Vec::new();
+        while let Some(msg) = scanner.next_message() {
+            process_message(&msg, &mut state, &mut stats, &mut rows);
+        }
+        let max_step = rows
+            .windows(2)
+            .filter_map(|w| match (w[0].lat, w[0].lon, w[1].lat, w[1].lon) {
+                (Some(a), Some(b), Some(c), Some(d)) => Some(haversine_m(a, b, c, d)),
+                _ => None,
+            })
+            .fold(0.0_f64, f64::max);
+        println!("rows = {}, max step = {:.2} m", rows.len(), max_step);
+        assert!(!rows.is_empty(), "no GPS rows decoded from {path}");
+        // Interleaved receivers jump by their mutual offset (hundreds of metres); a single receiver
+        // at log rate moves a few metres per row.
+        assert!(max_step < 50.0, "max step {max_step:.2} m");
     }
 }

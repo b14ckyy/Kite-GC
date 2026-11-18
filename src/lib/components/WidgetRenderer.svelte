@@ -21,6 +21,7 @@
   import LiveAglWidget from './widgets/LiveAglWidget.svelte';
   import TerrainRadarWidget from './widgets/TerrainRadarWidget.svelte';
   import VideoWidget from './widgets/VideoWidget.svelte';
+  import WeatherWidget from './widgets/WeatherWidget.svelte';
 
   let {
     id,
@@ -29,6 +30,7 @@
     sizePx,
     wPx,
     hPx,
+    small = false,
     editing = false,
     ghost = false,
   }: {
@@ -37,9 +39,11 @@
     interfaceSettings: InterfaceSettings;
     /** Cross-axis size (the square widgets' edge). */
     sizePx: number;
-    /** Box of the wide widgets (Live AGL, Video). */
+    /** Box of the wide widgets. */
     wPx: number;
     hPx: number;
+    /** The widget is in its `S` state (for those that lay out differently then). */
+    small?: boolean;
     editing?: boolean;
     /** A visual copy (the phone grid's drag ghost): no side effects — the video widget must not
      *  register a native surface or publish its rect from here. */
@@ -71,6 +75,8 @@
   <LiveAglWidget {telem} {interfaceSettings} width={wPx} height={hPx} />
 {:else if id === 'terrainRadar'}
   <TerrainRadarWidget {telem} {interfaceSettings} size={sizePx} {editing} />
+{:else if id === 'weather'}
+  <WeatherWidget {telem} {interfaceSettings} width={wPx} height={hPx} {small} />
 {:else if id === 'videoFeed'}
   <VideoWidget width={wPx} height={hPx} {ghost} />
 {/if}

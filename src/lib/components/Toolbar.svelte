@@ -8,6 +8,8 @@
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import WindowControls from '$lib/components/WindowControls.svelte';
   import ConnectionControls from '$lib/components/ConnectionControls.svelte';
+  import LinkManager from '$lib/components/LinkManager.svelte';
+  import MapSearch from '$lib/components/MapSearch.svelte';
   import { isLinux, isMacOS, isMobile } from '$lib/platform';
   import ArmingIndicator from '$lib/components/ArmingIndicator.svelte';
   import BatteryIndicator from '$lib/components/BatteryIndicator.svelte';
@@ -19,6 +21,7 @@
 
   let {
     appVersion,
+    mapSearchAvailable = true,
     telem,
     ports,
     bleDeviceList = [],
@@ -40,8 +43,11 @@
     onOpenRaw,
     onOpenRc,
     onRescanBle,
+    fleetEnabled = false,
   }: {
     appVersion: string;
+    /** False while the map is the Video widget's mini map: a jump would go nowhere, so no search then. */
+    mapSearchAvailable?: boolean;
     telem: TelemetryData;
     ports: PortInfo[];
     bleDeviceList: BleDeviceInfo[];
@@ -67,6 +73,8 @@
     onOpenRc?: () => void;
     /** Trigger a fresh bounded BLE scan window — called when the device dropdown is opened. */
     onRescanBle?: () => void;
+    /** Fleet feature gate (`--fleet` launch flag, stores/fleetMode): off = no link manager / multi-connect. */
+    fleetEnabled?: boolean;
   } = $props();
 
   // Sensor-health bar: one tile per sensor the airframe reports (helpers/sensorHealth.ts — shared
@@ -74,17 +82,9 @@
   const sensorTiles = $derived(sensorTilesOf(telem, $t));
   const ekfLabel = $derived(ekfLabelOf(telem));
 
-  // ── Progressive collapse ─────────────────────────────────────────────────────
-  // The toolbar is the title bar, so the window buttons must stay reachable at ANY window width.
-  // Nothing here shrinks on its own, so a narrow window used to push them out of the frame entirely
-  // (worst with a connected UAV, where the sensor bar adds ~200 px). Instead of clipping at random,
-  // the bar sheds content in a fixed order as it runs out of room:
-  //   1 = version   2 = wordmark → icon   3 = sensor bar   4 = connection controls onto a second row
-  // Level 4 only applies while disconnected — that's the only time those controls are wide.
-  // Past level 4 the centre group simply clips (see `.toolbar-center`), which is the last-resort
-  // guarantee: only the left and centre groups ever give way, so the window buttons stay put on both
-  // placements — inside the right-hand group on Windows/Linux, and as the toolbar's own first child
-  // (macOS traffic lights, which nothing can push leftwards out of the frame).
+  // ── Progressive collapse ── the toolbar is the title bar, so the window buttons must stay reachable at ANY
+  // width. The bar sheds content in a fixed order: 1 = version, 2 = wordmark → icon, 3 = sensor bar,
+  // 4 = connection controls onto a second row (disconnected only); past that the centre group clips.
   const COLLAPSE_MAX = 4;
   let collapse = $state(0);
   let headerEl = $state<HTMLElement>();
@@ -159,20 +159,17 @@
   });
 
   $effect(() => {
-    // Smaller content changes only need a fresh measurement. The recorded widths are deliberately
-    // KEPT here: dropping them makes the next pass restore a level greedily, and the resulting
-    // re-render would tear down a control the user is working in — the transport select can be
-    // sitting on the second row while it fires this.
+    // Smaller content changes only need a fresh measurement. The recorded widths are KEPT: dropping them
+    // restores a level greedily, and the re-render would tear down a control in use (the transport select can
+    // sit on the second row while this fires).
     void selectedTransport;
     void sensorCount;
     void $rcEngaged.on;
     scheduleFit();
   });
 
-  // Double-click the title bar to maximize/restore. Windows/macOS drag regions already do this
-  // natively, so only Linux/GTK needs the manual handler (otherwise it would toggle twice).
-  // `isLinux` comes from $lib/platform rather than a local user-agent test: Android's user-agent
-  // contains "Linux" too, and a local test armed this on a device with no window to maximize.
+  // Double-click the title bar to maximize/restore — only Linux/GTK needs it (Windows/macOS drag regions do it
+  // natively; twice would toggle back). `isLinux` from $lib/platform: Android's user-agent says "Linux" too.
   function onTitlebarDblClick(e: MouseEvent) {
     if (!isLinux) return;
     // Ignore double-clicks that land on interactive controls (buttons, selects, the window buttons).
@@ -180,10 +177,8 @@
     void getCurrentWindow().toggleMaximize();
   }
 
-  // Phone-only collapsible toolbar: the full bar is tall on a narrow screen, so on phones it collapses
-  // to a slim status strip with a show/hide toggle, reclaiming map space. Starts expanded so the
-  // connection controls are reachable; the toggle and collapsed strip only render on phones (the CSS
-  // is width-gated, so tablets/desktop always show the full bar regardless of this flag).
+  // Phone-only collapsible toolbar: collapses to a slim status strip with a show/hide toggle. Starts expanded
+  // so the connection controls are reachable; the CSS is width-gated, so tablets/desktop ignore this flag.
   let toolbarCollapsed = $state(false);
   const connLabel = $derived(
     connStatus === 'connected'
@@ -280,9 +275,17 @@
       {onConnect}
       {onRescanBle}
     />
+    <!-- Multi-vehicle: vehicle picker, open links, "Add link" (only meaningful once connected; behind
+         the fleet feature gate). -->
+    {#if connStatus === 'connected' && fleetEnabled}
+      <LinkManager {ports} {bleDeviceList} {isBleScanning} {baudRates} {onRescanBle} />
+    {/if}
   {/snippet}
 
   <div class="toolbar-right" data-tauri-drag-region>
+    <!-- Map search: left of the protocol selector (of the connection status once connected). Its
+         line opens as an overlay to the left, so the bar's collapse measurement is unaffected. -->
+    {#if mapSearchAvailable}<MapSearch variant="toolbar" />{/if}
     {#if !connOnSecondRow}
       <div class="port-controls">{@render connectionControls()}</div>
     {/if}
@@ -349,11 +352,9 @@
     gap: 12px;
     min-width: 0;
     overflow: hidden;
-    /* Auto margins, not `space-between` alone, place the three groups: on macOS the traffic lights
-       are a fourth flex child in front of this one, and space-between would hand a third of the free
-       room to the gap between the dots and the logo — the logo drifted towards the centre. With the
-       free room absorbed by these margins the dots stay glued to the logo and the centre group is
-       still centred between left and right on every platform. */
+    /* Auto margins, not `space-between` alone: on macOS the traffic lights are a fourth flex child, and
+       space-between would hand a third of the free room to the gap between the dots and the logo. The margins
+       keep the dots at the logo and the centre group centred on every platform. */
     margin-right: auto;
   }
 
@@ -457,10 +458,9 @@
       flex-wrap: nowrap;
       padding-bottom: 4px;
     }
-    /* `.conn-row` is a direct child of the header (not inside .toolbar-right), and on a phone the
-       progressive collapse always reaches COLLAPSE_MAX — so while disconnected the connection controls
-       live there. Without it in this list the toggle would hide only the Relay button and leave the
-       connection row on screen. */
+    /* `.conn-row` is a direct child of the header, and on a phone the collapse always reaches COLLAPSE_MAX, so
+       while disconnected the connection controls live there — without it in this list the toggle would hide
+       only the Relay button. */
     :global(html.is-mobile) .toolbar.collapsed .toolbar-center,
     :global(html.is-mobile) .toolbar.collapsed .toolbar-right,
     :global(html.is-mobile) .toolbar.collapsed .conn-row {

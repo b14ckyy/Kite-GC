@@ -1,19 +1,21 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Vehicle-control controller — domain logic (no UI) for direct GCS command of a MAVLink vehicle
-// (ArduPilot + PX4): flight-mode switch, arm/disarm, takeoff/land/RTL, Guided reposition, speed,
-// mission start/pause. Wraps the Tauri commands, surfaces COMMAND_ACK results as feedback, and owns
-// the Guided-toggle state + RC-presence lock. See docs/active/VEHICLE_CONTROL.md.
+// Vehicle-control controller (no UI) for direct GCS command of a MAVLink vehicle (ArduPilot + PX4): wraps the
+// Tauri commands, surfaces COMMAND_ACK results as feedback, and owns the Guided-toggle state + RC-presence
+// lock. See docs/active/VEHICLE_CONTROL.md.
 
 import { invoke } from '@tauri-apps/api/core';
 import { writable, derived, get, type Readable } from 'svelte/store';
 import { telemetry } from '$lib/stores/telemetry';
-import { connection } from '$lib/stores/connection';
+import { connection, isArduPilotLink, linkIsArduPilot } from '$lib/stores/connection';
+import { activeVehicleId, activeVehicle } from '$lib/stores/vehicles';
 import { autopilotSystem } from '$lib/stores/autopilotContext';
 import { arduVehicleClass, downloadArduMissionFromFc } from '$lib/stores/missionArdupilot';
 import { rcEngaged } from '$lib/stores/rcEngage';
-import { type MavMode, modesFor, guidedModeFor, matchActiveMode } from '$lib/helpers/mavModes';
+import { activeFcModes } from '$lib/stores/fcModes';
+import { type MavMode, type FcMode, modesFor, guidedModeFor, matchActiveMode, sameModeTable } from '$lib/helpers/mavModes';
+import { vehicleSystem, vehicleClassOf } from '$lib/helpers/fleetStatus';
 
 // ── Feedback (COMMAND_ACK surfacing) ────────────────────────────────────────
 
@@ -30,10 +32,16 @@ export const lastFeedback = writable<CommandFeedback | null>(null);
 /** Name of the action currently in flight (awaiting its ACK), or null. Drives per-button spinners. */
 export const busyAction = writable<string | null>(null);
 
+/** Every vehicle-facing backend command takes an optional `vehicleId`; always name the active vehicle
+ *  explicitly so a selection change between click and dispatch can't retarget a command. */
+function targeted(args?: Record<string, unknown>): Record<string, unknown> {
+  return { vehicleId: get(activeVehicleId), ...(args ?? {}) };
+}
+
 async function runCommand(action: string, cmd: string, args?: Record<string, unknown>): Promise<boolean> {
   busyAction.set(action);
   try {
-    await invoke(cmd, args);
+    await invoke(cmd, targeted(args));
     lastFeedback.set({ action, ok: true, message: '', ts: Date.now() });
     return true;
   } catch (e) {
@@ -93,7 +101,7 @@ async function refreshFcLoiterRadius(): Promise<void> {
   }
   const name = get(autopilotSystem) === 'px4' ? 'NAV_LOITER_RAD' : 'WP_LOITER_RAD';
   try {
-    const v = await invoke<number | null>('mav_read_param', { name });
+    const v = await invoke<number | null>('mav_read_param', targeted({ name }));
     // Negative = counter-clockwise loiter; the ring only needs the magnitude.
     fcLoiterRadius.set(v != null ? Math.abs(v) : null);
   } catch {
@@ -101,12 +109,24 @@ async function refreshFcLoiterRadius(): Promise<void> {
   }
 }
 
-/**
- * FC-confirmed navigation target (POSITION_TARGET_GLOBAL_INT, pushed at 1 Hz — see the `guided-target`
- * listener in +page). Accepted only while the FC is in its guided mode: in AUTO/RTL the same message
- * carries the current mission waypoint / home, which must not appear as a Guided marker. Keeps the
- * marker on the FC's actual loiter/goto point — including targets set by another GCS.
- */
+/** FC-confirmed guided targets of EVERY vehicle (multi-vehicle), keyed by vehicle id, with the time
+ *  the last POSITION_TARGET_GLOBAL_INT arrived. The map draws "who is heading where" from this; the
+ *  active vehicle additionally goes through `ingestFcGuidedTarget` → `guidedTarget` for the Guided UI. */
+export const guidedTargets = writable<ReadonlyMap<string, { lat: number; lon: number; ts: number }>>(new Map());
+
+export function ingestVehicleGuidedTarget(vehicleId: string, lat: number, lon: number): void {
+  guidedTargets.update((m) => {
+    const cur = m.get(vehicleId);
+    // Same ~0.1 m dedup as the active path, but the timestamp still refreshes so staleness works.
+    if (cur && Math.abs(cur.lat - lat) < 1e-6 && Math.abs(cur.lon - lon) < 1e-6 && Date.now() - cur.ts < 2000) return m;
+    const next = new Map(m);
+    next.set(vehicleId, { lat, lon, ts: Date.now() });
+    return next;
+  });
+}
+
+/** FC-confirmed target (POSITION_TARGET_GLOBAL_INT, 1 Hz), accepted only in the FC's guided mode — in AUTO/RTL
+ *  the same message carries the mission WP / home. Includes targets set by another GCS. */
 export function ingestFcGuidedTarget(lat: number, lon: number): void {
   if (get(activeMode)?.guided !== true) return;
   // Connected mid-flight to a vehicle already in guided → the toggle was never pressed, so fetch
@@ -125,26 +145,21 @@ let headingOverrideActive = false;
 
 // ── Connection / vehicle gating ─────────────────────────────────────────────
 
-/** True when connected over MAVLink (the only protocol the control panel supports in V1). */
-export const controlAvailable: Readable<boolean> = derived(
-  connection,
-  (c) => c.status === 'connected' && c.protocolType === 'mavlink',
-);
+/** True when connected over MAVLink to ArduPilot/PX4 (the only autopilots the control panel supports
+ *  in V1) — not on an INAV MSP-over-MAVLink link. */
+export const controlAvailable: Readable<boolean> = isArduPilotLink;
 
-/** "RC transmitter present" signal — a real radio is driving the FC. Primary source (MAVLink) is the
- *  FC's own RC_RECEIVER health bit from SYS_STATUS (`sensorRcReceiver === 1`): set for ANY live RC
- *  source, including a MAVLink-RC override (e.g. SIYI) with no serial RX, so it works where the receiver
- *  RSSI is absent (255 → `rssiPercent` null). Falls back to a reported RC RSSI (older paths / INAV).
- *  Without either, stick-required modes stay locked. */
+/** "RC transmitter present": primarily the FC's RC_RECEIVER health bit (SYS_STATUS) — set for ANY live RC
+ *  source, incl. a MAVLink-RC override without RSSI — else a reported RC RSSI (INAV). Without either,
+ *  stick-required modes stay locked. */
 export const rcLinkPresent: Readable<boolean> = derived(
   telemetry,
   (t) => t.sensorRcReceiver === 1 || (t.link.rssiPercent != null && t.link.rssiPercent > 0),
 );
 
-/** Whether stick-flown modes are safe to select: there must be a usable RC source — either a physical
- *  transmitter (the FC reports RC RSSI) OR Kite's own RC control is engaged, i.e. we're streaming the
- *  sticks to the FC (ArduPilot RC_CHANNELS_OVERRIDE / PX4 MANUAL_CONTROL). Without one, a stick mode
- *  would leave the vehicle with no control input, so the panel keeps those modes locked. */
+/** Stick-flown modes are selectable only with a usable RC source: a physical transmitter (rcLinkPresent) or
+ *  Kite's own RC control streaming sticks (RC_CHANNELS_OVERRIDE / MANUAL_CONTROL) — else the vehicle would
+ *  have no control input. */
 export const stickModesUnlocked: Readable<boolean> = derived(
   [rcLinkPresent, rcEngaged],
   ([rc, eng]) => rc || eng.on,
@@ -153,10 +168,33 @@ export const stickModesUnlocked: Readable<boolean> = derived(
 /** Armed state from the unified arming flags (bit 2 = armed, matches the recorder convention). */
 export const isArmed: Readable<boolean> = derived(telemetry, (t) => (t.armingFlags & 0x04) !== 0);
 
-/** The FC's currently active mode (matched against the firmware/vehicle table), or undefined. */
+/** Whether `autopilotSystem` / `arduVehicleClass` already describe the active vehicle's mode numbering.
+ *  On a vehicle switch `activeVehicleId` (and with it the FC mode list) changes at once, while system and
+ *  class follow `connection` one or two IPC turns later. True when the active vehicle is not known yet. */
+export const modeTableMatchesVehicle: Readable<boolean> = derived(
+  [activeVehicle, autopilotSystem, arduVehicleClass],
+  ([v, sys, cls]) => {
+    if (!v) return true;
+    const vSys = vehicleSystem(v);
+    // Plane vs QuadPlane is the same table: the QuadPlane class comes from the Q_ENABLE probe, while
+    // the vehicle summary of a QuadPlane reporting FIXED_WING still says "plane".
+    return vSys != null && sameModeTable(vSys, vehicleClassOf(v), sys, cls);
+  },
+);
+
+/** The active vehicle's FC mode list, only while system and class match that vehicle (see above) —
+ *  otherwise null: the old class's table must not be filtered by the new vehicle's mode numbers. */
+export const activeFcModesChecked: Readable<readonly FcMode[] | null> = derived(
+  [activeFcModes, modeTableMatchesVehicle],
+  ([fc, match]) => (match ? fc : null),
+);
+
+/** The FC's currently active mode (matched against the firmware/vehicle table, then the FC's own mode
+ *  list), or undefined. Only on an ArduPilot/PX4 MAVLink link: elsewhere `flightModeFlags` is INAV's mode
+ *  bitmask, whose values would "match" an ArduPilot mode number (bit 4 = Copter/Sub GUIDED → Fly Here). */
 export const activeMode: Readable<MavMode | undefined> = derived(
-  [telemetry, autopilotSystem, arduVehicleClass],
-  ([t, sys, cls]) => matchActiveMode(sys, cls, t.flightModeFlags),
+  [telemetry, autopilotSystem, arduVehicleClass, connection, activeFcModesChecked],
+  ([t, sys, cls, c, fc]) => (linkIsArduPilot(c) ? matchActiveMode(sys, cls, t.flightModeFlags, fc) : undefined),
 );
 
 // ── Commands ────────────────────────────────────────────────────────────────
@@ -180,19 +218,16 @@ export function disarm(force = false): Promise<boolean> {
   return runCommand('disarm', 'mav_arm', { arm: false, force });
 }
 
-/**
- * Take off to `altitude` (m). Guided takeoff requires the reposition-ready mode (GUIDED on ArduPilot)
- * and an already-armed vehicle. We switch to GUIDED first (ArduPilot) so the FC accepts NAV_TAKEOFF;
- * if the vehicle isn't armed the FC still rejects it and the error surfaces. PX4 takes off via the
- * NAV_TAKEOFF command directly.
- */
+/** Take off to `altitude` (m) via NAV_TAKEOFF (multirotor / QuadPlane / PX4; plain ArduPlane: `planeTakeoff`).
+ *  ArduPilot switches to GUIDED first when the FC lists it as selectable; unarmed or without GUIDED the FC
+ *  rejects the takeoff and the error surfaces. PX4 takes NAV_TAKEOFF directly. */
 export async function takeoff(altitude: number): Promise<boolean> {
   guidedTarget.set(null); // fresh flight phase — no carried-over Guided target
   if (get(autopilotSystem) === 'ardupilot') {
-    const g = guidedModeFor('ardupilot', get(arduVehicleClass));
+    const g = guidedModeFor('ardupilot', get(arduVehicleClass), get(activeFcModesChecked));
     if (g && get(activeMode)?.key !== g.key) {
       try {
-        await invoke('mav_set_mode', { main: g.main, sub: g.sub });
+        await invoke('mav_set_mode', targeted({ main: g.main, sub: g.sub }));
         guidedActive.set(true);
       } catch {
         // fall through — let the takeoff attempt surface the real error
@@ -200,6 +235,19 @@ export async function takeoff(altitude: number): Promise<boolean> {
     }
   }
   return runCommand('takeoff', 'mav_takeoff', { altitude });
+}
+
+/** Plain ArduPlane take-off: switch to TAKEOFF mode (NAV_TAKEOFF is the QuadPlane VTOL take-off). Disarmed the
+ *  mode waits; once armed the motor runs up and the plane climbs to TKOFF_ALT, then loiters. `mode` is the
+ *  table's TAKEOFF entry. */
+export async function planeTakeoff(mode: MavMode): Promise<boolean> {
+  const ok = await runCommand('takeoff', 'mav_set_mode', { main: mode.main, sub: mode.sub });
+  if (ok) {
+    guidedActive.set(false);
+    guidedTarget.set(null);
+    headingOverrideActive = false;
+  }
+  return ok;
 }
 
 export function land(): Promise<boolean> {
@@ -221,11 +269,9 @@ export function changeSpeed(speed: number, airspeed: boolean): Promise<boolean> 
   return runCommand('changeSpeed', 'mav_change_speed', { speedType: airspeed ? 0 : 1, speed });
 }
 
-/** Change the active target altitude — repositions to the EXISTING Guided target (the loiter centre)
- *  at the new altitude, so only the height changes. Falling back to the vehicle's momentary position
- *  would move a fixed-wing's loiter centre to wherever it currently is on its circle, breaking it out
- *  of the loiter to fly straight there (tester report). The current position is used only when no
- *  Guided target has been set yet. Needs a GPS fix; the vehicle should be in the reposition-ready mode. */
+/** Change the target altitude by repositioning to the EXISTING Guided target (the loiter centre) — using
+ *  the momentary position would break a fixed-wing out of its loiter. Falls back to the current position
+ *  only without a Guided target. Needs a GPS fix and the reposition-ready mode. */
 export function changeAlt(alt: number): Promise<boolean> {
   const tel = get(telemetry);
   if (tel.fixType < 2) {
@@ -265,11 +311,8 @@ export function abortLanding(): Promise<boolean> {
   return runCommand('abortLanding', 'mav_abort_landing', { altitude: 0 });
 }
 
-/**
- * VTOL transition (QuadPlane / VTOL). `toFw` = true → forward/fixed-wing flight, false → hover.
- * PX4 uses MAV_CMD_DO_VTOL_TRANSITION directly. ArduPlane's command path is AUTO-only, so we
- * transition by mode instead: forward → Guided (keeps GCS control), hover → QLOITER.
- */
+/** VTOL transition: `toFw` → forward flight, else hover. PX4 uses MAV_CMD_DO_VTOL_TRANSITION; ArduPlane's
+ *  command path is AUTO-only, so it transitions by mode: forward → Guided (keeps GCS control), hover → QLOITER. */
 export async function vtolTransition(toFw: boolean): Promise<boolean> {
   if (get(autopilotSystem) === 'px4') {
     return runCommand('vtolTransition', 'mav_vtol_transition', { toFw });
@@ -282,11 +325,8 @@ export async function vtolTransition(toFw: boolean): Promise<boolean> {
   return ok;
 }
 
-/**
- * Set the Guided target heading (degrees). ArduPlane flies the course continuously
- * (GUIDED_CHANGE_HEADING); ArduCopter yaws the nose to it (CONDITION_YAW). ArduPilot only — PX4 has
- * no equivalent GCS heading command, so the panel hides this for PX4.
- */
+/** Set the Guided target heading (deg): ArduPlane flies the course (GUIDED_CHANGE_HEADING), ArduCopter yaws
+ *  to it (CONDITION_YAW). ArduPilot only — PX4 has no equivalent, the panel hides it there. */
 export async function setHeading(heading: number): Promise<boolean> {
   const isPlane = get(arduVehicleClass) !== 'copter';
   const cmd = isPlane ? 'mav_guided_change_heading' : 'mav_condition_yaw';
@@ -338,18 +378,16 @@ export function missionPause(pause: boolean): Promise<boolean> {
   return runCommand('missionPause', 'mav_mission_pause', { pause });
 }
 
-/**
- * Toggle the Guided interaction. ON sends the firmware's reposition-ready mode (GUIDED on ArduPilot,
- * HOLD on PX4) once and arms the map click. OFF sends nothing to the FC — it just disables the map
- * interaction, so the vehicle stays in its current mode (no mode churn on toggle-off).
- */
+/** Toggle the Guided interaction. ON sends the reposition-ready mode (GUIDED on ArduPilot, HOLD on PX4) once
+ *  and arms the map click; OFF sends nothing (no mode churn), it only disables the map interaction. */
 export async function setGuided(on: boolean): Promise<boolean> {
   guidedTarget.set(null); // entering or leaving Guided starts with no target
   if (!on) {
     guidedActive.set(false);
     return true;
   }
-  const mode = guidedModeFor(get(autopilotSystem), get(arduVehicleClass));
+  // With the FC's own mode list, only a GUIDED the FC offers — none means no Guided for this vehicle.
+  const mode = guidedModeFor(get(autopilotSystem), get(arduVehicleClass), get(activeFcModesChecked));
   if (!mode) {
     lastFeedback.set({ action: 'guided', ok: false, message: 'No guided mode for this vehicle', ts: Date.now() });
     return false;
@@ -358,10 +396,8 @@ export async function setGuided(on: boolean): Promise<boolean> {
   guidedActive.set(ok);
   headingOverrideActive = false; // re-entering guided clears any heading slew
   if (ok) {
-    // Seed the target marker at the mode-entry point right away — ArduPlane loiters around the spot
-    // where GUIDED was entered, so this IS the initial target (MP shows nothing here, which testers
-    // read as "nothing happened"). The FC's 1 Hz POSITION_TARGET_GLOBAL_INT push then confirms or
-    // corrects it (ingestFcGuidedTarget).
+    // Seed the target marker at the mode-entry point — ArduPlane loiters where GUIDED was entered, so this IS
+    // the initial target; the FC's 1 Hz POSITION_TARGET_GLOBAL_INT then confirms or corrects it.
     const tel = get(telemetry);
     if (tel.fixType >= 2 && (tel.lat !== 0 || tel.lon !== 0)) {
       guidedTarget.set({ lat: tel.lat, lon: tel.lon });
@@ -376,7 +412,7 @@ export async function setGuided(on: boolean): Promise<boolean> {
  *  the new waypoint — see headingOverrideActive). */
 export async function repositionTo(lat: number, lon: number, p: GuidedParams): Promise<boolean> {
   if (headingOverrideActive) {
-    try { await invoke('mav_guided_clear_heading'); } catch { /* best effort */ }
+    try { await invoke('mav_guided_clear_heading', targeted()); } catch { /* best effort */ }
     headingOverrideActive = false;
   }
   const ok = await runCommand('reposition', 'mav_reposition', {
@@ -390,3 +426,18 @@ export async function repositionTo(lat: number, lon: number, p: GuidedParams): P
   if (ok) guidedTarget.set({ lat, lon }); // drive the map's loiter-target marker
   return ok;
 }
+
+// ── Active-vehicle switch ── Guided UI state is really per vehicle: on a switch the shown target must be the
+// NEW vehicle's FC-confirmed one (or none) and toggle / heading-override / loiter-radius bookkeeping restarts,
+// so the previous Guided session can't leak into commands for this one.
+let guidedSeededFor: string | null = null;
+activeVehicleId.subscribe((id) => {
+  if (id === guidedSeededFor) return;
+  guidedSeededFor = id;
+  const tgt = id ? get(guidedTargets).get(id) : undefined;
+  guidedTarget.set(tgt ? { lat: tgt.lat, lon: tgt.lon } : null);
+  guidedActive.set(false);
+  headingOverrideActive = false;
+  loiterRadiusRequested = false;
+  fcLoiterRadius.set(null);
+});

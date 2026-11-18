@@ -46,8 +46,8 @@
     box-sizing: border-box;
     /* Widget-style glass, a touch more transparent. */
     background: rgba(30, 30, 30, 0.5);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: var(--glass-blur, blur(6px));
+    -webkit-backdrop-filter: var(--glass-blur, blur(6px));
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 8px;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);

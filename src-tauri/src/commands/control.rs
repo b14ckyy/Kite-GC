@@ -17,7 +17,7 @@ use ::mavlink::ardupilotmega::{MavCmd, MavFrame};
 
 use crate::mavlink_proto::control;
 use crate::mavlink_proto::handler::MavlinkCommand;
-use crate::state::{ActiveProtocol, AppState};
+use crate::state::AppState;
 
 /// ArduPilot's "force" magic for COMMAND_ARM_DISARM param2 — bypasses pre-arm checks.
 const ARM_FORCE_MAGIC: f32 = 21196.0;
@@ -27,23 +27,20 @@ const ARM_FORCE_MAGIC: f32 = 21196.0;
 const RC_RELEASE_FRAMES: u8 = 5;
 const RC_RELEASE_INTERVAL: Duration = Duration::from_millis(50);
 
-/// Resolve the active MAVLink handle to (command channel, FC system id), or an error if the active
-/// protocol is not MAVLink. Holds the protocol mutex only briefly; the command exchange runs after.
-fn mav_handle(state: &State<'_, AppState>) -> Result<(mpsc::Sender<MavlinkCommand>, u8), String> {
-    let proto = state.protocol.lock().map_err(|e| e.to_string())?;
-    match proto.as_ref() {
-        Some(ActiveProtocol::Mavlink(h)) => Ok((h.cmd_tx_clone(), h.fc_sysid)),
-        Some(_) => Err("FC is not running MAVLink".into()),
-        None => Err("Not connected".into()),
-    }
+/// Resolve the target MAVLink handle to (command channel, system id), or an error if that vehicle's
+/// link is not MAVLink. `vehicle_id` is the frontend's `"L1:S1"` key; `None` addresses the active
+/// vehicle. Holds the registry mutex only briefly; the command exchange runs after.
+fn mav_handle(state: &State<'_, AppState>, vehicle_id: Option<&str>) -> Result<(mpsc::Sender<MavlinkCommand>, u8), String> {
+    let t = state.mav_target(vehicle_id)?;
+    Ok((t.cmd_tx, t.sysid))
 }
 
 /// Set the flight mode via `MAV_CMD_DO_SET_MODE`. `main`/`sub` are the firmware-specific custom-mode
 /// parts (ArduPilot: `main` = flat mode number, `sub` = 0; PX4: packed main/sub mode). param1 is the
 /// base mode with `MAV_MODE_FLAG_CUSTOM_MODE_ENABLED` (bit 0) set.
 #[tauri::command(async)]
-pub fn mav_set_mode(main: u32, sub: u32, state: State<'_, AppState>) -> Result<(), String> {
-    let (cmd_tx, fc_sysid) = mav_handle(&state)?;
+pub fn mav_set_mode(vehicle_id: Option<String>, main: u32, sub: u32, state: State<'_, AppState>) -> Result<(), String> {
+    let (cmd_tx, fc_sysid) = mav_handle(&state, vehicle_id.as_deref())?;
     control::send_command_long(
         &cmd_tx,
         fc_sysid,
@@ -54,8 +51,8 @@ pub fn mav_set_mode(main: u32, sub: u32, state: State<'_, AppState>) -> Result<(
 
 /// Arm or disarm via `MAV_CMD_COMPONENT_ARM_DISARM`. `force` bypasses pre-arm checks (use with care).
 #[tauri::command(async)]
-pub fn mav_arm(arm: bool, force: bool, state: State<'_, AppState>) -> Result<(), String> {
-    let (cmd_tx, fc_sysid) = mav_handle(&state)?;
+pub fn mav_arm(vehicle_id: Option<String>, arm: bool, force: bool, state: State<'_, AppState>) -> Result<(), String> {
+    let (cmd_tx, fc_sysid) = mav_handle(&state, vehicle_id.as_deref())?;
     control::send_command_long(
         &cmd_tx,
         fc_sysid,
@@ -66,28 +63,32 @@ pub fn mav_arm(arm: bool, force: bool, state: State<'_, AppState>) -> Result<(),
 
 /// Take off to `altitude` (m, relative to home) via `MAV_CMD_NAV_TAKEOFF`.
 #[tauri::command(async)]
-pub fn mav_takeoff(altitude: f32, state: State<'_, AppState>) -> Result<(), String> {
-    let (cmd_tx, fc_sysid) = mav_handle(&state)?;
-    // param7 = altitude; lat/lon (param5/6) = 0 → take off in place.
+pub fn mav_takeoff(vehicle_id: Option<String>, altitude: f32, state: State<'_, AppState>) -> Result<(), String> {
+    let (cmd_tx, fc_sysid) = mav_handle(&state, vehicle_id.as_deref())?;
+    // param7 = altitude. param4 (yaw) and param5/6 (lat/lon) are NaN = "current heading / here":
+    // PX4 reads a FINITE lat/lon as the take-off position, so 0/0 sent it climbing towards 0°N 0°E
+    // instead of straight up. ArduPilot ignores these fields for a take-off (param7 only), so NaN is
+    // harmless there. QGC sends the same.
     control::send_command_long(
         &cmd_tx,
         fc_sysid,
         MavCmd::MAV_CMD_NAV_TAKEOFF,
-        [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, altitude],
+        [0.0, 0.0, 0.0, f32::NAN, f32::NAN, f32::NAN, altitude],
     )
 }
 
 /// Land in place via `MAV_CMD_NAV_LAND`.
 #[tauri::command(async)]
-pub fn mav_land(state: State<'_, AppState>) -> Result<(), String> {
-    let (cmd_tx, fc_sysid) = mav_handle(&state)?;
-    control::send_command_long(&cmd_tx, fc_sysid, MavCmd::MAV_CMD_NAV_LAND, [0.0; 7])
+pub fn mav_land(vehicle_id: Option<String>, state: State<'_, AppState>) -> Result<(), String> {
+    let (cmd_tx, fc_sysid) = mav_handle(&state, vehicle_id.as_deref())?;
+    // Same PX4 semantics as take-off: NaN yaw / lat / lon = land right here.
+    control::send_command_long(&cmd_tx, fc_sysid, MavCmd::MAV_CMD_NAV_LAND, [0.0, 0.0, 0.0, f32::NAN, f32::NAN, f32::NAN, 0.0])
 }
 
 /// Return to launch via `MAV_CMD_NAV_RETURN_TO_LAUNCH`.
 #[tauri::command(async)]
-pub fn mav_rtl(state: State<'_, AppState>) -> Result<(), String> {
-    let (cmd_tx, fc_sysid) = mav_handle(&state)?;
+pub fn mav_rtl(vehicle_id: Option<String>, state: State<'_, AppState>) -> Result<(), String> {
+    let (cmd_tx, fc_sysid) = mav_handle(&state, vehicle_id.as_deref())?;
     control::send_command_long(&cmd_tx, fc_sysid, MavCmd::MAV_CMD_NAV_RETURN_TO_LAUNCH, [0.0; 7])
 }
 
@@ -97,7 +98,7 @@ pub fn mav_rtl(state: State<'_, AppState>) -> Result<(), String> {
 /// consciously releases over MAVLink (RC_CHANNELS_OVERRIDE path); PX4 (MANUAL_CONTROL) and involuntary
 /// loss just stop streaming. No-op if nothing was being overridden.
 #[tauri::command(async)]
-pub fn mav_rc_release(state: State<'_, AppState>) -> Result<(), String> {
+pub fn mav_rc_release(vehicle_id: Option<String>, state: State<'_, AppState>) -> Result<(), String> {
     // Snapshot the controlled channels, then stop the normal stream first so the handler doesn't
     // interleave live overrides with our release frames.
     let controlled = {
@@ -112,7 +113,7 @@ pub fn mav_rc_release(state: State<'_, AppState>) -> Result<(), String> {
     if controlled.iter().all(|&v| v == 0) {
         return Ok(()); // nothing was being overridden → nothing to release
     }
-    let (cmd_tx, fc_sysid) = mav_handle(&state)?;
+    let (cmd_tx, fc_sysid) = mav_handle(&state, vehicle_id.as_deref())?;
     control::send_rc_release(&cmd_tx, fc_sysid, &controlled, RC_RELEASE_FRAMES, RC_RELEASE_INTERVAL)
 }
 
@@ -121,6 +122,7 @@ pub fn mav_rc_release(state: State<'_, AppState>) -> Result<(), String> {
 /// `yaw` (deg; keep current if None — multirotor only), `loiter_radius` (m; fixed-wing only).
 #[tauri::command(async)]
 pub fn mav_reposition(
+    vehicle_id: Option<String>,
     lat: i32,
     lon: i32,
     alt: f32,
@@ -129,7 +131,7 @@ pub fn mav_reposition(
     loiter_radius: Option<f32>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let (cmd_tx, fc_sysid) = mav_handle(&state)?;
+    let (cmd_tx, fc_sysid) = mav_handle(&state, vehicle_id.as_deref())?;
     // param1 = ground speed (-1 = default). param2 = bitmask (unused = 0). param3 = loiter radius
     // (0 = default). param4 = yaw heading (NaN = keep current).
     let params = [
@@ -152,8 +154,8 @@ pub fn mav_reposition(
 
 /// Change target speed via `MAV_CMD_DO_CHANGE_SPEED`. `speed_type`: 0 = airspeed, 1 = groundspeed.
 #[tauri::command(async)]
-pub fn mav_change_speed(speed_type: u8, speed: f32, state: State<'_, AppState>) -> Result<(), String> {
-    let (cmd_tx, fc_sysid) = mav_handle(&state)?;
+pub fn mav_change_speed(vehicle_id: Option<String>, speed_type: u8, speed: f32, state: State<'_, AppState>) -> Result<(), String> {
+    let (cmd_tx, fc_sysid) = mav_handle(&state, vehicle_id.as_deref())?;
     // param1 = speed type, param2 = speed (m/s), param3 = throttle (-1 = no change).
     control::send_command_long(
         &cmd_tx,
@@ -165,15 +167,15 @@ pub fn mav_change_speed(speed_type: u8, speed: f32, state: State<'_, AppState>) 
 
 /// Start the loaded mission via `MAV_CMD_MISSION_START`.
 #[tauri::command(async)]
-pub fn mav_mission_start(state: State<'_, AppState>) -> Result<(), String> {
-    let (cmd_tx, fc_sysid) = mav_handle(&state)?;
+pub fn mav_mission_start(vehicle_id: Option<String>, state: State<'_, AppState>) -> Result<(), String> {
+    let (cmd_tx, fc_sysid) = mav_handle(&state, vehicle_id.as_deref())?;
     control::send_command_long(&cmd_tx, fc_sysid, MavCmd::MAV_CMD_MISSION_START, [0.0; 7])
 }
 
 /// Pause (`pause = true`) or resume the mission via `MAV_CMD_DO_PAUSE_CONTINUE`.
 #[tauri::command(async)]
-pub fn mav_mission_pause(pause: bool, state: State<'_, AppState>) -> Result<(), String> {
-    let (cmd_tx, fc_sysid) = mav_handle(&state)?;
+pub fn mav_mission_pause(vehicle_id: Option<String>, pause: bool, state: State<'_, AppState>) -> Result<(), String> {
+    let (cmd_tx, fc_sysid) = mav_handle(&state, vehicle_id.as_deref())?;
     // param1 = 0 → pause (hold), 1 → continue.
     control::send_command_long(
         &cmd_tx,
@@ -185,8 +187,8 @@ pub fn mav_mission_pause(pause: bool, state: State<'_, AppState>) -> Result<(), 
 
 /// Jump the mission to item `seq` via `MAV_CMD_DO_SET_MISSION_CURRENT`.
 #[tauri::command(async)]
-pub fn mav_mission_set_current(seq: u16, state: State<'_, AppState>) -> Result<(), String> {
-    let (cmd_tx, fc_sysid) = mav_handle(&state)?;
+pub fn mav_mission_set_current(vehicle_id: Option<String>, seq: u16, state: State<'_, AppState>) -> Result<(), String> {
+    let (cmd_tx, fc_sysid) = mav_handle(&state, vehicle_id.as_deref())?;
     control::send_command_long(
         &cmd_tx,
         fc_sysid,
@@ -197,8 +199,8 @@ pub fn mav_mission_set_current(seq: u16, state: State<'_, AppState>) -> Result<(
 
 /// Set the home position to the vehicle's current location via `MAV_CMD_DO_SET_HOME` (param1 = 1).
 #[tauri::command(async)]
-pub fn mav_set_home_here(state: State<'_, AppState>) -> Result<(), String> {
-    let (cmd_tx, fc_sysid) = mav_handle(&state)?;
+pub fn mav_set_home_here(vehicle_id: Option<String>, state: State<'_, AppState>) -> Result<(), String> {
+    let (cmd_tx, fc_sysid) = mav_handle(&state, vehicle_id.as_deref())?;
     control::send_command_long(
         &cmd_tx,
         fc_sysid,
@@ -209,8 +211,8 @@ pub fn mav_set_home_here(state: State<'_, AppState>) -> Result<(), String> {
 
 /// Abort a landing / go around via `MAV_CMD_DO_GO_AROUND` (param1 = climb altitude, 0 = default).
 #[tauri::command(async)]
-pub fn mav_abort_landing(altitude: f32, state: State<'_, AppState>) -> Result<(), String> {
-    let (cmd_tx, fc_sysid) = mav_handle(&state)?;
+pub fn mav_abort_landing(vehicle_id: Option<String>, altitude: f32, state: State<'_, AppState>) -> Result<(), String> {
+    let (cmd_tx, fc_sysid) = mav_handle(&state, vehicle_id.as_deref())?;
     control::send_command_long(
         &cmd_tx,
         fc_sysid,
@@ -223,8 +225,8 @@ pub fn mav_abort_landing(altitude: f32, state: State<'_, AppState>) -> Result<()
 /// fixed-wing flight (MAV_VTOL_STATE_FW = 4), false → hover/multicopter (MAV_VTOL_STATE_MC = 3).
 /// (ArduPlane transitions by mode switch instead — handled in the controller.)
 #[tauri::command(async)]
-pub fn mav_vtol_transition(to_fw: bool, state: State<'_, AppState>) -> Result<(), String> {
-    let (cmd_tx, fc_sysid) = mav_handle(&state)?;
+pub fn mav_vtol_transition(vehicle_id: Option<String>, to_fw: bool, state: State<'_, AppState>) -> Result<(), String> {
+    let (cmd_tx, fc_sysid) = mav_handle(&state, vehicle_id.as_deref())?;
     control::send_command_long(
         &cmd_tx,
         fc_sysid,
@@ -233,18 +235,22 @@ pub fn mav_vtol_transition(to_fw: bool, state: State<'_, AppState>) -> Result<()
     )
 }
 
-/// Set a single FC parameter (e.g. the fixed-wing loiter radius `WP_LOITER_RAD`). Fire-and-forget.
+/// Set a single FC parameter (e.g. the fixed-wing loiter radius `WP_LOITER_RAD`). On PX4 the parameter's
+/// type is read first and an unknown or silent parameter is an `Err`; no wait for the PARAM_VALUE echo
+/// (see `control::set_param`).
 #[tauri::command(async)]
-pub fn mav_set_param(name: String, value: f32, state: State<'_, AppState>) -> Result<(), String> {
-    let (cmd_tx, fc_sysid) = mav_handle(&state)?;
-    control::set_param(&cmd_tx, fc_sysid, &name, value)
+pub fn mav_set_param(vehicle_id: Option<String>, name: String, value: f32, state: State<'_, AppState>) -> Result<(), String> {
+    let t = state.mav_target(vehicle_id.as_deref())?;
+    control::set_param(&t.cmd_tx, t.sysid, &name, value, t.fc_variant.eq_ignore_ascii_case("px4"))
 }
 
+
 /// Read a single FC parameter by name (best-effort; `None` when the FC doesn't report it within the
-/// params_rt timeout). Used for the Guided loiter-radius ring (`WP_LOITER_RAD` / `NAV_LOITER_RAD`).
+/// params_rt timeout). Used for the Guided loiter-radius ring (`WP_LOITER_RAD` / `NAV_LOITER_RAD`) and
+/// the RC panel's PX4 `COM_RC_IN_MODE` read.
 #[tauri::command(async)]
-pub fn mav_read_param(name: String, state: State<'_, AppState>) -> Result<Option<f32>, String> {
-    let (cmd_tx, fc_sysid) = mav_handle(&state)?;
+pub fn mav_read_param(vehicle_id: Option<String>, name: String, state: State<'_, AppState>) -> Result<Option<f32>, String> {
+    let (cmd_tx, fc_sysid) = mav_handle(&state, vehicle_id.as_deref())?;
     let map = crate::mavlink_proto::params_rt::read_params(&cmd_tx, fc_sysid, &[name.as_str()]);
     Ok(map.get(&name).copied())
 }
@@ -256,8 +262,8 @@ pub fn mav_read_param(name: String, state: State<'_, AppState>) -> Result<Option
 /// ArduPlane only handles this command as a COMMAND_INT (in `handle_command_int_guided_slew_commands`)
 /// — sent as COMMAND_LONG it is ack'd but not executed. So we must use COMMAND_INT here.
 #[tauri::command(async)]
-pub fn mav_guided_change_heading(heading: f32, state: State<'_, AppState>) -> Result<(), String> {
-    let (cmd_tx, fc_sysid) = mav_handle(&state)?;
+pub fn mav_guided_change_heading(vehicle_id: Option<String>, heading: f32, state: State<'_, AppState>) -> Result<(), String> {
+    let (cmd_tx, fc_sysid) = mav_handle(&state, vehicle_id.as_deref())?;
     // param1 = HEADING_TYPE (0 = course-over-ground), param2 = heading deg, param3 = rate (0 = default).
     // No position payload → x/y/z = 0, frame irrelevant (GLOBAL).
     control::send_command_int(
@@ -277,8 +283,8 @@ pub fn mav_guided_change_heading(heading: f32, state: State<'_, AppState>) -> Re
 /// DO_REPOSITION in current firmware — only by a mode change or this explicit reset. See
 /// docs/active/VEHICLE_CONTROL.md.
 #[tauri::command(async)]
-pub fn mav_guided_clear_heading(state: State<'_, AppState>) -> Result<(), String> {
-    let (cmd_tx, fc_sysid) = mav_handle(&state)?;
+pub fn mav_guided_clear_heading(vehicle_id: Option<String>, state: State<'_, AppState>) -> Result<(), String> {
+    let (cmd_tx, fc_sysid) = mav_handle(&state, vehicle_id.as_deref())?;
     // param1 = 2 (HEADING_TYPE_DEFAULT) → clears the heading controller; other params ignored.
     control::send_command_int(
         &cmd_tx,
@@ -295,8 +301,8 @@ pub fn mav_guided_clear_heading(state: State<'_, AppState>) -> Result<(), String
 /// Point the nose to an absolute heading for a multirotor via `MAV_CMD_CONDITION_YAW` (Guided).
 /// `heading` is degrees (0–359).
 #[tauri::command(async)]
-pub fn mav_condition_yaw(heading: f32, state: State<'_, AppState>) -> Result<(), String> {
-    let (cmd_tx, fc_sysid) = mav_handle(&state)?;
+pub fn mav_condition_yaw(vehicle_id: Option<String>, heading: f32, state: State<'_, AppState>) -> Result<(), String> {
+    let (cmd_tx, fc_sysid) = mav_handle(&state, vehicle_id.as_deref())?;
     // param1 = target angle deg, param2 = yaw rate (0 = default), param3 = direction (0 = shortest), param4 = absolute (0).
     control::send_command_long(
         &cmd_tx,

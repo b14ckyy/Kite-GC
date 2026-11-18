@@ -34,6 +34,56 @@
         background-size: 10px 6px !important;
       }
       select:disabled { opacity: 0.5; }
+
+      /* Limits in % of the backdrop, never vh / vw: it fills the --ui-scale'd layer, where a viewport unit is
+         multiplied by the scale. Under a blurred or transformed ancestor the backdrop is that ancestor's box
+         (helpers/outOfPanel.ts). Boxes are border-box: their widths include the padding. */
+      .dialog-backdrop, .about-backdrop, .gc-backdrop, .rc-modal-backdrop, .modal-backdrop, .switch-overlay {
+        box-sizing: border-box;
+        padding: max(8px, var(--safe-top, 0px)) max(8px, var(--safe-right, 0px)) max(8px, var(--safe-bottom, 0px)) max(8px, var(--safe-left, 0px));
+      }
+      .dialog-box, .about-box, .gc-box, .rc-modal, .modal-card, .switch-dialog {
+        box-sizing: border-box;
+        max-width: 100%;
+        max-height: 100%;
+        overflow-y: auto;
+        overflow-wrap: break-word;
+        overscroll-behavior: contain;
+      }
+      /* The shadow covers the box's bottom padding, where the content would show under the row. */
+      .dialog-box .dialog-buttons {
+        position: sticky;
+        bottom: 12px;
+        background: #2e2e2e;
+        box-shadow: 0 16px 0 #2e2e2e;
+      }
+
+      /* Glass blur — two switches, the radii stay at the elements as the var() fallback.
+         Every backdrop-filter in the components reads `var(--glass-blur, blur(6px))` (everything that
+         lies on the map: widget cards, buttons, chips, the widget column's glass, toasts, menus) or
+         `var(--panel-blur, blur(10px))` (the panel shells and the popups of their kind — large,
+         contiguous surfaces where the blur earns its keep for readability). A backdrop-filter is a
+         readback of the framebuffer under the element plus a blur pass, per element and per frame
+         while the map moves — some twenty of them on the phone. A Chromium trace on the Sony
+         (2026-09-12) put them at 13–15 ms of a ~30 ms frame with video, 7 of ~21 without; the radius
+         made no measurable difference, the count does (Dev-Docs CHANGELOG). Hence: no map blur on
+         any mobile device (Android / iOS, phone and tablet UI alike), and the low-power mode
+         (Settings → lowPower3D, `auto` = on battery) switches both off on every platform. */
+      html.is-mobile { --glass-blur: none; }
+
+      /* The pressed / active / hovered fill of the glass buttons on the map (map corner controls,
+         hamburger, the video window's toggles, the widget dock's resize handle): the accent at less
+         than half brightness, nearly opaque. It used to be the accent at 25 % alpha alone — over a
+         blurred dark map a dull blue, over a bright map without the blur barely there (Marc,
+         2026-09-12: the camera toggle disappeared on light terrain). Buttons inside panels keep
+         their own subtler tints; those sit on a dark ground. */
+      :root { --btn-active-bg: rgba(39, 78, 96, 0.92); }
+
+      /* The map's 38 px glass buttons (corner controls in Map / Map3D, the phone's video toggle, the
+         map search): an icon's drawing fills 75 % of the button (each SVG's viewBox is cropped to its
+         drawing). The buttons keep their size. */
+      :root { --map-btn-icon: 28.5px; }
+      html.kite-low-power { --glass-blur: none; --panel-blur: none; }
     </style>
     <title>Tauri + SvelteKit + Typescript App</title>
     %sveltekit.head%

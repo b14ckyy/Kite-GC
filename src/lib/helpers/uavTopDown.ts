@@ -14,7 +14,7 @@ import type { UavMesh } from './uavMesh';
 
 const DEG = Math.PI / 180;
 const AMBIENT = 0.5, DIFFUSE = 0.6; // a bit more directional so the side light reveals the attitude
-const FIT = 0.66;                    // model fits this fraction of the icon (leaves room for the soft shadow)
+export const FIT = 0.66;             // model fits this fraction of the icon (leaves room for the soft shadow)
 const MODEL_RADIUS = 0.98;           // the current set is 1.5× the old size class (plane wingspan radius ≈ 0.95)
 // Light from the south (screen-down = −Z) + overhead (+Y): gives side shading so roll/pitch read.
 const LIGHT = norm3(0.1, 0.55, -0.66);
@@ -101,11 +101,13 @@ export function renderUavTopDown(
   // Shadow: show ONLY the soft (blurred) shadow — a canvas fill always has a hard edge, so we draw
   // the sharp silhouette OFF-canvas (translated left by `push`) and use shadowOffsetX = push to land
   // its blurred shadow back on the model, scaled slightly larger → a soft dark patch rings the model
-  // with no hard edge. Visible on street + satellite maps.
-  const SH = 1.3, push = size, oy = size * 0.02;
+  // with no hard edge. Visible on street + satellite maps. Kept tight (Marc, 2026-09-12: 1.3× with
+  // a 12 % blur looked massive and was clipped at the icon edge on long-armed models such as the
+  // tricopter — the model fits FIT of the icon, so silhouette × SH plus the blur must stay inside).
+  const SH = 1.15, push = size, oy = size * 0.02;
   ctx.save();
   ctx.shadowColor = 'rgba(0,0,0,1)';
-  ctx.shadowBlur = size * 0.12;
+  ctx.shadowBlur = size * 0.08;
   ctx.shadowOffsetX = push;
   ctx.shadowOffsetY = oy;
   ctx.fillStyle = '#000';

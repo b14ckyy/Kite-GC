@@ -3,10 +3,9 @@
   Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 -->
 
-<!-- WidgetPanel — a panel strip (horizontal or vertical) that holds widgets with drag-and-drop reordering.
-     Edit mode is entered by a LONG-PRESS on a widget (mouse or finger — the phone grid's gesture,
-     PhoneWidgetPanel), which also picks that widget up; a press outside the docks or Escape leaves it.
-     The flag is bindable: both docks share one edit mode (+page owns the state). -->
+<!-- WidgetPanel — a horizontal or vertical strip of widgets with drag-and-drop reordering. A LONG-PRESS on a
+     widget enters edit mode and picks it up; a press outside the docks or Escape leaves it. Both docks share
+     the bindable edit flag (+page owns it). -->
 <script lang="ts">
   import { t } from 'svelte-i18n';
   import type { TelemetryData } from "$lib/stores/telemetry";
@@ -22,6 +21,7 @@
     pxPerVmin = 1,
     smallBoost = 1,
     sizes = {},
+    idleIds = [],
     crossPx = $bindable(0),
     telem,
     interfaceSettings = { speedUnit: 'kmh', altitudeUnit: 'm', distanceUnit: 'metric', verticalSpeedUnit: 'ms', temperatureUnit: 'c' },
@@ -41,6 +41,8 @@
     smallBoost?: number;
     /** Per-widget size state (PanelConfig.sizes); a missing entry = the widget's default size. */
     sizes?: Record<string, WidgetSize>;
+    /** Widgets with nothing to show right now: they take no room, except in edit mode where they can be placed. */
+    idleIds?: string[];
     /** OUT: the panel's cross-axis extent in px (height in the bottom dock, width in the side dock) =
      *  its largest widget. The dock adapts to it (WIDGET_OVERHAUL.md D7) and the unobstructed
      *  fullscreen video reserves exactly this much. */
@@ -101,10 +103,8 @@
     };
   });
 
-  // Pointer-based DnD (independent from HTML5 drag events). Pointer events, not mouse events, on
-  // purpose: a finger never fires mousemove/mouseup, so the mouse-only version could start a drag
-  // on touch (mousedown is synthesised from a tap) and then never move or drop it — the widgets
-  // simply refused to move on a tablet. Pointer events cover mouse, pen and touch with one path.
+  // Pointer-based DnD (not HTML5 drag, not mouse events): a finger never fires mousemove/mouseup, so a
+  // mouse-only drag would start on touch and never move or drop.
   $effect(() => {
     // This panel's own drag visuals (index highlight, insert marker, ghost) — never the global
     // payload, which belongs to whichever panel consumes the drop.
@@ -149,6 +149,13 @@
         resetLocalDrag();
         return;
       }
+      // Lifted where it was picked up: entering edit mode can reflow the dock under the finger (an idle
+      // widget appears), and the release would otherwise drop the widget at whatever slid there.
+      if (payload.panelId === panelId && Math.hypot(e.clientX - pickX, e.clientY - pickY) < PRESS_SLOP_PX) {
+        setGlobalDragPayload(null);
+        resetLocalDrag();
+        return;
+      }
       const inside = isPointInsidePanel(e.clientX, e.clientY);
       if (inside) {
         const dropAt = computeInsertIdxFromPoint(e.clientX, e.clientY);
@@ -159,10 +166,9 @@
         return;
       }
 
-      // Released outside this panel. Our visuals end with the pointer either way — the ghost must
-      // not outlive the finger (on touch nothing else would ever clear it). Only the global payload
-      // is kept alive, and only while another widget panel sits under the pointer and will consume
-      // it in its own listener (cross-panel move); over anything else the drag is cancelled.
+      // Released outside this panel: the ghost ends with the pointer (on touch nothing else would clear it). The
+      // payload survives only while another widget panel under the pointer will consume it (cross-panel move);
+      // otherwise the drag is cancelled.
       if (payload.panelId === panelId) {
         resetLocalDrag();
         const el = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
@@ -174,10 +180,8 @@
       }
     };
 
-    // pointercancel matters on touch specifically: Android fires it when the system takes the
-    // gesture over (a back swipe, a notification pull, the WebView deciding it is a scroll after
-    // all). Without it the payload and the ghost would be left behind and the panel would look
-    // permanently mid-drag.
+    // pointercancel: Android fires it when the system takes the gesture over (back swipe, notification pull,
+    // WebView scroll decision); without it the payload and ghost stay behind, permanently mid-drag.
     const onWindowPointerCancel = () => {
       clearPress();
       if (!getGlobalDragPayload()) return;
@@ -186,11 +190,9 @@
       resetLocalDrag();
     };
 
-    // Capture phase: (a) the map swapped into the video widget's tile is a top-level layer OVER the
-    // tile, so a press on it is relayed to the slot beneath — a long-press there still opens edit
-    // mode (in edit mode +page makes that layer click-through, and the tile gets the pointer itself);
-    // (b) in edit mode a press outside every dock leaves it (the docks share one flag, so either
-    // panel's listener may clear it).
+    // Capture phase: (a) the map swapped into the video tile is a layer OVER the tile, so a press there is
+    // relayed to the slot beneath (long-press still opens edit mode); (b) in edit mode a press outside every
+    // dock leaves it (either panel's listener may clear the shared flag).
     const onWindowPointerDown = (e: PointerEvent) => {
       const target = e.target as HTMLElement | null;
       if (!editing) {
@@ -293,11 +295,9 @@
     };
   });
 
-  // ── Size model (Dev-Docs active/WIDGET_OVERHAUL.md) ──
-  // Every widget has a size STATE (S / L / W, from `sizes` or its registry default). The state
-  // decides its main-axis "units" (a large square = 1) and its cross-axis fill: S = 0.6 (× smallBoost),
-  // L and W fill the cross axis; W is 2:1 along the dock's main axis (2 units in the horizontal dock,
-  // 0.5 in the vertical one). The aspect ratio never changes — a widget is only rescaled by height.
+  // ── Size model (Dev-Docs active/WIDGET_OVERHAUL.md) ── a size STATE (S / L / W) decides main-axis units (a
+  // large square = 1) and cross-axis fill: S = 0.6 (× smallBoost), L and W fill; W is 2:1 along the main axis
+  // (2 units horizontal, 0.5 vertical). The aspect ratio never changes — only height rescales.
   const smallRatio = SMALL_BASE_VMIN / LARGE_BASE_VMIN; // 0.6
 
   function unitsFor(state: WidgetSize): number {
@@ -306,27 +306,30 @@
   }
   const crossFactor = (state: WidgetSize) => (state === 'S' ? smallRatio * smallBoost : 1);
 
-  // Compute widget sizes based on available space
-  function computeSizes(): { id: string; state: WidgetSize; size: number }[] {
+  function computeSizes(): { id: string; state: WidgetSize; hidden: boolean; size: number }[] {
     if (widgetIds.length === 0) return [];
 
-    // Cross-axis determines the target large widget size (fill dock height/width).
-    // Cap at LARGE_BASE_VMIN so widgets don't grow beyond their designed max.
     const effectiveLargeBase = Math.min(maxWidgetVmin, LARGE_BASE_VMIN);
 
+    // A dock whose widgets are all idle keeps them: edit mode is entered by a long-press on a widget.
+    const hideIdle = !editing && widgetIds.some(id => !idleIds.includes(id));
     let totalUnits = 0;
+    let shown = 0;
     const items = widgetIds.map(id => {
       const state = effectiveWidgetSize(id, sizes);
-      totalUnits += unitsFor(state);
-      return { id, state };
+      const hidden = hideIdle && idleIds.includes(id);
+      if (!hidden) {
+        totalUnits += unitsFor(state);
+        shown++;
+      }
+      return { id, state, hidden };
     });
 
     // Gap between widgets in vmin
     const gapVmin = 0.5;
-    const totalGaps = (widgetIds.length - 1) * gapVmin;
+    const totalGaps = Math.max(0, shown - 1) * gapVmin;
     const usableVmin = availableVmin - totalGaps;
 
-    // Check if widgets fit at their effective base size, scale down if not
     const baseTotal = totalUnits * effectiveLargeBase;
     const scale = baseTotal <= usableVmin ? 1 : Math.max(MIN_SCALE, usableVmin / baseTotal);
 
@@ -353,7 +356,7 @@
 
   // Report the cross-axis extent (= the largest widget) — see the `crossPx` prop.
   $effect(() => {
-    const max = items.reduce((m, it) => Math.max(m, it.sizePx), 0);
+    const max = items.reduce((m, it) => (it.hidden ? m : Math.max(m, it.sizePx)), 0);
     if (max !== crossPx) crossPx = max;
   });
 
@@ -395,17 +398,16 @@
     }
   }
 
-  // ── Long-press → edit mode ──
-  // Hold a widget LONG_PRESS_MS without moving (mouse or finger) → edit mode, and the widget is
-  // picked up right away, so "hold, then drag" is one motion. Movement or release before that
-  // cancels: a click stays a click, a widget's own buttons keep working. Android's long-press
-  // haptic fires at ~500 ms — arming exactly there reads as "press until the buzz" on a tablet.
-  // In edit mode a press picks up immediately (no pages to flick here, unlike the phone grid).
+  // ── Long-press → edit mode ── hold LONG_PRESS_MS without moving → edit mode with the widget picked up, so
+  // "hold, then drag" is one motion; earlier movement or release keeps a click a click. 500 ms matches Android's
+  // long-press haptic. In edit mode a press picks up immediately.
   const LONG_PRESS_MS = 500;
   const PRESS_SLOP_PX = 8;
   let pressTimer: ReturnType<typeof setTimeout> | null = null;
   let pressX = 0;
   let pressY = 0;
+  let pickX = 0;
+  let pickY = 0;
 
   function clearPress() {
     if (pressTimer) clearTimeout(pressTimer);
@@ -440,12 +442,21 @@
     startPointerDrag(e, idx, slotEl);
   }
 
+  /** The ghost is `position: fixed`, and on mobile the dock is a permanent compositor layer — that makes the
+   *  dock its containing block and its `overflow: hidden` clips the ghost away. So it lives on `body`. */
+  function atRoot(node: HTMLElement): { destroy(): void } {
+    document.body.appendChild(node);
+    return { destroy: () => node.remove() };
+  }
+
   /** Pick the widget up (edit mode): the ghost follows the pointer, the window listeners drop it. */
   function startPointerDrag(e: PointerEvent, idx: number, slotEl: HTMLElement) {
     dragIdx = idx;
     activeDragPayload = { panelId, widgetId: widgetIds[idx], sourceIdx: idx };
     setGlobalDragPayload(activeDragPayload);
     ghostWidgetId = activeDragPayload.widgetId;
+    pickX = e.clientX;
+    pickY = e.clientY;
     ghostX = e.clientX + 14;
     ghostY = e.clientY + 14;
     const rect = slotEl.getBoundingClientRect();
@@ -570,6 +581,7 @@
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       class="widget-slot"
+      class:idle={item.hidden}
       data-slot-idx={idx}
       class:dragging={dragIdx === idx}
       class:editing
@@ -598,7 +610,7 @@
         </button>
       {/if}
       <div class="widget-content">
-        <WidgetRenderer id={item.id} {telem} {interfaceSettings} sizePx={item.sizePx} wPx={item.wPx} hPx={item.hPx} {editing} />
+        <WidgetRenderer id={item.id} {telem} {interfaceSettings} sizePx={item.sizePx} wPx={item.wPx} hPx={item.hPx} small={item.state === 'S'} {editing} />
       </div>
     </div>
   {/each}
@@ -606,6 +618,7 @@
   {#if editing && ghostWidgetId && getGlobalDragPayload()?.panelId === panelId}
     <div
       class="drag-ghost"
+      use:atRoot
       style="left:{ghostX}px; top:{ghostY}px; width:{ghostW}px; height:{ghostH}px;"
     >
       <span>{ghostWidgetLabel}</span>
@@ -685,6 +698,9 @@
     position: relative;
     transition: opacity 0.15s, transform 0.15s;
     cursor: default;
+    /* Touch: the browser picks pan-or-not when the finger lands, so the long-press pickup needs the gesture
+       claimed BEFORE edit mode is on — else the first move cancels the pointer stream. The docks do not scroll. */
+    touch-action: none;
   }
 
   /* Overlay is visual-only; events must hit the slot directly for reliable DnD in WebView. */
@@ -721,7 +737,7 @@
     touch-action: manipulation;
   }
   .resize-btn:hover {
-    background: rgba(55, 168, 219, 0.25);
+    background: var(--btn-active-bg);
   }
   .resize-btn svg {
     width: 100%;
@@ -732,12 +748,12 @@
     stroke-linejoin: round;
   }
 
+  .widget-slot.idle {
+    display: none;
+  }
+
   .widget-panel.editing .widget-slot {
     cursor: grab;
-    /* Touch: claim the gesture so the browser does not read the drag as a pan/scroll and cancel
-       the pointer stream. Scoped to edit mode, so ordinary use keeps native scrolling and the
-       widgets stay interactive. */
-    touch-action: none;
   }
 
   .widget-panel.editing .widget-slot:active {
@@ -811,7 +827,8 @@
     border: 1px solid rgba(55, 168, 219, 0.75);
     border-radius: 8px;
     background: rgba(30, 30, 30, 0.48);
-    backdrop-filter: blur(4px);
+    backdrop-filter: var(--glass-blur, blur(6px));
+    -webkit-backdrop-filter: var(--glass-blur, blur(6px));
     box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
     display: flex;
     align-items: center;

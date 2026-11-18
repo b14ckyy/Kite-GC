@@ -1,16 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-/**
- * Flight-mode output registry — the single presentation source for the unified, protocol-agnostic
- * flight-mode model (see docs/active/FLIGHT_MODE_UNIFIED.md).
- *
- * Protocol input adapters (backend) classify raw mode data into a canonical `FlightModeState`
- * (string ids). This registry maps each id → a display label + a semantic **category**. The category
- * is the shared colour axis (drives the widget badge colour + track-coloring); the label stays exact
- * per mode, so nothing is lost. Adding a protocol = a new adapter + a few ids here — no widget/pipeline
- * changes. Mode names are intentionally kept in English (universal pilot terminology — FBW-A, RTL, …).
- */
+/** Flight-mode output registry — the single presentation source for the unified flight-mode model
+ *  (docs/active/FLIGHT_MODE_UNIFIED.md): canonical id (from the backend adapters) → display label + semantic
+ *  category (the shared colour axis). Mode names stay English (pilot terminology). */
 
 /** Canonical, protocol-agnostic flight mode (mirrors the backend struct). */
 export interface FlightModeState {
@@ -46,10 +39,7 @@ interface ModeDef {
   short?: string;         // compact label for modifier chips (INAV stacking)
 }
 
-/**
- * Canonical id → definition. Ids come 1:1 from the protocol adapters; cross-protocol-identical modes
- * (acro/manual/poshold/althold/autotune/cruise) share one entry.
- */
+/** Canonical id → definition; cross-protocol-identical modes (acro/manual/poshold/…) share one entry. */
 export const MODE_REGISTRY: Record<string, ModeDef> = {
   // ── INAV primary ──
   failsafe_rth: { label: 'Failsafe RTH', category: 'failsafe' },
@@ -75,7 +65,7 @@ export const MODE_REGISTRY: Record<string, ModeDef> = {
   flaperon:     { label: 'Flaperon', category: 'other',    short: 'FLAP' },
   autoland:     { label: 'Autoland', category: 'land',     short: 'LAND' },
 
-  // ── ArduPilot (Plane + Copter; shared ids reuse the entries above) ──
+  // ── ArduPilot (Plane + Copter, Rover + Sub below; shared ids reuse the entries above) ──
   ardu_auto:    { label: 'Auto',        category: 'mission' },
   rtl:          { label: 'RTL',         category: 'rth' },
   guided:       { label: 'Guided',      category: 'guided' },
@@ -110,6 +100,19 @@ export const MODE_REGISTRY: Record<string, ModeDef> = {
   qacro:        { label: 'QAcro',       category: 'acro' },
   thermal:      { label: 'Thermal',     category: 'other' },
   loiter_qland: { label: 'Loiter QLand', category: 'land' },
+  initialising: { label: 'Initialising', category: 'other' },
+
+  // ── ArduRover / Boat ──
+  rover_hold:   { label: 'Hold',        category: 'poshold' },
+  steering:     { label: 'Steering',    category: 'stabilized' },
+  simple:       { label: 'Simple',      category: 'stabilized' },
+  dock:         { label: 'Dock',        category: 'land' },
+
+  // ── ArduSub ──
+  depth_hold:   { label: 'Depth Hold',  category: 'althold' },
+  surface:      { label: 'Surface',     category: 'land' },
+  surftrak:     { label: 'Surftrak',    category: 'althold' },
+  motor_detect: { label: 'Motor Detection', category: 'other' },
 
   // ── PX4 (main + sub mode; shared manual/acro/mission/land/takeoff reuse the entries above) ──
   px4_altitude:     { label: 'Altitude',       category: 'althold' },

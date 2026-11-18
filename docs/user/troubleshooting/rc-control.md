@@ -18,6 +18,22 @@ through the checks below. For how RC control works in the first place, see the
 - **Watch the engage state text** in the panel — it tells you whether your sticks are actually being sent
   (see the firmware-specific notes below).
 
+## Windows: the gamepad is listed, but its inputs never move
+
+Some Xbox-class pads show up in the **Device** list while Windows never delivers a reading for them
+through its game-controller interface. Kite detects that: if such a pad stays silent for 1.5 seconds,
+it reads the same pad through Windows' classic **XInput** interface instead — automatically, nothing to
+set. Pads that already work are not affected.
+
+- **Is Kite the active window?** On Windows a game controller only reports input while the Kite
+  window is in the foreground.
+- **Sticks feel inverted after an update?** The pad may now be read through the other interface —
+  re-learn the mapping in the RC panel (**Learn**).
+- **Still nothing?** Set **Settings → Diagnostics → Log Level** to **Debug (verbose)**, plug the pad in,
+  open the RC panel and move the sticks. The log then records which game controllers Kite finds, which
+  one it streams from and the first reading it gets — attach it when
+  **[reporting the problem](reporting-issues.md)**.
+
 ## ArduPilot: a servo twitches but doesn't hold
 
 This is the classic sign of **a physical RC receiver competing with the GCS override** — for example an
@@ -55,8 +71,9 @@ needed and it takes over fully.
 
 ## PX4: joystick input is ignored
 
-- **`COM_RC_IN_MODE`** must allow a MAVLink/joystick source (not "RC only"). Kite shows a reminder, but
-  set the parameter in PX4 / QGroundControl.
+- **`COM_RC_IN_MODE`** must allow a MAVLink/joystick source (not "RC only"). The desktop RC panel's
+  banner shows the current value, and when it blocks joystick input **Allow joystick (set 2)** sets it
+  from Kite. Alternatively, set the parameter in PX4 / QGroundControl.
 
 ## Still stuck
 

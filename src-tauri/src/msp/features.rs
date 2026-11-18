@@ -82,6 +82,8 @@ pub enum Feature {
     LinkStats,
     /// Wind estimate over MSP — MSP2_INAV_WIND 0x2231 (INAV 10.0+, PR #11611; not in 9.x)
     WindEstimate,
+    /// MSP over MAVLink TUNNEL, payload type 0x8001 (INAV 10.0+, PR #11718)
+    MspTunnel,
 }
 
 impl Feature {
@@ -96,6 +98,7 @@ impl Feature {
             Feature::AdsbMsp => InavVersion::new(8, 0, 0),
             Feature::LinkStats => InavVersion::new(9, 1, 0),
             Feature::WindEstimate => InavVersion::new(10, 0, 0),
+            Feature::MspTunnel => InavVersion::new(10, 0, 0),
         }
     }
 }
@@ -118,6 +121,13 @@ pub struct FeatureSet {
     pub adsb_msp: bool,
     pub link_stats: bool,
     pub wind_estimate: bool,
+    /// The firmware version can serve MSP over MAVLink TUNNEL (INAV ≥ 10.0) — a capability only.
+    #[serde(default)]
+    pub msp_tunnel_capable: bool,
+    /// THIS link runs MSP over MAVLink: set by the MAVLink connect path once the tunnel probe and the
+    /// INAV handshake through it succeeded. Always false from `for_version` (and on serial MSP).
+    #[serde(default)]
+    pub msp_tunnel: bool,
 }
 
 impl FeatureSet {
@@ -133,6 +143,8 @@ impl FeatureSet {
             adsb_msp: version.is_at_least(Feature::AdsbMsp.min_version()),
             link_stats: version.is_at_least(Feature::LinkStats.min_version()),
             wind_estimate: version.is_at_least(Feature::WindEstimate.min_version()),
+            msp_tunnel_capable: version.is_at_least(Feature::MspTunnel.min_version()),
+            msp_tunnel: false,
         }
     }
 }

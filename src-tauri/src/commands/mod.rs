@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Tauri Commands Module
-// All frontend-callable commands are defined here, organized by feature area.
-// Each submodule exposes Tauri commands that the Svelte frontend can invoke.
+// Tauri commands, one submodule per feature area.
 
 pub mod aero;
 pub mod connection;
 pub mod control;
+pub mod custom_maps;
 pub mod fc_settings;
 pub mod fence;
 pub mod flightlog;
@@ -16,6 +15,7 @@ pub mod hid;
 pub mod storage;
 pub mod info;
 pub mod logging;
+pub mod map_search;
 pub mod mission;
 pub mod radar;
 pub mod rally;
@@ -25,4 +25,7 @@ pub mod system;
 pub mod terrain;
 pub mod tiles;
 pub mod update_check;
+pub mod updater;
+pub mod vehicles;
 pub mod video;
+pub mod weather;

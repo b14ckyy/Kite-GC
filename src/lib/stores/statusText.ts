@@ -1,16 +1,26 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// FC system messages (MAVLink STATUSTEXT) shown as top-of-screen toasts. The backend emits
-// `mavlink-statustext` ({ severity, text }); we keep the most recent few, expire each one 20 s after
-// it individually arrived (unless it's already slid out of the buffer), and play a severity-tiered
-// audio cue. Severity is MAV_SEVERITY (0 = emergency … 7 = debug).
+// FC system messages (MAVLink STATUSTEXT, `mavlink-statustext`) as top-of-screen toasts, each expiring 20 s after
+// it arrived, with a severity-tiered audio cue; plus pinned GCS notices (`setPinnedStatus`) that stay until
+// cleared. Severity = MAV_SEVERITY (0 = emergency … 7 = debug).
 
 import { writable, get } from 'svelte/store';
+import { isActive, vehicles } from '$lib/stores/vehicles';
+import { fleetEnabled } from '$lib/stores/fleetMode';
+import { orderedVehicles, vehicleColorFor } from '$lib/helpers/fleetStatus';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { settings } from './settings';
 
-export type StatusTextLevel = 'error' | 'warning' | 'info';
+export type StatusTextLevel = 'error' | 'warning' | 'info' | 'debug';
+
+/** Which vehicle a line came from — set only while 2+ vehicles are connected (single-vehicle sessions
+ *  keep the plain banner). Drives the colour chip + name prefix in the toast. */
+export interface StatusTextVehicle {
+  vehicleId: string;
+  name: string;
+  color: string;
+}
 
 export interface StatusTextMsg {
   id: number;
@@ -19,36 +29,41 @@ export interface StatusTextMsg {
   text: string;
   expiresAt: number;     // epoch ms when this line fades out (per-message lifetime)
   repeats: number;       // how many times this identical text has arrived while on screen (1 = once)
+  vehicle?: StatusTextVehicle;
+  /** A GCS notice that stays until its owner clears it (`setPinnedStatus`); `pinned` is the owner's key. */
+  pinned?: string;
 }
 
 const MAX_BUFFER = 12;          // lines kept (the banner shows a few and scrolls to the newest)
 const CLEAR_AFTER_MS = 20_000;  // each message fades out 20 s after it individually arrived
 const SOUND_MIN_GAP_MS = 1200;  // don't let an INFO flood machine-gun the speaker
 
-/** MAV_SEVERITY → display/sound level. ≤3 ERROR/CRITICAL/ALERT/EMERGENCY, 4 WARNING, ≥5 NOTICE/INFO/DEBUG. */
+/** MAV_SEVERITY → display/sound level. ≤3 ERROR/CRITICAL/ALERT/EMERGENCY, 4 WARNING, 5–6 NOTICE/INFO,
+ *  7 DEBUG. DEBUG is the firmware's developer chatter (ArduPilot: "Sending unknown message (44)" at the
+ *  rate a GCS asked for a message the build cannot send) — it stays off the banner unless asked for. */
 export function statusLevel(severity: number): StatusTextLevel {
   if (severity <= 3) return 'error';
   if (severity === 4) return 'warning';
+  if (severity >= 7) return 'debug';
   return 'info';
 }
 
-/** Honour the "System Messages" setting (off / error / warning / all). */
+/** Honour the "System Messages" setting (off / error / warning / all / debug). */
 function levelAllowed(level: StatusTextLevel): boolean {
   switch (get(settings).systemMessages) {
     case 'off': return false;
     case 'error': return level === 'error';
-    case 'warning': return level !== 'info';
-    default: return true; // 'all'
+    case 'warning': return level === 'error' || level === 'warning';
+    case 'all': return level !== 'debug';
+    default: return true; // 'debug' — everything, DEBUG included
   }
 }
 
 export const statusTexts = writable<StatusTextMsg[]>([]);
 
-/** Recent ArduPilot/PX4 "PreArm: …" failure reasons (newline-joined), for the arming indicator tooltip.
- *  Tracked independently of the toast `systemMessages` filter (so the detail is available even with
- *  toasts off). The red "not ready" STATE itself comes from the SYS_STATUS PREARM_CHECK bit, not this —
- *  this only supplies the human-readable reasons. Distinct lines accumulate during a check burst and the
- *  whole set clears once the FC stops repeating them (block cleared / armed). */
+/** Recent ArduPilot/PX4 "PreArm: …" reasons (newline-joined) for the arming tooltip, independent of the toast
+ *  filter. The red "not ready" STATE comes from SYS_STATUS PREARM_CHECK, not this. Lines accumulate during a
+ *  burst; the set clears once the FC stops repeating them. */
 export const prearmReason = writable<string | null>(null);
 // ArduPilot phrases arming blockers as "PreArm: …"; PX4 uses "Preflight Fail: …" / "Arming denied: …".
 // (PX4 matching is best-effort / untested — the SYS_STATUS PREARM_CHECK bit is the other fallback.)
@@ -86,39 +101,42 @@ function sweepExpired(): void {
 
 function scheduleSweep(): void {
   if (sweepTimer) { clearTimeout(sweepTimer); sweepTimer = null; }
-  const list = get(statusTexts);
+  const list = get(statusTexts).filter((m) => !m.pinned);
   if (!list.length) return;
   const soonest = Math.min(...list.map((m) => m.expiresAt));
   sweepTimer = setTimeout(sweepExpired, Math.max(0, soonest - Date.now()));
 }
 
-function push(severity: number, text: string): void {
+/** Show one line; false when it was not shown (empty, or filtered out by the "System Messages" setting). */
+function push(severity: number, text: string, vehicle?: StatusTextVehicle): boolean {
   const clean = text.trim();
-  if (!clean) return;
+  if (!clean) return false;
   const level = statusLevel(severity);
-  if (!levelAllowed(level)) return; // filtered out by the "System Messages" setting
+  if (!levelAllowed(level)) return false; // filtered out by the "System Messages" setting
 
   const expiresAt = Date.now() + CLEAR_AFTER_MS;
   let repeated = false;
   statusTexts.update((list) => {
-    // De-dup against the WHOLE buffer, not just the last line. An FC that nags with two alternating
-    // messages (INAV's "UNABLE TO ARM" / "WAITING FOR GPS FIX" while it waits for a fix) never repeats
-    // its *last* line, so a last-line-only check appends a fresh row for every nag and fills the banner
-    // within seconds. A repeat instead refreshes the existing line's lifetime and bumps its counter,
-    // keeping its position so the banner doesn't reshuffle while you're reading it.
-    const idx = list.findIndex((m) => m.text === clean);
+    // De-dup against the WHOLE buffer: an FC nagging with two alternating messages never repeats its last line.
+    // A repeat refreshes the existing line's lifetime and counter in place (no reshuffle). Keyed by vehicle too,
+    // so the same text from two craft is two lines.
+    const idx = list.findIndex((m) => m.text === clean && (m.vehicle?.vehicleId ?? null) === (vehicle?.vehicleId ?? null));
     if (idx !== -1) {
       repeated = true;
       const refreshed = [...list];
-      refreshed[idx] = { ...refreshed[idx], severity, level, expiresAt, repeats: refreshed[idx].repeats + 1 };
+      refreshed[idx] = { ...refreshed[idx], severity, level, expiresAt, repeats: refreshed[idx].repeats + 1, vehicle: vehicle ?? refreshed[idx].vehicle };
       return refreshed;
     }
-    return [...list, { id: nextId++, severity, level, text: clean, expiresAt, repeats: 1 }].slice(-MAX_BUFFER);
+    const pinned = list.filter((m) => m.pinned);
+    const rest = [...list.filter((m) => !m.pinned), { id: nextId++, severity, level, text: clean, expiresAt, repeats: 1, vehicle }];
+    return [...pinned, ...rest.slice(-(MAX_BUFFER - pinned.length))];
   });
   scheduleSweep();
 
-  // Always cue errors/warnings; an INFO line already on screen never re-cues, so a nag loop stays silent.
-  if (!repeated || level !== 'info') playTone(level);
+  // Always cue errors/warnings; an INFO line already on screen never re-cues, so a nag loop stays
+  // silent. DEBUG lines are never cued — they are on screen because someone is reading, not listening.
+  if (level !== 'debug' && (!repeated || level !== 'info')) playTone(level);
+  return true;
 }
 
 // ── Audio cue (Web Audio) — gentle for info, discreetly alarming for warnings/errors ──
@@ -167,17 +185,56 @@ function playTone(level: StatusTextLevel): void {
 }
 
 /** Inject a GCS-local message into the same toast banner (e.g. a geozone/geofence breach the GCS detects
- *  itself). Goes through the same severity filter + audio cue as FC STATUSTEXT. */
-export function pushLocalStatus(severity: number, text: string): void {
-  push(severity, text);
+ *  itself). Goes through the same severity filter + audio cue as FC STATUSTEXT. Returns whether it was
+ *  shown (false: filtered out by the "System Messages" setting). */
+export function pushLocalStatus(severity: number, text: string): boolean {
+  return push(severity, text);
+}
+
+/** Show or update the GCS notice `key`: a red line above the messages that never expires and ignores the
+ *  "System Messages" filter (it is not an FC message). No sound — see `playAlarm`. */
+export function setPinnedStatus(key: string, text: string): void {
+  statusTexts.update((list) => {
+    const idx = list.findIndex((m) => m.pinned === key);
+    if (idx === -1) return [{ id: nextId++, severity: 2, level: 'error', text, expiresAt: Infinity, repeats: 1, pinned: key }, ...list];
+    if (list[idx].text === text) return list;
+    const next = [...list];
+    next[idx] = { ...next[idx], text };
+    return next;
+  });
+}
+
+export function clearPinnedStatus(key: string): void {
+  statusTexts.update((list) => (list.some((m) => m.pinned === key) ? list.filter((m) => m.pinned !== key) : list));
+}
+
+/** The loudest cue: three falling notes, for a pinned notice. */
+export function playAlarm(): void {
+  lastSoundAt = Date.now();
+  beep(880, 0, 160, 0.22);
+  beep(660, 200, 160, 0.22);
+  beep(440, 400, 320, 0.22);
 }
 
 /** Start listening for FC STATUSTEXT messages. Safe to call once on app init. */
 export async function startStatusText(): Promise<void> {
   if (unlisten) return;
-  unlisten = await listen<{ severity: number; text: string }>('mavlink-statustext', (e) => {
-    trackPrearm(e.payload.text); // unfiltered — drives the arming indicator regardless of toast settings
-    push(e.payload.severity, e.payload.text);
+  unlisten = await listen<{ vehicleId?: string; severity: number; text: string }>('mavlink-statustext', (e) => {
+    const active = isActive(e.payload);
+    const known = get(vehicles);
+    // Per-vehicle lines and tags are a fleet feature (behind the `--fleet` gate).
+    const multi = get(fleetEnabled) && known.size > 1;
+    // Single vehicle: the plain banner, active only (unchanged). Fleet: every vehicle's lines, each
+    // tagged with its name + colour so a failing craft is identifiable at a glance.
+    if (!multi && !active) return;
+    if (active) trackPrearm(e.payload.text); // unfiltered — drives the arming indicator regardless of toast settings
+    let vehicle: StatusTextVehicle | undefined;
+    const vid = e.payload.vehicleId;
+    if (multi && typeof vid === 'string') {
+      const v = known.get(vid);
+      if (v) vehicle = { vehicleId: vid, name: v.name, color: vehicleColorFor(orderedVehicles(known), vid) };
+    }
+    push(e.payload.severity, e.payload.text, vehicle);
   });
 }
 

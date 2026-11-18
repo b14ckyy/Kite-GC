@@ -24,3 +24,7 @@ export const requestOpenFlightId = writable<number | null>(null);
  *  flight's linked-mission chip). `+page` switches to the mission tab, opens the Manager,
  *  selects the mission, and resets it to null. */
 export const requestOpenMissionId = writable<number | null>(null);
+
+/** Bumped when the library changed outside the Manager (a `.kmission` dropped on the window): an open
+ *  Manager reloads its list. */
+export const missionLibraryRevision = writable<number>(0);

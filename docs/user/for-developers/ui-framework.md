@@ -98,7 +98,11 @@ Plus the warm accent `#f5a623` (orange) used for warnings/highlights and in the 
 - **Sizing:** widget content is sized in **`vmin`** (no fixed px) so it scales with the window; the whole
   chrome scales with the global **`--ui-scale`** variable (the `.ui-scale` wrapper).
 - **Panels** use glassmorphism where appropriate — `backdrop-filter: blur()` over a semi-transparent
-  background.
+  background. Every blur goes through one of two switches: `var(--glass-blur, blur(6px))` for anything
+  that lies on the map (widgets, buttons, chips, the widget column) and `var(--panel-blur, blur(10px))`
+  for panel shells and their popups. `html.is-mobile` sets the map switch to `none` (a backdrop blur is
+  a framebuffer readback per element and frame — the largest single rendering cost on phones), and
+  the low-power mode (`html.kite-low-power`) sets both to `none`.
 - Use CSS variables where practical; otherwise the palette hex values above are the source of truth.
 
 ## When something's missing

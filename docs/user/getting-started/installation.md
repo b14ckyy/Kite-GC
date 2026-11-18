@@ -21,6 +21,10 @@ grabbing:
 - **Portable** — the bare executable, zipped **with an empty `.portable` marker** already inside, so all
   data stays in a `data/` folder next to it (see [Installed vs portable mode](#installed-vs-portable-mode)).
 
+The macOS release also carries a `..._update.tar.gz` — the app bundle packed for Kite's in-app updater
+(**Update and Restart**, see [Settings → Updates](../reference/settings.md#updates)). You don't need to
+download it yourself.
+
 !!! note "macOS: signed and notarized"
     The macOS build is **universal** (Apple Silicon + Intel), **signed and notarized** since 1.0.0, so it
     opens like any other app — no Gatekeeper warning, no right-click → Open. If you are still running a
@@ -126,6 +130,7 @@ In a normal install Kite follows each OS's conventions; in portable mode everyth
 | Flight database (`flights.db`) | `%APPDATA%\kite-gc\` | `~/.local/share/kite-gc/` | `~/Library/Application Support/kite-gc/` | `<app>/data/` |
 | Raw logs (`.tlog`, raw-MSP) | `Documents\KiteGC\` | `~/Documents/KiteGC/` (XDG) | `~/Documents/KiteGC/` | `<app>/data/` |
 | Downloaded helper tools | `%APPDATA%\kite-gc\bin\` | `~/.local/share/kite-gc/bin/` | `~/Library/Application Support/kite-gc/bin/` | `<app>/data/bin/` |
+| [Custom maps](../guides/custom-maps.md#the-map-folder) (default location) | `%APPDATA%\kite-gc\custom_maps\` | `~/.local/share/kite-gc/custom_maps/` | `~/Library/Application Support/kite-gc/custom_maps/` | `<app>/data/custom_maps/` |
 | Preferences & layout (settings, widget/panel layout) | web-view storage in your user profile | web-view storage in your user profile | web-view storage in your user profile | `<app>/data/` |
 | Window size & position | `%APPDATA%\com.kitegc.app\` | `~/.config/com.kitegc.app/` | `~/Library/Application Support/com.kitegc.app/` | not saved in portable mode |
 
@@ -146,16 +151,18 @@ The app itself is small. What grows over time is your flight data:
 
 - **Flight database** — grows with recorded telemetry (a time-series per flight). Typical flights are
   modest; a large library built over many flights can reach tens to a few hundred MB.
-- **Imported INAV blackbox logs** can optionally keep the **original log file inside the database** —
-  these are the biggest single contributor. You can **delete the stored original** for a flight at any
-  time (from its logbook entry) to reclaim that space while keeping the decoded data.
+- **Imported onboard logs** (INAV Blackbox, ArduPilot Dataflash, PX4 ULog) keep the **original log file
+  inside the database** — these are the biggest single contributor. You can **delete the stored
+  original** for a flight at any time (from its logbook entry) to reclaim that space while keeping the
+  decoded data.
 - **Raw logs** (`.tlog` / raw-MSP) are written separately under `Documents/KiteGC` and grow with use —
   housekeep them as you like; they're independent of the database.
 
 Keeping it tidy:
 
 - Deleting flights reclaims space incrementally (the database auto-shrinks over time).
-- **Settings → Data → Compact Database** runs a full defragmentation for maximum reclaim.
+- **Settings → Data → Compact Database** (desktop) rebuilds the whole file for maximum reclaim.
+  Kite is blocked while it runs (minutes on a slow drive), so do it between flights.
 - Move the database to another drive via **Settings** if space is tight.
 
 ## External dependencies & automatic downloads
@@ -165,21 +172,24 @@ program, which Kite offers to **download automatically the first time you use th
 
 | Helper | Used for | How it's provided |
 |---|---|---|
-| `blackbox_decode` | Importing **INAV blackbox** logs | auto-download on **Windows & Linux** (macOS: install manually) |
-| `ffmpeg` | **Video** (native capture + fallback decoding for some RTSP sources) | auto-download on **Windows & Linux**; **bundled inside the app on macOS** |
-| `mediamtx` | **Video** (the RTSP → low-latency engine) | auto-download on **Windows, Linux & macOS** |
+| `ffmpeg` | **Video** (native capture + fallback decoding for some RTSP sources on the classic path) | auto-download on **Windows & Linux**; **bundled inside the app on macOS** |
+| `mediamtx` | **Video** (the classic RTSP → low-latency engine, used with the *Native RTSP client* switched off) | auto-download on **Windows, Linux & macOS** |
+
+RTSP through Kite's own **Native RTSP client** needs neither helper — Android and iPad always use it,
+the desktop by default unless it is switched off in the Video panel (see **[Video](../guides/video.md)**).
 
 - Downloaded helpers are stored in Kite's tools folder (`…\kite-gc\bin`, or `data\bin` in portable
   mode) — they don't touch your system.
   Linux auto-downloads cover the common 64-bit CPUs (Intel/AMD `x86_64` and ARM `aarch64`).
 - Kite finds a helper if it's **on your `PATH`**, **next to the app**, or in that tools folder. Where a
-  helper isn't provided automatically — `blackbox_decode` on macOS, or an unsupported CPU like
-  32-bit/armv7 — install it yourself (e.g. `brew install ffmpeg` on macOS, or your package manager /
-  a manual download) and put it on your `PATH` or next to the app; Kite will pick it up.
+  helper isn't provided automatically — on an unsupported CPU like 32-bit/armv7 — install it yourself
+  (e.g. `brew install ffmpeg` on macOS, or your package manager / a manual download) and put it on
+  your `PATH` or next to the app; Kite will pick it up.
 - These downloads need **internet access**. The **map** also needs it: both **2D map tiles** and
-  **3D terrain** are streamed on demand and cached after first view — there's no offline map download
-  yet (it's under consideration for the future if there's enough demand). Connecting to your aircraft,
-  live telemetry, and logging all work fully offline.
+  **3D terrain** are streamed on demand and cached after first view — Kite has no offline map download.
+  On the desktop, map tiles you already have can be shown from a folder as a
+  [custom map](../guides/custom-maps.md#custom-maps-from-a-folder). Connecting to your aircraft, live telemetry, and logging all
+  work fully offline.
 
 ## First run
 

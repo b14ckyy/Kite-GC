@@ -23,11 +23,9 @@
   // In a MISSION-category mode, show the FC's current target waypoint as "WP N/X"
   // (N = active waypoint number, X = total waypoints). Only when an active WP number is known.
   let inMission = $derived(modeCategory(primary) === 'mission');
-  // X (total): in replay use the flown mission's count (linked library mission or Blackbox
-  // header); live uses the loaded planner mission's length.
-  // X (total): replay → flown mission count; live → the loaded planner mission length, from the
-  // INAV store on INAV, otherwise the ArduPilot store (which PX4 shares — 'px4' is its own
-  // system value, so discriminate on 'inav', never on 'ardupilot').
+  // X (total): replay → the flown mission's count (linked library mission or Blackbox header); live → the loaded
+  // planner mission from the INAV store on INAV, else the ArduPilot store (PX4 shares it — 'px4' is its own system
+  // value, so discriminate on 'inav', never on 'ardupilot').
   let wpTotal = $derived(
     $replayActive ? ($replayWpTotal ?? 0)
     : $autopilotSystem === 'inav' ? $mission.waypoints.length
@@ -67,7 +65,8 @@
     align-items: center;
     justify-content: flex-start;
     background: rgba(30, 30, 30, 0.75);
-    backdrop-filter: blur(10px);
+    backdrop-filter: var(--glass-blur, blur(6px));
+    -webkit-backdrop-filter: var(--glass-blur, blur(6px));
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: calc(var(--ws) * 0.08);
     gap: calc(var(--ws) * 0.03);

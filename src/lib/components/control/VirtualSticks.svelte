@@ -2,12 +2,9 @@
   SPDX-License-Identifier: GPL-3.0-or-later
   Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-  On-screen touch RC sticks for iPad (Phase 4). Mode-2 layout:
-    left stick  - throttle (vertical, no spring: holds position) + yaw (horizontal, springs to centre)
-    right stick - pitch (vertical) + roll (horizontal), both spring to centre
-  Feeds mobileRc, which drives the shared rcStream pump. Injecting RC to a real aircraft is
-  safety-critical: the sticks are inert until Engage, arming is a separate explicit toggle, and
-  releasing a spring axis re-centres it immediately.
+  On-screen touch RC sticks (Mode 2: left = throttle (holds) + yaw, right = pitch + roll; spring axes recentre
+  on release), feeding mobileRc → the shared rcStream pump. Safety-critical: inert until Engage, arming is a
+  separate explicit toggle.
 -->
 <script lang="ts">
   import {
@@ -134,7 +131,7 @@
   .vs-root {
     position: fixed; left: 0; right: 0; bottom: 0; height: 46vh; z-index: 400;
     display: flex; flex-direction: column; gap: 12px; padding: 12px; box-sizing: border-box;
-    background: linear-gradient(#0a0a0acc, #0a0a0aee); backdrop-filter: blur(2px);
+    background: linear-gradient(#0a0a0acc, #0a0a0aee); backdrop-filter: var(--glass-blur, blur(2px)); -webkit-backdrop-filter: var(--glass-blur, blur(2px));
     border-top: 2px solid #37a8db;
   }
   .vs-bar { display: flex; align-items: center; gap: 12px; }

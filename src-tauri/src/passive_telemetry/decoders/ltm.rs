@@ -17,12 +17,13 @@ use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 use std::time::Instant;
 
-use tauri::{AppHandle, Emitter};
+use crate::vehicle_registry::emitter::VehicleEmitter;
 
 use crate::flightlog::recorder::FlightRecorderHandle;
 use crate::flightmode::FlightModeState;
 use crate::scheduler::telemetry::{
     AirspeedData, AltitudeData, AnalogData, AttitudeData, GpsData, LinkStatsData, StatusData,
+    FIX_2D, FIX_3D, FIX_NONE,
 };
 
 /// INAV arming_flags bit 2 = ARMED (what the recorder + frontend look for).
@@ -329,7 +330,8 @@ impl LtmDecoder {
                 s.ground_speed = *gs_ms;
                 s.alt = *alt_m;
                 s.num_sat = *sats;
-                s.fix_type = if *fix == 3 { 3 } else if *fix == 2 { 2 } else { 0 };
+                // LTM wire 3 = 3D, 2 = 2D, else none → the unified scale (`scheduler::telemetry::FIX_*`).
+                s.fix_type = match *fix { 3 => FIX_3D, 2 => FIX_2D, _ => FIX_NONE };
                 s.have_fix = *fix >= 2;
                 s.seen_gps = true;
                 s.fresh_gps = true;
@@ -428,7 +430,7 @@ impl LtmDecoder {
 
     /// Emit the accumulated state as the unified telemetry events and feed the flight recorder. Each
     /// event is only sent once its relevant fields have been seen (mirrors the FrSky/CRSF decoders).
-    pub fn publish(&mut self, app: &AppHandle, recorder: Option<&FlightRecorderHandle>) {
+    pub fn publish(&mut self, app: &VehicleEmitter, recorder: Option<&FlightRecorderHandle>) {
         // Only emit a type when a fresh frame updated it since the last publish (no fixed-tick re-publish
         // of cached state). Capture + clear the flags, then emit from the immutably-borrowed state.
         let (f_status, f_att, f_gps, f_alt, f_an, f_asp) = {

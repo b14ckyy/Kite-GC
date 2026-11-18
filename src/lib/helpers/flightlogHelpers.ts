@@ -10,11 +10,8 @@ import type {
   LogbookSortDimension,
 } from '$lib/stores/flightlogTypes';
 
-// ── Flight-local time (ADR-048) ──────────────────────────────────────────────
-// A flight's `start_time` is always true UTC; `utc_offset_min` shifts it to the wall-clock of the
-// place the flight happened. We shift the epoch by the offset and then read the **UTC** components of
-// the result — that yields the flight-local wall clock without involving the browser's own timezone.
-// Unknown offset (null) → fall back to UTC and mark it, rather than guessing.
+// ── Flight-local time (ADR-048) ── `start_time` is UTC; shift the epoch by `utc_offset_min` and read the UTC
+// components → the flight-local wall clock, independent of the browser's timezone. Unknown offset → UTC, marked.
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
 
@@ -146,6 +143,14 @@ export function buildFlightTree(flights: FlightSummary[], mode: LogbookSortMode)
     });
 
   return { dimensions, groups };
+}
+
+/** The reason of a failed log of a multi-log Blackbox file without the backend's own `Log N: ` prefix
+ *  (1-based, `blackbox.rs`) — the caller puts the number in front once, through the locale. Errors
+ *  without the prefix (legacy decoder, storage) come back unchanged. */
+export function stripLogNumber(error: string, logNumber: number): string {
+  const own = `Log ${logNumber}: `;
+  return error.startsWith(own) ? error.slice(own.length) : error;
 }
 
 export function formatDurationSec(durationSec: number | null): string {

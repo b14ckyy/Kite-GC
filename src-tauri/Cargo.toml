@@ -26,11 +26,12 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"
 
 [dependencies]
 md-5 = "0.10"
+sha1 = "0.10"  # group-flight id (GROUP_FLIGHTS.md §3.1) — a stable short hash, not security
 tauri = { version = "2", features = ["macos-private-api"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde_json = { version = "1", features = ["raw_value"] }  # raw_value: .kmission carries JSON text unparsed
 serde_repr = "0.1"
 log = "0.4"
 rusqlite = { version = "0.31", features = ["bundled"] }
@@ -51,22 +52,17 @@ mavlink = { version = "0.17", default-features = false, features = ["std", "ardu
 num-traits = "0.2"  # FromPrimitive for lossless MavCmd/MavFrame <-> int (mission codec round-trip)
 tiff = "0.9"  # decode Copernicus GLO-30 GeoTIFF DEM tiles (Float32, DEFLATE, predictor 3)
 
-# Desktop-only dependencies — each mobile target swaps in its own implementation behind the
-# transport/ seam (transport/mod.rs) or a platform stand-in:
-#   serialport                — no backend on iOS at all; on Android an unrooted app may not open
-#                               /dev/tty*, so USB serial goes through the USB Host API instead
-#                               (UsbSerial.kt + transport/serial_android.rs).
-#   btleplug                  — no iOS backend (CoreBluetooth via objc2 instead); its Android backend
-#                               needs the droidplug Java companion the Gradle project does not ship.
-#   starship-battery          — no mobile targets; iOS reports always-on-battery, Android reads the
-#                               power-supply class from sysfs (commands/system.rs).
-#   tauri-plugin-window-state — desktop window geometry; mobile is a single full-screen surface.
-# On every desktop target this cfg is true, so Windows/Linux/macOS resolve these exactly as before.
+# Desktop-only: no mobile backend (serialport, btleplug, starship-battery; keepawake does not compile
+# off Windows/Linux/macOS) or no mobile meaning (window-state, updater). Mobile swaps in its own
+# implementation behind transport/ (transport/mod.rs) or a platform stand-in.
 [target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
 serialport = "4"
 btleplug = "0.11"
 starship-battery = "0.10"  # cross-platform AC/battery state (Windows + Linux + macOS) for the low-power 3D auto mode
 tauri-plugin-window-state = "2"
+tauri-plugin-updater = "2"  # "Update and Restart" for installed copies (commands/updater.rs); mobile links to the store
+keepawake = "0.6"  # display / system sleep inhibit behind the screen-awake rule (link_presence.rs)
+trash = "5"  # recycle bin / trash for the database backup the user removes (commands/flightlog.rs)
 
 # USB serial on Android runs through the platform's USB Host API, which only exists in Java — the
 # driver is `UsbSerial.kt` in the Android app module and `transport/serial_android.rs` is the JNI shim
@@ -100,6 +96,8 @@ version = "0.61"
 features = [
     "Gaming_Input",
     "Foundation_Collections",
+    # XInput fallback for Xbox-class pads that Windows.Gaming.Input lists but never reads (hid/windows.rs).
+    "Win32_UI_Input_XboxController",
     # Hole-punch spike / native video sink (P2.1): raw child windows under the WebView.
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
@@ -136,8 +134,17 @@ gst_app = { package = "gstreamer-app", version = "0.21" }
 # Swift, no Tauri plugin - so it survives `cargo tauri ios init` regeneration.
 [target.'cfg(target_os = "ios")'.dependencies]
 objc2 = "0.6"
+block2 = "0.6"  # the (absent) completion block of the share sheet presentation (commands/storage.rs); already in the tree
 objc2-foundation = { version = "0.3", features = ["NSArray", "NSData", "NSDictionary", "NSString", "NSValue", "NSEnumerator", "NSObject"] }
 objc2-core-bluetooth = { version = "0.3", features = ["CBCentralManager", "CBPeripheral", "CBService", "CBCharacteristic", "CBAttribute", "CBPeer", "CBAdvertisementData", "CBManager", "CBError", "CBUUID"] }
+# Native RTSP decode on iPad: the macOS sink (video/apple_sink.rs) under a UIKit host (video/ios_host.rs).
+# Same crate versions as the macOS sink below, so nothing new is downloaded.
+objc2-ui-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "objc2-quartz-core", "UIResponder", "UIView", "UIColor"] }
+objc2-quartz-core = { version = "0.3", features = ["CALayer", "CATransform3D", "objc2-core-foundation", "objc2-core-graphics"] }
+objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "AVSampleBufferDisplayLayer", "AVQueuedSampleBufferRendering", "AVAnimation", "objc2-core-media", "objc2-quartz-core"] }
+objc2-core-media = { version = "0.3", features = ["CMBase", "CMTime", "CMSync", "CMBlockBuffer", "CMFormatDescription", "CMSampleBuffer"] }
+objc2-core-foundation = { version = "0.3", features = ["CFBase", "CFArray", "CFDictionary", "CFNumber", "CFString"] }
+objc2-core-graphics = { version = "0.3", features = ["CGColor", "CGGeometry"] }
 
 # Native location on mobile. WKWebView's Web geolocation prompt is labelled with the page origin
 # host ("localhost"); this plugin routes to CoreLocation (iOS) / Android location services instead,

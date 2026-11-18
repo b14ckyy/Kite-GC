@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-//! Link state for the OS layer (Dev-Docs active/BACKGROUND_TELEMETRY.md): the values the Android
-//! foreground-service notification shows, plus the current flight's track points so the frontend
-//! can close its trail gap after being hidden (`telemetry_track_since`). Fed next to the recorder
-//! feeds in every protocol path — not inside the recorder, which only exists while logging is on.
+//! Link state for the OS layer (Dev-Docs active/BACKGROUND_TELEMETRY.md): the Android notification's
+//! values and the current flight's track points for the frontend's trail backfill. Fed next to the
+//! recorder, not inside it — the recorder only exists while logging is on.
 
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -119,15 +118,18 @@ pub fn on_link_down() {
 
 pub fn on_status(d: &StatusData) {
     let armed = d.arming_flags & ARMED_FLAG != 0;
-    let mut s = lock();
-    if armed && !s.armed {
-        // Arm edge = new flight; the FC sets home at launch, so a known home is stale.
-        s.track.clear();
-        s.flight_start_ms = now_ms();
-        s.home = None;
-        s.home_from_fc = false;
+    {
+        let mut s = lock();
+        if armed && !s.armed {
+            // Arm edge = new flight; the FC sets home at launch, so a known home is stale.
+            s.track.clear();
+            s.flight_start_ms = now_ms();
+            s.home = None;
+            s.home_from_fc = false;
+        }
+        s.armed = armed;
     }
-    s.armed = armed;
+    crate::link_presence::on_status(armed);
 }
 
 pub fn on_flightmode(fm: &FlightModeState) {

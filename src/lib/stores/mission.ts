@@ -269,15 +269,15 @@ export function markMissionSynced(flag: MissionFlag): void {
   bumpProv();
 }
 
-/** Mark EVERY mission slot as FC-synced — after a multi-mission upload/download all slots are on the
- *  FC at once (unlike `markMissionSynced('fc')`, which marks the active and clears the rest). */
-export function markAllMissionsSyncedFc(): void {
+/** Mark EVERY mission slot as synced via `flag` — a multi-mission transfer or a library set covers all
+ *  slots at once (unlike `markMissionSynced`, which marks the active one and, for FC, clears the rest). */
+export function markAllMissionsSynced(flag: MissionFlag): void {
   const activeIdx = get(activeMissionIndex);
   const count = get(missionCount);
   for (let i = 1; i <= count; i++) {
     const wps = i === activeIdx ? get(mission).waypoints : (missionSlots.get(i) ?? []);
     const refs = syncRefs.get(i) ?? {};
-    refs.fc = hashWaypoints(wps);
+    refs[flag] = hashWaypoints(wps);
     syncRefs.set(i, refs);
   }
   bumpProv();
@@ -334,27 +334,32 @@ function saveCurrentToSlot() {
   missionSlots.set(idx, [...m.waypoints]);
 }
 
-/** Switch to a different mission tab */
+/** Number and end flag as `Mission::renumber` sets them — a slot is only cached here, and a waypoint moved
+ *  in from another mission brings its own. */
+function normalizeSlot(wps: Waypoint[]): Waypoint[] {
+  const last = wps.length - 1;
+  return wps.map((w, i) => ({
+    ...w,
+    number: i + 1,
+    flag: i === last
+      ? (w.flag === WP_FLAG_FBH ? WP_FLAG_FBH : WP_FLAG_LAST)
+      : (w.flag === WP_FLAG_LAST ? WP_FLAG_NORMAL : w.flag),
+  }));
+}
+
+/** Sent whole via `mission_set`: a `mission_add_wp` rebuild drops the flag (fly-by-home) and the altitude
+ *  mode (AGL). */
+async function loadSlot(idx: number): Promise<void> {
+  const waypoints = normalizeSlot(missionSlots.get(idx) ?? []);
+  mission.set(await invoke<Mission>('mission_set', { waypoints }));
+}
+
 export async function switchMission(newIdx: number): Promise<void> {
   const currentIdx = get(activeMissionIndex);
   if (newIdx === currentIdx) return;
 
-  // Save current mission to slot cache
   saveCurrentToSlot();
-
-  // Load target mission from slot cache (or empty)
-  const targetWps = missionSlots.get(newIdx) || [];
-
-  // Clear backend and re-add target WPs
-  await invoke<Mission>('mission_clear');
-  for (const wp of targetWps) {
-    await invoke<Mission>('mission_add_wp', {
-      action: wp.action, lat: wp.lat, lon: wp.lon,
-      altitude: wp.altitude, p1: wp.p1, p2: wp.p2, p3: wp.p3,
-    });
-  }
-  const m = await invoke<Mission>('mission_get');
-  mission.set(m);
+  await loadSlot(newIdx);
   activeMissionIndex.set(newIdx);
   clearWpSelection();
   frameMissionOnMap(); // switching the active multi-mission reframes the map (free pan only)
@@ -412,17 +417,7 @@ export async function removeMission(idx: number): Promise<number> {
     newActive = currentIdx;
   }
 
-  // Load the new active mission into the backend
-  const targetWps = missionSlots.get(newActive) || [];
-  await invoke<Mission>('mission_clear');
-  for (const wp of targetWps) {
-    await invoke<Mission>('mission_add_wp', {
-      action: wp.action, lat: wp.lat, lon: wp.lon,
-      altitude: wp.altitude, p1: wp.p1, p2: wp.p2, p3: wp.p3,
-    });
-  }
-  const m = await invoke<Mission>('mission_get');
-  mission.set(m);
+  await loadSlot(newActive);
   activeMissionIndex.set(newActive);
   clearWpSelection();
   return newActive;
@@ -441,6 +436,37 @@ export function getTotalWpCount(): number {
     }
   }
   return total;
+}
+
+/** The waypoints of slot `i` (the active slot is read live, not from the cache). */
+function slotWaypoints(i: number): Waypoint[] {
+  return i === get(activeMissionIndex) ? get(mission).waypoints : (missionSlots.get(i) ?? []);
+}
+
+export function filledMissionCount(): number {
+  let n = 0;
+  for (let i = 1; i <= get(missionCount); i++) if (slotWaypoints(i).length > 0) n++;
+  return n;
+}
+
+/** All filled slots as ONE list (library set / `.mission` form): each mission ends on 0xA5, the only
+ *  boundary INAV knows. A final fly-by-home cannot keep 0x48 next to it and becomes lat/lon 0 (= home). */
+export function combinedMissionWaypoints(): Waypoint[] {
+  const out: Waypoint[] = [];
+  for (let i = 1; i <= get(missionCount); i++) {
+    const seg = slotWaypoints(i);
+    seg.forEach((w, k) => {
+      if (k < seg.length - 1) out.push({ ...w, flag: w.flag === WP_FLAG_LAST ? WP_FLAG_NORMAL : w.flag });
+      else if (w.flag === WP_FLAG_FBH) out.push({ ...w, flag: WP_FLAG_LAST, lat: 0, lon: 0 });
+      else out.push({ ...w, flag: WP_FLAG_LAST });
+    });
+  }
+  out.forEach((w, k) => { w.number = k + 1; });
+  return out;
+}
+
+export function missionSetSize(wps: Waypoint[]): number {
+  return splitMultiMission(wps).length;
 }
 
 /** Reset multi-mission state (e.g., after file load or FC download) */
@@ -660,7 +686,7 @@ export async function moveWaypointToMission(wpIndex: number, targetIdx: number):
     // Append a copy to the target slot, then remove from the active mission.
     const target = missionSlots.get(targetIdx) ?? [];
     target.push({ ...wps[wpIndex] });
-    missionSlots.set(targetIdx, target);
+    missionSlots.set(targetIdx, normalizeSlot(target));
 
     await missionRemoveWp(wpIndex);
   } finally {
@@ -686,7 +712,7 @@ export async function moveSelectedWpsToMission(targetIdx: number): Promise<void>
     // descending so the indices stay valid.
     const target = missionSlots.get(targetIdx) ?? [];
     for (const wp of toMove) target.push(wp);
-    missionSlots.set(targetIdx, target);
+    missionSlots.set(targetIdx, normalizeSlot(target));
 
     for (const i of [...sel].sort((a, b) => b - a)) await missionRemoveWp(i);
   } finally {
@@ -725,46 +751,63 @@ export async function missionReorderWp(from: number, to: number): Promise<Missio
   return m;
 }
 
-/** Split a downloaded combined INAV waypoint list into per-mission segments on the end-of-mission
- *  terminator flags (0xA5 / FBH 0x48). A trailing run without a terminator is kept as a final segment
- *  (defensive). Each segment is renumbered 1-based (the FC list is globally numbered; the slots hold
- *  single-mission WPs). Capped at MAX_MISSIONS. */
-function splitMultiMission(wps: Waypoint[]): Waypoint[][] {
+/** Split a combined INAV waypoint list into its missions. INAV ends a mission on 0xA5 only; 0x48
+ *  (fly-by-home) is valid on any waypoint and is no boundary. Segments are renumbered 1-based (the
+ *  combined list is numbered through); a run without terminator is kept. Capped at MAX_MISSIONS. */
+export function splitMultiMission(wps: Waypoint[]): Waypoint[][] {
   const segments: Waypoint[][] = [];
   let cur: Waypoint[] = [];
   for (const wp of wps) {
     cur.push({ ...wp });
-    if (wp.flag === WP_FLAG_LAST || wp.flag === WP_FLAG_FBH) { segments.push(cur); cur = []; }
+    if (wp.flag === WP_FLAG_LAST) { segments.push(cur); cur = []; }
   }
   if (cur.length > 0) segments.push(cur);
   for (const seg of segments) seg.forEach((w, i) => { w.number = i + 1; });
   return segments.slice(0, MAX_MISSIONS);
 }
 
-/** Download mission(s) from the FC. INAV stores multi-missions as one concatenated waypoint list
- *  (split on the end-of-mission flags); we rebuild the slot model from it and select the active mission
- *  from `nav_wp_multi_mission_index`. A single-mission FC reads back as one slot. */
-export async function missionDownload(fromEeprom = false): Promise<Mission> {
-  const full = await invoke<Mission>('mission_download', { fromEeprom });
-  const segments = splitMultiMission(full.waypoints);
-  const activeIdx = await invoke<number>('mission_get_active_index').catch(() => 1);
-
-  // Rebuild the multi-mission slot model from the FC's combined list.
+/** Replaces every slot; `active` is 1-based and clamped to the segment count. */
+async function loadSegments(segments: Waypoint[][], active: number): Promise<Mission> {
   missionSlots.clear();
   const count = Math.max(1, segments.length);
+  for (const slot of [...syncRefs.keys()]) if (slot > count) syncRefs.delete(slot);
   segments.forEach((seg, i) => missionSlots.set(i + 1, seg));
   missionCount.set(count);
-  const active = Math.min(Math.max(1, activeIdx), count);
-  activeMissionIndex.set(active);
-
-  // Load the active segment into the backend store + the active mission view.
-  const activeWps = missionSlots.get(active) ?? [];
-  const m = await invoke<Mission>('mission_set', { waypoints: activeWps });
+  const idx = Math.min(Math.max(1, active), count);
+  activeMissionIndex.set(idx);
+  const m = await invoke<Mission>('mission_set', { waypoints: missionSlots.get(idx) ?? [] });
   mission.set(m);
+  clearWpSelection();
+  return m;
+}
+
+/** Put a library mission on the map and mark it DB-synced. A plain mission goes into the active slot,
+ *  a set replaces ALL slots. */
+export async function missionLoadLibrary(wps: Waypoint[]): Promise<Mission> {
+  const segments = splitMultiMission(wps);
+  if (segments.length <= 1) {
+    const m = await missionSetWaypoints(wps);
+    markMissionSynced('db');
+    return m;
+  }
+  const m = await loadSegments(segments, 1);
+  clearUndoHistory();
+  markAllMissionsSynced('db');
+  return m;
+}
+
+/** INAV stores all missions as one list, each ending on 0xA5; the active slot follows
+ *  `nav_wp_multi_mission_index`. */
+export async function missionDownload(fromEeprom = false): Promise<Mission> {
+  // No fallback: a failed read must fail the download, not select mission 1 while the FC flies another
+  // (the backend returns 1 when the setting is absent).
+  const activeIdx = await invoke<number>('mission_get_active_index');
+  const full = await invoke<Mission>('mission_download', { fromEeprom });
+  const m = await loadSegments(splitMultiMission(full.waypoints), activeIdx);
 
   applyMissionLaunchDefault(m, undefined, true); // FC has no embedded home → UAV HOME, else WP1
   clearUndoHistory();
-  markAllMissionsSyncedFc(); // every slot now matches the FC
+  markAllMissionsSynced('fc');
   loadedMissionId.set(null);
   frameMissionOnMap(); // loaded from the FC → frame it (free pan only)
   return m;
@@ -796,11 +839,10 @@ export function onMissionUploadProgress(cb: (p: MissionTransferProgress) => void
   return listen<MissionTransferProgress>('mission-upload-progress', (e) => cb(e.payload));
 }
 
-/** Upload mission(s) to the FC. All mission slots are sent as one INAV multi-mission (concatenated +
- *  flagged + globally renumbered backend-side) and the active slot is selected via
- *  `nav_wp_multi_mission_index`. A single mission is just the one-slot case. */
+/** All slots go to the FC as one INAV multi-mission (flagged and renumbered backend-side); the FC's
+ *  active mission index is not changed. */
 export async function missionUpload(saveEeprom = false): Promise<Mission> {
-  saveCurrentToSlot(); // capture the active mission's latest edits into its slot cache
+  saveCurrentToSlot();
   const count = get(missionCount);
   const activeIdx = get(activeMissionIndex);
   const missions: Waypoint[][] = [];
@@ -809,7 +851,7 @@ export async function missionUpload(saveEeprom = false): Promise<Mission> {
   }
   const m = await invoke<Mission>('mission_upload_multi', { missions, saveEeprom });
   mission.set(m);
-  markAllMissionsSyncedFc();
+  markAllMissionsSynced('fc');
   return m;
 }
 
@@ -852,16 +894,32 @@ export async function missionExportXml(): Promise<string> {
   return invoke<string>('mission_export_xml', { home: launchHomeArg() });
 }
 
-/** Import mission from XML string */
-export async function missionImportXml(xml: string): Promise<Mission> {
-  const m = await invoke<Mission>('mission_import_xml', { xml });
-  mission.set(m);
-  applyMissionLaunchDefault(m, undefined, true);
+/** Asked before a file with several missions replaces slots that hold waypoints; false keeps the map. */
+export type ConfirmReplaceAll = (missions: number) => Promise<boolean>;
+
+/** A file with several missions (each ending on 0xA5) replaces ALL slots, a plain one only the active
+ *  slot. Returns the waypoints as a library entry would hold them, or null when the user declined. */
+async function adoptMissionFile(m: Mission, confirm?: ConfirmReplaceAll): Promise<Waypoint[] | null> {
+  const segments = splitMultiMission(m.waypoints);
+  const isSet = segments.length > 1;
+  if (isSet && confirm && getTotalWpCount() > get(mission).waypoints.length && !(await confirm(segments.length))) {
+    // The backend store already holds the file: put the active mission back.
+    await invoke<Mission>('mission_set', { waypoints: get(mission).waypoints });
+    return null;
+  }
+  const active = isSet ? await loadSegments(segments, 1) : m;
+  if (!isSet) mission.set(m);
+  applyMissionLaunchDefault(active, undefined, true);
   clearUndoHistory();
-  markMissionSynced('file');
+  if (isSet) markAllMissionsSynced('file');
+  else markMissionSynced('file');
   loadedMissionId.set(null);
-  frameMissionOnMap(); // imported from a file → frame it (free pan only)
-  return m;
+  frameMissionOnMap();
+  return isSet ? combinedMissionWaypoints() : m.waypoints;
+}
+
+export async function missionImportXml(xml: string, confirm?: ConfirmReplaceAll): Promise<Waypoint[] | null> {
+  return adoptMissionFile(await invoke<Mission>('mission_import_xml', { xml }), confirm);
 }
 
 /** Save mission to a .mission file (writes the launch point as <mwp> meta) */
@@ -870,14 +928,6 @@ export async function missionSaveFile(path: string): Promise<void> {
   markMissionSynced('file');
 }
 
-/** Load mission from a .mission file */
-export async function missionLoadFile(path: string): Promise<Mission> {
-  const m = await invoke<Mission>('mission_load_file', { path });
-  mission.set(m);
-  applyMissionLaunchDefault(m, undefined, true);
-  clearUndoHistory();
-  markMissionSynced('file');
-  loadedMissionId.set(null);
-  frameMissionOnMap(); // loaded from a file → frame it (free pan only)
-  return m;
+export async function missionLoadFile(path: string, confirm?: ConfirmReplaceAll): Promise<Waypoint[] | null> {
+  return adoptMissionFile(await invoke<Mission>('mission_load_file', { path }), confirm);
 }

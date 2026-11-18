@@ -19,6 +19,13 @@ link modes — see the **[Connecting guide](../guides/connecting.md)**.
 
 The connection controls live in the **top bar** (right-hand side) whenever you're disconnected.
 
+!!! note "On a phone or tablet"
+    On a phone the controls sit behind the **🔗 chain-link** button at the top-right of the map. A
+    fresh install on Android, iPhone or iPad starts on **MAVLink** over **UDP** (port `14550`), the
+    usual Wi-Fi telemetry setup; for the USB steps below, Android needs an OTG adapter, and you switch
+    the transport to **Serial** yourself. iPhone and iPad have no USB serial — connect over **BLE** or Wi-Fi (TCP / UDP)
+    instead, as described in the **[Connecting guide](../guides/connecting.md)**.
+
 ![The connection controls in the top bar](../assets/getting-started/connection_bar_main.png)
 /// caption
 The connection controls in the top bar: protocol, transport, port, baud, and **Connect**.
@@ -70,7 +77,9 @@ That's it — you're connected. 🎉
 ## Disconnect
 
 Click **Disconnect** in the top bar. Kite remembers your **port, baud, protocol and transport**, so
-next time you can usually just press **Connect** straight away.
+next time you can usually just press **Connect** straight away. (Always fly the same link? Pin it under
+**Settings → Interface → UI → Default Protocol**, and Kite starts on that protocol whatever the last session
+used.)
 
 ## It didn't connect?
 

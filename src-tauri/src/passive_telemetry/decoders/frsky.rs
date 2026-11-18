@@ -12,12 +12,13 @@
 
 use std::time::Instant;
 
-use tauri::{AppHandle, Emitter};
+use crate::vehicle_registry::emitter::VehicleEmitter;
 
 use crate::flightlog::recorder::FlightRecorderHandle;
 use crate::flightmode::{classify_inav, FlightModeState, ARM_DISABLE_BLOCKED};
 use crate::scheduler::telemetry::{
     AirspeedData, AltitudeData, AnalogData, AttitudeData, GpsData, LinkStatsData, StatusData,
+    FIX_2D, FIX_3D, FIX_NONE,
 };
 
 use super::ap_passthrough::ApPassthroughDecoder;
@@ -268,7 +269,8 @@ impl FrskyDecoder {
                 // sats in the low two decimal digits; GPS_FIX in the thousands column.
                 s.num_sat = (value % 100) as u8;
                 let thous = (value / 1000) % 10;
-                s.fix_type = if thous & 1 != 0 { 3 } else { 0 };
+                // GPS_FIX bit, read as a 3D fix → the unified scale (`scheduler::telemetry::FIX_*`).
+                s.fix_type = if thous & 1 != 0 { FIX_3D } else { FIX_NONE };
                 s.seen_gnss = true;
                 s.seen_gps = true;
             }
@@ -313,7 +315,7 @@ impl FrskyDecoder {
     /// Emit the accumulated state as the unified telemetry events and feed the flight recorder. Each
     /// event is only sent once its relevant fields have been seen, so widgets/recorder aren't fed
     /// placeholder zeros.
-    pub fn publish(&mut self, app: &AppHandle, recorder: Option<&FlightRecorderHandle>) {
+    pub fn publish(&mut self, app: &VehicleEmitter, recorder: Option<&FlightRecorderHandle>) {
         // ArduPilot passthrough (if present) owns flight mode / armed / EKF / status-text; the native
         // INAV status fields are simply never seen for an AP source, so there is no conflict.
         if let Some(ap) = self.ap.as_mut() {
@@ -365,7 +367,7 @@ impl FrskyDecoder {
         }
 
         if f_gps {
-            let fix = if s.seen_gnss { s.fix_type } else if s.num_sat >= 4 { 3 } else { 2 };
+            let fix = if s.seen_gnss { s.fix_type } else if s.num_sat >= 4 { FIX_3D } else { FIX_2D };
             let gps = GpsData {
                 fix_type: fix,
                 num_sat: s.num_sat,

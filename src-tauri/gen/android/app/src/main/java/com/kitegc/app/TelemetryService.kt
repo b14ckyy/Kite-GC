@@ -16,11 +16,9 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 
 /**
- * Foreground service for the life of a telemetry link (Dev-Docs active/BACKGROUND_TELEMETRY.md).
- * It does no work itself — being a foreground service is what keeps Android from freezing or
- * reaping the process while the activity is not in front. Type `connectedDevice` (no 6-hour cap,
- * unlike `dataSync`; the manifest's CHANGE_NETWORK_STATE is its Android 14 prerequisite).
- * `START_NOT_STICKY`: a restart after a kill would have no link to report.
+ * Foreground service for the life of a telemetry link (Dev-Docs active/BACKGROUND_TELEMETRY.md): no
+ * work of its own, it keeps Android from freezing the process. `connectedDevice`: no 6-hour cap (needs
+ * CHANGE_NETWORK_STATE on Android 14). START_NOT_STICKY: after a kill there is no link to report.
  */
 class TelemetryService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
@@ -58,7 +56,7 @@ class TelemetryService : Service() {
             PendingIntent.getActivity(this, 0, it, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         }
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_stat_kite)
             .setContentTitle(title)
             .setContentText(text)
             .setOngoing(true)

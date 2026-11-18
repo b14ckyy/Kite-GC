@@ -97,7 +97,8 @@ Each waypoint carries an altitude against a **reference**:
 ## Building a mission
 
 - **Add** points by clicking on the map; **drag** a marker to move it; **reorder** in the list.
-- **Edit** a point (type, altitude, parameters) from its popup or the list.
+- **Edit** a point (type, altitude, parameters) from its popup or the list. The popup's number fields
+  are the same **+ / −** fields as everywhere in Kite: click into one and the mouse wheel steps it.
 - **Multi-select** (while **editing**) to act on several waypoints at once:
     - In the **list**: **Ctrl/⌘-click** rows to toggle them, **Shift-click** for an inclusive range, or
       tap a number **badge** to toggle a single one.
@@ -205,6 +206,10 @@ the whole pattern. On INAV the 120-waypoint limit is checked, with the option to
 
 Up- and downloads show an **"x of n"** progress counter as the waypoints transfer.
 
+An INAV flight controller reached over a MAVLink-only radio link (**MSP/MAV**, INAV 10.0+) uses the
+INAV column: Kite carries the MSP transfer inside the MAVLink stream, EEPROM save and multi-mission
+included — see **[Connecting → INAV over MAVLink](connecting.md#inav-over-mavlink-mspmav)**.
+
 After a download the plan is tagged **FC** (see provenance below); the mission you see is exactly what
 the aircraft will fly.
 
@@ -212,10 +217,13 @@ the aircraft will fly.
 
 - **Save / load files** — INAV uses `.mission` (MultiWii XML); ArduPilot and PX4 use `.waypoints`
   (the QGroundControl-compatible plain-text format). Kite also **imports QGroundControl `.plan`
-  files** (the only format modern QGC saves, so the usual hand-off in PX4 workflows) — mission
-  waypoints only: QGC pattern items (Survey, Corridor Scan, …) can't be expanded outside QGC and are
-  refused with a clear message, and a plan's embedded geofence/rally sections are ignored. Saving
-  from Kite produces `.waypoints`, which QGC can open. You can also drag a file onto the map.
+  files** (the only format modern QGC saves, so the usual hand-off in PX4 workflows). A Survey
+  arrives as the waypoints QGC generated for it, camera commands included; the pattern itself is
+  not kept. A command Kite has no editor for is listed with its number and uploaded unchanged. A
+  pattern item that stores no waypoints is refused with a message — upload such a plan to the
+  flight controller from QGC and download the mission in Kite. A plan's embedded geofence/rally
+  sections are ignored. Saving from Kite produces `.waypoints`, which QGC can open. You can also
+  drag a file onto the map.
 - **Provenance badges** tell you where the loaded plan came from — **FC** (downloaded), **FILE** (opened
   from disk) or **DB** (from the library) — plus a **Modified** badge once you've edited it. Shown for
   all three stacks.
@@ -226,9 +234,17 @@ Save a plan into Kite's **library** to reuse it across sessions, then open the *
 browse them. Missions are grouped by **location** (named automatically from their coordinates) and can
 be **searched**, **loaded to the map**, **exported** to a file, or **deleted** — with a warning when
 flights still link to a mission you're removing. Saving **de-duplicates by content**, so re-saving an
-unchanged plan won't pile up copies. The library is **shared across the flight stacks** (each mission
-loads back into the stack it belongs to), and library missions also link to flights in the
-**[logbook](logbook.md)**.
+unchanged plan won't pile up copies. There are **two export buttons**: **`.kmission`**, Kite's own
+file with everything the entry holds (name, notes, target system, planned home, vehicle class) for
+moving it to another Kite install, and the flight stack's own format (`.mission` / `.waypoints`) with
+the waypoints only, for other tools. **Import** takes both. Importing a mission the library already has adds
+nothing.
+
+Dropping files onto the window follows one rule: **`.kmission` files are always imported into the
+library** — several at once if you like — while `.mission`, `.waypoints` and `.plan` files are only
+loaded onto the map. A dropped `.kmission` is additionally shown on the map when the map holds no
+mission (in either editor); with a vehicle connected, only when it is a mission for that vehicle's
+flight stack. If the drop also contains a plain mission file, that one gets the map.
 
 ![The Mission Manager](../assets/guides/missions/mission_manager.png)
 /// caption
@@ -242,6 +258,15 @@ handy for storing alternates. Uploading sends **all** of them to the flight cont
 mission set (and **EEPROM save** stores the whole set); downloading reads it back and splits it into the
 separate tabs again — so a multi-mission round-trips cleanly. ArduPilot and PX4 work with a **single**
 mission.
+
+**Save to library** asks, when more than one tab holds waypoints, whether to store **all missions as
+one library entry** or only the mission of the current tab. In the Mission Manager such an entry
+carries a **MULTI** badge; its preview draws every mission in its own colour, and the arrows in the
+preview step through the missions one by one. **Loading it to the map replaces every mission tab**
+(Kite asks first when tabs would be lost), and exporting it writes one `.mission` file with all
+missions. Opening a `.mission` file that holds several missions fills the tabs the same way. **Save**
+to a file from the panel still writes the current tab only. Linking a flight in the logbook always
+links the mission of the open tab, not the whole set.
 
 ## Staying clear of airspace
 

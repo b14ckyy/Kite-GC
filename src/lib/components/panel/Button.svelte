@@ -110,10 +110,10 @@
   .kbtn-icon { display: inline-flex; flex-shrink: 0; }
   .kbtn-icon :global(svg) { width: 1.2em; height: 1.2em; display: block; }
 
-  /* ── Sizes — fixed height so buttons align regardless of icon/label; px scales with
-     --ui-scale. Width stays dynamic (content / translations). ──── */
-  .kbtn-md { font-size: 12px; height: 28px; padding: 0 10px; }
-  .kbtn-sm { font-size: 11px; height: 24px; padding: 0 8px; }
+  /* Fixed height so buttons align regardless of icon / label. min-height too: a `full` button in a
+     column flex container has flex-basis 0 and would shrink to its text. */
+  .kbtn-md { font-size: 12px; height: 28px; min-height: 28px; padding: 0 10px; }
+  .kbtn-sm { font-size: 11px; height: 24px; min-height: 24px; padding: 0 8px; }
 
   /* ── Standard (neutral, the usual action) ───────────────── */
   .kbtn-standard {
@@ -181,6 +181,7 @@
   /* ── Compact (slim inline / auto-generated link chips) ──── */
   .kbtn-compact {
     height: 20px;
+    min-height: 20px;
     padding: 0 8px;
     font-size: 11px;
     font-weight: 600;

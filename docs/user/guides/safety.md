@@ -88,7 +88,9 @@ altitude band, reference and action. Editing is **locked while armed**.
 
 **Saving** writes every zone to the FC, stores it to EEPROM and **reboots** the flight controller —
 geozones only take effect after a restart, so the link drops and reconnects. Kite checks your zones
-first (valid shapes, vertex/zone limits, sensible altitude band) and fixes polygon winding for you.
+first (valid shapes, vertex/zone limits, sensible altitude band) and fixes polygon winding for you. If
+the write fails (a link hiccup, a timeout, a zone the FC refuses), the error is shown under the Save
+button — the zones on the FC may then not match the panel.
 
 ### ArduPilot / PX4 — Geofence
 
@@ -106,7 +108,10 @@ the connected autopilot:
   altitude / margin).
 - **PX4** — fence **action**, **max horizontal** and **max vertical** distance.
 
-Saving uploads the fence and writes the changed parameters; no reboot is needed.
+Saving uploads the fence and writes the fence parameters you changed; no reboot is needed. Parameters Kite
+could not write are listed as a warning under the Save button after the save — the zones themselves are
+on the vehicle by then. A fence or rally-point save that fails outright shows its error in the same
+place.
 
 !!! tip "Two ways to express the same idea"
     INAV carries each zone's **altitude band** and **breach action** with the zone itself, so different

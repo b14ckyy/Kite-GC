@@ -1,12 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Radar — ADS-B online source (Phase 1).
-//
-// Polls one or more free REST providers (adsb.lol / adsb.one / adsb.fi by default) for aircraft
-// within a radius of the user location and maps them to TrackedVehicles. Runs as an async task on
-// the Tauri runtime (reqwest), pushing batches into the manager's aggregator channel; the aggregator
-// merges providers by ICAO. Provider URLs are templates with {lat}/{lon}/{dist} placeholders.
+// Radar — ADS-B online source: polls free REST providers (adsb.lol / adsb.one / adsb.fi by default; URL
+// templates with {lat}/{lon}/{dist}) around the user location; the aggregator merges them by ICAO.
 // See docs/active/RADAR_TRACKING_CORE.md §7.1.
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -65,10 +61,8 @@ pub struct AdsbOnlineSource {
     radius: Arc<Mutex<Option<f64>>>,
     radius_km: f64,
     poll: Duration,
-    /// Instant of the last fetch, **shared by the manager** so it survives a reconfigure (which rebuilds
-    /// this source). Lets a fresh instance wait out the remaining poll interval instead of fetching
-    /// immediately — otherwise rapid reconfigures (connect/disconnect, settings toggles) would bypass
-    /// the poll rate and hammer the provider (HTTP 429 / IP ban).
+    /// Instant of the last fetch, shared by the manager so it survives a reconfigure — rapid reconfigures
+    /// must not bypass the poll rate (HTTP 429 / IP ban).
     last_fetch: Arc<Mutex<Option<Instant>>>,
     app: AppHandle,
 }
@@ -108,12 +102,10 @@ impl RadarSource for AdsbOnlineSource {
         let stop_task = stop.clone();
 
         let handle = tauri::async_runtime::spawn(async move {
-            // No connection reuse: adsb.lol rate-limits a persistent (HTTP/2) connection far harder
-            // than fresh ones — measured at a 5 s poll, every second request on a kept-alive connection
-            // came back 429 while a new TLS connection per request never did (same IP, same minute).
-            // One handshake per poll is nothing next to the JSON payload.
+            // No connection reuse: adsb.lol rate-limits a kept-alive connection far harder (every second request
+            // 429 at a 5 s poll) than fresh TLS connections.
             let client = reqwest::Client::builder()
-                .user_agent("Kite-GC/0.5 radar")
+                .user_agent(crate::user_agent::user_agent("radar"))
                 .timeout(Duration::from_secs(10))
                 .pool_max_idle_per_host(0)
                 .build()
@@ -138,11 +130,8 @@ impl RadarSource for AdsbOnlineSource {
                     }
                 };
 
-                // Atomic rate claim, shared across ALL source loops (including any left over from a
-                // reconfigure): fetch only if `poll` has elapsed since the last actual fetch, and stamp
-                // the slot in the SAME lock so concurrent loops can't all slip through. This bounds
-                // outgoing requests to at most one set per poll interval no matter how many loops exist.
-                // (A previous read-then-wait gate let each loop pass on a stale read → HTTP 429.)
+                // Atomic rate claim across ALL source loops (incl. leftovers of a reconfigure): fetch only if `poll`
+                // elapsed and stamp the slot under the SAME lock — a read-then-wait gate let every loop pass (HTTP 429).
                 let claimed = match self.last_fetch.lock() {
                     Ok(mut g) => {
                         let due = g.map(|t| t.elapsed() >= self.poll).unwrap_or(true);
@@ -195,10 +184,8 @@ impl RadarSource for AdsbOnlineSource {
                             *b = Backoff::default();
                         }
                         Err(e) => {
-                            // Back off this provider: double the spacing per consecutive failure (capped at
-                            // MAX_BACKOFF). Both a 429 and a network error mean "leave it alone for a while";
-                            // adsb.fi even counts 429 replies towards a temporary IP ban, so hammering on
-                            // regardless is the one thing not to do.
+                            // Back off this provider: double the spacing per consecutive failure (capped). adsb.fi counts 429
+                            // replies towards a temporary IP ban, so hammering on is the one thing not to do.
                             let first = b.mult == 1;
                             b.mult = (b.mult * 2).min(max_mult);
                             b.skip = b.mult - 1;

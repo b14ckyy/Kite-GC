@@ -7,24 +7,30 @@
   import { onDestroy, onMount, untrack } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
-  import { open, save } from "@tauri-apps/plugin-dialog";
-  import { connection, availablePorts, bleDevices, defaultNetPort } from "$lib/stores/connection";
+  import { open } from "@tauri-apps/plugin-dialog";
+  import { connection, availablePorts, bleDevices, defaultNetPort, netHostOrLocal, hasMsp, isArduPilotLink } from "$lib/stores/connection";
   import type { FcInfo, PortInfo, BleDeviceInfo, TransportType, ProtocolType } from "$lib/stores/connection";
   import { settings } from "$lib/stores/settings";
-  import { isAndroid, isMobile, isTablet, isPhone as isPhoneDevice, hasSerialPorts, logPlayerWidth, deviceProfile } from "$lib/platform";
+  import { tickSnapshot } from "$lib/helpers/telemetryTick.svelte";
+  import { isAndroid, isMobile, isTablet, isPhone as isPhoneDevice, hasSerialPorts, hasVideo, hasRcControl, logPlayerWidth, deviceProfile } from "$lib/platform";
   import { isDebugMode } from "$lib/stores/debug";
   import { telemetry } from "$lib/stores/telemetry";
   import { startRadarListeners, configureRadar, setRadarCenter, setRadarNode } from "$lib/stores/radarTracking";
+  import { effectiveLink } from "$lib/helpers/radarPorts";
   import { startRadarAlerts } from "$lib/controllers/radarAlerts";
   import { startBreachMonitor } from "$lib/controllers/breachMonitor";
+  import { startTelemetryLostNotice } from "$lib/controllers/telemetryLostNotice";
   import { startAlertAudio } from "$lib/controllers/alertAudio";
   import { get } from "svelte/store";
+  import { phoneEdit } from "$lib/stores/phoneEdit.svelte";
   import { t, locale } from 'svelte-i18n';
   import Map from "$lib/components/Map.svelte";
   import Map3D from "$lib/components/Map3D.svelte";
   import CesiumKeyPrompt from "$lib/components/CesiumKeyPrompt.svelte";
   import LogPlayer from "$lib/components/logbook/LogPlayer.svelte";
   import HiresParseModal from "$lib/components/logbook/HiresParseModal.svelte";
+  import CompactDbModal from "$lib/components/logbook/CompactDbModal.svelte";
+  import { stripLogNumber } from "$lib/helpers/flightlogHelpers";
   import RawTelemetryModal from "$lib/components/RawTelemetryModal.svelte";
   import PhoneBottomChips from "$lib/components/phone/PhoneBottomChips.svelte";
   import PhoneDebugButton from "$lib/components/phone/PhoneDebugButton.svelte";
@@ -32,7 +38,12 @@
   import PhoneWidgetPanel from "$lib/components/phone/PhoneWidgetPanel.svelte";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import UpdateDialog from "$lib/components/UpdateDialog.svelte";
-  import { runUpdateCheck } from "$lib/controllers/updateCheck";
+  import { runUpdateCheck, resolveUpdateKind } from "$lib/controllers/updateCheck";
+  import { checkDbBackupPrompt, runPendingDbUpgrade, probeDbSchema, formatBackupSize, type DbSchemaState, type DbUpgradeOutcome } from "$lib/controllers/dbBackupPrompt";
+  import { importMissionFile } from "$lib/helpers/missionFile";
+  import { exportFile, sharesExports, flightFileStem, clearExportCache, setExportErrorReporter } from "$lib/helpers/exportFile";
+  import type { LibraryMission } from "$lib/stores/flightlogTypes";
+  import DbUpgradeNotice from "$lib/components/DbUpgradeNotice.svelte";
   import ContextMenu from "$lib/components/ContextMenu.svelte";
   import BatchEditPopup from "$lib/components/mission/BatchEditPopup.svelte";
   import ArduBatchEditPopup from "$lib/components/mission/ArduBatchEditPopup.svelte";
@@ -48,6 +59,14 @@
   import LogbookPanel from "$lib/components/logbook/LogbookPanel.svelte";
   import MissionPanel from "$lib/components/mission/MissionPanel.svelte";
   import MavCommandPanel from "$lib/components/control/MavCommandPanel.svelte";
+  import FleetPanel from "$lib/components/FleetPanel.svelte";
+  import GroupCommandBar from "$lib/components/GroupCommandBar.svelte";
+  import { vehicles } from "$lib/stores/vehicles";
+  import { selectedVehicleIds } from "$lib/stores/fleetSelection";
+  import { fleetEnabled, loadFleetMode } from "$lib/stores/fleetMode";
+  import { startFleetRecordingNotice } from "$lib/controllers/fleetRecordingNotice";
+  import { enqueueFlightDialog, dropQueuedFlightDialogs } from "$lib/controllers/flightDialogQueue";
+  import { navTabRequest } from "$lib/stores/navRequest";
   import RcControlPanel from "$lib/components/control/RcControlPanel.svelte";
   import VirtualSticks from "$lib/components/control/VirtualSticks.svelte";
   import VideoPanel from "$lib/components/video/VideoPanel.svelte";
@@ -65,8 +84,9 @@
   import { gcsLocation, gcsAccuracyM } from "$lib/stores/gcsLocation";
   import { fetchAero } from "$lib/stores/airspace";
   import { PlaybackController } from '$lib/controllers/playbackController';
-  import { refreshSerialPorts, connectFC, disconnectFC, startBleScan, stopBleScan, startBleDeviceListener, stopBleDeviceListener, clearBleDevices } from '$lib/controllers/connectionController';
+  import { refreshSerialPorts, connectFC, disconnectFC, startBleScan, stopBleScan, startBleDeviceListener, stopBleDeviceListener, clearBleDevices, disconnectLink, recoverBackendLinks } from '$lib/controllers/connectionController';
   import * as logbookCtrl from '$lib/controllers/logbookController';
+  import { loadReplayWind, seekReplayWind } from '$lib/controllers/windAloft';
   import * as widgetCtrl from '$lib/controllers/widgetController';
   import * as phoneCtrl from '$lib/controllers/phoneWidgetController';
   import { PHONE_GRID_PAD } from '$lib/config/phoneGrid';
@@ -76,20 +96,23 @@
   import { liveTrack, appendLivePoint, clearLiveTrack, backfillLivePoints } from '$lib/stores/liveTrack';
   import { toTelemetryData } from '$lib/adapters/telemetryAdapter';
   import { activeWpNumber, replayWpTotal } from '$lib/stores/navStatus';
-  import { missionManagerOpen, missionManagerSelectedId, requestOpenFlightId, requestOpenMissionId } from '$lib/stores/missionManager';
+  import { missionManagerOpen, missionManagerSelectedId, requestOpenFlightId, requestOpenMissionId, missionLibraryRevision } from '$lib/stores/missionManager';
   import { batteryManagerOpen, batteryManagerCreateSerial, normalizeSerial } from '$lib/stores/batteryManager';
-  import { vehicleManagerOpen, vehicleManagerCreateCraft, vehicleManagerSelectedId } from '$lib/stores/vehicleManager';
+  import { vehicleManagerOpen, vehicleManagerCreatePrefill, vehicleManagerSelectedId } from '$lib/stores/vehicleManager';
+  import { settleEndFlightVehicle } from '$lib/controllers/vehicleLinkController';
   import type { BlackboxImportStatus } from '$lib/stores/flightlog';
-  import { missionDbForFlight, flightLoggedWpCount, missionDbSave, flightLinkMission, missionDbGeocode, flightSetBatterySerial, updateFlightNotes, getFlight, flightlogCommitPending, flightlogDiscardPending, flightlogContinuePending, scanOrphanSessions, recoverDiscard, recoverSaveIncomplete, recoverContinue, batteryDbFindBySerial, batteryDbAddUsage, vehicleDbFindByCraftName, blackboxDecoderAvailable, downloadBlackboxDecode, hiresInfo, hiresParse, hiresSample, hiresDrop, hiresCleanup, scratchDir, scratchClear } from '$lib/stores/flightlog';
+  import { missionDbGet, missionDbForFlight, flightLoggedWpCount, missionDbSave, flightLinkMission, missionDbGeocode, flightSetBatterySerial, updateFlightNotes, getFlight, flightlogCommitPending, flightlogDiscardPending, flightlogContinuePending, scanOrphanSessions, recoverDiscard, recoverSaveIncomplete, recoverContinue, batteryDbFindBySerial, batteryDbAddUsage, blackboxLegacyMode, blackboxDecoderAvailable, downloadBlackboxDecode, hiresInfo, hiresParse, hiresSample, hiresDrop, hiresCleanup, scratchDir, scratchClear } from '$lib/stores/flightlog';
   import EndFlightDialog from "$lib/components/logbook/EndFlightDialog.svelte";
-  import type { EndFlightStats } from "$lib/components/logbook/EndFlightDialog.svelte";
+  import type { EndFlightStats, EndFlightIdentity } from "$lib/components/logbook/EndFlightDialog.svelte";
   import RecoveryPrompt from "$lib/components/logbook/RecoveryPrompt.svelte";
   import DisconnectArmedDialog from "$lib/components/logbook/DisconnectArmedDialog.svelte";
   import { haversineDistance, bearing, destinationPoint } from '$lib/utils/geo';
   import { buildMissionInput } from '$lib/helpers/missionLibrary';
   import { buildArduMissionInput } from '$lib/helpers/missionLibraryArdu';
-  import { homePosition } from '$lib/stores/home';
-  import { ingestFcGuidedTarget } from '$lib/controllers/vehicleControl';
+  import { homePosition, setVehicleHome } from '$lib/stores/home';
+  import { isActive, links, activeVehicleId, refreshLinks } from '$lib/stores/vehicles';
+  import { parseVehicleId } from '$lib/helpers/vehicleId';
+  import { ingestFcGuidedTarget, ingestVehicleGuidedTarget } from '$lib/controllers/vehicleControl';
   import { MAP_PROVIDERS } from "$lib/config/mapProviders";
   import { tileCacheStats, setCacheMaxMB, clearCache } from "$lib/cache/tileCache";
   import { weatherTempDisplayFromC, weatherWindDisplayFromMs, weatherTempCFromDisplay, weatherWindMsFromDisplay, canonicalWeatherDescription } from "$lib/helpers/weather";
@@ -100,7 +123,10 @@
   import FloatingVideoWindow from "$lib/components/video/FloatingVideoWindow.svelte";
   import { startDetachedVideo, stopDetachedVideo } from "$lib/controllers/detachedVideo";
   import PhoneVideoDock from "$lib/components/phone/PhoneVideoDock.svelte";
-  import { setNativeRightBound } from "$lib/controllers/nativeVideo";
+  import MapSearch from "$lib/components/MapSearch.svelte";
+  import PhoneBottomBar from "$lib/components/phone/PhoneBottomBar.svelte";
+  import PhoneDragGhost from "$lib/components/phone/PhoneDragGhost.svelte";
+  import { setNativeRightBound, MAX_SURFACES as NATIVE_SURFACE_CAP } from "$lib/controllers/nativeVideo";
   import { doubleTap, mouseDoubleClick } from "$lib/helpers/doubleTap";
   import { startFloatMove, startFloatResize } from "$lib/helpers/floatWindowGestures";
   import { initVideo, videoState, videoStream, bindVideoEl, setMapLocation, reportMjpegError, setVideoWidgetActive, floatFrameRect, togglePhoneDockCompact, PHONE_DOCK_COMPACT, FLOAT_BEZEL_PX, FLOAT_MARGIN_PX, FLOAT_BTN_PX, FLOAT_BTN_GAP_PX } from "$lib/stores/video";
@@ -110,9 +136,9 @@
   import { initPulseBlink } from "$lib/stores/pulseBlink";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import TerrainAnalysisPanel from "$lib/components/terrain/TerrainAnalysisPanel.svelte";
-  import { editMode, replayActive, mission, missionFlags, missionDownload, missionUpload, missionFcInfo, markMissionSynced, loadedMissionId, missionSetWaypoints, missionImportXml, launchPoint, hasLocation, toDeg, type Waypoint } from "$lib/stores/mission";
+  import { editMode, replayActive, mission, missionFlags, missionDownload, missionUpload, missionFcInfo, markMissionSynced, loadedMissionId, missionLoadLibrary, missionImportXml, applyMissionLaunchDefault, getTotalWpCount, launchPoint, hasLocation, toDeg, type Waypoint } from "$lib/stores/mission";
   import { pendingSystemSwitch, autopilotSystem, autopilotLocked, setAutopilotSystem, confirmSystemSwitch } from "$lib/stores/autopilotContext";
-  import { arduMission, arduSelectedWpIndex, arduLoadedMissionId, parseWaypoints, parsePlanFile, planFirmwareTarget, loadArduMissionFromFile, type ArduWaypoint } from "$lib/stores/missionArdupilot";
+  import { arduMission, arduSelectedWpIndex, arduLoadedMissionId, arduEditMode, parseWaypoints, parsePlanFile, planFirmwareTarget, planVehicleClass, loadArduMissionFromFile, arduVehicleClass, setArduVehicleClass, knownVehicleClass, arduClearUndoHistory, markArduMissionSynced, type ArduWaypoint } from "$lib/stores/missionArdupilot";
   import { frameMissionOnMap } from "$lib/stores/mapCamera";
   import { terrainAnalysis, patchTerrainAnalysis } from "$lib/stores/terrainAnalysis";
   import { DEFAULT_RADAR, DEFAULT_AIRSPACE, BUILTIN_ADSB_PROVIDERS } from "$lib/stores/settings";
@@ -137,20 +163,25 @@
 
   // Map view mode: 2D (Leaflet) or 3D (CesiumJS)
   let mapViewMode = $state<'2d' | '3d'>('2d');
-  // 3D is expensive to spin up (Cesium viewer + terrain). Mount it lazily on the
-  // first switch to 3D, then KEEP it mounted (hidden behind the 2D map) so further
-  // toggles are instant — no viewer re-init. The Map3D `active` prop pauses its
-  // render loop while hidden.
+  // Mounted lazily on the first switch to 3D, then kept mounted (hidden) so toggles skip the viewer
+  // re-init; Map3D's `active` prop pauses its render loop while hidden.
   let map3dEverOpened = $state(false);
   $effect(() => { if (mapViewMode === '3d') map3dEverOpened = true; });
-  // Waypoints can only be edited on the 2D map → entering edit mode forces 2D (untracked read/write so
-  // toggling the view later doesn't re-trigger this; it reacts to the edit-mode transition only).
-  // Mission edit mode needs the full map: leave 3D, and bring the map back from a mini frame (the
-  // widget tile / the phone's docked frame take no waypoint interaction — Marc, 2026-09-04).
+  // Waypoints can only be edited on the full 2D map: entering edit mode leaves 3D and brings the map back
+  // from a mini frame (untracked, so it reacts to the edit-mode transition only).
   $effect(() => {
     if ($editMode) untrack(() => {
       if (mapViewMode === '3d') mapViewMode = '2d';
       if (mapInFrame) setMapLocation('main');
+    });
+  });
+  // Edit mode (INAV `editMode` and ArduPilot/PX4 `arduEditMode` alike) lives only while the mission tab is
+  // active: every way of leaving it ends the mode. Parking the panel keeps it — that is how the map gets
+  // the whole screen while waypoints are placed.
+  $effect(() => {
+    if (activeTab !== 'mission') untrack(() => {
+      if ($editMode) editMode.set(false);
+      if ($arduEditMode) arduEditMode.set(false);
     });
   });
   // Map3D instance handle — used to read the 3D camera focus on a 3D→2D switch so
@@ -196,7 +227,7 @@
   }
   // 2D follow state, lifted here so it survives the 2D map's remount on each 2D↔3D toggle
   // (the 3D camera mode persists on its own since Map3D stays mounted).
-  let map2dViewMode = $state<'free' | 'follow' | 'heading-follow'>('free');
+  let map2dViewMode = $state<'free' | 'follow' | 'heading-follow' | 'fleet'>('free');
 
   function toggleMapView() {
     if (mapViewMode === '3d') {
@@ -216,10 +247,8 @@
   // Measured container dimensions (bind:clientWidth/Height on grid zones)
   let bottomDockW = $state(800);
   let bottomDockH = $state(200);
-  // Live toolbar height (exposed as --toolbar-h). The phone toolbar wraps/collapses so its height
-  // varies; the absolutely-positioned nav-rail + panels track this so they never hide under it.
-  // The phone has no toolbar at all (Dev-Docs active/PHONE_UI.md): its chrome is the burger + chips,
-  // the connection popout, the right-hand widget column and a bottom-left status strip.
+  // Live toolbar height (exposed as --toolbar-h); the absolutely-positioned nav rail + panels track it.
+  // The phone has no toolbar at all (Dev-Docs active/PHONE_UI.md).
   const phoneUi = isPhoneDevice;
   let toolbarH = $state(phoneUi ? 0 : 53);
   /** Rendered width of the phone widget column (reported by PhoneWidgetPanel) → the grid column. */
@@ -237,11 +266,9 @@
 
   /** The replay player's full panel is showing (paused / pinned) — reported by LogPlayer. */
   let playerExpanded = $state(false);
-  // Phone: the full player must fit between the burger (12 + 42 + 8) and the chain-link button
-  // (8 + 42 + 8 from the column) with 8px on each side. Whatever is missing slides the widget
-  // column (and the button) out to the right — never further than the column is wide. 0 on wide
-  // phones (21:9) and whenever the player is collapsed or closed, so the column is anchored while
-  // a replay runs.
+  // Phone: the full player must fit between the burger (12 + 42 + 8) and the chain-link button (8 + 42 + 8)
+  // with 8px each side; the shortfall slides the widget column out right, at most by its width. 0 while
+  // the player is collapsed or closed.
   const PHONE_PLAYER_CHROME_PX = 62 + 58 + 16;
   const phoneShift = $derived(
     phoneUi && playerExpanded
@@ -272,30 +299,22 @@
   // Fully populated nav rail in logical px: hamburger 44 + 4 top margin + 9 tabs ×40 + 8 gaps ×2
   // (DEV excluded). A fixed reference on purpose — the live rail height varies with connection state.
   const NAV_RAIL_FULL_HEIGHT = 424;
-  // Bottom reserve for the floating panels (PanelShell). Panels normally stop above the bottom
-  // widget dock, but once that cap would make them shorter than the nav rail, they may overlay the
-  // dock instead — the rail already scrolls past it, so the panel just follows. Logical px
-  // throughout, so the switch adapts to the UI scale. The 6px keeps the rail's visual gap above
-  // the status bar instead of sitting flush on it. `toolbarH` is the live bar height (53 on the
-  // desktop, taller on the iPad where the bar carries the status-bar inset), so the tablet uses the
-  // same rule (PanelShell's tablet block reads the reserve too).
+  // Bottom reserve for the floating panels: they stop above the widget dock unless that would make them
+  // shorter than the nav rail, then they overlay the dock. Logical px (adapts to the UI scale); the 6px keeps
+  // the rail's gap above the status bar. PanelShell's tablet block reads the reserve too.
   const panelBottomReserve = $derived(
     winH / uiScale - toolbarH - bottomDockH - 24 - 12 < NAV_RAIL_FULL_HEIGHT ? '6px' : gridBottomHeight
   );
 
-  // Floating-window rect — ONE computation (`floatFrameRect`, store) for the window itself (it gets
-  // the rect as props), the map placed inside its frame when the view is swapped, and the dock
-  // reserve. The window lives in the zoomed `.ui-scale` layer, so it is computed in that layer's
-  // logical px (viewport / uiScale); the map is unzoomed, so its visual rect is the logical rect *
-  // uiScale. The desktop frame has a glass bezel: the map goes into the INNER box.
+  // Floating-window rect: ONE computation (`floatFrameRect`) for the window, the map swapped into its frame
+  // and the dock reserve. In the zoomed layer's logical px; the unzoomed map's rect is that × uiScale,
+  // inside the desktop frame's bezel.
   const logicalW = $derived(winW / uiScale);
   const logicalH = $derived(winH / uiScale);
   const floatFrame = $derived(floatFrameRect($videoState, logicalW, logicalH));
-  // Phone (PHONE_VIDEO.md D2): the DOCKED frame instead — the stream aspect fitted into 40 % of the
-  // map-area height / 50 % of its width, whichever binds — or 2/3 of that with the frame's corner
-  // toggle (`phoneDockCompact`); bottom-right of the map area, left of the corner-control column
-  // (8 + 38 + 8), bottom-aligned with the chip row (8 px; the safe inset is 0 on Android, iPhone
-  // has no video). Same numbers drive PhoneVideoDock and the in-frame map.
+  // Phone (PHONE_VIDEO.md D2): the docked frame — stream aspect fitted into 40 % of the map-area height /
+  // 50 % of its width (2/3 of that when compact), bottom-right left of the corner-control column, aligned
+  // with the chip row. Same numbers drive PhoneVideoDock and the in-frame map.
   const phoneMapW = $derived(winW - phonePanelW + phoneShift);
   const dockH = $derived.by(() => {
     const aspect = $videoState.aspect || 16 / 9;
@@ -321,6 +340,15 @@
       : ($videoState.floating && $videoState.floatSnapped ? floatW + FLOAT_BTN_GAP_PX : 0) +
         FLOAT_MARGIN_PX + FLOAT_BTN_PX + FLOAT_BTN_GAP_PX,
   );
+  // `videoReserve` is measured from the window's left edge, but the dock zone starts right of the nav-rail
+  // column in the wide layout — the dock yields only the part that reaches into its own zone.
+  let bottomDockEl = $state<HTMLDivElement | null>(null);
+  let bottomDockLeft = $state(0);
+  $effect(() => {
+    void winW; void bottomDockW; // the zone's left edge moves with the window and the layout
+    bottomDockLeft = bottomDockEl?.offsetLeft ?? 0;
+  });
+  const videoReserveDock = $derived(Math.max(0, videoReserve - bottomDockLeft));
   // The phone's widget column overlays the map: no native surface may show through it (the docked
   // frame parks behind it) — the surface router clips at its edge.
   $effect(() => {
@@ -330,15 +358,18 @@
   // floating window frame, `widget` → the video-widget tile (its published rect). Every other surface
   // shows video. `main` (default) = the normal full-screen map.
   const mapInFrame = $derived($videoState.mapLocation !== 'main' && $videoState.status === 'live');
-  // Map centre offset for the covered right edge (PHONE_UI.md D16) — only while the map is the
-  // full-screen layer. In the docked frame / widget tile nothing covers it: a shifted centre put
-  // the follow anchor on the frame's left edge (Marc, 2026-09-04).
+  // Map centre offset for the covered right edge (PHONE_UI.md D16) — only while the map is full screen;
+  // in a frame nothing covers it, and a shifted centre put the follow anchor on the frame's edge.
   const phoneMapInset = $derived(phoneUi && !mapInFrame ? phonePanelW - phoneShift : 0);
-  // Full-screen map box, rounded to whole px (issue #52): the CSS fallback `calc(53px * scale)`
-  // lands on fractions at uiScale 1.25/1.5 (66.25px / 79.5px), which is what leaked tile seams —
-  // see mapFrameStyle above for the mechanism. The map sliding ≤ half a px under the toolbar edge
-  // is invisible (chrome z1 covers map z0); Map.svelte's ResizeObserver re-invalidates on the
-  // resulting size change by itself.
+  // …and for the bottom widget slots (PHONE_BOTTOM_WIDGETS.md B7): the tallest filled tile plus its
+  // 8 px edge margin, published by PhoneBottomBar; 0 while every slot is empty.
+  let phoneBarH = $state(0);
+  /** The open nav rail's right edge on the phone: 12 px offset + 42 px buttons (NavRail.svelte); the
+   *  bottom tiles keep clear of it (PHONE_BOTTOM_WIDGETS.md B4). */
+  const NAV_RAIL_RIGHT_PX = 54;
+  const phoneMapInsetBottom = $derived(phoneUi && !mapInFrame && phoneBarH > 0 ? phoneBarH + 8 : 0);
+  // Full-screen map box rounded to whole px (see mapFrameStyle): the CSS fallback `calc(53px * scale)` lands
+  // on fractions at uiScale 1.25/1.5 and leaks tile seams. Map.svelte's ResizeObserver handles the resize.
   const mapLayerStyle = $derived(
     phoneUi
       ? 'top:0; bottom:0;' // the whole screen — the map runs on under the widget column's glass
@@ -346,12 +377,9 @@
   );
   const mapFloating = $derived($videoState.mapLocation === 'floating');
   const mapInWidget = $derived($videoState.mapLocation === 'widget');
-  // Rounded to whole px, here and everywhere the unzoomed map layer is placed (issue #52): a
-  // fractional box origin (floatLeft × 1.25 …) puts every 256px tile edge on a subpixel boundary,
-  // and WebKitGTK antialiases each tile as its own composited layer — hairline seams between tiles,
-  // shimmering during heading-follow rotation. Chromium snaps layers to device pixels, which is why
-  // Windows never showed it. The frame drawn by the zoomed chrome may sit up to half a px off the
-  // rounded map rect — invisible, and .miniframe-ctl uses this same string so it stays aligned.
+  // Rounded to whole px wherever the unzoomed map layer is placed: a fractional origin puts tile edges on
+  // subpixels and WebKitGTK antialiases each tile layer → hairline seams. .miniframe-ctl uses this same
+  // string so it stays aligned.
   const mapFrameStyle = $derived(
     `left:${Math.round((floatLeft + floatBezel) * uiScale)}px; top:${Math.round((floatTop + floatBezel) * uiScale)}px; width:${Math.round((floatW - 2 * floatBezel) * uiScale)}px; height:${Math.round((floatH - 2 * floatBezel) * uiScale)}px;`,
   );
@@ -371,17 +399,13 @@
     }
   });
 
-  // The WIDGET mini-map is locked to a clean nav view: 2D + follow, zoom-only (3D/mode buttons hidden
-  // via `miniControls`). Heading-up or north-up is the one choice left — a tap on the mini map
-  // toggles it (Map.svelte) and the choice is remembered in the settings. The FLOATING map stays
-  // fully operational on the desktop; on the phone the docked frame is a mini map too and takes the
-  // same lock (PHONE_VIDEO.md D6). Restore the view on release.
-  // Only while the map is actually in a frame (mapInFrame includes `status === 'live'`): a stale
-  // mapLocation with the video off must not put the FULL map into mini mode (half-size markers).
+  // The widget mini map (and the phone's docked frame, PHONE_VIDEO.md D6) is locked to 2D + follow, zoom
+  // only; a tap toggles heading-up/north-up (remembered). Only while mapInFrame — a stale mapLocation with
+  // the video off must not put the FULL map into mini mode.
   const miniMapLocked = $derived(mapInFrame && (mapInWidget || phoneUi));
   let miniLockActive = false;
   let savedMapViewMode: '2d' | '3d' = '2d';
-  let savedMode2d: 'free' | 'follow' | 'heading-follow' = 'free';
+  let savedMode2d: 'free' | 'follow' | 'heading-follow' | 'fleet' = 'free';
   $effect(() => {
     const lock = miniMapLocked;
     untrack(() => {
@@ -406,21 +430,17 @@
     });
   });
 
-  // Per-container px-per-unit: 1 unit = cross-axis fraction so that
-  // LARGE_BASE_VMIN units == cross-axis px (widget fills dock height/width).
-  // This fully decouples bottom dock and side dock scaling.
-  // Subtract zone padding (6px each side) from cross-axis measurement.
+  // Per-container px-per-unit: LARGE_BASE_VMIN units == cross-axis px minus the zone padding (6px each side),
+  // so the bottom and side docks scale independently.
   const DOCK_PAD = 6;
   // On phone the dock is two rows tall, so a tile is sized to ONE row (dock height / rows). Desktop
   // and tablet keep the full-height single-row tile.
   const bottomPxPerUnit = $derived((bottomDockH / bottomRows - 2 * DOCK_PAD) / LARGE_BASE_VMIN);
   const sidePxPerUnit   = $derived((sideDockW  - 2 * DOCK_PAD) / LARGE_BASE_VMIN);
 
-  // Available space expressed in abstract units (container px / pxPerUnit)
-  // Bottom: subtract edit button (28px) + wrapper gap (6px) + zone padding (12px). Multiply by the row
-  // count so the sizing algorithm (which lays out in one line) budgets for two rows on phone and keeps
-  // the tiles a readable size; flex-wrap then splits them across the rows.
-  const bottomAvailUnits = $derived(Math.max(0, ((bottomDockW - 34 - 2 * DOCK_PAD - videoReserve) / bottomPxPerUnit) * bottomRows));
+  // Available units (px / pxPerUnit) after the zone padding and the video window, multiplied by the row
+  // count so the one-line sizing budgets for two rows on the phone; flex-wrap then splits them.
+  const bottomAvailUnits = $derived(Math.max(0, ((bottomDockW - 2 * DOCK_PAD - videoReserveDock) / bottomPxPerUnit) * bottomRows));
   const rightAvailUnits  = $derived(Math.max(0, (sideDockH - 2 * DOCK_PAD) / sidePxPerUnit));
 
   let appVersion = $state("...");
@@ -431,7 +451,7 @@
   let selectedProtocol = $state<ProtocolType>(isMobile ? 'mavlink' : 'msp');
   let selectedPort = $state("");
   let selectedBaud = $state(115200);
-  let tcpHost = $state("192.168.1.1");
+  let tcpHost = $state("");
   /** Port a fresh profile starts on: the MAVLink GCS convention on mobile (Wi-Fi links only),
    *  INAV SITL's MSP port on the desktop. */
   const INITIAL_NET_PORT = isMobile ? 14550 : 5761;
@@ -456,10 +476,8 @@
   let terrainOpen = $state(false);
   terrainAnalysis.subscribe((s) => { terrainOpen = s.open; });
 
-  // Debug Monitor + dev UI. In dev builds `import.meta.env.DEV` is true; in a RELEASE build it's enabled
-  // at runtime when started with `--debug` (backend `is_debug_mode`, fetched in initPage → debugMode).
-  // Because DEV_MODE now depends on a runtime value, Vite can no longer prove the DebugPanel import dead,
-  // so the chunk stays in the release bundle (loaded lazily only when debug mode is actually on).
+  // Debug Monitor + dev UI: DEV builds, or a release started with `--debug` (backend `is_debug_mode`).
+  // The runtime flag keeps the DebugPanel chunk in the release bundle; it loads lazily only in debug mode.
   let debugMode = $state(false);
   const DEV_MODE = $derived(import.meta.env.DEV || debugMode);
   let debugOpen = $state(false);
@@ -470,7 +488,6 @@
     }
   });
 
-  // Reactive telemetry subscription
   let liveTelem = $state(get(telemetry));
   let prevArmed = false;
   // Seed `prevArmed` from the FIRST valid telemetry frame of each connection so a reconnect mid-flight
@@ -483,14 +500,63 @@
   let accMaxAlt = 0, accMaxSpeed = 0, accMaxDist = 0, accMah = 0, accTotalDist = 0;
   let accStartLat: number | null = null, accStartLon: number | null = null;
   let accLastLat: number | null = null, accLastLon: number | null = null;
+
+  // Multi-vehicle: arm-edge detector and flight stats belong to ONE vehicle; park/restore them on a switch,
+  // so switching to an armed aircraft is no arm edge (track clear, Home move) and the reverse no disarm.
+  interface FlightStatsSlot {
+    prevArmed: boolean; armEdgeInit: boolean; armStartMs: number;
+    accMaxAlt: number; accMaxSpeed: number; accMaxDist: number; accMah: number; accTotalDist: number;
+    accStartLat: number | null; accStartLon: number | null; accLastLat: number | null; accLastLon: number | null;
+  }
+  const flightStatsSlots = new globalThis.Map<string, FlightStatsSlot>(); // `Map` here is the map component
+  let flightStatsOwner: string | null = null;
+  activeVehicleId.subscribe((id) => {
+    if (id === flightStatsOwner) return;
+    const previous = flightStatsOwner;
+    if (previous) {
+      flightStatsSlots.set(previous, {
+        prevArmed, armEdgeInit, armStartMs, accMaxAlt, accMaxSpeed, accMaxDist, accMah, accTotalDist,
+        accStartLat, accStartLon, accLastLat, accLastLon,
+      });
+    }
+    flightStatsOwner = id;
+    const slot = id ? flightStatsSlots.get(id) : undefined;
+    if (slot) {
+      ({ prevArmed, armEdgeInit, armStartMs, accMaxAlt, accMaxSpeed, accMaxDist, accMah, accTotalDist,
+         accStartLat, accStartLon, accLastLat, accLastLon } = slot);
+      return;
+    }
+    // Unknown vehicle (or none): re-baseline the edge detector on the first status-carrying frame
+    // (no false edge either way).
+    armEdgeInit = false; prevArmed = false;
+    // The flight stats reset only on a switch between two vehicles. Disconnect (→ null) and reconnect
+    // (null → a new key for the same aircraft) keep them, so a flight that lost its link mid-air still
+    // gets its full summary at the disarm after the reconnect.
+    if (previous !== null && id !== null) {
+      armStartMs = 0;
+      accMaxAlt = 0; accMaxSpeed = 0; accMaxDist = 0; accMah = 0; accTotalDist = 0;
+      accStartLat = null; accStartLon = null; accLastLat = null; accLastLon = null;
+    }
+  });
+
+  // Multi-vehicle: End-Flight dialog, recovery prompt and captured mission belong to the vehicle whose
+  // recording-ended/-interrupted (or disarm) opened them; other vehicles' lifecycle events must not touch
+  // them. An owner that is gone (a reconnect means a new key) hands over to the active vehicle.
+  let recordingOwner: string | null = null;
+  function isRecordingOwner(vehicleId: string | null | undefined): boolean {
+    if (vehicleId == null) return true; // payload without a vehicle (not per-vehicle)
+    if (vehicleId === recordingOwner) return true;
+    const ownerGone = recordingOwner === null || !get(vehicles).has(recordingOwner);
+    // An unknown vehicle belongs to the link being connected: its recorder can report before the vehicle is
+    // announced (MSP-tunnel probe). Secondaries are announced before their frames, so none is adopted here.
+    return ownerGone && (vehicleId === get(activeVehicleId) || !get(vehicles).has(vehicleId));
+  }
   telemetry.subscribe((t) => {
     liveTelem = t;
     // Accumulate the live flown track (RAM) for the Terrain Analyzer
     const armed = isArmed(t.armingFlags, t.lastUpdate);
-    // Baseline the armed state on the first frame that actually CARRIES it (statusSeen) → no false
-    // edge on reconnect. Gating on any first frame (lastUpdate) raced: attitude/GPS at 5–10 Hz beat
-    // the 1 Hz status after a reconnect, seeding prevArmed=false from a frame without arming info —
-    // the first real status then looked like an arm edge and moved Home to wherever the aircraft was.
+    // Baseline on the first frame that CARRIES the armed state (statusSeen), not any first frame: 5–10 Hz
+    // attitude/GPS beat the 1 Hz status after a reconnect and would fake an arm edge (moving Home).
     if (!armEdgeInit && t.statusSeen) { armEdgeInit = true; prevArmed = armed; }
     if (armed && !prevArmed) {
       clearLiveTrack();
@@ -498,7 +564,8 @@
       armStartMs = t.lastUpdate || Date.now();
       accMaxAlt = 0; accMaxSpeed = 0; accMaxDist = 0; accMah = 0; accTotalDist = 0;
       accStartLat = null; accStartLon = null; accLastLat = null; accLastLon = null;
-      endFlightDialog?.close(); // re-arming dismisses a lingering End-Flight dialog
+      // Re-arming dismisses a lingering End-Flight dialog — of this vehicle, not another one's.
+      if (isRecordingOwner(flightStatsOwner)) endFlightDialog?.close();
       // warm the Copernicus tile for the current area so it's ready
       if (isValidGpsCoordinate(t.lat, t.lon)) {
         void invoke('terrain_elevation', { lat: t.lat, lon: t.lon }).catch(() => {});
@@ -541,6 +608,9 @@
     }
     if (!armed && prevArmed) {
       void handleDisarm(t.lastUpdate || Date.now());
+      // A real disarm (not a telemetry reset) ends the flight: a later connect to an already-armed
+      // aircraft must not reuse this start.
+      if (t.statusSeen) armStartMs = 0;
     }
     prevArmed = armed;
   });
@@ -550,10 +620,8 @@
   // a replay (those own the Home store); never downgrades an FC home.
   launchPoint.subscribe((lp) => {
     if (!lp) return;
-    // Never mirror an invalid / 0,0 launch into Home: before a GPS fix the launch auto-place can fall
-    // back to the map centre (≈ 0,0), which would otherwise light up the Home widget with a bogus
-    // ~5800 km distance to null island. Home stays unset until a real reference (FC home on arm, a
-    // valid manual placement, or replay) exists.
+    // Never mirror an invalid / 0,0 launch into Home: before a GPS fix the auto-place can fall back to the
+    // map centre (≈ 0,0), which would show a bogus distance to null island.
     if (!isValidGpsCoordinate(lp.lat, lp.lng)) return;
     const h = get(homePosition);
     if (h.source === 'fc' || h.source === 'replay') return;
@@ -567,6 +635,7 @@
     const durationSec = armStartMs ? Math.round((disarmMs - armStartMs) / 1000) : 0;
     if (durationSec < 5) return; // ignore trivial bench arm/disarm
     if (flightLoggingEnabled && flightRecordingEnabled) return; // recorded → handled on -ended
+    recordingOwner = flightStatsOwner;
     try {
       await endFlightDialog.show({
         stats: {
@@ -624,12 +693,9 @@
   let flightLoggingEnabled = $state(false);
   let flightRecordingEnabled = $state(false);
   let flightLogDbPath = $state("");
-  // Open a log WITHOUT importing it (Dev-Docs active/OPEN_LOG_WITHOUT_IMPORT.md): the file is parsed
-  // by the ordinary importers into a throwaway scratch DB dir; while one is open, every logbook /
-  // replay READ goes there instead of the main DB (writes are unreachable — the panel is read-only).
-  // Several files can be open at once (a multi-file drop, or files dropped one after another): the
-  // scratch DB collects them, each scratch flight remembers its source file (+ log index inside a
-  // multi-log flash dump) so it can be imported for real on its own.
+  // Open a log WITHOUT importing it (Dev-Docs active/OPEN_LOG_WITHOUT_IMPORT.md): parsed into a scratch DB
+  // that every logbook/replay READ uses while open; each scratch flight keeps its source file (+ log index)
+  // so it can be imported for real on its own.
   type OpenedFlight = { id: number; sourcePath: string; logIndex?: number };
   let openedLogs = $state<{ dir: string; flights: OpenedFlight[] } | null>(null);
   const activeDbPath = $derived(openedLogs?.dir ?? flightLogDbPath);
@@ -644,7 +710,7 @@
   let mapProvider = $state("osm");
   let mapCacheMaxMB = $state(200);
   let cesiumIonToken = $state("");
-  let altitudeCurtain3D = $state(true);
+  let altitudeCurtain3D = $state(false);
   let realLighting3D = $state(false);
   let buildings3D = $state(false);
   let logReplayTime = $state(false);
@@ -655,7 +721,7 @@
   let defaultWpAltitudeM = $state(50);
   let defaultPhTimeSec = $state(30);
   let warnAltitudeM = $state(120);
-  let systemMessages = $state<SystemMessagesLevel>('all');
+  let systemMessages = $state<SystemMessagesLevel>('warning');
   let logLevel = $state<LogLevel>('warning');
   let interfaceSettings = $state<InterfaceSettings>({
     speedUnit: 'kmh',
@@ -671,6 +737,9 @@
   let logbookLoading = $state(false);
   let blackboxImporting = $state(false);
   let blackboxImportProgress = $state<BlackboxImportProgress | null>(null);
+  // "Compact Database" running: shows the blocking CompactDbModal and keeps a second click from
+  // starting another run (the backend refuses one per file as well).
+  let dbCompacting = $state(false);
   let flightSummaries = $state<FlightSummary[]>([]);
   let selectedFlight: Flight | null = $state(null);
   let selectedFlightTrack = $state<TelemetryRecord[]>([]);
@@ -716,6 +785,21 @@
   let disconnectArmedDialog: ReturnType<typeof DisconnectArmedDialog>;
   // True after "Continue on Reconnect" until the next connection resolves the recovered session.
   let awaitingResumeReconnect = $state(false);
+  // Per vehicle: bumped whenever its pending backend session may change hands (arm, resume, new prompt,
+  // grace auto-commit), so a Save retry never commits a newer flight. No vehicle → bump all.
+  // (A plain record: `Map` is the map component in this file.)
+  const pendingEpochs: Record<string, number> = {};
+  let pendingEpochAll = 0;
+  let pendingEpochTotal = 0;
+  function bumpPendingEpoch(vehicleId: string | null | undefined): void {
+    pendingEpochTotal++;
+    if (vehicleId == null) pendingEpochAll++;
+    else pendingEpochs[vehicleId] = (pendingEpochs[vehicleId] ?? 0) + 1;
+  }
+  /** A dialog without a vehicle (the only pending session) watches every vehicle's events. */
+  function pendingEpochOf(vehicleId: string | null): string {
+    return vehicleId == null ? `*${pendingEpochTotal}` : `${pendingEpochAll}:${pendingEpochs[vehicleId] ?? 0}`;
+  }
 
   async function showDialog(opts: DialogOptions): Promise<string | null> {
     return confirmDialog.show(opts);
@@ -735,16 +819,9 @@
   // Raw telemetry popup (toolbar button next to Relay; connected only).
   let rawTelemetryOpen = $state(false);
 
-  // Unobstructed fullscreen (Video panel toggle): the map-swap video box retreats from the
-  // nav-rail column (always, in this mode) and from OCCUPIED widget panels, so widgets never
-  // overlay the picture. A panel counts as occupied only while visible AND holding widgets —
-  // an empty or hidden panel contributes 0 and the video keeps that edge. Values are logical
-  // px (the wrapper lives in the zoomed .app layer); the measured dock sizes (clientWidth/
-  // clientHeight binds above) track user resizes and the phone/tablet overrides for free.
-  // The reserve is the panel's OWN extent (its largest widget + the zone padding), not the whole
-  // dock zone: a dock of small tiles hugs the screen edge and the video gets the rest
-  // (WIDGET_OVERHAUL.md D7). Capped at the zone in case a bind lags a frame.
-  // Not on the phone: there is no dock to retreat from, the video runs under the widget column.
+  // Unobstructed fullscreen: the map-swap video box retreats from the nav-rail column and from OCCUPIED
+  // (visible + non-empty) widget panels by each panel's own extent (WIDGET_OVERHAUL.md D7), capped at the
+  // zone. Logical px. Not on the phone: the video runs under the widget column there.
   const ufActive = $derived($videoState.unobstructedFullscreen && mapInFrame && !phoneUi);
   const ufRight = $derived(
     ufActive && $layout.sideDock.visible && panels.right.length > 0
@@ -756,13 +833,9 @@
       ? Math.min(bottomDockH, bottomPanelCrossPx + 2 * DOCK_PAD)
       : 0
   );
-  // The wrapper itself stays FULL-SIZE (so the blurred backdrop map fills the whole zone,
-  // widgets and nav rail float on it); the reserves only shrink the AVAILABLE AREA the
-  // video box is fitted into: 62px nav-rail column left (always in this mode), the occupied
-  // docks right/bottom. Inside that area the box is cut to the stream's aspect ratio and
-  // centred — no letterbox bars at all (the native sink's own black letterbox never becomes
-  // visible because box = picture). Null until the wrapper is measured (or when the mode is
-  // off) — the box then falls back to filling the wrapper via CSS.
+  // The wrapper stays full-size (the blurred backdrop map fills the zone); the reserves only shrink the area
+  // the box is fitted into, cut to the stream aspect and centred — no letterbox. Null until measured or
+  // when off; CSS then fills the wrapper.
   let ufWrapW = $state(0);
   let ufWrapH = $state(0);
   const ufBox = $derived.by(() => {
@@ -780,20 +853,15 @@
     };
   });
 
-  // Cache stats subscription
   let cacheStats = $state<TileCacheStats>({ usedBytes: 0, maxBytes: 0, tileCount: 0 });
   tileCacheStats.subscribe((s) => { cacheStats = s; });
 
   const baudRates = [115200, 57600, 38400, 19200, 9600, 230400, 460800, 921600];
 
-  // NavRail icons — migrating from glyphs to flat, high-contrast inline SVG (monochrome,
-  // `currentColor` so they follow the rail's inactive/hover/active colours). UAV Info uses a
-  // flight-controller (microchip) icon: neutral across UAV types, matches the panel content
-  // (FC variant/version/board/sensors). Remaining tabs stay glyphs until converted.
+  // NavRail icons: flat inline SVG in `currentColor`, so they follow the rail's state colours.
   const ICON_UAV_INFO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="6.5" y="6.5" width="11" height="11" rx="1.5"/><rect x="9.7" y="9.7" width="4.6" height="4.6" rx="0.6"/><path d="M9 6.5V3.8M12 6.5V3.8M15 6.5V3.8M9 17.5v2.7M12 17.5v2.7M15 17.5v2.7M6.5 9H3.8M6.5 12H3.8M6.5 15H3.8M17.5 9h2.7M17.5 12h2.7M17.5 15h2.7"/></svg>';
 
-  // 6-tooth gear (Settings) — original-style proportions (chunky body, modest teeth) but
-  // with sharp (non-rounded) tooth corners; solid + punched centre hole (evenodd).
+  // 6-tooth gear (Settings), punched centre hole (evenodd).
   const ICON_SETTINGS = '<svg viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" clip-rule="evenodd" d="M19.52 9.26 22.31 10 22.31 14 19.52 14.74 18.13 17.14 18.89 19.92 15.42 21.93 13.39 19.88 10.61 19.88 8.58 21.93 5.11 19.92 5.87 17.14 4.48 14.74 1.69 14 1.69 10 4.48 9.26 5.87 6.86 5.11 4.08 8.58 2.07 10.61 4.12 13.39 4.12 15.42 2.07 18.89 4.08 18.13 6.86ZM12 8.5A3.5 3.5 0 1 0 12 15.5 3.5 3.5 0 0 0 12 8.5Z"/></svg>';
   // Solid spiral notebook (Logbook): filled cover with knocked-out (transparent) 2px text
   // lines + spiral binding holes on the left (mask = white keeps, black cuts out).
@@ -802,10 +870,11 @@
   const ICON_MISSION = '<svg viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" clip-rule="evenodd" d="M12 2.5C8.4 2.5 5.5 5.4 5.5 9c0 4.8 6.5 12.5 6.5 12.5S18.5 13.8 18.5 9c0-3.6-2.9-6.5-6.5-6.5Zm0 4.1A2.4 2.4 0 1 0 12 11.4 2.4 2.4 0 0 0 12 6.6Z"/></svg>';
   // Two solid peaks, slightly raised (Terrain).
   const ICON_TERRAIN = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M1.5 20 8.5 5 13 14 16.5 8.5 22.5 20Z"/></svg>';
+  // Fleet (multi-vehicle list + group commands): three craft arrows inside a corner frame.
+  const ICON_FLEET = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8V4h4M17 4h4v4M21 16v4h-4M7 20H3v-4"/><polygon points="12,7 9.6,13 12,11.8 14.4,13" fill="currentColor" stroke="none"/><polygon points="7.5,12 5.1,18 7.5,16.8 9.9,18" fill="currentColor" stroke="none"/><polygon points="16.5,12 14.1,18 16.5,16.8 18.9,18" fill="currentColor" stroke="none"/></svg>';
   // Solid flat movie camera (Video): two reels + body + lens funnel.
   const ICON_VIDEO = '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="7" cy="7" r="2.9"/><circle cx="12.6" cy="7" r="2.9"/><rect x="2.5" y="9.5" width="13" height="9" rx="1.6"/><path d="M15.5 12 21.5 9.5V18.5L15.5 16Z"/></svg>';
-  // Radar dish on a mast with two sweep arcs (Radar / foreign-vehicle tracking).
-  // Stylised radar scope: outer ring + inner range ring + sweep line + contact blips.
+  // Radar scope: range rings + sweep line + contact blip (Radar / foreign-vehicle tracking).
   const ICON_RADAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.3"/><path d="M12 12 18.7 6.4"/><circle cx="17.6" cy="9.4" r="1.15" fill="currentColor" stroke="none"/><circle cx="7.6" cy="15.4" r="0.85" fill="currentColor" stroke="none"/><circle cx="9.4" cy="6.8" r="0.85" fill="currentColor" stroke="none"/></svg>';
 
   // Stacked layers (Airspace Manager / aeronautical data).
@@ -817,22 +886,23 @@
   // RC control (INAV RC over MSP) — two stacked sticks + a signal arc; opt-in via settings.
   const ICON_RC = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3" width="17" height="18" rx="2.5"/><circle cx="8" cy="9" r="2.1"/><circle cx="16" cy="9" r="2.1"/><path d="M6.5 15.5h11"/><path d="M6.5 18h6"/></svg>';
 
-  // The vehicle-control panel is MAVLink-only (ArduPilot/PX4) and only meaningful while connected.
-  const isMavlinkConnected = $derived(
-    $connection.status === 'connected' && $connection.protocolType === 'mavlink'
-  );
+  // The vehicle-control panel is MAVLink-only (ArduPilot/PX4) and only meaningful while connected —
+  // not on an INAV MSP-over-MAVLink link (that FC gets the INAV/MSP surface instead).
+  const isMavlinkConnected = $derived($isArduPilotLink);
 
   // Passive telemetry (listen-only) has no uplink — there's no way to send RC channels — so the RC tab
   // is hidden while connected that way. Available = master switch on AND not telemetry-connected.
   const isTelemetryConnected = $derived(
     $connection.status === 'connected' && $connection.protocolType === 'telemetry'
   );
-  const rcTabAvailable = $derived($settings.rcControl.enabled && !isTelemetryConnected);
-  // On mobile there is no joystick, but the on-screen touch sticks (VirtualSticks) can drive RC over
-  // Wi-Fi. RC is safety-relevant and barely field-tested, so touch control is opt-in behind the SAME
-  // master switch as the joystick path (`rcTabAvailable`) rather than appearing whenever an FC is
-  // connected — one switch governs both, no matter the input device. On top of that, mobile also needs a
-  // control-capable connection (MSP or MAVLink, not passive telemetry).
+  // Also hidden on an MSP-over-MAVLink link: the MSP RC stream doesn't run through the tunnel and the
+  // ArduPilot override adapter must not drive INAV (Dev-Docs active/MSP_OVER_MAVLINK.md, Stage 3).
+  // Never on a phone or tablet, whatever the stored switch says — see `hasRcControl`.
+  const rcTabAvailable = $derived(
+    hasRcControl && $settings.rcControl.enabled && !isTelemetryConnected && !($connection.status === 'connected' && $connection.mspTunnel)
+  );
+  // Mobile touch sticks (VirtualSticks) sit behind the SAME master switch as the joystick path — RC is
+  // safety-relevant — and additionally need a control-capable link (MSP or MAVLink, not passive).
   const mobileRcAvailable = $derived(
     isMobile && rcTabAvailable && $connection.status === 'connected'
   );
@@ -847,6 +917,7 @@
     { id: "uav-info", label: () => $t('nav.uavInfo'), icon: ICON_UAV_INFO },
     { id: "mission", label: () => $t('nav.mission'), icon: ICON_MISSION },
     { id: "control", label: () => $t('nav.control'), icon: ICON_CONTROL },
+    { id: "fleet", label: () => $t('nav.fleet'), icon: ICON_FLEET },
     { id: "rc-control", label: () => $t('nav.rc'), icon: ICON_RC },
     { id: "terrain", label: () => $t('nav.terrain'), icon: ICON_TERRAIN },
     { id: "logbook", label: () => $t('nav.logbook'), icon: ICON_LOGBOOK },
@@ -860,10 +931,18 @@
   const geozonesAvailable = $derived($geozoneWorking?.has_geozones ?? false);
   const fenceAvailable = $derived($fenceWorking?.has_fence ?? false);
   const rallyAvailable = $derived($rallyWorking?.has_rally ?? false);
+  // Fleet tab only with MORE THAN ONE vehicle connected; protocol-agnostic, behind the fleet feature gate.
+  const fleetTabAvailable = $derived($fleetEnabled && $vehicles.size >= 2);
+  // With the gate off, a Fleet tab restored from the last session (or open when it was switched off) must
+  // not stay rendered — the same fallback as the RC tab above.
+  $effect(() => {
+    if (!$fleetEnabled && activeTab === 'fleet') activeTab = 'uav-info';
+  });
   const tabs = $derived(
     allTabs.filter(t =>
       (t.id !== 'logbook' || flightLoggingEnabled) &&
       (t.id !== 'control' || isMavlinkConnected) && // control tab only when connected via MAVLink
+      (t.id !== 'fleet' || fleetTabAvailable) &&
       (t.id !== 'rc-control' || (rcTabAvailable && !isMobile) || mobileRcAvailable) && // RC tab: desktop needs the master switch + a joystick; mobile uses on-screen sticks when a FC is connected
       (t.id !== 'radar' || radarSettings.enabled) && // radar tab only when the master switch is on
       (t.id !== 'airspace' || airspaceSettings.enabled || geozonesAvailable || fenceAvailable || rallyAvailable) // airspace: master switch, or geozone (INAV) / fence+rally (MAVLink) capable FC
@@ -885,15 +964,14 @@
   let connStatus: string = $state("disconnected");
   let fcInfo = $state<FcInfo | null>(null);
 
-  // Subscribe to stores
   connection.subscribe((c) => {
     const wasConnected = connStatus === 'connected';
     connStatus = c.status;
     fcInfo = c.fcInfo;
     // Fresh connection → re-baseline the arm-edge detector (see armEdgeInit).
     if (!wasConnected && c.status === 'connected') armEdgeInit = false;
-    // Auto-refresh the logbook on disconnect (picks up a just-recorded live flight) — replaces
-    // the manual Refresh button. Disarm is covered by the flight-recording-ended listener.
+    // Auto-refresh the logbook on disconnect (picks up a just-recorded live flight). Disarm is covered by
+    // the flight-recording-ended listener.
     if (wasConnected && c.status !== 'connected') {
       void loadLogbook();
       // Lost the FC → the locked home becomes a manual reference (keeps its position so planning
@@ -909,12 +987,9 @@
   // One geolocation check at app start (refreshes the persisted user location for Night-Mode auto).
   ensureUserLocation();
 
-  /** Protocol the connection bar starts on. Settings → Connection owns the choice: "Last used"
-   *  (the default, and the behaviour Kite has always had) restores the stored protocol, while a
-   *  fixed value wins over that store on every launch. Only a protocol we actually support is
-   *  honoured, with MSP as the fallback: the old form mapped everything that was not MAVLink onto
-   *  MSP, which silently rewrote a stored `telemetry` choice, so a pilot who last connected in
-   *  passive Telemetry mode came back to MSP selected. */
+  /** Protocol the connection bar starts on: "Last used" (Settings → Interface → UI) restores the stored
+   *  protocol, a fixed value wins on every launch. Any supported stored protocol (incl. `telemetry`) is
+   *  honoured, MSP otherwise. */
   function resolveStartupProtocol(s: AppSettings): ProtocolType {
     const wanted = s.defaultProtocol === 'last' ? s.lastProtocol : s.defaultProtocol;
     return wanted === 'mavlink' || wanted === 'telemetry' ? wanted : 'msp';
@@ -950,7 +1025,7 @@
     : storedPort;
   if (saved.lastBleDevice) selectedBleDevice = saved.lastBleDevice;
   navPanelOpen = saved.navPanelOpen;
-  // Drop any legacy "-v2" suffix from a persisted tab (the migration scaffolding is gone now).
+  // Drop any legacy "-v2" suffix from a persisted tab.
   activeTab = (saved.activeTab ?? 'uav-info').replace(/-v2$/, '');
   attitudeRateHz = saved.attitudeRateHz;
   positionRateHz = saved.positionRateHz;
@@ -966,7 +1041,7 @@
   mapProvider = saved.mapProvider;
   mapCacheMaxMB = saved.mapCacheMaxMB;
   cesiumIonToken = saved.cesiumIonToken ?? '';
-  altitudeCurtain3D = saved.altitudeCurtain3D ?? true;
+  altitudeCurtain3D = saved.altitudeCurtain3D ?? false;
   realLighting3D = saved.realLighting3D ?? false;
   buildings3D = saved.buildings3D ?? false;
   logReplayTime = saved.logReplayTime ?? false;
@@ -977,7 +1052,9 @@
   defaultWpAltitudeM = saved.defaultWpAltitudeM;
   defaultPhTimeSec = saved.defaultPhTimeSec;
   warnAltitudeM = saved.warnAltitudeM;
-  systemMessages = saved.systemMessages ?? 'all';
+  systemMessages = saved.systemMessages ?? 'warning';
+  // Display timeout: the backend decides by link state, this is the user's override.
+  void invoke('set_stay_awake', { enabled: saved.stayAwake ?? false }).catch(() => {});
   // Apply the persisted diagnostic log level to the backend logger (it starts at Warning by default).
   // When the app runs in debug mode (release `--debug` or any debug build) surface the Debug Monitor
   // and force the log to Debug regardless of the saved level.
@@ -1032,15 +1109,9 @@
   // ── Radar (foreign-vehicle tracking) — independent of the main connection ──
   /** Free-look: cap the query centre's offset from the camera nadir (and the radius) at 150 km. */
   const FREE_LOOK_MAX_OFFSET_KM = 150;
-  /** ONLINE ADS-B query centre + radius — all measured over the ground (the query is a surface circle).
-   *  - **Free-look 3D:** centre = the screen-centre ground point, but its offset from the camera nadir
-   *    (subpoint) is capped at 150 km; if the view runs past that — or hits no ground (looking above the
-   *    horizon) — the centre is projected 150 km along the look direction. The radius = that horizontal
-   *    offset, floored at the configured download radius. So the camera sits at the circle's near edge
-   *    and looks into it; straight-down collapses the offset → the configured radius.
-   *  - **UAV-locked 3D (follow/orbit/fpv) and 2D:** the UAV/reference (or 2D map centre) + the configured
-   *    radius — unchanged from before.
-   *  (Distance/bearing labels use `radarReference` separately.) */
+  /** ONLINE ADS-B query circle (ground distances). Free-look 3D: centre = screen-centre ground point, capped
+   *  at 150 km from the camera nadir along the look direction; radius = that offset, floored at the
+   *  configured radius. UAV-locked 3D and 2D: the UAV/reference or map centre + the configured radius. */
   function radarQueryView(): { lat: number; lon: number; radiusKm: number } {
     const cfgKm = radarSettings.adsb.radiusKm > 0 ? radarSettings.adsb.radiusKm : 25;
 
@@ -1106,7 +1177,9 @@
     }
     return gcsGroundAltM;
   });
-  /** ADS-B-via-MSP available: connected + the FC reports the feature (INAV 8.0+; MAVLink has no features). */
+  /** ADS-B-via-MSP available: connected + the FC reports the feature (INAV 8.0+ over direct MSP; a plain
+   *  MAVLink link has no feature set, and the MSP-over-MAVLink tunnel reports it false — it never polls it,
+   *  so FC-side ADS-B is not available on a tunnel link today). */
   const mspAdsbSupported = $derived(
     connStatus === 'connected' && fcInfo != null && fcInfo.features != null && fcInfo.features.adsb_msp,
   );
@@ -1125,9 +1198,8 @@
   function pushRadarConfig() {
     const { lat, lon } = radarQueryView();
     lastRadarCenterKey = '';
-    // Don't clear per-provider status here: the backend now reconfigures in place (keeps the aggregator),
-    // so the live provider counts shouldn't blink on an unrelated source toggle. Disabled providers stop
-    // emitting and aren't shown anyway.
+    // Don't clear per-provider status here: the backend reconfigures in place, so the live provider counts
+    // must not blink on an unrelated source toggle.
     void configureRadar({
       enabled: radarSettings.enabled,
       sim: radarSettings.sim,
@@ -1139,19 +1211,15 @@
           ...BUILTIN_ADSB_PROVIDERS.map((b) => ({ name: b.name, url: b.url, enabled: radarSettings.adsb.builtins[b.name] ?? true })),
           ...radarSettings.adsb.online,
         ],
-        local: radarSettings.adsb.local,
+        // The links as the Radar panel shows them (iOS: a stored serial source as TCP), so what is shown runs.
+        local: radarSettings.adsb.local.map((l) => effectiveLink(l, 'adsb', hasSerialPorts)),
         // Only request the FC's ADS-B list when the connected INAV (8.0+) actually supports it.
         mspFromFc: radarSettings.adsb.mspFromFc && mspAdsbSupported,
         radiusKm: radarSettings.adsb.radiusKm,
         pollSec: radarSettings.adsb.pollSec,
         center: [lat, lon],
       },
-      formationFlight: {
-        enabled: radarSettings.formationFlight.enabled,
-        port: radarSettings.formationFlight.port,
-        baud: radarSettings.formationFlight.baud,
-        nodeName: radarSettings.formationFlight.nodeName,
-      },
+      formationFlight: effectiveLink(radarSettings.formationFlight, 'formationFlight', hasSerialPorts),
     });
   }
   if (typeof window !== 'undefined') {
@@ -1160,6 +1228,7 @@
     startAlertAudio();
     void startStatusText();
     startBreachMonitor();
+    startTelemetryLostNotice();
     pushRadarConfig();
     // Query centre follows the map view: 2D pans update settings.map.center (broad subscribe, gated by
     // the ~100 m key); 3D camera moves come via Map3D's onCamFocus; the mode flip via the effect below.
@@ -1201,6 +1270,13 @@
     void setRadarNode(g.lat, g.lon, gcsGroundAltM ?? 0);
   });
 
+  // The backend makes these lookups on its own (recorder, imports): it needs the two switches.
+  $effect(() => {
+    const weather = $settings.flightWeatherRecording;
+    const location = $settings.flightAutoLocation;
+    void invoke('flightlog_set_lookups', { weather, location }).catch((e) => console.warn('[settings] lookups not set:', e));
+  });
+
   // Telemetry API (Dev-Docs active/TELEMETRY_API.md): push the persisted config on start + every change;
   // the backend reconfigures in place (unchanged config = no restart, clients keep their stream).
   $effect(() => {
@@ -1218,9 +1294,9 @@
   // Auto-start video with the last settings if it was running at last close.
   if (typeof window !== 'undefined') void initVideo();
 
-  // Detached video window (VIDEO_MULTISINK_WINDOW.md PR B): the controller reconciles the second OS
-  // window against `videoState.undocked` — including at launch, so a session that ended detached
-  // comes back detached as soon as the auto-started source is live.
+  // Detached video window (Dev-Docs VIDEO_MULTISINK_WINDOW.md): the controller reconciles the second OS
+  // window against `videoState.undocked` — also at launch, so a session that ended detached comes back
+  // detached once the auto-started source is live.
   onMount(() => {
     startDetachedVideo();
     return () => stopDetachedVideo();
@@ -1232,6 +1308,7 @@
     // The X hides all panels — including the terrain overlay
     if (!navPanelOpen) {
       editMode.set(false);
+      arduEditMode.set(false);
       patchTerrainAnalysis({ open: false });
     }
     settings.patch({ navPanelOpen });
@@ -1246,10 +1323,9 @@
     }
   }
 
-  // Collapse-anywhere (Dev-Docs active/REPLAY_PANEL_COMPACT.md): a click/tap on any surface other
-  // than the logbook itself or a dialog collapses the flight view to its info card — the mini-map
-  // click used to be the only way, awkward in fullscreen video. Capture phase, so a surface that
-  // stops propagation still counts. The handler reads state at event time (not tracked).
+  // Collapse-anywhere (Dev-Docs active/REPLAY_PANEL_COMPACT.md): a click outside the logbook or a dialog
+  // collapses the flight view to its info card. Capture phase, so surfaces that stop propagation count.
+  // The handler reads state at event time (not tracked).
   $effect(() => {
     const onDown = (e: PointerEvent) => {
       if (!logbookHasFlightOnMap || logbookMinimized) return;
@@ -1268,8 +1344,7 @@
     }
   }
 
-  // Persist a settings patch + mirror it into the local reactive vars the page binds. Shared by
-  // the legacy SettingsPanel and the new SettingsPanel.
+  // Persist a settings patch + mirror it into the local reactive vars the page binds.
   function applySettingsPatch(patch: Partial<AppSettings>) {
     settings.patch(patch);
     if (patch.attitudeRateHz != null) attitudeRateHz = patch.attitudeRateHz;
@@ -1306,6 +1381,7 @@
       void invoke('set_log_level', { level: patch.logLevel }).catch(() => {});
     }
     if (patch.uiScale != null) uiScale = patch.uiScale;
+    if (patch.stayAwake != null) void invoke('set_stay_awake', { enabled: patch.stayAwake }).catch(() => {});
     if (patch.interface != null) {
       interfaceSettings = { ...interfaceSettings, ...patch.interface };
       if (selectedFlight) {
@@ -1321,11 +1397,44 @@
     }
   }
 
+  // ── Fleet auto-switch: 2+ vehicles selected → open the Fleet tab; back under 2 → return to where the
+  // operator was. A manual tab change in between cancels the return (selectTab clears the memo).
+  let autoFleetPrevTab: string | null = null;
+  let autoFleetSwitching = false;
+  let lastSelCount = 0;
+  $effect(() => {
+    const n = $selectedVehicleIds.size;
+    untrack(() => {
+      if (n >= 2 && lastSelCount < 2 && activeTab !== 'fleet' && fleetTabAvailable) {
+        autoFleetPrevTab = terrainOpen ? 'terrain' : activeTab;
+        autoFleetSwitching = true;
+        try { selectTab('fleet'); } finally { autoFleetSwitching = false; }
+      } else if (n < 2 && lastSelCount >= 2 && autoFleetPrevTab && activeTab === 'fleet' && !terrainOpen) {
+        const back = autoFleetPrevTab;
+        autoFleetPrevTab = null;
+        autoFleetSwitching = true;
+        try { selectTab(back); } finally { autoFleetSwitching = false; }
+      }
+      lastSelCount = n;
+    });
+  });
+
+  // Tab requests from panels that don't own this state (fleet panel → mission editor).
+  $effect(() => {
+    const r = $navTabRequest;
+    if (!r) return;
+    untrack(() => {
+      // selectTab on the already-visible active tab would HIDE it (the re-click gesture) — a request
+      // means "show it", so only act when it isn't already on screen.
+      const isActive = terrainOpen ? r.tabId === 'terrain' : r.tabId === activeTab;
+      if (isActive && navPanelOpen && !panelHidden) return;
+      selectTab(r.tabId);
+    });
+  });
+
   function selectTab(tabId: string) {
-    // Re-clicking the ACTIVE tab's button hides its panel without touching its state (the mission
-    // edit mode stays armed, a half-typed form survives): the panel slides out to the left and the
-    // map gets the whole screen; the next click brings it back. Only switching to another tab or
-    // closing the rail (the hamburger X) deactivates as before. Same for the terrain overlay.
+    // Re-clicking the ACTIVE tab's button hides its panel without touching its state (edit mode, half-typed
+    // forms survive); the next click brings it back. Only another tab or the hamburger X deactivates.
     const isActive = terrainOpen ? tabId === 'terrain' : tabId === activeTab;
     if (navPanelOpen && isActive) {
       panelHidden = !panelHidden;
@@ -1340,7 +1449,8 @@
     }
     // Selecting another tab switches away from the terrain overlay
     patchTerrainAnalysis({ open: false });
-    if (tabId !== 'mission') editMode.set(false);
+    // A manual tab choice ends the fleet auto-switch (see the selection effect below).
+    if (!autoFleetSwitching && tabId !== 'fleet') autoFleetPrevTab = null;
     activeTab = tabId;
     settings.patch({ activeTab });
     if (tabId === 'logbook') {
@@ -1354,11 +1464,9 @@
     }
   }
 
-  /** Folder picker for the storage-location settings. Desktop: the dialog plugin, a real path.
-   *  Android: the system tree picker — the user grants ONE folder (scoped storage, no permission),
-   *  the setting stores the grant's content:// tree URI, and a session-end mirror copies the
-   *  artefacts into it (the app itself keeps writing app-private; SQLite and the raw writers need
-   *  real paths, which a SAF grant does not provide). */
+  /** Folder picker for the storage-location settings. Desktop: a real path. Android: the SAF tree picker —
+   *  the setting stores the content:// grant and a session-end mirror copies the artefacts there (SQLite
+   *  and the raw writers need real paths, so the app keeps writing app-private). */
   async function pickStorageFolder(defaultPath?: string): Promise<string | null> {
     if (isAndroid) {
       return await invoke<string | null>('storage_pick_folder');
@@ -1367,21 +1475,69 @@
     return typeof selected === 'string' && selected.length > 0 ? selected : null;
   }
 
+  // The flight database upgrade at start, before anything else opens the database (a plain open would
+  // upgrade it unseen, and on the main thread). 'failed' leaves the database to the error shown.
+  let dbUpgrade = $state<DbSchemaState | null>(null);
+  const dbUpgradeOutcome: Promise<DbUpgradeOutcome | 'failed'> =
+    runPendingDbUpgrade(get(settings).flightLogDbPath, (p) => { dbUpgrade = p; })
+      .catch((e) => { errorMsg = String(e); return 'failed' as const; });
+
+  function askAboutDbBackup(dbPath: string): Promise<void> {
+    return checkDbBackupPrompt(dbPath, showDialog, (key, values) => $t(key, { values }));
+  }
+
+  /** Point Kite at another database folder. A database there in an older format is upgraded only after
+   *  the user agreed; declined, or written by a newer Kite, the folder stays as it was. */
+  async function switchFlightLogPath(next: string) {
+    if (get(connection).status !== 'disconnected') return; // the buttons are disabled then
+    const prev = flightLogDbPath;
+    // Android keeps the database in app storage whatever folder is chosen (it only mirrors there).
+    const state = isAndroid && next.startsWith('content://') ? null : await probeDbSchema(next);
+    if (state && state.from_version > state.to_version) {
+      await showInfo($t('logbook.dbNewerTitle'), $t('settings.dbFolderNewerMsg'));
+      return;
+    }
+    if (state) {
+      const answer = await showDialog({
+        title: $t('settings.dbFolderUpgradeTitle'),
+        message: $t('settings.dbFolderUpgradeMsg', { values: { size: formatBackupSize(state.size_bytes) } }),
+        buttons: [{ label: $t('settings.dbFolderUpgradeYes'), value: 'upgrade', primary: true }],
+      });
+      if (answer !== 'upgrade') return;
+    }
+    flightLogDbPath = next;
+    settings.patch({ flightLogDbPath });
+    // Row ids restart in every database: a selected flight or a loaded library mission of the old one
+    // would be written to an unrelated row of the new one.
+    resetPlayback();
+    selectedFlight = null;
+    selectedFlightId = null;
+    selectedFlightTrack = [];
+    selectedFlightTrackCount = 0;
+    loadedMissionId.set(null);
+    arduLoadedMissionId.set(null);
+    if (!state) return;
+    try {
+      if ((await runPendingDbUpgrade(next, (p) => { dbUpgrade = p; })) === 'done') await askAboutDbBackup(next);
+    } catch (e) {
+      // A database that cannot be upgraded would fail on every access: back to the folder that worked.
+      flightLogDbPath = prev;
+      settings.patch({ flightLogDbPath: prev });
+      errorMsg = String(e);
+    }
+  }
+
   async function chooseFlightLogPath() {
     try {
       const selected = await pickStorageFolder(flightLogDbPath || defaultFlightLogPath || undefined);
-      if (selected) {
-        flightLogDbPath = selected;
-        settings.patch({ flightLogDbPath });
-      }
+      if (selected) await switchFlightLogPath(selected);
     } catch (e) {
       console.error('Failed to choose flight log path', e);
     }
   }
 
   function resetFlightLogPath() {
-    flightLogDbPath = '';
-    settings.patch({ flightLogDbPath: '' });
+    void switchFlightLogPath('');
   }
 
   async function chooseRawLogPath() {
@@ -1401,12 +1557,9 @@
     settings.patch({ flightLogRawPath: '' });
   }
 
-  // Set when the flight DB was written by a NEWER Kite (downgrade guard, `db-newer:` marker from
-  // the backend) — the logbook shows a targeted "restore a backup or update Kite" notice instead
-  // of a generic error and stays disabled; the DB file is never touched. Cleared on a successful
-  // load (e.g. after the user pointed the DB path at a compatible copy). The explanatory popup
-  // fires ONCE per session, and ONLY on a real schema mismatch — every other DB error keeps the
-  // generic error bar.
+  // Set when the flight DB was written by a NEWER Kite (`db-newer:` marker): the logbook shows a "restore a
+  // backup or update" notice, stays disabled and never touches the file; cleared on a successful load. The
+  // popup fires once per session and only on that mismatch — other DB errors keep the generic error bar.
   let logbookDbIncompatible = $state<string | null>(null);
   let dbNewerPopupShown = false;
 
@@ -1535,20 +1688,24 @@
   }
 
   // ── Open logs WITHOUT importing them (Dev-Docs active/OPEN_LOG_WITHOUT_IMPORT.md) ──────────
-  // Desktop only, and only while nothing is connected (the player is replay-only anyway). Files run
-  // through the ordinary importers into the scratch dir — force_import (nothing there to be a
-  // duplicate of), no linking prompt (no live flights there), a multi-log .bbl imports all its logs
-  // without the prompt. `.kflight` stays import-only: it IS a logbook export.
+  // Desktop only, while disconnected. The ordinary importers write into the scratch dir (force_import, no
+  // linking or multi-log prompt). `.kflight` stays import-only: it IS a logbook export.
   const OPEN_EXTS = ['txt', 'bbl', 'bfl', 'bin', 'ulg', 'rawmsp', 'tlog'];
   const canOpenLogFile = $derived(!isMobile && flightLoggingEnabled);
   const isOpenableLog = (p: string) => new RegExp(`\\.(${OPEN_EXTS.join('|')})$`, 'i').test(p);
 
-  /** Parse one file into the scratch dir; returns the scratch flights it produced. */
-  async function parseIntoScratch(filePath: string, dir: string): Promise<OpenedFlight[]> {
+  /** Parse one file into the scratch dir; returns the scratch flights it produced and, for a multi-log
+   *  Blackbox file, the logs that failed (one bad log does not stop the others). A single-log file or
+   *  another format still rejects as a whole. */
+  async function parseIntoScratch(
+    filePath: string,
+    dir: string,
+  ): Promise<{ flights: OpenedFlight[]; failures: string[] }> {
     const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
     const lang = $locale ?? 'en';
     const idOf = (r: BlackboxImportStatus) => (r.type === 'duplicate' ? null : r.flight_id);
     const out: OpenedFlight[] = [];
+    const failures: string[] = [];
     if (ext === 'bin') {
       const id = idOf(await logbookCtrl.importArdupilot(filePath, dir, true, lang));
       if (id != null) out.push({ id, sourcePath: filePath });
@@ -1564,12 +1721,16 @@
         if (id != null) out.push({ id, sourcePath: filePath });
       } else {
         for (let index = 0; index < logCount; index++) {
-          const id = idOf(await logbookCtrl.importBlackbox(filePath, dir, index, true, lang));
-          if (id != null) out.push({ id, sourcePath: filePath, logIndex: index });
+          try {
+            const id = idOf(await logbookCtrl.importBlackbox(filePath, dir, index, true, lang));
+            if (id != null) out.push({ id, sourcePath: filePath, logIndex: index });
+          } catch (e) {
+            failures.push(multiLogFailure(index + 1, String(e)));
+          }
         }
       }
     }
-    return out;
+    return { flights: out, failures };
   }
 
   /** Open one or more log files for replay. Appends to an already open set; a selected main-DB
@@ -1597,7 +1758,9 @@
     try {
       for (const filePath of files) {
         try {
-          added.push(...(await parseIntoScratch(filePath, dir)));
+          const parsed = await parseIntoScratch(filePath, dir);
+          added.push(...parsed.flights);
+          for (const f of parsed.failures) failures.push(`${baseName(filePath)}: ${f}`);
         } catch (e) {
           failures.push(`${baseName(filePath)}: ${String(e)}`);
         }
@@ -1760,8 +1923,8 @@
   }
 
   /** A Configurator flash download holds one log per arm/disarm cycle, and `blackbox_decode --stdout`
-   *  refuses such a file without `--index`. Import every log as its own flight; a single-log file
-   *  keeps passing no index at all. */
+   *  refuses it without `--index`: import every log as its own flight (a single-log file passes no index).
+   *  Failures are collected and reported with the count at the end. */
   async function performBlackboxImport(filePath: string) {
     const logCount = await logbookCtrl.countBlackboxLogs(filePath);
     if (logCount <= 1) {
@@ -1774,9 +1937,28 @@
       buttons: [{ label: $t('logbook.multiLogImportAll'), value: 'all', primary: true }],
     });
     if (answer !== 'all') return;
+    let imported = 0;
+    let skipped = 0;
+    const failures: string[] = [];
     for (let index = 0; index < logCount; index++) {
-      await performImport(filePath, index, false);
+      try {
+        if ((await performImport(filePath, index, false)) === 'imported') imported++;
+        else skipped++;
+      } catch (e) {
+        failures.push(multiLogFailure(index + 1, String(e)));
+      }
     }
+    if (failures.length === 0) return;
+    const lines = [$t('logbook.multiLogSummary', { values: { imported, total: logCount } })];
+    if (skipped > 0) lines.push($t('logbook.multiLogSkipped', { values: { count: skipped } }));
+    lines.push('', $t('logbook.multiLogFailedHeader', { values: { count: failures.length } }), ...failures);
+    await showInfo($t('logbook.multiLogSummaryTitle', { values: { file: baseName(filePath) } }), lines.join('\n'));
+  }
+
+  /** One failed log of a multi-log file for a summary, numbered once through the locale. */
+  function multiLogFailure(logNumber: number, error: string): string {
+    const reason = stripLogNumber(error, logNumber);
+    return $t('logbook.multiLogFailedItem', { values: { n: logNumber, reason } });
   }
 
   async function performRawImport(filePath: string) {
@@ -1802,10 +1984,14 @@
     return p.split(/[\\/]/).pop() ?? p;
   }
 
-  /** INAV blackbox text logs need the external `blackbox_decode`. If it's missing, offer to fetch it
-   *  from GitHub (Windows auto-download) and report progress on the shared import progress bar.
-   *  Returns true when the decoder is available afterwards. */
+  /** Only the legacy switch (`KITE_BLACKBOX_LEGACY=1`) needs the external `blackbox_decode`; offer to fetch
+   *  it when missing, with progress on the import bar. Returns true when the import can go ahead. */
   async function ensureBlackboxDecoder(): Promise<boolean> {
+    try {
+      if (!(await blackboxLegacyMode())) return true;
+    } catch {
+      return true; // the probe cannot tell → the default, built-in decoder
+    }
     try {
       if (await blackboxDecoderAvailable()) return true;
     } catch {
@@ -1830,16 +2016,13 @@
     }
   }
 
-  /** The INAV blackbox formats — the only ones that need the external `blackbox_decode`. Everything
-   *  else the importer accepts (.kflight archives, .rawmsp, .tlog, ArduPilot .bin, PX4 .ulg) is parsed
-   *  in-process by the Rust backend and works on every platform. */
+  /** The INAV blackbox formats. Like everything else the importer accepts (.kflight archives, .rawmsp,
+   *  .tlog, ArduPilot .bin, PX4 .ulg) they are parsed in-process by the Rust backend; only the legacy
+   *  switch (`KITE_BLACKBOX_LEGACY=1`) sends them through the external `blackbox_decode`. */
   const BLACKBOX_EXTS = /\.(txt|bbl|bfl)$/i;
-  /** Extensions offered in the file picker / accepted from a drop. Mobile keeps what the device can
-   *  produce itself or receive from a desktop — .kflight archives and the raw links (.rawmsp / .tlog)
-   *  — and drops the rest: the three INAV blackbox formats need `blackbox_decode`, a separate native
-   *  executable neither mobile OS allows to run (the backend refuses too — decoder_impossible), and
-   *  ArduPilot dataflash (.bin) and PX4 ULog (.ulg) grow to tens or hundreds of megabytes for a tablet database that never
-   *  archives originals (ANDROID_SUPPORT.md §4). Recording, replay and export are unaffected. */
+  /** Extensions offered in the picker / accepted from a drop. Mobile drops the onboard logs (blackbox, .bin,
+   *  .ulg — tens to hundreds of MB; ANDROID_SUPPORT.md §4) and keeps .kflight/.rawmsp/.tlog. The gate is
+   *  the frontend's alone: the backend would decode them on mobile too. */
   const IMPORT_EXTS = isMobile
     ? ['kflight', 'rawmsp', 'tlog']
     : ['txt', 'bbl', 'bfl', 'bin', 'ulg', 'kflight', 'rawmsp', 'tlog'];
@@ -1847,9 +2030,8 @@
   /** Import a batch of files, isolating each so one bad/corrupt/non-log file doesn't abort the rest;
    *  failures (with the per-importer reason) are collected and surfaced together. */
   async function importFiles(files: string[]) {
-    // Second line of defence for mobile: the picker no longer offers blackbox formats, but a file can
-    // still arrive by another route (a drop, a picker that ignores the filter). Say why rather than
-    // letting it fail somewhere in the decoder lookup.
+    // Second line of defence for mobile: a blackbox file can still arrive by a drop or a picker that ignores
+    // the filter, and nothing behind this point stops it.
     if (isMobile) {
       const rejected = files.filter((f) => BLACKBOX_EXTS.test(f));
       files = files.filter((f) => !BLACKBOX_EXTS.test(f));
@@ -1860,7 +2042,8 @@
       }
       if (files.length === 0) return;
     }
-    // INAV blackbox text logs (.txt/.bbl/.bfl) need blackbox_decode — ensure it once before the batch.
+    // INAV blackbox text logs (.txt/.bbl/.bfl): in legacy mode they need blackbox_decode — ensure it
+    // once before the batch (a no-op with the built-in decoder).
     if (files.some((f) => BLACKBOX_EXTS.test(f)) && !(await ensureBlackboxDecoder())) {
       return;
     }
@@ -1918,14 +2101,77 @@
     await importFiles(supported);
   }
 
-  /** Import a mission file dropped anywhere over the app (the docs' "drag a mission file onto the
-   *  map") — the ONLY working drop path is Tauri's native drag-drop event: with `dragDropEnabled`
-   *  the WebView never sees DOM drop events, so element-scoped drop zones cannot exist. Routed by
-   *  extension: .mission → INAV, .plan/.waypoints → the ArduPilot/PX4 stack. `.txt` stays with the
-   *  logbook (SD blackbox logs use it too). If the file belongs to the other mission family, the
-   *  editor switches — with 'keep': INAV and Ardu keep separate stores, so nothing is lost — unless
-   *  a connected FC locks the system, which reports instead of silently importing into a hidden
-   *  store. */
+  /** A dropped library mission goes onto the map only when the map is empty (both editors) and, with a
+   *  vehicle connected, only when it is that vehicle's system. Returns the system to show it in, or null. */
+  function mapSystemForDrop(m: LibraryMission): 'inav' | 'ardupilot' | 'px4' | null {
+    if (getTotalWpCount() > 0 || get(arduMission).length > 0) return null;
+    const target = m.format === 'ardupilot' || m.format === 'px4' ? m.format : 'inav';
+    if (get(autopilotSystem) === target) return target;
+    return get(autopilotLocked) ? null : target;
+  }
+
+  /** `.kmission` files dropped on the window: all go into the library; with `showOnMap` the first one
+   *  `mapSystemForDrop` admits is also shown on the map. */
+  async function importDroppedLibraryMissions(paths: string[], showOnMap: boolean): Promise<void> {
+    let added = 0;
+    let known = 0;
+    let shown = !showOnMap;
+    for (const path of paths) {
+      try {
+        const res = await importMissionFile(path, flightLogDbPath, showDialog, (key) => $t(key));
+        if (!res) continue;
+        if (res.added) {
+          added++;
+          void missionDbGeocode(res.id, $locale ?? 'en', flightLogDbPath)
+            .then(() => missionLibraryRevision.update((n) => n + 1))
+            .catch(() => {});
+        } else {
+          known++;
+        }
+        // Not a failed import when only the map step fails: the entry is in the library.
+        if (!shown) shown = await showLibraryMissionOnMap(res.id).catch(() => false);
+      } catch (e) {
+        errorMsg = $t('mission.importFailed', { values: { error: String(e) } });
+      }
+    }
+    if (added + known === 0 || (showOnMap && shown && paths.length === 1)) return;
+    await showInfo(
+      $t('missionMgr.title'),
+      $t('missionMgr.importedCount', { values: { added: String(added), known: String(known) } }),
+    );
+  }
+
+  async function showLibraryMissionOnMap(id: number): Promise<boolean> {
+    const m = await missionDbGet(id, flightLogDbPath);
+    const system = m ? mapSystemForDrop(m) : null;
+    if (!m || !system) return false;
+    if (get(autopilotSystem) !== system) setAutopilotSystem(system);
+    if (get(autopilotSystem) !== system) return false;
+    if (system === 'inav') {
+      const loaded = await missionLoadLibrary(JSON.parse(m.waypoints_json));
+      loadedMissionId.set(m.id);
+      applyMissionLaunchDefault(
+        loaded,
+        m.home_lat != null && m.home_lon != null ? { lat: m.home_lat, lng: m.home_lon } : undefined,
+        true,
+      );
+    } else {
+      const wps = JSON.parse(m.waypoints_json) as ArduWaypoint[];
+      const cls = knownVehicleClass(m.vehicle_class);
+      if (cls) setArduVehicleClass(cls);
+      arduMission.set(wps);
+      arduSelectedWpIndex.set(-1);
+      arduLoadedMissionId.set(m.id);
+      arduClearUndoHistory();
+      markArduMissionSynced('db', wps);
+    }
+    frameMissionOnMap();
+    return true;
+  }
+
+  /** Import a mission file dropped anywhere — only via Tauri's native drag-drop event (with dragDropEnabled
+   *  the WebView gets no DOM drop events). .mission → INAV, .plan/.waypoints → ArduPilot/PX4 (.txt is the
+   *  logbook's); switches the editor family ('keep') unless a connected FC locks it, which reports instead. */
   async function importDroppedMission(path: string): Promise<void> {
     console.log('[IMPORT] mission file dropped:', path);
     try {
@@ -1937,7 +2183,11 @@
           if (get(pendingSystemSwitch)) confirmSystemSwitch('keep');
           if (get(autopilotSystem) !== 'inav') return;
         }
-        await missionImportXml(content);
+        await missionImportXml(content, async (count) => (await showDialog({
+          title: $t('missionMgr.replaceTitle'),
+          message: $t('missionMgr.replaceSetMsg', { values: { count: String(count) } }),
+          buttons: [{ label: $t('missionMgr.replaceYes'), value: 'replace', primary: true }],
+        })) === 'replace');
       } else {
         const isPlan = /\.plan$/i.test(path);
         const wps = isPlan ? parsePlanFile(content) : parseWaypoints(content);
@@ -1947,7 +2197,7 @@
           if (get(pendingSystemSwitch)) confirmSystemSwitch('keep');
           if (get(autopilotSystem) === 'inav') return;
         }
-        loadArduMissionFromFile(wps);
+        loadArduMissionFromFile(wps, isPlan ? planVehicleClass(content) : null);
       }
       frameMissionOnMap();
     } catch (e) {
@@ -1958,7 +2208,6 @@
   async function exportFlightsToKflight(flightIds: number[]) {
     if (flightIds.length === 0) return;
     try {
-      // Auto-include linked partner flights
       const allIds = new Set(flightIds);
       for (const id of flightIds) {
         const summary = flightSummaries.find((f) => f.id === id);
@@ -1966,13 +2215,18 @@
       }
       const exportIds = [...allIds];
 
-      const outputPath = await save({
+      // One flight (with its linked partner): named after it; several: after their number.
+      const named = flightSummaries.find((f) => f.id === flightIds[0]);
+      const stem = flightIds.length === 1 && named ? flightFileStem(named) : `Flights_${exportIds.length}`;
+      let count = 0;
+      const outputPath = await exportFile({
+        name: `${stem}.kflight`,
         filters: [{ name: $t('logbook.kflightFileFilter'), extensions: ['kflight'] }],
-        defaultPath: exportIds.length === 1 ? `flight_${exportIds[0]}.kflight` : `flights_export.kflight`,
+        write: async (path) => { count = await logbookCtrl.exportSelectedFlights(exportIds, path, flightLogDbPath); },
       });
       if (!outputPath) return;
-      const count = await logbookCtrl.exportSelectedFlights(exportIds, outputPath, flightLogDbPath);
-      await showInfo($t('logbook.exportTitle'), $t('logbook.exportSuccess', { values: { count } }));
+      // The share sheet is the confirmation on mobile; a dialog under it would only be in the way.
+      if (!sharesExports) await showInfo($t('logbook.exportTitle'), $t('logbook.exportSuccess', { values: { count } }));
     } catch (e) {
       errorMsg = String(e);
     }
@@ -1983,22 +2237,17 @@
     const src = selectedFlight.source;
     if (src !== 'blackbox' && src !== 'both') return;
     try {
-      // Keep the stored original file's extension (INAV .txt/.bbl, ArduPilot .bin, .tlog, raw-MSP, …)
-      // and build a descriptive default name: <craft>_<date>_<flightId>.<ext>. The user can rename in
-      // the dialog. (Previously hardcoded to blackbox_flight_<id>.TXT — wrong extension for non-INAV.)
       const orig = blackboxFileInfo?.filename ?? '';
       const dot = orig.lastIndexOf('.');
       const ext = (dot > 0 ? orig.slice(dot + 1) : 'log').toLowerCase();
-      const craft = (selectedFlight.craft_name || 'flight')
-        .trim().replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^_+|_+$/g, '') || 'flight';
-      const date = (selectedFlight.start_time ?? '').slice(0, 10); // YYYY-MM-DD
-      const base = date ? `${craft}_${date}_${selectedFlightId}` : `${craft}_${selectedFlightId}`;
-      const outputPath = await save({
+      const base = flightFileStem(selectedFlight);
+      const flightId = selectedFlightId;
+      const outputPath = await exportFile({
+        name: `${base}.${ext}`,
         filters: [{ name: $t('logbook.blackboxFileFilter'), extensions: [ext] }],
-        defaultPath: `${base}.${ext}`,
+        write: (path) => logbookCtrl.exportBlackbox(flightId, path, activeDbPath),
       });
-      if (!outputPath) return;
-      await logbookCtrl.exportBlackbox(selectedFlightId, outputPath, activeDbPath);
+      if (!outputPath || sharesExports) return;
       const savedName = outputPath.split(/[\\/]/).pop() ?? `${base}.${ext}`;
       await showInfo($t('logbook.exportBlackboxTitle'), $t('logbook.exportBlackboxSuccess', { values: { filename: savedName } }));
     } catch (e) {
@@ -2044,32 +2293,66 @@
   }
 
   async function compactDb() {
-    try {
-      const sizeBytes = await logbookCtrl.compactDb(flightLogDbPath);
-      const mb = (sizeBytes / (1024 * 1024)).toFixed(1);
-      await showInfo($t('settings.compactDb'), $t('settings.compactDbDone', { values: { size: `${mb} MB` } }));
-    } catch (e) {
-      errorMsg = String(e);
+    if (dbCompacting) return;
+    // An import writes to the same database in batches; a compact in between would lock it out.
+    if (blackboxImporting) {
+      errorMsg = $t('settings.compactDbBusyImport');
+      return;
     }
+    dbCompacting = true;
+    let stats: Awaited<ReturnType<typeof logbookCtrl.compactDb>>;
+    try {
+      stats = await logbookCtrl.compactDb(flightLogDbPath);
+    } catch (e) {
+      // `compact-recording:` / `compact-running:` are stable markers of flightlog_compact_db.
+      const msg = String(e);
+      if (msg.includes('compact-recording:')) errorMsg = $t('settings.compactDbBusyRecording');
+      else if (msg.includes('compact-running:')) errorMsg = $t('settings.compactDbBusyRunning');
+      else errorMsg = msg;
+      return;
+    } finally {
+      dbCompacting = false;
+    }
+    const mb = (bytes: number) => `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    const freed = Math.max(0, stats.size_before - stats.size_after);
+    await showInfo(
+      $t('settings.compactDb'),
+      [
+        $t('settings.compactDbDone', { values: { size: mb(stats.size_after) } }),
+        $t('settings.compactDbFreed', { values: { freed: mb(freed) } }),
+      ].join('\n'),
+    );
   }
+
+  const TRACK_FORMATS = [
+    { name: 'KMZ (Google Earth)', extensions: ['kmz'] },
+    { name: 'KML (Google Earth)', extensions: ['kml'] },
+    { name: 'GPX (GPS Exchange)', extensions: ['gpx'] },
+    { name: 'CSV (Spreadsheet)', extensions: ['csv'] },
+  ];
 
   async function exportTrack() {
     if (!selectedFlightId || !selectedFlight) return;
     try {
-      const craft = selectedFlight.craft_name || 'flight';
-      const date = selectedFlight.start_time ? new Date(selectedFlight.start_time).toISOString().slice(0, 10) : '';
-      const defaultName = `${craft}_${date}`.replace(/\s+/g, '_');
-      const outputPath = await save({
-        filters: [
-          { name: 'KMZ (Google Earth)', extensions: ['kmz'] },
-          { name: 'KML (Google Earth)', extensions: ['kml'] },
-          { name: 'GPX (GPS Exchange)', extensions: ['gpx'] },
-          { name: 'CSV (Spreadsheet)', extensions: ['csv'] },
-        ],
-        defaultPath: `${defaultName}.kmz`,
+      // The backend tells the format from the extension. Desktop picks it in the save dialog; with the
+      // share sheet there is no such dialog, so it is asked for here.
+      let filters = TRACK_FORMATS;
+      if (sharesExports) {
+        const ext = await showDialog({
+          title: $t('logbook.exportTrack'),
+          message: $t('logbook.exportTrackFormat'),
+          buttons: TRACK_FORMATS.map((f) => ({ label: f.extensions[0].toUpperCase(), value: f.extensions[0] })),
+        });
+        if (ext == null) return;
+        filters = TRACK_FORMATS.filter((f) => f.extensions[0] === ext);
+      }
+      const flightId = selectedFlightId;
+      const outputPath = await exportFile({
+        name: `${flightFileStem(selectedFlight)}.${filters[0].extensions[0]}`,
+        filters,
+        write: (path) => logbookCtrl.exportTrack(flightId, path, activeDbPath),
       });
-      if (!outputPath) return;
-      await logbookCtrl.exportTrack(selectedFlightId, outputPath, activeDbPath);
+      if (!outputPath || sharesExports) return;
       await showInfo($t('logbook.exportTrackTitle'), $t('logbook.exportTrackSuccess'));
     } catch (e) {
       errorMsg = String(e);
@@ -2077,7 +2360,13 @@
   }
 
 
-  async function performImport(filePath: string, logIndex: number | undefined, forceImport: boolean) {
+  /** Import one INAV Blackbox log. Resolves 'skipped' when the user declined a duplicate, 'imported'
+   *  otherwise; a failed import rejects. */
+  async function performImport(
+    filePath: string,
+    logIndex: number | undefined,
+    forceImport: boolean,
+  ): Promise<'imported' | 'skipped'> {
     const result = await logbookCtrl.importBlackbox(filePath, flightLogDbPath, logIndex, forceImport, $locale ?? 'en');
     
     if (result.type === 'duplicate') {
@@ -2093,8 +2382,9 @@
       });
       
       if (answer === 'force') {
-        await performImport(filePath, logIndex, true);
+        return performImport(filePath, logIndex, true);
       }
+      return 'skipped';
     } else {
       if (result.type === 'success_linkable') {
         const answer = await showDialog({
@@ -2103,10 +2393,16 @@
           buttons: [{ label: $t('logbook.linkYes'), value: 'link', primary: true }],
         });
         if (answer === 'link') {
-          await logbookCtrl.linkFlights(result.flight_id, result.linkable_flight_id, flightLogDbPath);
+          // The flight is stored already: a failed link is reported, the import still counts.
+          try {
+            await logbookCtrl.linkFlights(result.flight_id, result.linkable_flight_id, flightLogDbPath);
+          } catch (e) {
+            errorMsg = $t('logbook.linkFailed', { values: { id: result.linkable_flight_id, error: String(e) } });
+          }
         }
       }
       await afterRealImport(result.flight_id);
+      return 'imported';
     }
   }
 
@@ -2162,6 +2458,8 @@
   async function selectFlight(flightId: number) {
     selectedFlightId = flightId;
     const data = await logbookCtrl.selectFlightData(flightId, activeDbPath, $locale ?? 'en');
+    // The location / weather lookup inside can take a moment — another flight may be selected by now.
+    if (selectedFlightId !== flightId) return;
     selectedFlight = data.flight;
     selectedFlightTrack = data.track;
     selectedFlightTrackCount = data.trackCount;
@@ -2176,10 +2474,8 @@
     resetPlayback();
     resetHires(true); // a different flight's cache is stale — drop it
 
-    // While connected to a UAV, selecting a logbook entry shows DETAILS ONLY — nothing is loaded
-    // onto the map (no mission, home, launch or playback), so the live FC mission/home stay
-    // authoritative (this was the source of the FC↔map desync). To fly a logbook flight's mission,
-    // open it from the detail's linked-mission chip → Mission Manager.
+    // While connected, selecting a logbook entry shows DETAILS ONLY — nothing goes onto the map, so the live
+    // FC mission/home stay authoritative. A flight's mission flies via its linked-mission chip → Mission Manager.
     if (connStatus === 'connected') {
       replayWpTotal.set(null);
       await loadLogbook();
@@ -2188,10 +2484,8 @@
 
     if (data.hasGpsData) playbackActive = true;
 
-    // Resolve the replay WP total (X for the WP N/X readout) and load the flown mission.
-    // If the flight has a linked library mission, load it onto the map (so the mission overlay
-    // + active-WP highlight show what was actually flown — hideable via the player MISSION
-    // toggle). X = linked mission's WP count, else the Blackbox-header count, else null.
+    // Replay WP total (X in WP N/X): the linked library mission's count (it is loaded onto the map for the
+    // overlay + active-WP highlight), else the Blackbox-header count, else null.
     replayWpTotal.set(null);
     try {
       const linked = await missionDbForFlight(flightId, activeDbPath);
@@ -2200,9 +2494,8 @@
           const linkedSys = linked.format === 'ardupilot' || linked.format === 'px4' ? linked.format : 'inav';
           if (linkedSys === 'inav') {
             switchAutopilotSystemForReplay('inav');
-            await missionSetWaypoints(JSON.parse(linked.waypoints_json));
+            await missionLoadLibrary(JSON.parse(linked.waypoints_json));
             loadedMissionId.set(linked.id);
-            markMissionSynced('db'); // it's the library mission → trusted for the highlight
             // Launch/home reference for the replay mission (REL waypoint altitudes + 3D height):
             // the real flown start if known, else the mission's saved home, else its first waypoint.
             const fl = data.flight;
@@ -2495,13 +2788,9 @@
     selectedPort = await refreshSerialPorts(selectedPort);
   }
 
-  // ── Auto-discovery while disconnected (Quick Note: auto-discover changed COM ports + auto-scan BLE) ──
-  // Only runs while a connection is neither active nor being established. The kickoff is wrapped in
-  // `untrack` so the effect tracks only the transport/status it gates on — never the port/scan state it
-  // writes (which would self-trigger).
-  //
-  // Serial: cheap port enumeration polled every 1 s; newly plugged adapters are auto-selected and
-  // unplugged ones disappear (diff logic in refreshSerialPorts) — no manual ⟳ needed.
+  // ── Auto-discovery while disconnected ──
+  // The kickoff is `untrack`ed: the effect tracks only the transport/status it gates on, never the
+  // port/scan state it writes (self-trigger). Serial: ports enumerated every 1 s, diffed in refreshSerialPorts.
   $effect(() => {
     if (selectedTransport !== 'serial' || connStatus === 'connected' || connStatus === 'connecting') return;
     const id = setInterval(() => { void refreshPorts(); }, 1000);
@@ -2509,12 +2798,9 @@
     return () => clearInterval(id);
   });
 
-  // BLE discovery is a firehose: the backend scan puts the adapter into CONTINUOUS discovery, and
-  // BlueZ emits a D-Bus signal per advertisement (hundreds/s in a busy RF area) for as long as it
-  // runs — pegging dbus-daemon + bluetoothd, not Kite itself. So we never hold it open: each scan is
-  // a short bounded WINDOW. One fires on entering BLE (list ready), and one each time the device
-  // dropdown is opened (fresh RSSI) via onRescanBle. Devices stream in through the `ble-device` event
-  // (listener set up in initPage) during the window.
+  // BLE discovery is never held open: BlueZ emits a D-Bus signal per advertisement during CONTINUOUS
+  // discovery, pegging dbus-daemon + bluetoothd. Each scan is a short WINDOW — on entering BLE and on each
+  // dropdown open (onRescanBle); devices stream in via the `ble-device` event.
   let bleScanTimer: ReturnType<typeof setTimeout> | undefined;
   const BLE_SCAN_WINDOW_MS = 6000;
   function bleScanWindow() {
@@ -2579,6 +2865,12 @@
         if (choice === 'cancel') return; // stay connected
         // Capture the flown mission now (still connected + FC-synced) for a Save/Continue commit.
         captureEndedMission();
+        // The vehicle whose session gets stashed — read before the disconnect clears the active one.
+        // Only a link's PRIMARY recorder parks a pending session (secondaries auto-commit), so a selected
+        // secondary maps to its link's primary; an unknown active vehicle falls back to "the only one".
+        const active = get(activeVehicleId);
+        const ownerLink = active ? get(links).find((l) => l.linkId === parseVehicleId(active)?.link) : undefined;
+        const vid = ownerLink?.primaryVehicleId ?? active;
         try {
           await disconnectFC(selectedBaud); // backend stashes the active flight as the pending session
         } catch (e) {
@@ -2587,14 +2879,15 @@
         }
         try {
           if (choice === 'discard') {
-            await flightlogDiscardPending();
+            await flightlogDiscardPending(vid);
           } else if (choice === 'save') {
-            const flightId = await flightlogCommitPending();
-            await linkEndedMission(flightId, false);
-            void loadLogbook();
+            const flightId = await commitPendingOrReportKept(vid);
+            if (flightId !== null) {
+              await linkEndedMission(flightId, false);
+              void loadLogbook();
+            }
           } else if (choice === 'continue') {
-            await flightlogContinuePending();
-            awaitingResumeReconnect = true;
+            if (await flightlogContinuePending(vid)) awaitingResumeReconnect = true;
           }
         } catch (e) {
           console.warn('[disconnect-armed] action failed', e);
@@ -2616,10 +2909,6 @@
       errorMsg = $t('connection.noPortSelected');
       return;
     }
-    if ((selectedTransport === 'tcp' || selectedTransport === 'udp') && !tcpHost) {
-      errorMsg = $t('connection.noHostSpecified');
-      return;
-    }
     if (selectedTransport === 'ble' && !selectedBleDevice) {
       errorMsg = $t('connection.noBleDeviceSelected');
       return;
@@ -2639,7 +2928,8 @@
         transportType: selectedTransport,
         port: selectedTransport === 'serial' ? selectedPort : undefined,
         baudRate: selectedTransport === 'serial' ? selectedBaud : undefined,
-        host: (selectedTransport === 'tcp' || selectedTransport === 'udp') ? tcpHost : undefined,
+        // A blank host is this machine; `lastHost` above keeps what was typed, so it stays blank.
+        host: (selectedTransport === 'tcp' || selectedTransport === 'udp') ? netHostOrLocal(tcpHost) : undefined,
         tcpPort: (selectedTransport === 'tcp' || selectedTransport === 'udp') ? tcpPort : undefined,
         bleDeviceId: selectedTransport === 'ble' ? selectedBleDevice : undefined,
         attitudeRateHz,
@@ -2656,7 +2946,11 @@
       });
     } catch (e) {
       errorMsg = String(e);
-      connection.set({ status: "error", protocolType: selectedProtocol, transportType: selectedTransport, port: "", baudRate: selectedBaud, errorMessage: String(e), fcInfo: null });
+      // Multi-vehicle: a failed attempt must not paint the UI "disconnected" while other links are up.
+      const stillUp = await recoverBackendLinks().catch(() => false);
+      if (!stillUp) {
+        connection.set({ status: "error", protocolType: selectedProtocol, transportType: selectedTransport, port: "", baudRate: selectedBaud, errorMessage: String(e), fcInfo: null, mspTunnel: false });
+      }
     } finally {
       isConnecting = false;
     }
@@ -2665,6 +2959,13 @@
   async function initPage() {
     await startBleDeviceListener(); // live BLE discovery → bleDevices store
     await loadInfo();
+    // The `--fleet` launch flag → fleet UI on/off; then the once-per-run "only the first vehicle is
+    // recorded" notice of a fleet session without group recording.
+    void loadFleetMode().then(startFleetRecordingNotice);
+    // Links the backend still holds (page reload / a UI state that drifted) → show them as connected.
+    void recoverBackendLinks().catch((e) => {
+      void invoke('log_frontend', { level: 'warn', area: 'ui', message: `recoverBackendLinks failed at start-up: ${e}` }).catch(() => {});
+    });
     try {
       defaultFlightLogPath = await getDefaultFlightlogPath();
     } catch {
@@ -2676,7 +2977,8 @@
       defaultRawLogPath = '';
     }
     if (activeTab === 'logbook') {
-      await loadLogbook();
+      // After a failed upgrade a load would run the backup again, on the main thread.
+      if ((await dbUpgradeOutcome) !== 'failed') await loadLogbook();
     }
   }
 
@@ -2702,14 +3004,57 @@
   function patchPhoneWidgets(next: PhoneWidgetsConfig) {
     if (next !== $settings.phoneWidgets) settings.patch({ phoneWidgets: next });
   }
-  // The video store learns whether a Video widget is on screen (dock or phone grid): Start then
-  // leaves the floating window parked — the widget is the picture.
+  /** A drop in a column cell (from the column or out of a bottom slot); refused when the column has
+   *  no room for a widget coming back from a slot. */
+  function phoneMoveToColumn(id: string, page: number, row: number, col: number) {
+    const next = phoneCtrl.movePhoneWidget(phoneWidgets, id, page, row, col);
+    if (next === null) {
+      void showInfo($t('widgets.phoneNoSpaceTitle'), $t('widgets.phoneNoSpace'));
+      return;
+    }
+    patchPhoneWidgets(next);
+  }
+  /** A drop on a bottom slot; refused when the widget it displaces has no room in the column. */
+  function phoneMoveToBottom(id: string, slot: phoneCtrl.PhoneBottomSlot) {
+    const next = phoneCtrl.movePhoneWidgetToBottom(phoneWidgets, id, slot);
+    if (next === null) {
+      void showInfo($t('widgets.phoneNoSpaceTitle'), $t('widgets.phoneNoSpace'));
+      return;
+    }
+    patchPhoneWidgets(next);
+  }
+  // Phone map search: the top-most button of the map's corner column — above the 2D/3D and follow
+  // buttons, and above the docked video's toggle while PhoneVideoDock shows it (a live source, the
+  // video not in a widget tile). Not while the map is the docked frame's mini map: no jump goes there.
+  const PHONE_CTL_STEP_PX = 46; // 38 px button + 8 px gap, as the corner column
+  const phoneSearchShown = $derived(phoneUi && !mapInFrame);
+  const phoneSearchBottomPx = $derived(
+    8 + PHONE_CTL_STEP_PX * (hasVideo && $videoState.status === 'live' && !phoneCtrl.isPhoneWidgetActive(phoneWidgets, 'videoFeed') ? 3 : 2),
+  );
+
+  // The video store needs it: Start then leaves the floating window parked — the tile is the picture.
+  const videoTileOnScreen = $derived(
+    phoneUi
+      ? phoneCtrl.isPhoneWidgetActive(phoneWidgets, 'videoFeed')
+      : (panels.bottom.includes('videoFeed') && $layout.bottomDock.visible) ||
+          (panels.right.includes('videoFeed') && $layout.sideDock.visible),
+  );
   $effect(() => {
-    setVideoWidgetActive(
-      phoneUi
-        ? phoneCtrl.isPhoneWidgetActive(phoneWidgets, 'videoFeed')
-        : panels.bottom.includes('videoFeed') || panels.right.includes('videoFeed'),
-    );
+    setVideoWidgetActive(videoTileOnScreen);
+  });
+  // A map in the floating window moves into the video tile once that window is gone: put away, or — phone —
+  // replaced by the tile (the grid's video widget takes the dock's place). Not while the phone's edit mode
+  // parks the window for the moment; checked a task later, when the dock has reacted to the same change.
+  $effect(() => {
+    const windowGone = phoneUi || !$videoState.floating;
+    if ($videoState.mapLocation !== 'floating' || !videoTileOnScreen || !windowGone || phoneEdit.editing) return;
+    const id = setTimeout(() => {
+      const v = get(videoState);
+      if (v.mapLocation === 'floating' && v.status === 'live' && (phoneUi || !v.floating) && !phoneEdit.editing) {
+        setMapLocation('widget');
+      }
+    }, 0);
+    return () => clearTimeout(id);
   });
 
   function toggleWidget(widgetId: string) {
@@ -2733,6 +3078,10 @@
 
   function getWidgetPanelLabel(widgetId: string): string {
     if (phoneUi) {
+      const slot = phoneCtrl.bottomSlotOf(phoneWidgets, widgetId);
+      if (slot === 'left') return $t('widgets.bottomLeft');
+      if (slot === 'centre') return $t('widgets.bottomCentre');
+      if (slot === 'right') return $t('widgets.bottomRight');
       const page = phoneCtrl.phoneWidgetPage(phoneWidgets, widgetId);
       return page == null ? $t('widgets.off') : $t('widgets.phonePage', { values: { n: page + 1 } });
     }
@@ -2761,10 +3110,8 @@
       : null,
   );
   const showPlayer = $derived(playbackActive && !isPrimaryConnected && selectedFlight != null);
-  // Blackbox-replay position for the video-backdrop map — a replayed model is a valid UAV
-  // position, so the backdrop follows it exactly like the mini map does. Null outside a
-  // replay or when the record carries no usable coordinates (the track is already
-  // GPS-filtered above, so the null checks are belt-and-braces).
+  // Blackbox-replay position for the video-backdrop map (it follows it like the mini map); null outside a
+  // replay or without usable coordinates.
   const ufReplayPos = $derived(
     playbackPoint != null && playbackPoint.lat != null && playbackPoint.lon != null
       ? { lat: playbackPoint.lat, lon: playbackPoint.lon }
@@ -2773,6 +3120,16 @@
   // Mirror replay-mode state to the store so the map layers can gate mission
   // visibility (replay → follow the MISSION toggle; planning/live → always show).
   $effect(() => { replayActive.set(showPlayer); });
+  $effect(() => {
+    void loadReplayWind(showPlayer ? selectedFlightId : null, activeDbPath);
+  });
+  $effect(() => {
+    const ts = playbackPoint?.timestamp_ms;
+    if (!showPlayer || ts == null || replayStartEpochMs == null) return;
+    // The linked blackbox track counts from the FC's boot, the weather rows from the recording's start.
+    const offset = activeReplayTrack === selectedFlightTrack ? 0 : (activeReplayTrack[0]?.timestamp_ms ?? 0);
+    seekReplayWind(ts - offset, replayStartEpochMs);
+  });
   const playbackBaseMs = $derived(
     selectedTrackWithPosition.length > 0 ? selectedTrackWithPosition[0].timestamp_ms : 0,
   );
@@ -2830,10 +3187,23 @@
       : liveTelem,
   );
 
+  // Widgets on phones and tablets: one telemetry snapshot per tick (the rate rows are stored at). The
+  // desktop keeps every sample — high-resolution replay exceeds it.
+  const WIDGET_TICK_MS = 100;
+  const tickedTelem = isMobile ? tickSnapshot(() => telem, WIDGET_TICK_MS) : null;
+  const widgetTelem = $derived(tickedTelem ? tickedTelem() : telem);
+  // The video tile takes no dock space while it has nothing to show — no stream, or (a native sink with
+  // one output) the floating window holds the picture; edit mode shows it for placing.
+  const videoTileBehindWindow = $derived(NATIVE_SURFACE_CAP === 1 && $videoState.nativeSink && $videoState.floating);
+  const idleWidgetIds = $derived($videoState.status === 'off' || videoTileBehindWindow ? ['videoFeed'] : []);
+  // Docks only (the phone grid keeps its tile): a map inside the tile moves on before the tile hides.
+  $effect(() => {
+    if (!phoneUi && videoTileBehindWindow && $videoState.mapLocation === 'widget') setMapLocation('floating');
+  });
+
   // ── Active-WP highlight trust gating (see MISSION_TRACKING_AND_PROVENANCE.md) ──
-  // The highlight only shows when the loaded mission is trusted for the active context:
-  //  - replay: the mission has the DB flag (or the user confirmed once for this log/file)
-  //  - live:   the mission has the FC flag and the UAV is armed (or the user confirmed at arm)
+  // Replay: the mission has the DB flag (or the user confirmed once for this log/file).
+  // Live: the mission has the FC flag and the UAV is armed (or the user confirmed at arm).
   let replayTrackConfirmed = $state(false);
   let liveTrackConfirmed = $state(false);
   let replayAskedFlightId: number | null = null;
@@ -2859,10 +3229,10 @@
     let trusted = false;
     if (isReplay) trusted = f.db || replayTrackConfirmed;
     else if (isPrimaryConnected) {
-      // ArduPilot/MAVLink reports its own current mission item (MISSION_CURRENT) — that is the FC's
-      // own truth, so trust it whenever armed + in a mission mode. INAV needs the mission to be FC-
-      // synced (or operator-confirmed) since the active WP is matched against the loaded planner mission.
-      const fcOwnsActiveWp = get(connection).protocolType === 'mavlink';
+      // ArduPilot/MAVLink reports its own current item (MISSION_CURRENT) — trusted whenever armed in a mission
+      // mode. INAV (also over MSP over MAVLink) matches against the planner mission, so it needs FC sync or
+      // operator confirmation.
+      const fcOwnsActiveWp = get(isArduPilotLink);
       trusted = armed && (fcOwnsActiveWp || f.fc || liveTrackConfirmed);
     }
     activeWpNumber.set(inWpMode && trusted ? wp : 0);
@@ -2891,10 +3261,8 @@
     prevFileFlagForTrack = fileFlag;
   });
 
-  // Live prompt: once at arm, if connected and the mission isn't FC-synced.
-  // Suppressed while a system switch is pending (e.g. an INAV mission is still loaded when an
-  // ArduPilot FC connects): the Clear-or-Disconnect dialog handles that mission, so tracking the
-  // soon-to-be-cleared INAV waypoints during the new flight is meaningless.
+  // Live prompt: once at arm, if connected and the mission isn't FC-synced. Suppressed while a system switch
+  // is pending — the Clear-or-Disconnect dialog handles that mission.
   $effect(() => {
     const armed = isArmed(telem.armingFlags, telem.lastUpdate);
     if (isPrimaryConnected && armed && !prevArmedForTrack && !get(pendingSystemSwitch)) {
@@ -2916,8 +3284,8 @@
   });
 
   async function onConnectMissionPrompt() {
-    // INAV/MSP only for now (ArduPilot/MAVLink mission sync is a separate path).
-    if (get(connection).protocolType !== 'msp') return;
+    // INAV/MSP only for now — direct or MSP over MAVLink (ArduPilot/MAVLink mission sync is a separate path).
+    if (!get(hasMsp)) return;
     let fcWpCount = 0;
     try { fcWpCount = (await missionFcInfo()).wp_count; } catch { /* FC may not answer — treat as none */ }
     const mapHasMission = get(mission).waypoints.length > 0;
@@ -2948,26 +3316,29 @@
   });
 
   // ── Mission recording link (deferred commit, ADR-041) ────────────────
-  // The flown mission is captured at disarm (while FC-sync still reflects what the FC flew) and
-  // linked when the pending session is committed (Save, or a grace-lapsed re-arm auto-commit).
-  // Captured per active autopilot system: INAV carries an FC-sync flag (links silently when synced);
-  // ArduPilot/PX4 have no provenance flag yet (Phase 2) → linked only on explicit user opt-in.
+  // Captured at disarm (FC sync still reflects what was flown), linked at commit. INAV links silently when
+  // FC-synced; ArduPilot/PX4 have no provenance flag → linked only on explicit opt-in.
   interface EndedMissionSnapshot {
     system: 'inav' | 'ardupilot' | 'px4';
     inavWps: Waypoint[];
     arduWps: ArduWaypoint[];
     fc: boolean;
+    /** Vehicle class of the ArduPilot / PX4 editor at capture: the prompt may be answered much later. */
+    cls: string | null;
   }
-  let endedMission: EndedMissionSnapshot = { system: 'inav', inavWps: [], arduWps: [], fc: false };
+  let endedMission: EndedMissionSnapshot = { system: 'inav', inavWps: [], arduWps: [], fc: false, cls: null };
 
   /** Snapshot the flown mission from the active autopilot system (at disarm / interrupt). */
   function captureEndedMission(): void {
+    endedMission = currentMissionSnapshot();
+  }
+
+  function currentMissionSnapshot(): EndedMissionSnapshot {
     const sys = get(autopilotSystem);
     if (sys === 'inav') {
-      endedMission = { system: 'inav', inavWps: [...get(mission).waypoints], arduWps: [], fc: get(missionFlags).fc };
-    } else {
-      endedMission = { system: sys, inavWps: [], arduWps: [...get(arduMission)], fc: false };
+      return { system: 'inav', inavWps: [...get(mission).waypoints], arduWps: [], fc: get(missionFlags).fc, cls: null };
     }
+    return { system: sys, inavWps: [], arduWps: [...get(arduMission)], fc: false, cls: get(arduVehicleClass) };
   }
 
   function endedMissionHasWps(snap: EndedMissionSnapshot): boolean {
@@ -2983,7 +3354,7 @@
       loadedMissionId.set(id);
     } else {
       const fmt = snap.system === 'px4' ? 'px4' : 'ardupilot';
-      id = await missionDbSave(await buildArduMissionInput(snap.arduWps, { format: fmt }), flightLogDbPath);
+      id = await missionDbSave(await buildArduMissionInput(snap.arduWps, { format: fmt, vehicleClass: snap.cls }), flightLogDbPath);
       arduLoadedMissionId.set(id);
     }
     await flightLinkMission(flightId, id, flightLogDbPath);
@@ -2999,9 +3370,8 @@
     catch (e) { console.warn('[end-flight] mission link failed', e); }
   }
 
-  // Fresh recording started — clear any stale captured-mission snapshot (defensive).
   function onRecordingStarted(): void {
-    endedMission = { system: 'inav', inavWps: [], arduWps: [], fc: false };
+    endedMission = { system: 'inav', inavWps: [], arduWps: [], fc: false, cls: null };
   }
 
   /** Switch the active autopilot system for replay rendering (the mission layer switches on it),
@@ -3013,22 +3383,81 @@
     if (get(pendingSystemSwitch)) confirmSystemSwitch('keep');
   }
 
-  async function onRecordingEnded(stats: EndFlightStats): Promise<void> {
+  /** Only the active vehicle's session gets the flown mission (the planner follows it); others get an empty
+   *  snapshot. No active vehicle (a recorder reports before its announcement) → captured as well. Taken when
+   *  the recording ends; its dialog may open later (flightDialogQueue). */
+  function endedMissionFor(vehicleId: string | null): EndedMissionSnapshot {
+    const active = get(activeVehicleId);
+    if (vehicleId == null || active == null || vehicleId === active) return currentMissionSnapshot();
+    return { system: 'inav', inavWps: [], arduWps: [], fc: false, cls: null };
+  }
+
+  /** The backend had no pending session to commit (nothing was recorded, or a re-arm resolved it) —
+   *  not a failed save. Matches the unchanged backend error text. */
+  function isNothingPending(e: unknown): boolean {
+    return String(e).includes('No pending recording session to commit');
+  }
+
+  /** End-Flight Save: commit `vehicleId`'s pending session; a failed commit stays pending so the pilot can
+   *  retry, Cancel keeps it. Null = kept, nothing pending, or a re-arm / new prompt took the session meanwhile. */
+  async function commitPendingWithRetry(vehicleId: string | null): Promise<number | null> {
+    const epoch = pendingEpochOf(vehicleId);
+    for (;;) {
+      try {
+        return await flightlogCommitPending(vehicleId);
+      } catch (e) {
+        console.warn('[end-flight] save failed', e);
+        if (isNothingPending(e)) return null;
+        // ConfirmDialog adds its own Cancel (also Escape / backdrop) — that means "keep"; so does a
+        // dialog displaced by another one (resolved with null).
+        const choice = await showDialog({
+          title: $t('endFlight.saveFailedTitle'),
+          message: $t('endFlight.saveFailedMessage', { values: { error: String(e) } }),
+          buttons: [{ label: $t('endFlight.saveRetry'), value: 'retry', primary: true }],
+        });
+        if (choice !== 'retry' || pendingEpochOf(vehicleId) !== epoch) return null;
+      }
+    }
+  }
+
+  /** A Save outside the End-Flight dialog failed: the backend kept the recording — say so. */
+  async function showRecordingKept(e: unknown): Promise<void> {
+    console.warn('[recording] save failed — kept', e);
+    await showInfo($t('endFlight.saveFailedTitle'), $t('endFlight.saveKeptMessage', { values: { error: String(e) } }));
+  }
+
+  /** Save from the connection-lost / disconnect prompt; null when it failed (reported, kept). */
+  async function commitPendingOrReportKept(vehicleId: string | null): Promise<number | null> {
+    try {
+      return await flightlogCommitPending(vehicleId);
+    } catch (e) {
+      if (isNothingPending(e)) console.warn('[recording] nothing to save', e);
+      else await showRecordingKept(e);
+      return null;
+    }
+  }
+
+  async function onRecordingEnded(stats: EndFlightStats, identity: EndFlightIdentity, vehicleId: string | null, flown: EndedMissionSnapshot): Promise<void> {
     awaitingResumeReconnect = false; // a recovered session that came back disarmed is now in the dialog
-    // Capture the flown mission at disarm, while FC-sync still reflects what the FC flew.
-    captureEndedMission();
+    recordingOwner = vehicleId;
+    // The flown mission captured at disarm belongs to this dialog's session from now on.
+    endedMission = flown;
     const missionConfirm = endedMissionHasWps(endedMission) && !endedMission.fc;
     try {
-      const res = await endFlightDialog.show({ stats, recorded: true, missionConfirm });
+      const res = await endFlightDialog.show({ stats, recorded: true, missionConfirm, identity });
       // null = the dialog was force-closed by a re-arm (resumed) or a grace auto-commit — the
       // backend already resolved the pending session, so there is nothing to do here.
       if (res === null) return;
       if (res.discard) {
-        await flightlogDiscardPending();
+        await flightlogDiscardPending(vehicleId);
         return;
       }
-      // Save → commit the pending session, then link mission + battery/notes against the new id.
-      const flightId = await flightlogCommitPending();
+      // Save → commit, then link mission + battery/notes. Notes and mission link go first, so an abandoned
+      // follow-up question (battery / vehicle) cannot lose them.
+      const flightId = await commitPendingWithRetry(vehicleId);
+      if (flightId === null) return;
+      if (res.notes) await updateFlightNotes(flightId, res.notes, flightLogDbPath);
+      await linkEndedMission(flightId, res.linkMission);
       if (res.batterySerial) {
         await flightSetBatterySerial(flightId, res.batterySerial, flightLogDbPath);
         // A flight may link several packs (comma-separated). Offer to create each unknown serial; on the
@@ -3042,7 +3471,6 @@
             message: $t('endFlight.newBatteryMessage', { values: { serial } }),
             buttons: [
               { label: $t('endFlight.newBatteryCreate'), value: 'create' },
-              { label: $t('endFlight.newBatterySkip'), value: 'skip' },
             ],
           });
           if (choice === 'create') {
@@ -3054,30 +3482,27 @@
           }
         }
       }
-      // Unknown craft name → offer to create a vehicle (opens the Vehicle Manager create form
-      // pre-filled). The FC's craft name is the one just recorded for this flight.
-      const craft = (fcInfo?.craft_name ?? '').trim();
-      if (craft) {
-        const veh = await vehicleDbFindByCraftName(craft, flightLogDbPath).catch(() => null);
-        if (!veh) {
-          const choice = await showDialog({
-            title: $t('endFlight.newVehicleTitle'),
-            message: $t('endFlight.newVehicleMessage', { values: { craft } }),
-            buttons: [
-              { label: $t('endFlight.newVehicleCreate'), value: 'create' },
-              { label: $t('endFlight.newVehicleSkip'), value: 'skip' },
-            ],
-          });
-          if (choice === 'create') {
+      // Library vehicle: apply the dialog's pick to the committed flight and ask what it implies (store
+      // the FC id / FC swapped / a new vehicle / not in the library) — controllers/vehicleLinkController.
+      if (res.vehicle !== undefined) {
+        try {
+          const prefill = await settleEndFlightVehicle(showDialog, {
+            flightId,
+            craftName: identity.craftName,
+            fcUid: identity.fcUid,
+            resolution: res.resolution ?? null,
+            chosen: res.vehicle,
+          }, flightLogDbPath);
+          if (prefill) {
             activeTab = 'logbook';
             settings.patch({ activeTab: 'logbook' });
             vehicleManagerOpen.set(true);
-            vehicleManagerCreateCraft.set(craft);
+            vehicleManagerCreatePrefill.set({ ...prefill, platformType: get(connection).fcInfo?.platform_type ?? null });
           }
+        } catch (e) {
+          console.warn('[end-flight] vehicle link failed', e);
         }
       }
-      if (res.notes) await updateFlightNotes(flightId, res.notes, flightLogDbPath);
-      await linkEndedMission(flightId, res.linkMission);
       void loadLogbook();
     } catch (e) {
       console.warn('[end-flight] disarm dialog failed', e);
@@ -3087,31 +3512,32 @@
   // Disconnect while the UAV was still armed (ADR-042): the recovery prompt (Discard / Save /
   // Continue on Reconnect), NOT the End-Flight dialog — the flight may not be over (port change,
   // switch to telemetry). The session is already stashed as pending in the backend.
-  async function onRecordingInterrupted(info: { temp_path: string; craft_name: string; start_time: string; duration_sec: number; sample_count: number }): Promise<void> {
-    // Capture the flown mission (FC-sync) for a later commit.
-    captureEndedMission();
+  async function onRecordingInterrupted(info: { temp_path: string; craft_name: string; start_time: string; duration_sec: number; sample_count: number }, vehicleId: string | null, flown: EndedMissionSnapshot): Promise<void> {
+    recordingOwner = vehicleId;
+    // The flown mission (FC-sync) captured at the interrupt, for a later commit.
+    endedMission = flown;
     awaitingResumeReconnect = false;
     try {
       const choice = await recoveryPrompt.show(info, { reason: 'lost' });
       if (choice === 'discard') {
-        await flightlogDiscardPending();
+        await flightlogDiscardPending(vehicleId);
       } else if (choice === 'save') {
-        const flightId = await flightlogCommitPending();
-        await linkEndedMission(flightId, false);
-        void loadLogbook();
+        const flightId = await commitPendingOrReportKept(vehicleId);
+        if (flightId !== null) {
+          await linkEndedMission(flightId, false);
+          void loadLogbook();
+        }
       } else if (choice === 'continue') {
-        await flightlogContinuePending();
-        awaitingResumeReconnect = true; // resolved by the next connection's first poll
+        // Resolved by the next connection's first poll — when something was actually queued.
+        if (await flightlogContinuePending(vehicleId)) awaitingResumeReconnect = true;
       }
     } catch (e) {
       console.warn('[interrupted] recovery failed', e);
     }
   }
 
-  // Startup recovery (ADR-042): if a crash/close left an orphan temp session, prompt for it. A pile
-  // of stragglers is settled in this one launch: Discard sweeps them all in the backend, and after
-  // Save / Continue the scan runs again (the handled session is excluded by then) until nothing is
-  // left — no more "one prompt per start" for the same pile. Bounded so a failing action cannot spin.
+  // Startup recovery (ADR-042): prompt for orphan temp sessions. Discard sweeps them all; after Save /
+  // Continue the scan repeats (handled one excluded) until none is left — bounded so a failure cannot spin.
   async function runStartupRecovery(): Promise<void> {
     // Hi-res caches and the opened-file scratch store left by a crash are worthless (always
     // reproducible) — wipe them in passing.
@@ -3126,7 +3552,12 @@
           await recoverDiscard(orphan.temp_path); // drops every leftover, not just this one
           return;
         } else if (choice === 'save') {
-          await recoverSaveIncomplete(orphan.temp_path, flightLogDbPath);
+          try {
+            await recoverSaveIncomplete(orphan.temp_path, flightLogDbPath);
+          } catch (e) {
+            await showRecordingKept(e); // the backend keeps the file; it comes back at the next start
+            return;
+          }
           void loadLogbook();
         } else if (choice === 'continue') {
           await recoverContinue(orphan.temp_path, flightLogDbPath);
@@ -3138,16 +3569,25 @@
     }
   }
 
-  onMount(() => { void runStartupRecovery(); });
+  // After the upgrade: recovery opens the database too. No backup question on a database that failed to
+  // upgrade or belongs to a newer Kite — its backup is the way back.
+  onMount(() => {
+    void dbUpgradeOutcome.then(async (outcome) => {
+      await runStartupRecovery();
+      if (outcome === 'none' || outcome === 'done') await askAboutDbBackup(flightLogDbPath);
+    });
+  });
 
-  // The Windows main window starts hidden (`visible: false` in tauri.windows.conf.json): it is
-  // `transparent: true` for the native-video hole punch, so before the WebView's first paint the
-  // whole app area was see-through to the desktop with only the frame visible. Show it once the
-  // UI is actually mounted. No-op on platforms whose window starts visible.
+  // The Windows main window starts hidden: it is `transparent` for the native-video hole punch and would be
+  // see-through before the first paint. Shown once mounted (no-op elsewhere). A failure is fatal for a
+  // portable build (no window-state plugin to show it), so it goes to the file log.
   onMount(() => {
     void import('@tauri-apps/api/webviewWindow').then(({ getCurrentWebviewWindow }) => {
       const win = getCurrentWebviewWindow();
-      void win.show().then(() => win.setFocus()).catch(() => {});
+      const failed = (what: string) => (e: unknown) => {
+        void invoke('log_frontend', { level: 'error', area: 'ui', message: `main window ${what} failed: ${String(e)}` }).catch(() => {});
+      };
+      void win.show().then(() => win.setFocus().catch(failed('focus')), failed('show'));
     });
   });
 
@@ -3155,6 +3595,10 @@
   // class that CSS gates the expensive widget-bar transitions off (see stores/lowPower.ts). It is a
   // readable store, so it only runs while something subscribes — this is that subscription.
   onMount(() => lowPowerActive.subscribe(() => {}));
+  onMount(() => {
+    clearExportCache();
+    setExportErrorReporter((message) => { errorMsg = message; });
+  });
 
   // Hard-blink indicator mode on WebKitGTK and Android — see stores/pulseBlink.ts for why a looping
   // CSS animation costs a large fraction of a core there (per-frame fixed cost, not per pixel).
@@ -3164,6 +3608,7 @@
   // Startup update check (GitHub releases). Deferred a few seconds so it never competes with launch work;
   // failures are swallowed inside the controller — it must never disrupt the app.
   onMount(() => {
+    void resolveUpdateKind(); // Settings needs it before the check runs
     const id = setTimeout(() => { void runUpdateCheck(); }, 4000);
     return () => clearTimeout(id);
   });
@@ -3208,28 +3653,46 @@
   });
 
   if (typeof window !== 'undefined') {
-    void listen('flight-recording-started', () => {
-      onRecordingStarted(); // id-less signal — recording started (deferred commit, ADR-041)
+    // Every `flight-recording-*` payload carries the recorder's `vehicleId` / `linkId`.
+    void listen<{ vehicleId?: string }>('flight-recording-started', (event) => {
+      bumpPendingEpoch(event.payload?.vehicleId);
+      // Recording started (no flight id yet — deferred commit, ADR-041). Only this vehicle's own start
+      // clears its captured-mission snapshot; another aircraft arming must not.
+      if (isRecordingOwner(event.payload?.vehicleId)) onRecordingStarted();
     });
     // Disarm → the summary dialog (stats arrive in the payload; no flight_id yet under deferred
-    // commit). Save commits the pending session, Discard drops it.
-    void listen<{ duration_sec: number; max_alt_m: number; max_speed_ms: number; max_distance_m: number; total_distance_m: number; battery_used_mah: number | null }>(
+    // commit). Save commits the pending session, Discard drops it — of the vehicle that sent it.
+    void listen<{ duration_sec: number; max_alt_m: number; max_speed_ms: number; max_distance_m: number; total_distance_m: number; battery_used_mah: number | null; craft_name?: string; fc_uid?: string | null; vehicleId?: string }>(
       'flight-recording-ended',
       (event) => {
         const p = event.payload;
-        void onRecordingEnded({
+        const vid = p.vehicleId ?? null;
+        bumpPendingEpoch(vid);
+        const stats: EndFlightStats = {
           durationSec: p.duration_sec,
           maxAltM: p.max_alt_m,
           maxSpeedMs: p.max_speed_ms,
           maxDistM: p.max_distance_m,
           totalDistM: p.total_distance_m,
           batteryUsedMah: p.battery_used_mah,
-        });
+        };
+        // The identity the flight is stored with — its library vehicle is resolved from it.
+        const identity: EndFlightIdentity = { craftName: p.craft_name ?? '', fcUid: p.fc_uid ?? null };
+        // Captured now (at the disarm); the dialog opens once the one before it has settled (§5e M3).
+        const flown = endedMissionFor(vid);
+        enqueueFlightDialog(vid, () => onRecordingEnded(stats, identity, vid, flown));
       },
     );
     // Grace-lapsed re-arm auto-committed the previous flight: close the (now stale) summary and link
     // the mission captured at that disarm.
-    void listen<{ flight_id: number }>('flight-recording-committed', async (event) => {
+    // Secondary vehicles' flights commit by themselves (no End-Flight dialog) — just refresh the list.
+    void listen<{ flight_id: number }>('flight-recording-autocommitted', () => { void loadLogbook(); });
+    void listen<{ flight_id: number; vehicleId?: string }>('flight-recording-committed', async (event) => {
+      bumpPendingEpoch(event.payload.vehicleId);
+      // Its End-Flight summary still waiting in the queue is stale — and then the open one is not its.
+      const waited = dropQueuedFlightDialogs(event.payload.vehicleId) > 0;
+      // Another vehicle's grace-lapsed re-arm: its flight is in, but this dialog/snapshot is not its.
+      if (waited || !isRecordingOwner(event.payload.vehicleId)) { void loadLogbook(); return; }
       const snap = endedMission; // snapshot before any await
       endFlightDialog?.close();
       if (endedMissionHasWps(snap) && snap.fc) {
@@ -3239,18 +3702,42 @@
     });
     // Re-arm within grace (or a recovered session resumed on reconnect) continues the same flight —
     // drop the stale summary dialog and exit the awaiting-reconnect state.
-    void listen('flight-recording-resumed', () => {
+    void listen<{ vehicleId?: string }>('flight-recording-resumed', (event) => {
+      bumpPendingEpoch(event.payload?.vehicleId);
+      // Its End-Flight summary still waiting in the queue is stale — and then the open one is not its.
+      if (dropQueuedFlightDialogs(event.payload?.vehicleId) > 0) return;
+      if (!isRecordingOwner(event.payload?.vehicleId)) return; // e.g. a secondary re-arming within grace
       awaitingResumeReconnect = false;
       endFlightDialog?.close();
     });
     // Connection lost while recording (device gone, e.g. USB unplugged) → recovery prompt.
-    void listen<{ temp_path: string; craft_name: string; start_time: string; duration_sec: number; sample_count: number }>(
+    void listen<{ temp_path: string; craft_name: string; start_time: string; duration_sec: number; sample_count: number; vehicleId?: string }>(
       'flight-recording-interrupted',
-      (event) => { lostWhileHidden = false; void onRecordingInterrupted(event.payload); },
+      (event) => {
+        lostWhileHidden = false;
+        const vid = event.payload.vehicleId ?? null;
+        bumpPendingEpoch(vid);
+        const flown = endedMissionFor(vid); // captured now, the prompt may open later (§5e M3)
+        enqueueFlightDialog(vid, () => onRecordingInterrupted(event.payload, vid, flown));
+      },
     );
     // The device vanished (fatal transport error) — the backend tore the scheduler down. Clean up the
     // connection state so the UI shows disconnected and the user can simply reconnect.
-    void listen('connection-lost', () => {
+    // MAVLink transport loss arrives as the same `connection-lost` (stamped with `linkId`).
+    void listen<{ linkId?: number }>('connection-lost', async (event) => {
+      const lid = event.payload?.linkId;
+      // Ask the backend, not the mirror: `connectFC` refreshes `links` without awaiting it, so a loss
+      // right after connect would otherwise find its own link missing and be ignored.
+      const known = lid != null ? await refreshLinks().catch(() => get(links)) : get(links);
+      // A loss reported for a link that was never registered — the MSP tunnel probe of a connect that
+      // then fails — has nothing to tear down here; the connect call itself returns the error. Without
+      // this guard the fallback below would close every OTHER link.
+      if (lid != null && !known.some((l) => l.linkId === lid)) return;
+      // Multi-vehicle: with other links still up, only close the one that died.
+      if (lid != null && known.length > 1) {
+        void disconnectLink(lid, selectedBaud).catch(() => {});
+        return;
+      }
       if (document.hidden) lostWhileHidden = true;
       void disconnectFC(selectedBaud).catch(() => {});
     });
@@ -3269,15 +3756,21 @@
       if (!paths.length) return;
       // Mission files import from anywhere (see importDroppedMission). `.txt` deliberately stays on
       // the logbook side (SD blackbox collision).
+      // `.kmission` = library entries: always imported, every one of a drop. A plain mission file in the
+      // same drop keeps the map for itself.
+      const libraryFiles = paths.filter((p) => /\.kmission$/i.test(p));
       const missionFile = paths.find((p) => /\.(mission|plan|waypoints)$/i.test(p));
+      if (libraryFiles.length > 0) {
+        void importDroppedLibraryMissions(libraryFiles, !missionFile)
+          .then(() => (missionFile ? importDroppedMission(missionFile) : undefined));
+        return;
+      }
       if (missionFile) {
         void importDroppedMission(missionFile);
         return;
       }
-      // Log files: dropped ON the Logbook panel → import as before. Dropped anywhere else (the map)
-      // → open for replay without importing (desktop, disconnected). The native event carries the
-      // drop position in physical pixels; hit-test it against the panel root. Without a position
-      // (older payloads) the old behaviour stands: logbook tab open = import.
+      // Log files: dropped ON the Logbook panel → import; anywhere else → open for replay (desktop, disconnected).
+      // The drop position is physical px, hit-tested against the panel root; without one an open logbook tab imports.
       const pos = event.payload.position;
       let overLogbook = activeTab === 'logbook';
       if (overLogbook && pos) {
@@ -3293,9 +3786,13 @@
     });
     // Home from the FC (MSP_WP 0), pushed once at connect — recovers Home on a mid-flight connect /
     // app restart. The live arm-transition path (Map.svelte) overwrites it on the next arm.
-    void listen<{ lat: number; lon: number; alt: number }>('home-position', (event) => {
+    void listen<{ lat: number; lon: number; alt: number; vehicleId?: string }>('home-position', (event) => {
       const { lat, lon, alt } = event.payload;
       if (lat === 0 && lon === 0) return;
+      // Every vehicle's home is kept by id (fleet map + re-seed on switch); only the active one
+      // drives the singleton home / launch reference below.
+      if (event.payload.vehicleId) setVehicleHome(event.payload.vehicleId, lat, lon, alt);
+      if (!isActive(event.payload)) return;
       // The FC re-broadcasts HOME_POSITION (ArduPilot ~0.2 Hz), often with sub-metre jitter. Re-setting
       // the stores on every tick churns every subscriber — writable stores emit even on an identical
       // value — and the 3D mission overlay rebuilds, flickering its polylines. Only update on a real move.
@@ -3310,7 +3807,11 @@
     });
     // FC-confirmed Guided target (POSITION_TARGET_GLOBAL_INT, 1 Hz) — the controller gates it on the
     // FC actually being in its guided mode (in AUTO/RTL the same message carries the mission WP/home).
-    void listen<{ lat: number; lon: number; alt: number }>('guided-target', (event) => {
+    void listen<{ lat: number; lon: number; alt: number; vehicleId?: string }>('guided-target', (event) => {
+      // Every vehicle's target feeds the fleet map ("who is heading where"); only the active one
+      // drives the Guided UI.
+      if (event.payload.vehicleId) ingestVehicleGuidedTarget(event.payload.vehicleId, event.payload.lat, event.payload.lon);
+      if (!isActive(event.payload)) return;
       ingestFcGuidedTarget(event.payload.lat, event.payload.lon);
     });
   }
@@ -3339,15 +3840,15 @@
   {/if}
 
   <!-- ======= MAP LAYER — unzoomed / native resolution (see docs/archive/UI_SCALING.md) =======
-       The map must stay crisp, so it lives OUTSIDE the zoomed `.ui-scale` layer. It is the
-       same single Map/Map3D instance (no re-mount). Normally it sits behind the chrome; when
-       video is primary it flips above the chrome into the floating window's body (.in-frame). -->
-  <!-- Phone: the swapped-in mini map is clipped to the box of the frame it sits in — the map area
-       (docked frame: it parks BEHIND the widget column like the video does) or the column's tile
-       area (widget: it scrolls out with the page instead of hanging over the glass). Desktop: a
-       transparent, non-clipping wrapper. Same coordinate system as before (inset 0). -->
+       Outside the zoomed `.ui-scale` layer so it stays crisp; one Map/Map3D instance that flips above
+       the chrome into the floating window's body (.in-frame) when video is primary. -->
+  <!-- Phone: the swapped-in mini map is clipped to its frame's box — the map area (docked frame: it parks
+       BEHIND the widget column) or the column's tile area. Desktop: transparent, non-clipping (inset 0). -->
+  <!-- `inert={dbCompacting}` here and on the other layers below: while "Compact Database" runs, nothing
+       behind CompactDbModal takes focus or keys (the modal itself sits outside those subtrees). -->
   <div
     class="map-clip"
+    inert={dbCompacting}
     class:clip-map-area={phoneUi && mapFloating}
     class:clip-column={phoneUi && mapInWidget}
     style:--phone-pad="{PHONE_GRID_PAD}px"
@@ -3360,6 +3861,7 @@
     class:parked={mapFloating && !$videoState.floating}
     class:edit-passive={widgetEditMode && mapInWidget}
     data-nv-clip={mapInFrame ? undefined : true}
+    data-nv-opaque={mapInFrame ? undefined : true}
     style={mapInFrame ? inFrameStyle : mapLayerStyle}
     onclick={minimizeLogbook}
   >
@@ -3381,6 +3883,7 @@
         bind:viewMode={map2dViewMode}
         miniControls={miniMapLocked}
         centerInsetRight={phoneMapInset}
+        centerInsetBottom={phoneMapInsetBottom}
         radarActive={radarSettings.enabled}
         radarMapSettings={radarSettings.map}
         {radarReference}
@@ -3392,6 +3895,7 @@
       <div class="map3d-layer" class:active={mapViewMode === '3d'}>
         <Map3D
           centerInsetRight={phoneMapInset}
+          centerInsetBottom={phoneMapInsetBottom}
           bind:this={map3dRef}
           active={mapViewMode === '3d'}
           playbackTrack={mapTrack}
@@ -3420,20 +3924,21 @@
        floating window or a widget tile, and map-bound banners would then cover that tiny tile. This
        container sits above everything in the content area so alerts stay readable. -->
   <!-- --toast-dock-inset = the open left-docked panel's right edge (0 when none); the system-message
-       toasts read it to centre in the free area beside the panel (issue #10). The radar banner ignores
-       it and stays frame-centred + on top. -->
-  <div class="app-toasts" style:--toast-dock-inset="{panelHidden ? 0 : $panelDockRight}px">
+       toasts centre beside the panel with it. The radar banner ignores it and stays frame-centred + on top. -->
+  <div class="app-toasts" inert={dbCompacting} style:--toast-dock-inset="{panelHidden ? 0 : $panelDockRight}px">
     <!-- Conflict-alert banner (renders nothing when idle). -->
     <RadarAlertBanner {interfaceSettings} />
     <!-- FC system messages (MAVLink STATUSTEXT) as top-edge toasts (renders nothing when idle). -->
     <StatusTextToasts />
+    <!-- Multi-vehicle group commands, bottom-centre (renders nothing with fewer than 2 MAVLink vehicles;
+         behind the fleet feature gate). -->
+    {#if $fleetEnabled}
+      <GroupCommandBar />
+    {/if}
   </div>
 
-  <!-- Floating-frame map controls — top-level/unzoomed so they sit ABOVE the in-frame map (z2); the
-       float-win's own chrome lives in .ui-scale (z1) and would be hidden behind it. Only the two
-       corner handles: the map goes back to main by double-clicking the full-screen video (a ✕ here
-       did the same and was dropped, Marc 2026-09-10). Not while the frame is parked (the map slides
-       out with it). -->
+  <!-- Floating-frame map controls, top-level/unzoomed so they sit ABOVE the in-frame map: only the two
+       corner handles (the map goes back by double-clicking the full-screen video). Not while parked. -->
   {#if mapFloating && $videoState.status === 'live' && !phoneUi && $videoState.floating}
     <div class="miniframe-ctl" style={mapFrameStyle}>
       <!-- The window's resize corner, redrawn above the map just inside the picture's top-right
@@ -3464,7 +3969,7 @@
   <!-- Phone: the docked frame's size toggle, redrawn above the swapped-in map in the frame's
        top-left corner (PhoneVideoDock draws it in video mode — same corner, same look). -->
   {#if mapFloating && $videoState.status === 'live' && phoneUi && $videoState.floating}
-    <div class="miniframe-ctl" style={mapFrameStyle}>
+    <div class="miniframe-ctl" inert={dbCompacting} style={mapFrameStyle}>
       <button
         class="mf-corner mf-size"
         style="top:{4 * uiScale}px; left:{4 * uiScale}px; width:{26 * uiScale}px; height:{26 * uiScale}px; padding:{2 * uiScale}px 0 0 {2 * uiScale}px; border-width:{4 * uiScale}px 0 0 {4 * uiScale}px; border-top-left-radius:{8 * uiScale}px;"
@@ -3480,7 +3985,7 @@
   {/if}
 
   <!-- ======= UI CHROME LAYER — zoomed by --ui-scale ======= -->
-  <div class="ui-scale">
+  <div class="ui-scale" inert={dbCompacting}>
 
 <!-- Dialogs render in the panels layer below — as .ui-scale children their z-index could
      never beat the in-frame mini-map either (same stacking-context wall as the panels). -->
@@ -3524,17 +4029,33 @@
   <div class="zone-phone-widgets">
     <PhoneWidgetPanel
       config={phoneWidgets}
-      {telem}
+      telem={widgetTelem}
       {interfaceSettings}
       onresize={(id) => patchPhoneWidgets(phoneCtrl.cyclePhoneWidgetSize(phoneWidgets, id))}
-      onmove={(id, page, row, col) => patchPhoneWidgets(phoneCtrl.movePhoneWidget(phoneWidgets, id, page, row, col))}
+      onmove={phoneMoveToColumn}
+      onmovetobottom={phoneMoveToBottom}
       bind:widthPx={phonePanelW}
     />
   </div>
+  <!-- Bottom widget slots (PHONE_BOTTOM_WIDGETS.md) — under the chips and the docked video window
+       in the stacking order; the drag ghost shared with the column sits over everything. -->
+  <PhoneBottomBar
+    config={phoneWidgets}
+    telem={widgetTelem}
+    {interfaceSettings}
+    frameShift={phoneShift}
+    leftReserve={navPanelOpen ? NAV_RAIL_RIGHT_PX : 0}
+    onmovetobottom={phoneMoveToBottom}
+    onmovetocolumn={phoneMoveToColumn}
+    ontogglewide={() => patchPhoneWidgets(phoneCtrl.togglePhoneBottomWide(phoneWidgets))}
+    bind:barH={phoneBarH}
+  />
+  <PhoneDragGhost telem={widgetTelem} {interfaceSettings} />
   <div class="phone-bottom-chips">
     <PhoneBottomChips {telem} />
   </div>
   <!-- Docked video window + its toggle (PHONE_VIDEO.md) — the phone's floating window. -->
+  {#if hasVideo}
   <PhoneVideoDock
     left={dockLeft}
     top={dockTop}
@@ -3542,11 +4063,18 @@
     height={dockH}
     widgetActive={phoneCtrl.isPhoneWidgetActive(phoneWidgets, 'videoFeed')}
   />
+  {/if}
+  {#if phoneSearchShown}
+    <div class="phone-map-search" style:--ms-bottom="{phoneSearchBottomPx}px">
+      <MapSearch variant="phone" />
+    </div>
+  {/if}
   {:else}
   <!-- ======= TOOLBAR ======= -->
   <div class="zone-toolbar" bind:clientHeight={toolbarH}>
     <Toolbar
     {appVersion}
+    mapSearchAvailable={!miniMapLocked}
     {telem}
     {ports}
     {bleDeviceList}
@@ -3568,6 +4096,7 @@
     onOpenRaw={() => (rawTelemetryOpen = true)}
     onOpenRc={() => selectTab('rc-control')}
     onRescanBle={bleScanWindow}
+    fleetEnabled={$fleetEnabled}
   />
     <RelayPanel open={relayPanelOpen} />
   </div>
@@ -3713,7 +4242,7 @@
 
   {#if !phoneUi}
   <!-- ======= BOTTOM WIDGET PANEL ======= -->
-  <div class="zone-bottom-dock" class:zone-hidden={!$layout.bottomDock.visible} class:panel-editing={widgetEditMode} bind:clientWidth={bottomDockW} bind:clientHeight={bottomDockH} style:padding-left="{videoReserve}px">
+  <div class="zone-bottom-dock" class:zone-hidden={!$layout.bottomDock.visible} class:panel-editing={widgetEditMode} bind:this={bottomDockEl} bind:clientWidth={bottomDockW} bind:clientHeight={bottomDockH} style:padding-left="{videoReserveDock}px">
     <div class="panel-bottom-wrap">
       <!-- Edit mode (both docks share it): entered by a long-press on a widget, left by a click
            outside the docks or Escape — the panels own the gesture, the flag lives here. -->
@@ -3724,8 +4253,9 @@
         pxPerVmin={bottomPxPerUnit}
         smallBoost={isPhonePortrait ? 1.5 : isTablet ? 1.4 : 1}
         sizes={panels.sizes ?? {}}
+        idleIds={idleWidgetIds}
         bind:crossPx={bottomPanelCrossPx}
-        {telem}
+        telem={widgetTelem}
         bind:editing={widgetEditMode}
         {interfaceSettings}
         onreorder={handleReorder}
@@ -3748,8 +4278,9 @@
       pxPerVmin={sidePxPerUnit}
       smallBoost={isTablet ? 1.4 : 1}
       sizes={panels.sizes ?? {}}
+      idleIds={idleWidgetIds}
       bind:crossPx={sidePanelCrossPx}
-      {telem}
+      telem={widgetTelem}
       bind:editing={widgetEditMode}
       {interfaceSettings}
       onreorder={handleReorder}
@@ -3795,12 +4326,13 @@
   </div><!-- .ui-scale -->
 
   <!-- ======= FLOATING PANELS LAYER — scaled like .ui-scale, ABOVE the in-frame mini-map ======= -->
-  <!-- .ui-scale is one stacking context (its transform), so nothing inside it can stack over the
-       unzoomed in-frame map (z2) / its corner controls (z3). The floating panels + modal dialogs
-       therefore live in this second, identically-scaled layer (z4) — panels cover the mini-map
-       exactly like they cover the floating video window. The host replicates .app's positioning
-       context and grid vars so PanelShell geometry is untouched. -->
+  <!-- .ui-scale is one stacking context (its transform), so nothing in it can stack over the unzoomed
+       in-frame map (z2) / its controls (z3): panels + modal dialogs live in this second, identically-scaled
+       layer (z4), whose host replicates .app's positioning context and grid vars for PanelShell. -->
   <div class="ui-scale panels-layer">
+    <!-- Everything in this layer except CompactDbModal (below) goes inert while it shows; the wrapper
+         adds no box (display: contents), so geometry and stacking stay as they were. -->
+    <div class="panels-inert" inert={dbCompacting}>
     <div
       class="panels-host"
       class:panels-hidden={panelHidden}
@@ -3826,6 +4358,7 @@
           <SettingsPanel
             localeValue={$locale ?? 'en'}
             {uiScale}
+            stayAwake={$settings.stayAwake}
             {mapProvider}
             {mapCacheMaxMB}
             {cacheStats}
@@ -3836,6 +4369,7 @@
             {logReplayTime}
             {nightMode2D}
             lowPower3D={$settings.lowPower3D}
+            highRes3D={$settings.highRes3D}
             {gcsMode}
             userLocation={$userGeoLocation}
             onGeoCheck={requestUserLocation}
@@ -3928,6 +4462,8 @@
           <MissionPanel />
         {:else if activeTab === 'control'}
           <MavCommandPanel />
+        {:else if activeTab === 'fleet'}
+          <FleetPanel />
         {:else if activeTab === 'rc-control'}
           {#if isMobile}
             <VirtualSticks />
@@ -3935,7 +4471,7 @@
             <RcControlPanel />
           {/if}
         {:else if activeTab === 'radar'}
-          <RadarPanel radar={radarSettings} {interfaceSettings} referencePoint={radarReference} mspSupported={mspAdsbSupported} onPatch={applySettingsPatch} />
+          <RadarPanel radar={radarSettings} {interfaceSettings} referencePoint={radarReference} mspSupported={mspAdsbSupported} mainSerialPort={$connection.status === 'connected' && $connection.transportType === 'serial' ? selectedPort || null : null} mainUdpPort={selectedTransport === 'udp' ? tcpPort : null} onPatch={applySettingsPatch} />
         {:else if activeTab === 'airspace'}
           <!-- Re-init the panel on connect/disconnect + when the FC's geozone/fence capability resolves
                (loaded async after connect) so an already-open panel reflects the new FC without a tab switch. -->
@@ -3954,20 +4490,26 @@
         <TerrainAnalysisPanel track={selectedTrackWithPosition} live={isPrimaryConnected} {interfaceSettings} confirm={showDialog} />
       {/if}
     </div>
-    <!-- Phone: the dev Debug toggle lives in the PANELS layer so it stays reachable over an open
-         panel (a developer tool); the arming / sensor chips stay in .app under the panels (Marc:
-         a panel may cover them, they still peek out left of it). Dialogs keep their higher z-index. -->
+    <!-- Phone: the dev Debug toggle lives in the PANELS layer so it stays reachable over an open panel; the
+         arming / sensor chips stay under the panels (they still peek out). Dialogs keep their higher z. -->
     {#if phoneUi && DEV_MODE}
       <div class="phone-debug-btn">
         <PhoneDebugButton bind:debugOpen />
       </div>
     {/if}
     <ConfirmDialog bind:this={confirmDialog} />
+    {#if dbUpgrade}
+      <DbUpgradeNotice title={$t('settings.dbUpgradeTitle')} message={$t('settings.dbUpgradeMsg', { values: { size: formatBackupSize(dbUpgrade.size_bytes) } })} />
+    {/if}
     <UpdateDialog />
     <CesiumKeyPrompt bind:open={cesiumKeyPromptOpen} onSave={cesiumKeySave} onRemindLater={cesiumKeyRemindLater} onIgnore={cesiumKeyIgnore} />
     <EndFlightDialog bind:this={endFlightDialog} {interfaceSettings} />
     <RecoveryPrompt bind:this={recoveryPrompt} />
     <DisconnectArmedDialog bind:this={disconnectArmedDialog} />
+    </div><!-- .panels-inert -->
+    {#if dbCompacting}
+      <CompactDbModal />
+    {/if}
   </div>
 
   <!-- Cursor-positioned overlays stay OUTSIDE the zoom so their fixed clientX/clientY
@@ -3979,11 +4521,8 @@
 </div><!-- .ui-root -->
 
 <style>
-  /* ============================================================
-     Kite Ground Control Theme — Floating Panel Layout
-     Color palette derived from INAV Configurator
-     https://github.com/iNavFlight/inav-configurator
-     ============================================================ */
+  /* Kite theme — floating panel layout. Palette derived from the INAV Configurator
+     (https://github.com/iNavFlight/inav-configurator). */
 
   /* Continue-on-reconnect status banner (recovery, ADR-042) */
   .resume-banner {
@@ -4023,18 +4562,15 @@
     -webkit-user-select: text;
   }
 
-  /* Leaflet map tooltips (hover hints / "toasts") live in the unzoomed map. Scale them
-     with the global UI scale via font-size + padding (Leaflet sets an inline transform
-     for positioning, so a CSS transform would be overridden — em/px scaling reflows the
-     box instead). --ui-scale inherits from `.ui-root`. Base values match Leaflet defaults. */
+  /* Leaflet tooltips live in the unzoomed map: scale them via font-size + padding, since Leaflet's inline
+     positioning transform would override a CSS transform. Base values match Leaflet defaults. */
   :global(.leaflet-tooltip) {
     font-size: calc(12px * var(--ui-scale, 1));
     padding: calc(6px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1));
   }
 
   /* ── Global UI scaling (see docs/archive/UI_SCALING.md) ──────────
-     `.ui-root` fills the viewport. `.ui-scale` holds all chrome and is zoomed by
-     --ui-scale (sized /scale so it fills exactly the viewport after the zoom).
+     `.ui-scale` holds all chrome, zoomed by --ui-scale (sized /scale so it fills the viewport after it);
      `.layer-map` holds the single Map/Map3D instance UNZOOMED so it stays crisp. */
   .ui-root {
     position: relative;
@@ -4048,11 +4584,8 @@
     left: 0;
     width: calc(100vw / var(--ui-scale, 1));
     height: calc(100vh / var(--ui-scale, 1));
-    /* Scale the chrome up to fill the viewport (the box is sized /scale above, then scaled back from
-       the top-left corner). We use transform: scale() rather than `zoom` because WebKitGTK (Linux)
-       does not support CSS `zoom` — it left the chrome at the /scale size, i.e. SMALLER than the
-       window. transform is geometrically identical here (origin 0 0: logical→viewport = ×scale, same
-       mapping the offset/rect math relies on) and works on both WebView2 (Windows) and WebKitGTK. */
+    /* transform: scale(), not `zoom`: WebKitGTK does not support CSS `zoom`. With origin 0 0 it maps
+       logical→viewport ×scale, as the offset/rect math expects. */
     transform: scale(var(--ui-scale, 1));
     transform-origin: 0 0;
     z-index: 1;
@@ -4073,6 +4606,9 @@
   .panels-host > :global(*) {
     pointer-events: auto;
   }
+  .panels-inert {
+    display: contents;
+  }
 
   .app {
     display: grid;
@@ -4087,12 +4623,9 @@
       "status-bar   status-bar   status-bar   status-bar";
   }
 
-  /* The chrome layer sits ABOVE the unzoomed map, so its empty centre must let pointer
-     events fall through to the map (pan/zoom/Leaflet controls + the WP editor popup,
-     which is part of the map). BOTH `.ui-scale` (the parent covering the viewport) and
-     `.app` must be click-through, or the parent eats events the moment `.app` passes them
-     on. Solid children re-capture; the widget docks + map-controls stay click-through so
-     the map is draggable under/around them. See docs/archive/UI_SCALING.md. */
+  /* The chrome sits ABOVE the unzoomed map, so its empty centre must pass pointer events through —
+     BOTH `.ui-scale` and `.app`, or the parent eats them. Solid children re-capture; the widget docks
+     + map-controls stay click-through so the map drags under them. */
   .ui-scale {
     pointer-events: none;
   }
@@ -4151,14 +4684,9 @@
     right: calc(var(--phone-panel-w, 0px) - var(--phone-shift, 0px));
     transition: right 0.3s ease;
   }
-  /* Video primary: the mini map in the floating / docked frame parks with it — off the screen (the
-     frame itself unmounts; the map layer is +page's, so it moves): left on the desktop, where the
-     window snaps bottom-left, right on the phone, behind the column and out.
-     Touches on the phone: the mini map takes them (pinch zoom — Leaflet's dragging and double-tap
-     zoom are off in mini mode, D6) and relays a long-press to the tile underneath (PhoneWidgetPanel);
-     while the grid is in EDIT mode (html.phone-editing) the layer goes touch-free so the tile can be
-     dragged. The desktop's counterpart is `.edit-passive` (map in the widget tile + dock edit mode):
-     WidgetPanel relays the long-press on the map to the tile, then the tile gets the pointer. */
+  /* Video primary: the frame's mini map parks off screen with it (left on the desktop, right behind the
+     column on the phone). Phone touches: pinch zoom + long-press relayed to the tile (PhoneWidgetPanel);
+     touch-free while the grid is in edit mode. Desktop counterpart: `.edit-passive`. */
   .layer-map.in-frame {
     transition: transform 0.3s ease;
   }
@@ -4174,10 +4702,8 @@
   :global(html.is-phone) .layer-map.in-frame.parked {
     transform: translateX(100vw);
   }
-  /* The clipping wrapper: transparent on the desktop; on the phone it bounds the mini map to the
-     map area (docked frame — the map slides out BEHIND the column, like the video) or to the
-     column's tile box (widget — the map leaves with its page instead of hanging over the glass).
-     pointer-events is inherited: the wrapper takes none, the map layer opts back in. */
+  /* Clipping wrapper: transparent on the desktop; on the phone it bounds the mini map to the map area
+     (docked frame) or the column's tile box (widget). It takes no pointer events; the map layer opts in. */
   .map-clip {
     position: absolute;
     inset: 0;
@@ -4211,10 +4737,8 @@
     top: var(--safe-top, 0px);
   }
 
-  /* Phone portrait is too narrow to fit the toolbar on one row, so it wraps to multiple lines
-     (see Toolbar.svelte). Size the toolbar grid row to its content instead of the fixed one-row
-     height so the wrapped bar is never clipped and the nav-rail / panels below are pushed down
-     cleanly rather than tucked under it. Tablets keep the fixed row (wider screen fits one row). */
+  /* Phone portrait: the toolbar wraps to several lines (Toolbar.svelte), so its grid row sizes to content
+     and the nav rail / panels below are pushed down instead of tucked under it. */
   @media (max-width: 600px) {
     :global(html.is-mobile) .app {
       /* Bottom bar hidden on phone (redundant with the collapsed top strip; arming moves into it). The
@@ -4238,26 +4762,19 @@
     :global(html.is-mobile) .layer-map {
       bottom: 0;
     }
-    /* Top-align the right side dock so MODE sits just under the toolbar (the zone centered the whole
-       widget block vertically, leaving a big gap above it). The 8px top padding matches the panel/
-       nav-rail offset so MODE lines up with the UAV Info panel below the bar. */
+    /* Top-align the right side dock so MODE sits just under the toolbar; 8px matches the panel/nav-rail offset. */
     :global(html.is-mobile) .zone-side-dock {
       align-items: flex-start;
       padding-top: 8px;
     }
   }
 
-  /* Map layer — UNZOOMED overlay over the content area. The toolbar (53px) and status
-     bar (24px) live in the zoomed `.ui-scale`, so their visual heights are *--ui-scale;
-     the map offsets track that. z-index 0 keeps it behind the chrome normally. When the
-     view is swapped into the floating window it flips above the chrome (.in-frame) and
-     uses the inline rect (already *--ui-scale in mapFrameStyle). */
+  /* Map layer — UNZOOMED overlay over the content area; offsets track the zoomed toolbar (53px) and status
+     bar (24px) × --ui-scale. z0 behind the chrome; .in-frame flips it above and uses the inline rect. */
   .layer-map {
     position: absolute;
-    /* top/bottom only as the no-JS fallback: the inline `mapLayerStyle` overrides them with the
-       same values rounded to whole px — a fractional box origin (53px × 1.25 = 66.25px) put every
-       tile edge on a subpixel boundary and WebKitGTK rendered hairline seams between the tiles
-       (issue #52). */
+    /* No-JS fallback only: the inline `mapLayerStyle` overrides top/bottom rounded to whole px (fractional
+       origins give WebKitGTK hairline tile seams). */
     top: calc(53px * var(--ui-scale, 1));
     left: 0;
     right: 0;
@@ -4394,19 +4911,14 @@
   .map-video-wrap.nv-active {
     background: transparent;
   }
-  /* Unobstructed fullscreen (Video panel toggle): the wrapper KEEPS its full-zone box (the
-     blurred backdrop map inside it fills everything — widgets, docks and nav rail float on
-     it); the video box alone retreats from the reserves, computed in ufBox. The wrapper only
-     stops painting its own black so the backdrop (or the app ground, without a position)
-     shows through. */
+  /* Unobstructed fullscreen: the wrapper keeps its full-zone box (the blurred backdrop map fills it); only
+     the video box retreats (ufBox). The wrapper stops painting black so the backdrop shows through. */
   .map-video-wrap.unobstructed {
     background: transparent;
   }
-  /* Inner video box: fills the wrapper normally; in unobstructed mode the inline style from
-     ufBox cuts it to the stream's aspect (left+width beat the inset's right, top+height its
-     bottom) and it reads as a deliberately framed surface — panel-style accent border, black
-     only behind the picture itself (≤1px rounding slivers). border-box keeps the frame inside
-     the aspect-exact rect. */
+  /* Inner video box: fills the wrapper normally; in unobstructed mode ufBox cuts it to the stream's aspect
+     (left+width beat the inset's right, top+height its bottom), framed with an accent border. border-box
+     keeps the frame inside the aspect-exact rect. */
   .map-video-box {
     position: absolute;
     inset: 0;
@@ -4511,14 +5023,11 @@
   }
 
   /* ── Phone chrome (Dev-Docs active/PHONE_UI.md) ──────────────────────────────────────────
-     One row: the map area (everything floats over it) and the full-height widget column whose
-     width the panel reports (--phone-panel-w). No toolbar, no docks, no status bar. Declared
-     after the is-mobile rules so it wins at equal specificity. */
+     One row: the map area plus the full-height widget column (--phone-panel-w). Declared after the
+     is-mobile rules so it wins at equal specificity. */
   :global(html.is-phone) .app {
-    /* minmax(0, 1fr): a grid row's default min-height is its CONTENT — the widget column's
-       two pages are 2× the panel height, so a plain 1fr row grew with them, the panel measured
-       the taller row, the slot grew, the pages grew … (measured: slot 419 840 px, the screen
-       flickering). The row must be the viewport, never the content. */
+    /* minmax(0, 1fr): a plain 1fr row's min-height is its content — the column's two pages are 2× the panel
+       height, so row, panel and pages grew each other in a loop. The row must be the viewport. */
     grid-template-rows: minmax(0, 1fr);
     grid-template-columns: 1fr var(--phone-panel-w, 0px);
     grid-template-areas: "main phone-widgets";
@@ -4531,14 +5040,17 @@
     height: 100%;
     overflow: hidden;
     pointer-events: none;
+    /* A compositor layer of its own, permanently: the docked video window slides BEHIND this column, and
+       Chromium otherwise promotes/demotes the column around every slide — everything squashed with the
+       glass vanished for a frame at both ends. */
+    will-change: transform;
   }
   .zone-phone-widgets > :global(*) {
     pointer-events: auto;
   }
-  /* The widget column slides out to the right by --phone-shift (set on .ui-root) while the full
-     replay player needs more room than the gap between the burger and the chain-link button offers
-     (narrow 16:9 phones); the chain-link button rides along so the gap really grows. The grid
-     column itself stays put — a transform only, so the packer and the map centre are untouched. */
+  /* The widget column slides right by --phone-shift while the full replay player needs more room than the
+     burger-to-chain-link gap; the chain-link button rides along. A transform only, so the packer and the
+     map centre are untouched. */
   .zone-phone-widgets {
     transform: translateX(var(--phone-shift, 0px));
     transition: transform 0.3s ease;
@@ -4550,10 +5062,21 @@
     z-index: 110;
     transition: right 0.3s ease;
   }
-  /* Bottom-left corner: arming + sensor chips (under the panels — they peek out left of an open
-     panel), then the dev Debug button in the panels layer (over them), then the Leaflet
-     attribution (--phone-bottom-w / --phone-debug-w, published by the two components); the nav
-     rail stops above the row. */
+  /* Map search (phone): on top of the map's corner column, riding with the widget column; --ms-bottom stacks
+     it above the visible buttons. The line opens left up to the burger, the hit list rises up to the safe
+     edge. Over chips and tiles, under the panels (150 / 160); `fitBesidePanel` keeps it beside an open panel. */
+  .phone-map-search {
+    position: absolute;
+    right: calc(var(--phone-panel-w, 0px) + 8px - var(--phone-shift, 0px));
+    bottom: calc(var(--ms-bottom, 100px) + var(--safe-bottom, 0px));
+    z-index: 120;
+    transition: right 0.3s ease;
+    --ms-line-max: calc(100vw - var(--phone-panel-w, 0px) + var(--phone-shift, 0px) - 8px - 38px - 6px - 62px - var(--safe-left, 0px));
+    --ms-drop-max: calc(100vh - var(--ms-bottom, 100px) - var(--safe-bottom, 0px) - 38px - 6px - 8px - var(--safe-top, 0px));
+  }
+  /* Bottom-left corner: arming + sensor chips (under the panels), then the dev Debug button (panels layer),
+     then the Leaflet attribution (--phone-bottom-w / --phone-debug-w, published by the components); the
+     nav rail stops above the row. */
   .phone-bottom-chips {
     position: absolute;
     left: calc(12px + var(--safe-left, 0px));
@@ -4567,10 +5090,9 @@
     bottom: calc(8px + var(--safe-bottom, 0px));
     z-index: 170; /* over every panel (150 / 160), under the dialogs */
   }
-  /* Toasts and alerts live in the TOP band between the burger (12 + 42 + 8) and the chain-link
-     button (panel-w + 8 + 42 + 8 from the right) — the same gap the replay player uses. The
-     container already sits at --safe-top (is-mobile rule), so its children start 8px down, in
-     the buttons' row; the right edge rides along when the widget column slides out. */
+  /* Toasts live in the TOP band between the burger (12 + 42 + 8) and the chain-link button (panel-w + 8 +
+     42 + 8 from the right), as the replay player does; the container sits at --safe-top, so children start
+     8px down, and the right edge rides along when the column slides out. */
   :global(html.is-phone) .app-toasts {
     left: calc(62px + var(--safe-left, 0px));
     right: calc(var(--phone-panel-w, 0px) - var(--phone-shift, 0px) + 58px);
@@ -4585,7 +5107,7 @@
   :global(html.is-phone) .error-bar {
     left: calc(var(--phone-bottom-w, 0px) + var(--phone-debug-w, 0px) + 8px);
     right: calc(var(--phone-panel-w, 0px) - var(--phone-shift, 0px) + 54px);
-    bottom: calc(8px + var(--safe-bottom, 0px));
+    bottom: calc(8px + var(--safe-bottom, 0px) + var(--phone-bar-lift, 0px));
     margin-inline: auto;
     width: max-content;
     max-width: calc(100% - var(--phone-bottom-w, 0px) - var(--phone-debug-w, 0px) - var(--phone-panel-w, 0px) + var(--phone-shift, 0px) - 62px);
@@ -4607,7 +5129,7 @@
     --band-l: calc(62px + var(--safe-left, 0px));
     --band-r: calc(100vw - var(--phone-panel-w, 0px) + var(--phone-shift, 0px) - 54px);
     left: calc((var(--band-l) + var(--band-r)) / 2);
-    bottom: calc(46px + var(--safe-bottom, 0px));
+    bottom: calc(46px + var(--safe-bottom, 0px) + var(--phone-bar-lift, 0px));
     max-width: calc(var(--band-r) - var(--band-l) - 16px);
     box-sizing: border-box;
     white-space: nowrap;
@@ -4616,6 +5138,16 @@
     transition: left 0.3s ease;
   }
 
+  /* Mobile: the zones around the map are permanent compositor layers — the floating window otherwise
+     promotes/demotes every zone it overlaps, and the chrome vanished for a frame on each switch. Mobile
+     only: on the desktop the raster is back within the frame, and the layers would cost texture memory. */
+  :global(html.is-mobile) .zone-toolbar,
+  :global(html.is-mobile) .zone-bottom-dock,
+  :global(html.is-mobile) .zone-side-dock,
+  :global(html.is-mobile) .zone-map-controls,
+  :global(html.is-mobile) .zone-status-bar {
+    will-change: transform;
+  }
   .zone-status-bar {
     grid-area: status-bar;
     z-index: 200;

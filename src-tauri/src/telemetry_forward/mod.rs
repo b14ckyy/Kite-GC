@@ -70,7 +70,12 @@ impl RelayHub {
             ($event:literal, $ty:ty, $field:ident, $kind:expr) => {{
                 let cache = self.cache.clone();
                 let relays = self.relays.clone();
+                let app_for_filter = app.clone();
                 app.listen($event, move |ev| {
+                    // Multi-vehicle: relay the ACTIVE vehicle only (one outbound stream, one aircraft).
+                    if !crate::vehicle_registry::payload_is_active(&app_for_filter, ev.payload()) {
+                        return;
+                    }
                     if let Ok(d) = serde_json::from_str::<$ty>(ev.payload()) {
                         cache.lock().unwrap().$field = Some(d);
                         dispatch(&cache, &relays, $kind);

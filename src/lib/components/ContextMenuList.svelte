@@ -90,16 +90,15 @@
   .cm-menu {
     position: fixed;
     z-index: 2000;
-    /* The menu lives outside the zoomed `.ui-scale` (so its clientX/clientY position stays
-       correct), so scale it here. Origin top-left keeps the cursor-anchored corner fixed;
-       the viewport-clamp effect measures the scaled size via getBoundingClientRect.
-       --ui-scale inherits from `.ui-root`. */
+    /* The menu lives outside the zoomed `.ui-scale` (so clientX/clientY stay correct), so scale it here; origin
+       top-left keeps the cursor-anchored corner fixed (the clamp effect measures the scaled size). */
     transform: scale(var(--ui-scale, 1));
     transform-origin: top left;
     min-width: 168px;
     padding: 4px;
     background: rgba(30, 30, 30, 0.75);
-    backdrop-filter: blur(10px);
+    backdrop-filter: var(--glass-blur, blur(6px));
+    -webkit-backdrop-filter: var(--glass-blur, blur(6px));
     border: 1px solid rgba(55, 168, 219, 0.35);
     border-radius: 8px;
     box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);

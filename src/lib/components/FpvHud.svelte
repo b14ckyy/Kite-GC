@@ -4,15 +4,11 @@
 -->
 
 <script lang="ts">
-  // Projected-style FPV HUD, in two layers:
-  //  • the artificial horizon (horizon line + pitch ladder) is CONFORMAL — its scaling is derived
-  //    from the camera FOV so the ladder lines up with the real horizon plane in the 3D scene. It
-  //    spans the full viewport because the conformal mapping needs the full vertical FOV ↔ full height.
-  //  • the instrument cluster (boresight, bank scale, heading tape, speed, altitude) is a compact,
-  //    schematic overlay capped at 50% of the viewport.
-  // Driven purely by props (attitude + display values already converted to the user's units).
+  // Projected-style FPV HUD, driven purely by props: a CONFORMAL horizon + pitch ladder over the full viewport
+  // (scaled from the camera FOV so it matches the 3D horizon), plus a schematic instrument cluster capped at 50%.
 
   import { untrack } from 'svelte';
+  import { t } from 'svelte-i18n';
   import { easeToward, easeAngleToward } from '$lib/utils/smoothing';
 
   let {
@@ -56,12 +52,9 @@
   const PITCH_ANGLES = [-30, -20, -10, 10, 20, 30];
   const BANK_TICKS = [-60, -45, -30, -20, -10, 10, 20, 30, 45, 60];
 
-  // ── Conformal AHI scaling ───────────────────────────────────────────
-  // Vertical FOV from the horizontal FOV at the viewBox (≈ canvas) aspect. The AHI layer fills the
-  // viewport, so the full vertical FOV maps onto the full height. The focal length (in viewBox units)
-  // then places a line-of-sight at angle θ at y = CY − f·tan(θ) — a true perspective horizon that
-  // tracks the real one as the FOV (zoom) changes. (Assumes the map panel is ≥16:9 wide, so `meet`
-  // makes the AHI layer height-fill; if it were taller than 16:9 the mapping would be slightly off.)
+  // ── Conformal AHI scaling ── vertical FOV from the horizontal FOV at the viewBox aspect; a line of sight at θ
+  // sits at y = CY − f·tan(θ), a true perspective horizon as the FOV changes. Assumes a ≥16:9 map panel (`meet`
+  // height-fills); taller would be slightly off.
   const vFovRad = $derived(2 * Math.atan(Math.tan((fov * RAD) / 2) * (H / W)));
   const fAhi = $derived((H / 2) / Math.tan(vFovRad / 2));
   const rungY = (a: number) => CY - fAhi * Math.tan((a + pitch) * RAD);
@@ -74,10 +67,10 @@
 
   const cardinal = (h: number): string => {
     const n = ((h % 360) + 360) % 360;
-    if (n === 0) return 'N';
-    if (n === 90) return 'E';
-    if (n === 180) return 'S';
-    if (n === 270) return 'W';
+    if (n === 0) return $t('compass.n');
+    if (n === 90) return $t('compass.e');
+    if (n === 180) return $t('compass.s');
+    if (n === 270) return $t('compass.w');
     return String(n);
   };
 
@@ -109,11 +102,9 @@
   const fmt = (n: number, digits = 0) =>
     Math.abs(n) >= 100 ? Math.round(n).toString() : n.toFixed(digits);
 
-  // ── Flight-path marker (velocity vector) ────────────────────────────
-  // Conformal (same projection + FOV scaling as the pitch ladder), body-frame / pilot's view: vertical
-  // = flight-path angle via rungY (= AoA depression below the boresight), horizontal = crab. Drawn in
-  // the full-viewport AHI layer but OUTSIDE the roll rotation, so it stays upright relative to the UAV
-  // while the horizon turns around it.
+  // ── Flight-path marker (velocity vector) ── conformal like the ladder, pilot's view: vertical = flight-path
+  // angle (rungY), horizontal = crab. In the AHI layer but OUTSIDE the roll rotation, so it stays upright
+  // while the horizon turns.
   const FPM_SMOOTH = 0.35; // per-update ease factor
   let dispGamma = $state(0);
   let dispCrab = $state(0);

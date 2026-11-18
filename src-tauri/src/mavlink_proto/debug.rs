@@ -1,12 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// MAVLink Debug Statistics Tracker
-// Compiled into all builds; methods early-return on `crate::debug_mode::enabled()` (active in debug
-// builds + a release started with `--debug`, near-zero-cost otherwise).
-// MAVLink is push-based, so — unlike the MSP tracker — there is no request/response/
-// timeout model. We track every message ID seen in the session, separately per direction
-// (RX from the FC, TX from us), with a measured update rate and a "last seen" age.
+// MAVLink debug statistics: every message id per direction with its rate and age (push-based — no
+// request/timeout model as for MSP). Compiled in always; methods return early unless debug mode is on.
 
 use std::collections::HashMap;
 use std::time::Instant;
@@ -254,6 +250,9 @@ fn mavlink_msg_name(id: u32) -> String {
         242 => "HOME_POSITION".into(),
         244 => "MESSAGE_INTERVAL".into(),
         253 => "STATUSTEXT".into(),
+        385 => "TUNNEL".into(),
+        435 => "AVAILABLE_MODES".into(),
+        437 => "AVAILABLE_MODES_MONITOR".into(),
         _ => format!("MSG_{}", id),
     }
 }

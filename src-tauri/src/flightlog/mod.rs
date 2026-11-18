@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Flight Recording & Logbook Module
-// Records telemetry data during flights (arm→disarm) into a SQLite database.
-// Supports optional raw text logging, reverse geocoding, and weather metadata.
+// Flight recording (arm → disarm) into SQLite, the logbook and its enrichment (geocode, weather).
 
 pub mod db;
 pub mod ardupilot;
@@ -11,7 +9,10 @@ pub mod blackbox;
 pub mod decoder;
 pub mod exchange;
 pub mod geocode;
+pub mod group;
+pub mod group_store;
 pub mod hires;
+mod inav;
 pub mod msp_raw_logger;
 pub mod raw_import;
 pub mod recorder;

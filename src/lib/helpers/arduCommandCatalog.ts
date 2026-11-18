@@ -127,10 +127,12 @@ export const ARDU_CATALOG: ArduCmdDef[] = [
     id: CMD.NAV_WAYPOINT, friendlyName: 'Waypoint', short: 'WP', category: 'Basic',
     specifiesCoordinate: true, vehicles: ALL,
     params: {
-      1: { label: 'Hold', units: 's', default: 0, decimals: 0, min: 0, max: 600, advanced: true, tooltip: 'Seconds to wait at the waypoint before continuing.' },
+      // Hold and Yaw are the two fields operators reach for on nearly every waypoint — keep them in the
+      // basic view; acceptance / pass radius stay behind "Advanced".
+      1: { label: 'Hold', units: 's', default: 0, decimals: 0, min: 0, max: 600, tooltip: 'Seconds to wait at the waypoint before continuing.' },
       2: { label: 'Acceptance', units: 'm', default: 0, decimals: 1, min: 0, advanced: true, tooltip: 'Radius within which the waypoint counts as reached (0 = firmware default).' },
       3: { label: 'Pass Radius', units: 'm', default: 0, decimals: 1, advanced: true, tooltip: 'Fly past the point by this radius instead of stopping (0 = pass through).' },
-      4: { label: 'Yaw', units: 'deg', default: 0, decimals: 0, min: -1, max: 360, advanced: true, tooltip: 'Heading to hold at the waypoint (Copter). -1 = keep current heading.' },
+      4: { label: 'Yaw', units: 'deg', default: 0, decimals: 0, min: -1, max: 360, tooltip: 'Heading to hold at the waypoint (Copter). -1 = keep current heading.' },
     },
   },
   {

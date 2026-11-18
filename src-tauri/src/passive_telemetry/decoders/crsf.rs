@@ -24,13 +24,14 @@ use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 use std::time::Instant;
 
-use tauri::{AppHandle, Emitter};
+use crate::vehicle_registry::emitter::VehicleEmitter;
 
 use crate::flightlog::recorder::FlightRecorderHandle;
 use crate::flightmode::FlightModeState;
 use crate::msp::codec::MspCodec;
 use crate::scheduler::telemetry::{
     AirspeedData, AltitudeData, AnalogData, AttitudeData, GpsData, LinkStatsData, StatusData,
+    FIX_2D, FIX_3D,
 };
 
 use super::ap_passthrough::ApPassthroughDecoder;
@@ -454,7 +455,7 @@ impl CrsfDecoder {
 
     /// Emit the accumulated state as the unified telemetry events and feed the flight recorder. Each
     /// event is only sent once its relevant fields have been seen (mirrors the FrSky decoder).
-    pub fn publish(&mut self, app: &AppHandle, recorder: Option<&FlightRecorderHandle>) {
+    pub fn publish(&mut self, app: &VehicleEmitter, recorder: Option<&FlightRecorderHandle>) {
         // ArduPilot passthrough (if present) owns status / flight mode / EKF — suppress the native CRSF
         // mode here so the real AP modes win (the native 0x21 string would be misread as an INAV mode).
         let ap_active = self.ap.is_some();
@@ -503,7 +504,9 @@ impl CrsfDecoder {
 
         if f_gps {
             let gps = GpsData {
-                fix_type: if s.num_sat >= 4 { 3 } else { 2 },
+                // CRSF carries no fix field: inferred from the sat count, on the unified scale
+                // (`scheduler::telemetry::FIX_*`).
+                fix_type: if s.num_sat >= 4 { FIX_3D } else { FIX_2D },
                 num_sat: s.num_sat,
                 lat: s.lat,
                 lon: s.lon,

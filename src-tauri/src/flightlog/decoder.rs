@@ -1,26 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-//! On-demand download of INAV's `blackbox_decode` — Kite's one external runtime dependency.
-//!
-//! The decoder is intentionally NOT bundled, so it can be updated independently when a new INAV
-//! version changes the log format. When it's missing, this module fetches it from the
-//! iNavFlight/blackbox-tools GitHub releases and installs it into a writable app-data `bin/` dir
-//! (which `blackbox::find_decoder` also searches).
-//!
-//! Windows releases ship a `.zip` containing `bin/blackbox_decode.exe`, which we unpack with the
-//! `zip` crate. macOS/Linux releases ship `.tar.zst`, unpacked via the `zstd` + `tar` crates (the
-//! binary is made executable after extraction). Only platforms without a matching release asset
-//! (e.g. FreeBSD) fall back to the manual-install error pointing at the releases page.
+//! On-demand download of INAV's `blackbox_decode` (only for `KITE_BLACKBOX_LEGACY=1`). Deliberately not
+//! bundled, so a new INAV log format needs no Kite release; installed into a writable app-data `bin/`.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
 const REPO: &str = "iNavFlight/blackbox-tools";
 const RELEASES_PAGE: &str = "https://github.com/iNavFlight/blackbox-tools/releases";
-const HTTP_USER_AGENT: &str = "Kite-GC blackbox-decode-fetch";
 
-/// Filename of the decoder for the current platform.
 pub fn binary_name() -> &'static str {
     if cfg!(target_os = "windows") {
         "blackbox_decode.exe"
@@ -29,17 +18,14 @@ pub fn binary_name() -> &'static str {
     }
 }
 
-/// True where the decoder can never work: both mobile systems forbid executing a downloaded binary
-/// (Android by W^X on writable app storage since API 29, iOS by codesigning outright), so a
-/// downloaded `blackbox_decode` is a dead file there. Checked in the backend — the guard must not
-/// depend on the frontend remembering to hide a button.
+/// True where the decoder can never run: Android (W^X on app storage) and iOS forbid executing a
+/// downloaded binary. Checked here, not only by the frontend hiding a button.
 fn decoder_impossible() -> bool {
     cfg!(any(target_os = "android", target_os = "ios"))
 }
 
-/// Writable directory we install the downloaded decoder into. Portable → `<exe>/data/bin`, else the
-/// platform AppData (`<AppData>/kite-gc/bin` on Windows). `blackbox::find_decoder` searches this too,
-/// so a once-downloaded decoder is found on every later run.
+/// Writable install dir of the downloaded decoder (`<exe>/data/bin` portable, else app data); also
+/// searched by `blackbox::find_decoder`.
 pub fn install_dir() -> PathBuf {
     if crate::is_portable() {
         if let Some(dir) = std::env::current_exe()
@@ -86,10 +72,8 @@ pub fn available() -> bool {
     super::blackbox::find_decoder().is_some()
 }
 
-/// Query the installed decoder's version by running `blackbox_decode --version`. Returns the trimmed
-/// first output line (e.g. `"9.0.0 INAV 1918a75"`), or `None` if the decoder is absent or the call
-/// fails. Works for both the auto-downloaded binary and one the user placed themselves — the only
-/// reliable way to know the version, since `blackbox_decode` carries no Windows file-version resource.
+/// `blackbox_decode --version`'s first line (e.g. `"9.0.0 INAV 1918a75"`), or `None` — the only reliable
+/// version source (the binary carries no Windows file-version resource).
 pub fn version() -> Option<String> {
     let decoder = super::blackbox::find_decoder()?;
     let mut cmd = std::process::Command::new(&decoder);
@@ -105,10 +89,8 @@ pub fn version() -> Option<String> {
     let output = match cmd.output() {
         Ok(o) => o,
         Err(e) => {
-            // The decoder is present but won't run. On Linux this is the usual post-download failure:
-            // a wrong-arch binary (Exec format error / ENOEXEC), a non-executable file or a `noexec`
-            // mount (Permission denied), or a missing shared library. Surface it at the default log
-            // level so a tester's log file shows *why* the version stays blank after a download.
+            // Present but won't run (wrong arch, not executable, `noexec` mount, missing library): logged at
+            // the default level, or the blank version after a download has no explanation.
             log::warn!(
                 "blackbox_decode found at {} but could not be executed: {e}",
                 decoder.display()
@@ -163,11 +145,12 @@ pub async fn download<F: FnMut(u8, &str)>(mut report: F) -> Result<PathBuf, Stri
     // the `releases/latest` redirect gives the tag, the release page's own asset fragment gives the
     // names. Unlike ffmpeg the names carry the version, so they can't be constructed up front.
     report(5, "Querying latest release");
-    let tag = crate::github_release::latest_tag(HTTP_USER_AGENT, REPO).await?;
-    let assets = crate::github_release::release_assets(HTTP_USER_AGENT, REPO, &tag).await?;
+    let user_agent = crate::user_agent::user_agent("blackbox-decode-fetch");
+    let tag = crate::github_release::latest_tag(&user_agent, REPO).await?;
+    let assets = crate::github_release::release_assets(&user_agent, REPO, &tag).await?;
 
     let client = reqwest::Client::builder()
-        .user_agent(HTTP_USER_AGENT)
+        .user_agent(user_agent)
         .build()
         .map_err(|e| format!("HTTP client error: {e}"))?;
 
@@ -261,12 +244,8 @@ fn extract_from_tar_zst(archive_bytes: &[u8], target: &Path) -> Result<(), Strin
     let mut archive = tar::Archive::new(decoder);
     let want = binary_name();
 
-    // The archive contains TWO entries named `blackbox_decode`: the real ELF binary under `bin/`
-    // and a bash-completion script under `share/bash-completion/completions/`, which appears FIRST
-    // in tar order. Matching on the file name alone grabbed the completion script — a ~1.7 KB text
-    // file that runs as a no-op and prints no `--version`, so the install looked successful but the
-    // version stayed blank. Prefer the `bin/<name>` entry; keep the first plain name match only as a
-    // fallback for unexpected future layouts.
+    // The archive holds TWO `blackbox_decode` entries — a bash-completion script under `share/` comes
+    // FIRST. Prefer `bin/<name>`; the first plain name match is only a fallback for future layouts.
     let mut fallback: Option<Vec<u8>> = None;
 
     for entry in archive.entries().map_err(|e| format!("Bad tar archive: {e}"))? {

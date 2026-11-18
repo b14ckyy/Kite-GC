@@ -4,9 +4,12 @@ Found a bug, or something not working as described? Reports are very welcome —
 much faster. Kite is developed openly on GitHub:
 
 [:material-github: Open an issue on GitHub](https://github.com/b14ckyy/Kite-GC/issues){ .md-button }
+[:fontawesome-brands-discord: Ask in #help on Discord](https://discord.gg/3FM7EWhkg9){ .md-button }
 
 ## Before you file
 
+- **Not sure it's a bug?** Ask in `#help` on the [Kite Discord](https://discord.gg/3FM7EWhkg9) first (English) —
+  a quick answer is often all it takes, and a confirmed bug becomes an issue from there.
 - **Check the troubleshooting pages** — many common snags are covered under
   **[Connection](connection.md)** and **[Video](video.md)**.
 - **Search existing issues.** Someone may have already reported it; adding your details to an open issue
@@ -38,9 +41,10 @@ The more of this you provide, the quicker it can be diagnosed:
 
 The log usually pinpoints the cause. To capture a good one:
 
-1. Open **Settings → Diagnostics** and set **Log Level** to **Debug**.
+1. Open **Settings → Diagnostics** and set **Log Level** to **Debug (verbose)**.
 2. **Reproduce** the problem.
-3. Click **Open Log Folder** and attach the log file to the issue.
+3. Click **Open Folder** and attach the log file to the issue (on Android **Share log file** → pick the
+   day → send it to mail or a messenger, then attach it).
 
 The log locations and what the file contains (port names and firmware strings, but no personal data) are
 listed under **[Connection → Getting a diagnostic log](connection.md#getting-a-diagnostic-log)**.

@@ -193,4 +193,8 @@ impl Transport for MspTransport {
     fn connection_lost_reason(&self) -> Option<String> {
         self.lost_reason.clone()
     }
+
+    fn checksum_errors(&self) -> u32 {
+        self.parser.checksum_errors()
+    }
 }
