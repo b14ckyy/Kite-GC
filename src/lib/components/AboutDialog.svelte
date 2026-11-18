@@ -17,12 +17,8 @@
 
   let { open = $bindable(false) }: { open?: boolean } = $props();
 
-  // ── Runtime line ──
-  // The facts a layout report from an unknown device needs and a screenshot of this dialog can
-  // carry: the WebView engine and version, the css viewport with its density, the root font size
-  // (Android scales it with the system font setting), the safe-area insets the chrome keeps clear
-  // of, and the hardware profile when the device is a known one. Technical on purpose — it is read
-  // by whoever debugs, not by the pilot — so the values are not translated.
+  // Runtime line: facts a layout report from an unknown device needs (engine, css viewport @dpr,
+  // root font size, safe-area insets, profile). Read by whoever debugs, so the values stay untranslated.
   function engineLabel(): string {
     const ua = navigator.userAgent;
     const chrome = /Chrome\/(\d+)/.exec(ua);

@@ -32,17 +32,13 @@ export const deviceProfile: string | null = (() => {
   return m ? m[1] : null;
 })();
 
-/** RadioMaster AX12: an Android 9 RC transmitter with a 5.5" 1280×720 screen and an internal ELRS
- *  UART. Its WebView does not reliably carry the "Mobile" token — Chromium derives that from the
- *  smallest screen width in dp, which the AX12's density setting puts on either side of the 600 dp
- *  tablet threshold (two testers, two layouts on identical hardware). A handheld transmitter is a
- *  phone-shaped device whatever its density says, so the profile forces the phone chrome. */
+/** RadioMaster AX12: its density setting puts it on either side of Chromium's 600 dp "Mobile"
+ *  threshold, so the profile forces the phone chrome on this handheld. */
 export const isAx12 = deviceProfile === 'ax12';
 
-/** True on a phone: iPhone/iPod, Android carrying the "Mobile" UA token (Chromium sets it on
- *  phones and omits it on tablets), or a known handheld transmitter (see `isAx12`). UA-based, so
- *  orientation-independent — a landscape phone never becomes a tablet. Used to gate phone-only
- *  layout that must NOT affect tablets. */
+/** True on a phone: iPhone/iPod, Android with the "Mobile" UA token (absent on tablets), or a known
+ *  handheld transmitter. UA-based, so orientation-independent. Gates phone-only layout that must
+ *  NOT affect tablets. */
 export const isPhone = /iPhone|iPod/i.test(ua) || (isAndroid && /Mobile/i.test(ua)) || isAx12;
 
 /** True on a tablet (iPad, Android tablets): a mobile build that is not a phone. */

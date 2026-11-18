@@ -660,6 +660,7 @@
   $effect(() => {
     if (selectedProtocol !== prevProtocol) {
       prevProtocol = selectedProtocol;
+      if (onInternalUart) return;
       if (selectedProtocol === 'mavlink') {
         selectedBaud = 57600;
       } else {
@@ -667,16 +668,14 @@
       }
     }
   });
-  // A transmitter's built-in UART runs at whatever its radio module is set to — the AX12's ELRS
-  // module at 460800 — so picking that port sets the baud once, on the transition onto it. A
-  // deliberate change afterwards sticks (the effect only fires when the selection moves onto it).
+  // The internal UART runs at its radio module's baud (AX12 ELRS: 460800): set once when the
+  // selection moves onto it; the protocol default never overrides it.
   const INTERNAL_UART_BAUD = 460800;
-  let onInternalUart = $state(false);
+  let onInternalUart = false;
   $effect(() => {
     const internal = ports.some((p) => p.path === selectedPort && p.port_type === 'internal-uart');
-    const was = untrack(() => onInternalUart);
-    if (internal && !was) selectedBaud = INTERNAL_UART_BAUD;
-    if (internal !== was) onInternalUart = internal;
+    if (internal && !onInternalUart) selectedBaud = INTERNAL_UART_BAUD;
+    onInternalUart = internal;
   });
   bleDevices.subscribe((d) => {
     bleDeviceList = d;
@@ -999,6 +998,8 @@
   const saved = get(settings);
   selectedPort = saved.lastPort;
   selectedBaud = saved.lastBaud;
+  // A restored internal UART keeps its saved baud instead of being reset to the module default.
+  onInternalUart = deviceProfile !== null && saved.lastPort.startsWith('/dev/tty');
   const startupProtocol = resolveStartupProtocol(saved);
   selectedProtocol = startupProtocol;
   // Restore the full last-used connection path so nothing has to be re-entered. A serial value is only
@@ -1083,8 +1084,6 @@
       flightLog: s.flightLoggingEnabled, rawLog: s.flightLogRawEnabled,
       batteryAlertPct: s.batteryAlertPct, mapProvider: s.mapProvider,
       uiScale: s.uiScale, logLevel: savedLogLevel,
-      // Runtime facts a layout report needs (the same line the About dialog shows): which engine,
-      // the css viewport and its density, and the hardware profile if the device is a known one.
       device: deviceProfile, viewport: `${window.innerWidth}x${window.innerHeight}@${window.devicePixelRatio}`,
       ua: navigator.userAgent,
     });

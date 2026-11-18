@@ -66,8 +66,7 @@
   // Outgoing BT SPP ports (tagged `bluetooth-spp` by the backend) get no useful OS descriptor, so the
   // user can rename them; the name is stored per COM path in settings and appended to "COMx".
   function portLabel(p: PortInfo): string {
-    // A transmitter's built-in FC link (RadioMaster AX12: /dev/ttyS1 → ELRS module) — the backend's
-    // English label is replaced by the translated one; the node path stays so the log matches.
+    // The backend labels a built-in UART with its bare path; the translated description is added here.
     if (p.port_type === 'internal-uart') return `${p.path} — ${$t('connection.internalUart')}`;
     if (p.port_type !== 'bluetooth-spp') return p.label;
     const name = $settings.btPortNames[p.path];

@@ -10,36 +10,13 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
-/**
- * Which known ground-station hardware Kite is running on — one decision, three consumers.
- *
- * Kite runs on ordinary phones and tablets, and on Android-based RC transmitters that wire a
- * flight-controller link into the device itself. Those need adaptations a stock device must never
- * see: an internal UART that no USB-host enumeration can find, and a form factor the WebView
- * misreports. Everything device-specific is keyed off the profile name this object computes, so
- * the identification rule lives in exactly one place and a wrong match is corrected here alone.
- *
- * Consumers:
- *   - [tagUserAgent]: the frontend learns the profile from a `KiteDevice/<name>` token appended to
- *     the WebView user-agent (`platform.ts`). A token, not a Tauri command, because the form-factor
- *     decision is made synchronously at module load, before any command could answer.
- *   - Rust over JNI (`android/device.rs`): [profile] for the log, [internalSerialPorts] for the
- *     serial port picker. JNI-only callers are invisible to R8 — keep rule in proguard-rules.pro.
- *
- * Known profiles:
- *   - [AX12] — RadioMaster AX12 (MediaTek MT8788, Android 9). Its ELRS module is wired to the SoC's
- *     UART1, which the firmware exposes as a world-accessible `/dev/ttyS1` (0666, SELinux
- *     permissive) at the module's 460800 baud; RadioMaster's own QGroundControl build reaches it the
- *     same way (Qt's stock serial port on a raw tty node). The firmware is built from MediaTek's
- *     `tb8788p1_64_bsp` reference product and carries that name in the build fields — there is no
- *     RadioMaster-specific identifier anywhere in the build properties. Blind implementation from
- *     the ax12-research audit (2026-04) and the Radiomaster-RC/qgroundcontrol fork; not verified on
- *     hardware yet.
- */
+/** Which known ground-station hardware Kite runs on; every device-specific adaptation keys off
+ *  [profile]. The AX12 firmware carries only MediaTek's reference-product name (tb8788p1_64_bsp), no
+ *  RadioMaster identifier. Rust calls the @JvmStatic members over JNI only — keep rule in
+ *  proguard-rules.pro. */
 object DeviceProfile {
   private const val TAG = "KiteDevice"
 
-  /** Profile name of the RadioMaster AX12. */
   const val AX12 = "ax12"
 
   /** MediaTek reference-product name the AX12 firmware reports in `Build.DEVICE` / `PRODUCT` /
@@ -51,7 +28,6 @@ object DeviceProfile {
    *  root-only. */
   private const val AX12_INTERNAL_UART = "/dev/ttyS1"
 
-  /** The matched profile name, or "" on a device Kite does not recognise. Computed once. */
   private val name: String by lazy { detect() }
 
   private fun detect(): String {
@@ -72,14 +48,11 @@ object DeviceProfile {
   fun buildSummary(): String =
     "manufacturer=${Build.MANUFACTURER} brand=${Build.BRAND} model=${Build.MODEL} " +
       "device=${Build.DEVICE} product=${Build.PRODUCT} board=${Build.BOARD} " +
-      "hardware=${Build.HARDWARE} sdk=${Build.VERSION.SDK_INT} fingerprint=${Build.FINGERPRINT}"
+      "hardware=${Build.HARDWARE} sdk=${Build.VERSION.SDK_INT} display=${Build.DISPLAY} " +
+      "fingerprint=${Build.FINGERPRINT}"
 
-  /**
-   * Serial ports built into the device, as a JSON array of `{path, label, type}` — the same shape
-   * `UsbSerial.listDevices` answers with, so Rust appends them to one list. Empty on an unknown
-   * device, and on a known one whose node is not accessible after all: a port the open would fail
-   * on is worse than no port, and the log says which check failed.
-   */
+  /** Built-in serial ports as JSON {path, label, type} (the UsbSerial.listDevices shape). A node
+   *  this app cannot read and write is left out: listing a port the open would fail on is worse. */
   @JvmStatic
   fun internalSerialPorts(): String {
     val out = JSONArray()
@@ -92,7 +65,7 @@ object DeviceProfile {
         else -> out.put(
           JSONObject()
             .put("path", AX12_INTERNAL_UART)
-            .put("label", "$AX12_INTERNAL_UART — internal UART (ELRS module)")
+            .put("label", AX12_INTERNAL_UART)
             .put("type", "internal-uart")
         )
       }
@@ -100,12 +73,8 @@ object DeviceProfile {
     return out.toString()
   }
 
-  /**
-   * Append the `KiteDevice/<name>` token to the WebView's user-agent so the frontend can key its
-   * form-factor decision off the profile. Must run before the first page load — it does, from
-   * `MainActivity.onWebViewCreate`, which wry calls before it navigates. No-op on an unknown device,
-   * so the user-agent of every stock phone and tablet stays exactly as it was.
-   */
+  /** Must run before the first page load (platform.ts reads the token at module load); no-op on an
+   *  unknown device, so stock user-agents stay untouched. */
   fun tagUserAgent(webView: WebView) {
     if (name.isEmpty()) return
     val settings = webView.settings

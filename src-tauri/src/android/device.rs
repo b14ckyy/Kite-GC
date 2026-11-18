@@ -1,13 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-//! JNI bridge to the Kotlin `DeviceProfile`: which known ground-station hardware this is, and the
-//! serial ports built into it.
-//!
-//! The identification rule itself lives in `DeviceProfile.kt` (one place, see its docs); this side
-//! only asks, caches the answer and logs it. Today the one profile is the RadioMaster AX12, whose
-//! internal ELRS UART is a raw `/dev/ttyS1` — the reason the Android serial transport grew a tty
-//! backend next to the USB-host one.
+//! JNI bridge to DeviceProfile.kt: which known hardware this is, and its built-in serial ports.
+//! The identification rule lives on the Kotlin side only.
 
 use std::sync::OnceLock;
 
@@ -20,11 +15,8 @@ const BRIDGE: &str = "com.kitegc.app.DeviceProfile";
 /// empty answer for the life of the process.
 static PROFILE: OnceLock<String> = OnceLock::new();
 
-/// The matched profile name, "" on a device Kite does not recognise.
-///
-/// The first successful call logs the build fields the decision was made from — at the default log
-/// level on purpose: the AX12 support is a blind implementation, and the one thing a tester's log
-/// must answer is whether the device was recognised at all.
+/// The matched profile name, "" on an unrecognised device. Logged with the build fields at the
+/// default level: a report from a misdetected device needs them.
 pub fn profile() -> String {
     if let Some(p) = PROFILE.get() {
         return p.clone();
@@ -91,7 +83,6 @@ fn internal_ports_json() -> Result<String, String> {
     string_call(&mut env, &class, "internalSerialPorts")
 }
 
-/// Call a static `() -> String` method of the bridge class.
 fn string_call(
     env: &mut jni::JNIEnv<'_>,
     class: &jni::objects::JClass<'_>,

@@ -713,7 +713,7 @@
     "privacy": "Datenschutz",
     "community": "Community",
     "supportedFirmware": "Unterstützte Autopilot-Firmware",
-    "runtime": "Laufzeit",
+    "runtime": "Umgebung",
     "thirdParty": "Drittanbieter-Lizenzen",
     "thirdPartyNote": "Eingebundene Komponenten und ihre Lizenzen. Transitive Abhängigkeiten stehen unter kompatiblen permissiven Lizenzen.",
     "close": "Schließen"
