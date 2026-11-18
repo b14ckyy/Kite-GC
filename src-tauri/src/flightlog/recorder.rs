@@ -225,6 +225,9 @@ pub struct PendingSession {
     /// session-local identity of a vehicle without a hardware id (`same_fc`). `None` for a session
     /// recovered from disk — its key belonged to an earlier run.
     pub vehicle_key: Option<String>,
+    /// Last weather answer the session stored (`ActiveFlight::weather_seq`): a reopened session must
+    /// not store the same answer again.
+    pub weather_seq: u64,
 }
 
 impl PendingSession {
@@ -776,6 +779,7 @@ pub fn summarize_temp_session(
             armed_segments,
             membership,
             vehicle_key: None,
+            weather_seq: 0,
         },
         count,
     ))
@@ -835,13 +839,11 @@ fn valid_start(lat: Option<f64>, lon: Option<f64>) -> Option<(f64, f64)> {
     }
 }
 
-/// Async enrichment: fetch weather + geocode for a newly armed flight.
-/// Runs in the background, never blocks the recorder thread.
+/// Weather + place name of a committed flight, in the background — never blocks the recorder thread.
 #[cfg_attr(test, allow(dead_code))] // unit tests never go online (`commit_pending_session`)
 async fn enrich_flight_async(flight_id: i64, lat: f64, lon: f64, db_path: String) {
-    // Fetch weather and geocode (sequential — no tokio::join available)
     let weather = super::weather::fetch_weather(lat, lon).await;
-    let location = super::geocode::reverse_geocode(lat, lon, "en").await;
+    let location = super::geocode::flight_location(lat, lon, "en").await;
 
     // Open a fresh connection for the update (recorder's conn is on another thread)
     let conn = match db::open_database(std::path::Path::new(&db_path)) {
@@ -950,6 +952,8 @@ struct ActiveFlight {
     buffer: Vec<TelemetryRecord>,
     /// Accumulated per-instance battery records pending flush (multi-battery; ArduPilot/PX4).
     bat_buffer: Vec<BatteryRecord>,
+    /// Sequence number of the last weather answer written to the temp store; 0 = none yet.
+    weather_seq: u64,
     // Statistics tracking
     max_alt: f64,
     max_speed: f64,
@@ -1500,6 +1504,27 @@ impl FlightRecorder {
         self.maybe_record_sample();
     }
 
+    /// Whether an answer of the weather service would be stored now (a session with a temp store).
+    pub fn records_weather(&self) -> bool {
+        self.active_flight.as_ref().is_some_and(|f| f.temp_db.is_some())
+    }
+
+    /// An answer of the weather service; offered repeatedly, stored once per `seq` and session.
+    pub fn on_weather(&mut self, seq: u64, lat: f64, lon: f64, source: &str, data_json: &str) {
+        let now = self.clock.instant();
+        let Some(flight) = self.active_flight.as_mut() else { return };
+        if flight.weather_seq == seq {
+            return;
+        }
+        let Some(conn) = flight.temp_db.as_ref() else { return };
+        let elapsed_ms = now.saturating_duration_since(flight.start_instant).as_millis() as i64;
+        // Also after a failed insert: the answer comes again every few seconds.
+        flight.weather_seq = seq;
+        if let Err(e) = db::insert_weather_record(conn, 0, elapsed_ms, lat, lon, source, data_json) {
+            log::warn!("Failed to store the weather answer: {}", e);
+        }
+    }
+
     /// Feed altitude data from the scheduler
     pub fn on_altitude(&mut self, data: &AltitudeData) {
         self.snapshot.alt_baro = Some(data.altitude);
@@ -1877,6 +1902,7 @@ impl FlightRecorder {
             start_lon: p.flight.start_lon,
             buffer: Vec::with_capacity(FLUSH_THRESHOLD),
             bat_buffer: Vec::new(),
+            weather_seq: p.weather_seq,
             max_alt: p.flight.max_alt_m.unwrap_or(0.0),
             max_speed: p.flight.max_speed_ms.unwrap_or(0.0),
             max_distance: p.flight.max_distance_m.unwrap_or(0.0),
@@ -2023,6 +2049,7 @@ impl FlightRecorder {
             start_lon: None,
             buffer: Vec::with_capacity(FLUSH_THRESHOLD),
             bat_buffer: Vec::new(),
+            weather_seq: 0,
             max_alt: 0.0,
             max_speed: 0.0,
             max_distance: 0.0,
@@ -2167,6 +2194,7 @@ impl FlightRecorder {
                 armed_segments,
                 membership: self.membership.clone(),
                 vehicle_key: Some(self.key().to_string()),
+                weather_seq: flight.weather_seq,
             },
             sample_count,
         ))
@@ -2579,6 +2607,7 @@ mod tests {
             armed_segments: Vec::new(),
             membership: None,
             vehicle_key: None,
+            weather_seq: 0,
         }
     }
 
@@ -3720,6 +3749,38 @@ mod tests {
         rec.on_status(&status(false));
         assert!(rec.active_flight.is_none());
         path
+    }
+
+    /// The weather service offers its answer on every tick: a session stores each answer once, at the
+    /// session time it was first offered, and nothing outside a session.
+    #[test]
+    fn a_weather_answer_is_stored_once_per_session() {
+        let rig = Rig::new("weather-once");
+        let (mut rec, _) = rig.recorder("L1:S1", fc("Solo", None));
+        rec.on_weather(1, 48.1, 11.5, "open-meteo", "{}");
+        assert!(!rec.records_weather());
+
+        rec.on_gps(&gps(2, 48.1, 11.5));
+        rec.on_status(&status(false));
+        rec.on_status(&status(true));
+        assert!(rec.records_weather());
+        let path = active_path(&rec);
+        rig.advance_s(2);
+        rec.on_weather(1, 48.1, 11.5, "open-meteo", "{\"a\":1}");
+        rig.advance_s(3);
+        rec.on_weather(1, 48.1, 11.5, "open-meteo", "{\"a\":1}");
+        rig.advance_s(3);
+        rec.on_weather(2, 48.2, 11.6, "open-meteo", "{\"a\":2}");
+
+        let conn = Connection::open(&path).unwrap();
+        let rows: Vec<(i64, f64, String)> = conn
+            .prepare("SELECT timestamp_ms, lat, data_json FROM weather_records ORDER BY id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert_eq!(rows, vec![(2000, 48.1, "{\"a\":1}".to_string()), (8000, 48.2, "{\"a\":2}".to_string())]);
     }
 
     /// A commit while "Compact Database" runs on the main DB fails at once — no busy-timeout wait on the

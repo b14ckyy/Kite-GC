@@ -395,6 +395,10 @@ export interface AppSettings {
   flightLogRawPath: string;
   flightLogRawEnabled: boolean;
   flightLogRawAlways: boolean;
+  /** Weather requests without a weather widget on screen: during a recording and for a stored flight. */
+  flightWeatherRecording: boolean;
+  /** Look up the place name of a flight's start point. */
+  flightAutoLocation: boolean;
   // Mission Control
   defaultWpAltitudeM: number;
   defaultPhTimeSec: number;
@@ -506,6 +510,8 @@ const defaults: AppSettings = {
   flightLogRawPath: '',
   flightLogRawEnabled: false,
   flightLogRawAlways: false,
+  flightWeatherRecording: true,
+  flightAutoLocation: true,
   defaultWpAltitudeM: 50,
   defaultPhTimeSec: 30,
   lastAutopilotSystem: 'inav',

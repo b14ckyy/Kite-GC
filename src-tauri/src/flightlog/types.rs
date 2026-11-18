@@ -23,6 +23,18 @@ pub struct FlightLogSettings {
 }
 
 
+/// One answer of the weather service as stored with a flight (row in `weather_records`).
+#[derive(Debug, Clone, Serialize)]
+pub struct WeatherRecord {
+    /// Session time the answer reached the recorder.
+    pub timestamp_ms: i64,
+    pub lat: Option<f64>,
+    pub lon: Option<f64>,
+    pub source: Option<String>,
+    /// The widget's `WindAloft`, as JSON text.
+    pub data_json: String,
+}
+
 /// A single recorded flight (row in `flights` table)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Flight {

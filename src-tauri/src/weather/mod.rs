@@ -1,12 +1,28 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Wind by height from the Open-Meteo forecast model (no key), for the weather widget.
+// Wind by height from the Open-Meteo forecast model (no key), for the weather widget and the flight recorders.
 // Fixed heights are above ground; pressure levels carry a geopotential height (MSL), made AGL with the answer's `elevation`.
+
+pub mod service;
 
 use serde::Serialize;
 use serde_json::Value;
 use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Setting "Record weather with flights": weather requests without a widget on screen — the poller
+/// during a recording and the current weather of a stored flight.
+pub static RECORD_WITH_FLIGHTS: AtomicBool = AtomicBool::new(true);
+
+pub fn records_with_flights() -> bool {
+    RECORD_WITH_FLIGHTS.load(Ordering::Relaxed)
+}
+
+/// The position a weather request carries: two decimals (about 1 km), enough for the model cell and
+/// too coarse to follow an aircraft or to tell where exactly someone flies.
+pub fn coarse(deg: f64) -> f64 {
+    (deg * 100.0).round() / 100.0
+}
 
 const OPEN_METEO_URL: &str = "https://api.open-meteo.com/v1/forecast";
 
@@ -72,8 +88,8 @@ pub async fn fetch_wind_aloft(lat: f64, lon: f64) -> Result<WindAloft, String> {
     let resp = client
         .get(OPEN_METEO_URL)
         .query(&[
-            ("latitude", format!("{lat:.4}")),
-            ("longitude", format!("{lon:.4}")),
+            ("latitude", format!("{:.2}", coarse(lat))),
+            ("longitude", format!("{:.2}", coarse(lon))),
             ("wind_speed_unit", "ms".to_string()),
             ("timeformat", "unixtime".to_string()),
             ("forecast_minutely_15", STEPS.to_string()),

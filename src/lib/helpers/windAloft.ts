@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Wind-by-height data of the weather widget: types of the `weather_wind_aloft` answer and the
+// Wind-by-height data of the weather widget (service event and `weather_records.data_json`) and the
 // pure maths on it.
 
 export interface WindLevel {

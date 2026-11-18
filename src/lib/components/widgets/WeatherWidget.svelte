@@ -13,7 +13,7 @@
   import { replayActive } from '$lib/stores/mission';
   import { bearing, haversineDistance } from '$lib/utils/geo';
   import { convertSpeed, speedDigits } from '$lib/utils/units';
-  import { watchWindAloft, windAloft } from '$lib/controllers/windAloft';
+  import { replayWind, watchWindAloft, windAloft } from '$lib/controllers/windAloft';
   import { currentStep, weatherKind, windAt } from '$lib/helpers/windAloft';
   import WeatherIcon from './WeatherIcon.svelte';
 
@@ -53,9 +53,9 @@
 
   const STALE_MS = 30 * 60_000;
   // An old answer stays as a reference (greyed): better than nothing where the FC reports no wind.
-  let data = $derived($replayActive ? null : $windAloft.data);
-  let stale = $derived(!!data && now - $windAloft.fetchedAt > STALE_MS);
-  let stepIdx = $derived(data ? currentStep(data.steps, now) : 0);
+  let data = $derived($replayActive ? $replayWind.data : $windAloft.data);
+  let stale = $derived(!$replayActive && !!data && now - $windAloft.fetchedAt > STALE_MS);
+  let stepIdx = $derived(data ? currentStep(data.steps, $replayActive ? $replayWind.nowMs : now) : 0);
   let step = $derived(data ? data.steps[stepIdx] : null);
   let wind = $derived(step ? windAt(step.levels, heightM) : null);
   let kind = $derived(step ? weatherKind(step.weatherCode) : null);
@@ -101,7 +101,7 @@
   const UAV = '0,-40 -22,34 0,20 22,34';
 
   let note = $derived(
-    $replayActive || (!data && $windAloft.noPosition)
+    !data && ($replayActive || $windAloft.noPosition)
       ? $t('widgetLabels.na')
       : !data
         ? $windAloft.failed
