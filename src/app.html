@@ -50,10 +50,12 @@
         overflow-wrap: break-word;
         overscroll-behavior: contain;
       }
-      /* The shadow covers the box's bottom padding, where the content would show under the row. */
+      /* The shadow covers the box's bottom padding, where the content would show under the row.
+         `bottom` counts from the box's content edge in Chromium (the padding is subtracted): any value
+         above 0 lifts the row out of its place in a dialog that does not scroll. */
       .dialog-box .dialog-buttons {
         position: sticky;
-        bottom: 12px;
+        bottom: 0;
         background: #2e2e2e;
         box-shadow: 0 16px 0 #2e2e2e;
       }
