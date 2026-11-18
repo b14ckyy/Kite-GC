@@ -160,6 +160,13 @@ until the first receiver is listed.
 | `fixType` | int | The same scale as `gps.fixType`. |
 | `fixRaw` | int | The MAVLink `GPS_FIX_TYPE` as sent: 0 no receiver · 1 no fix · 2 = 2D · 3 = 3D · 4 DGPS · 5 RTK float · 6 RTK fixed · 7 static · 8 PPP. |
 | `hdop` | float · null | Horizontal dilution of precision; `null` when the receiver reports none. |
+| `vdop` | float · null | Vertical dilution of precision. |
+| `hAccM`, `vAccM` | float · null | Horizontal / vertical position accuracy the receiver estimates, metres. |
+| `speedMs` | float · null | This receiver's ground speed, m/s. |
+| `courseDeg` | float · null | This receiver's course over ground, degrees. |
+| `yawDeg` | float · null | Heading of a dual-antenna receiver, degrees (0 = north). |
+
+The last six are `null` where the receiver or the firmware does not report the value.
 
 #### `attitude` — sources: all
 
