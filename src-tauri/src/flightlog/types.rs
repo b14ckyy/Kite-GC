@@ -202,8 +202,8 @@ pub struct MissionInput {
     /// See `Mission::extra_json`. On an overwrite `None` keeps what the row holds.
     #[serde(default)]
     pub extra_json: Option<String>,
-    /// Only a `.kmission` import sets these two (the row comes from another library); else the DB's
-    /// own time and the geocoder fill them.
+    /// Only an import from another library (`.kmission`, `.kflight`) sets these two; else the DB's own
+    /// time and the geocoder fill them.
     #[serde(default)]
     pub created_at: Option<String>,
     #[serde(default)]
