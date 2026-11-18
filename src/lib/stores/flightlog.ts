@@ -157,6 +157,15 @@ export async function missionDbForFlight(flightId: number, dbPath: string): Prom
   });
 }
 
+/** `flights.alt_relative`: the track's altitude is relative to the arming point. Null when the flight
+ *  stores no value (imported logs, opened files) — then `isRelativeAltitudeProtocol` decides. */
+export async function flightAltRelative(flightId: number, dbPath: string): Promise<boolean | null> {
+  return invoke<boolean | null>('flight_alt_relative', {
+    flightId,
+    dbPath: dbPath || undefined,
+  });
+}
+
 /** Blackbox-header waypoint count for a flight (replay `WP N/X` fallback), or null. */
 export async function flightLoggedWpCount(flightId: number, dbPath: string): Promise<number | null> {
   return invoke<number | null>('flight_logged_wp_count', {

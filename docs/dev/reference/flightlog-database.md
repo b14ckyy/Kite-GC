@@ -71,7 +71,11 @@ Migration history (tracked via `PRAGMA user_version`):
   New columns: `missions.extra_json` (data a version does not know yet — kept as it is) and
   `missions.vehicle_class`; `flights.alt_relative` (1 = altitudes relative to the arming point, 0 = MSL,
   NULL = decide from the `protocol` label). The back-fill sets it on every existing flight: 1 for the
-  passive CRSF and LTM links, else 0.
+  passive CRSF and LTM links, else 0. The recorder sets it when a session is committed: what the passive
+  handler reported for its protocol, 0 for an active MSP or MAVLink link, and the label rule for a
+  session recovered from disk. The replay reads it with the flight (`flight_alt_relative`) and uses the
+  label only for a flight without a value (imported logs, opened files); the linked blackbox track of a
+  pair always counts as MSL.
 
 Freed space: the database runs with `auto_vacuum = INCREMENTAL`, so deleted data (e.g. a blackbox
 BLOB) first lands on the SQLite freelist. A background thread hands the freelist back to the file

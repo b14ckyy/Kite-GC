@@ -742,6 +742,7 @@
   let flightSummaries = $state<FlightSummary[]>([]);
   let selectedFlight: Flight | null = $state(null);
   let selectedFlightTrack = $state<TelemetryRecord[]>([]);
+  let selectedFlightAltRelative = $state(false);
   let selectedFlightTrackCount = $state(0);
   let selectedFlightId: number | null = $state(null);
   let selectedFlightNotes = $state("");
@@ -2461,6 +2462,7 @@
     if (selectedFlightId !== flightId) return;
     selectedFlight = data.flight;
     selectedFlightTrack = data.track;
+    selectedFlightAltRelative = data.altRelative;
     selectedFlightTrackCount = data.trackCount;
     selectedFlightNotes = data.notes;
     weatherTempC = weatherTempDisplayFromC(data.weatherTempC, interfaceSettings);
@@ -3158,9 +3160,10 @@
   // FC variant for the selected flight (used by mode widgets + map coloring)
   const replayFcVariant = $derived((selectedFlight as Flight | null)?.fc_variant ?? 'INAV');
 
-  // Recording protocol of the selected flight — the 3D map needs it to tell a true-MSL track from an
-  // arming-relative one (CRSF/LTM), which decides how its altitude anchor is derived.
-  const replayProtocol = $derived((selectedFlight as Flight | null)?.protocol ?? null);
+  // The linked blackbox track is a log import and carries MSL, whatever the selected flight says.
+  const replayAltRelative = $derived(
+    replaySource === 'blackbox' && linkedPartnerTrack.length > 0 ? false : selectedFlightAltRelative,
+  );
 
   // Absolute flight-start epoch (ms) — telemetry timestamp_ms is flight-relative, so the
   // 3D sky clock needs this origin to reconstruct the real instant for sun positioning.
@@ -3899,7 +3902,7 @@
           active={mapViewMode === '3d'}
           playbackTrack={mapTrack}
           playbackPoint={playbackPoint}
-          playbackProtocol={replayProtocol}
+          playbackAltRelative={replayAltRelative}
           {replayStartEpochMs}
           {trackColorMode}
           platformType={mapPlatformType}

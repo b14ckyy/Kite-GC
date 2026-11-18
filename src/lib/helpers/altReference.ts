@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Which recorded flights carry arming-relative altitude instead of true MSL, decided from the `protocol`
-// label (`passive_telemetry/handler.rs`) — renaming a label breaks stored flights. The v22 back-fill of
-// `flights.alt_relative` (`ALT_RELATIVE_PROTOCOL_SQL`, db.rs) applies the same rule: change both together.
+// Fallback for a flight without a stored `flights.alt_relative` (imported logs, opened files): the same
+// rule on the `protocol` label as `ALT_RELATIVE_PROTOCOL_SQL` (db.rs) — change both together.
 
 /** Flight-row `protocol` labels written by the passive backend (see `passive_telemetry/handler.rs`). */
 const RELATIVE_ALTITUDE_PROTOCOLS = ['CRSF', 'LTM'];

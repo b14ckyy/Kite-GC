@@ -229,6 +229,9 @@ pub struct PendingSession {
     /// Last weather answer the session stored (`ActiveFlight::weather_seq`): a reopened session must
     /// not store the same answer again.
     pub weather_seq: u64,
+    /// The link reports altitude relative to the arming point (`FlightRecorder::alt_relative`); `None`
+    /// for a session recovered from disk.
+    pub alt_relative: Option<bool>,
 }
 
 impl PendingSession {
@@ -671,10 +674,12 @@ pub fn commit_pending_session(session: &PendingSession) -> Result<i64, String> {
     }
     let flight_id = db::commit_session_to_main(&conn, &session.temp_path, &session.flight)
         .map_err(|e| format!("Failed to commit session: {}", e))?;
+    if let Err(e) = db::set_flight_alt_relative(&conn, flight_id, session.alt_relative) {
+        log::warn!("Flight {flight_id}: altitude reference not stored: {e}");
+    }
     db::remove_temp_session(&session.temp_path);
 
-    // Weather + geocode for a flight with a home (§5e M1: a session that never armed with a fix has none).
-    // Unit tests commit sessions with real positions now (no recording without a fix) — they never go online.
+    // Weather + geocode for a flight with a home (§5e M1). Unit tests never go online.
     #[cfg(not(test))]
     if let Some((lat, lon)) = valid_start(session.flight.start_lat, session.flight.start_lon) {
         let db_path = session.db_path.to_string_lossy().to_string();
@@ -781,6 +786,7 @@ pub fn summarize_temp_session(
             membership,
             vehicle_key: None,
             weather_seq: 0,
+            alt_relative: None,
         },
         count,
     ))
@@ -975,6 +981,9 @@ pub struct FlightRecorder {
     settings: FlightLogSettings,
     fc_info: FcInfo,
     protocol: String,
+    /// Set by the passive handler at protocol lock (true for LTM / CRSF); `None` on an active MSP or
+    /// MAVLink link, which reports MSL.
+    alt_relative: Option<bool>,
     db_file_path: std::path::PathBuf,
     /// Base dir for raw logs (raw_logs/*.tlog | *.rawmsp) — separate from the DB folder.
     raw_log_dir: std::path::PathBuf,
@@ -1077,6 +1086,7 @@ impl FlightRecorder {
             settings,
             fc_info,
             protocol: protocol.to_string(),
+            alt_relative: None,
             db_file_path: db_path,
             raw_log_dir,
             msp_raw_sink,
@@ -1432,6 +1442,10 @@ impl FlightRecorder {
     /// "Telemetry (SmartPort)") once locked — before a flight is created on arm.
     pub fn set_protocol(&mut self, protocol: &str) {
         self.protocol = protocol.to_string();
+    }
+
+    pub fn set_alt_relative(&mut self, relative: bool) {
+        self.alt_relative = Some(relative);
     }
 
     /// Start continuous raw logging on connect (`raw_always`): one session-level file incl. pre-arm data.
@@ -2227,6 +2241,7 @@ impl FlightRecorder {
                 membership: self.membership.clone(),
                 vehicle_key: Some(self.key().to_string()),
                 weather_seq: flight.weather_seq,
+                alt_relative: self.alt_relative.or(Some(false)),
             },
             sample_count,
         ))
@@ -2641,6 +2656,7 @@ mod tests {
             membership: None,
             vehicle_key: None,
             weather_seq: 0,
+            alt_relative: None,
         }
     }
 
@@ -3814,6 +3830,30 @@ mod tests {
             .map(Result::unwrap)
             .collect();
         assert_eq!(rows, vec![(2000, 48.1, "{\"a\":1}".to_string()), (8000, 48.2, "{\"a\":2}".to_string())]);
+    }
+
+    /// What the link said about its altitude travels with the finished session into the flight row; a
+    /// link that never said anything reports MSL.
+    #[test]
+    fn the_altitude_reference_travels_with_the_session() {
+        for (name, told, expected) in [("alt-ref-crsf", Some(true), Some(true)), ("alt-ref-msp", None, Some(false))] {
+            let rig = Rig::new(name);
+            let (mut rec, _) = rig.recorder("L1:S1", fc("Solo", None));
+            if let Some(relative) = told {
+                rec.set_alt_relative(relative);
+            }
+            rec.on_gps(&gps(2, 48.1, 11.5));
+            rec.on_status(&status(false));
+            rec.on_status(&status(true));
+            rig.advance_s(2);
+            rec.on_gps(&gps(2, 48.101, 11.5));
+            rec.on_status(&status(false));
+            let p = rig.slots.take_pending_for("L1:S1").expect("a pending session");
+            assert_eq!(p.alt_relative, expected, "{name}");
+            let id = commit_pending_session(&p).unwrap();
+            let main = db::open_database(&p.db_path).unwrap();
+            assert_eq!(db::get_flight_alt_relative(&main, id).unwrap(), expected, "{name}: stored with the flight");
+        }
     }
 
     /// Every raw receiver message becomes one `gps_records` row on the session timeline, written when

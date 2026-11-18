@@ -325,6 +325,13 @@ pub fn mission_db_flights(
     db::list_flights_for_mission(&conn, mission_id).map_err(|e| format!("Query error: {}", e))
 }
 
+/// Whether a flight's altitude is relative to the arming point; `None` when the flight stores no value.
+#[tauri::command]
+pub fn flight_alt_relative(flight_id: i64, db_path: Option<String>) -> Result<Option<bool>, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::get_flight_alt_relative(&conn, flight_id).map_err(|e| format!("Query error: {}", e))
+}
+
 /// Read the Blackbox-header waypoint count for a flight (replay `WP N/X` fallback).
 #[tauri::command]
 pub fn flight_logged_wp_count(
