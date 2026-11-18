@@ -72,7 +72,7 @@ const BATTERY_RECORDS_DDL_FULL: &str = "CREATE TABLE IF NOT EXISTS battery_recor
 
 /// Raw values of every GPS receiver next to the fused track (`instance` 0 = GPS_RAW_INT, 1 = GPS2_RAW).
 /// `fix_type` is the unified scale, `fix_raw` MAVLink's `GPS_FIX_TYPE` as sent.
-const GPS_RECORDS_DDL_FULL: &str = "CREATE TABLE IF NOT EXISTS gps_records (
+pub(crate) const GPS_RECORDS_DDL_FULL: &str = "CREATE TABLE IF NOT EXISTS gps_records (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     flight_id     INTEGER NOT NULL,
     timestamp_ms  INTEGER NOT NULL,
@@ -94,7 +94,7 @@ const GPS_RECORDS_DDL_FULL: &str = "CREATE TABLE IF NOT EXISTS gps_records (
 
 /// One row per weather answer during a flight; `data_json` is the backend's `WindAloft` as returned, so
 /// the widget reads it back unchanged and a new field needs no schema change.
-const WEATHER_RECORDS_DDL_FULL: &str = "CREATE TABLE IF NOT EXISTS weather_records (
+pub(crate) const WEATHER_RECORDS_DDL_FULL: &str = "CREATE TABLE IF NOT EXISTS weather_records (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     flight_id     INTEGER NOT NULL,
     timestamp_ms  INTEGER NOT NULL,
@@ -107,7 +107,7 @@ const WEATHER_RECORDS_DDL_FULL: &str = "CREATE TABLE IF NOT EXISTS weather_recor
 /// Videos attached to a flight: a path relative to the video folder (a setting), never the file. The
 /// sync is two anchors (a, b), each a video frame / video time and the flight time it belongs to, so a
 /// split or partial recording maps onto the log. Dev-Docs active/SCHEMA_V22.md.
-const FLIGHT_VIDEOS_DDL_FULL: &str = "CREATE TABLE IF NOT EXISTS flight_videos (
+pub(crate) const FLIGHT_VIDEOS_DDL_FULL: &str = "CREATE TABLE IF NOT EXISTS flight_videos (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
     flight_id         INTEGER NOT NULL,
     rel_path          TEXT NOT NULL,
@@ -2420,7 +2420,7 @@ pub fn update_mission(conn: &Connection, id: i64, m: &MissionInput) -> SqlResult
     Ok(())
 }
 
-/// Only for a `.kmission` import onto an existing row; every other writer leaves `extra_json` as it is.
+/// A `.kmission` import onto an existing row; a `.kflight` import has its own rule (exchange.rs).
 pub fn set_mission_extra(conn: &Connection, id: i64, extra_json: Option<&str>) -> SqlResult<()> {
     conn.execute("UPDATE missions SET extra_json = ?1 WHERE id = ?2", params![extra_json, id])?;
     Ok(())

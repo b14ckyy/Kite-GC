@@ -10,9 +10,9 @@ use std::path::Path;
 use rusqlite::{params, Connection};
 
 use super::db;
-use super::types::{BatteryRecord, Flight, FlightSummary, TelemetryRecord};
+use super::types::{BatteryRecord, Flight, FlightSummary, Mission, MissionInput, TelemetryRecord};
 
-/// Schema version stored in exported .kflight files
+/// Stays 2 while changes are additive: Kite 1.0 reads named columns and never checks it.
 const KFLIGHT_SCHEMA_VERSION: u32 = 2;
 
 /// Application identifier stored in the export header
@@ -198,9 +198,9 @@ fn create_export_db(path: &Path) -> Result<Connection, String> {
     )
     .map_err(|e| format!("Pragma error: {}", e))?;
 
-    // The flight-data tables of the main DB schema; `flights.vehicle_id` stays NULL (the library is local).
-    // `blackbox_records` must stay in the file although the main DB dropped it (v21): Kite 1.0's importer
-    // fails a flight without it. It only holds one empty marker row per log flight.
+    // The main schema's flight tables plus the linked missions; `flights.vehicle_id` stays NULL (the
+    // library is local). `blackbox_records` stays although the main DB dropped it (v21): Kite 1.0's
+    // importer fails a flight without it. One empty marker row per log flight.
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS flights (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -235,7 +235,35 @@ fn create_export_db(path: &Path) -> Result<Connection, String> {
             fc_uid          TEXT,
             group_id        TEXT,
             vehicle_id      INTEGER,
-            source_before_link TEXT
+            source_before_link TEXT,
+            mission_id      INTEGER,
+            alt_relative    INTEGER,
+            logged_wp_count INTEGER
+        );
+
+        CREATE TABLE IF NOT EXISTS missions (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            content_hash     TEXT NOT NULL UNIQUE,
+            name             TEXT NOT NULL DEFAULT '',
+            format           TEXT NOT NULL DEFAULT 'inav',
+            waypoints_json   TEXT NOT NULL,
+            source_xml       TEXT,
+            wp_count         INTEGER NOT NULL DEFAULT 0,
+            total_distance_m REAL,
+            alt_diff_m       REAL,
+            max_alt_m        REAL,
+            min_alt_m        REAL,
+            bndbox_min_lat   REAL,
+            bndbox_min_lon   REAL,
+            bndbox_max_lat   REAL,
+            bndbox_max_lon   REAL,
+            location_name    TEXT,
+            created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+            notes            TEXT,
+            home_lat         REAL,
+            home_lon         REAL,
+            vehicle_class    TEXT,
+            extra_json       TEXT
         );
 
         CREATE TABLE IF NOT EXISTS telemetry_records (
@@ -330,11 +358,133 @@ fn create_export_db(path: &Path) -> Result<Connection, String> {
     )
     .map_err(|e| format!("Schema creation error: {}", e))?;
 
+    for ddl in [db::GPS_RECORDS_DDL_FULL, db::WEATHER_RECORDS_DDL_FULL, db::FLIGHT_VIDEOS_DDL_FULL] {
+        conn.execute_batch(ddl).map_err(|e| format!("Schema creation error: {}", e))?;
+    }
+
     Ok(conn)
 }
 
-/// Copy a single flight with all related data from source to destination DB. `vehicle_id` never travels
-/// (it names a vehicle of the source library); an import resolves it against the target's library.
+/// Every column of the `db::*_DDL_FULL` table except `id` / `flight_id`: a column missing here never travels.
+const CHILD_TABLES: [(&str, &str); 3] = [
+    (
+        "gps_records",
+        "timestamp_ms, instance, fix_type, fix_raw, num_sat, hdop, lat, lon, alt_msl, vdop, h_acc_m, \
+         v_acc_m, speed_ms, course_deg, yaw_deg",
+    ),
+    ("weather_records", "timestamp_ms, lat, lon, source, data_json"),
+    (
+        "flight_videos",
+        "rel_path, label, duration_ms, codec, width, height, fps, frame_count, file_size, fingerprint, \
+         sync_a_frame, sync_a_video_ms, sync_a_flight_ms, sync_b_frame, sync_b_video_ms, \
+         sync_b_flight_ms, extra_json, created_at",
+    ),
+];
+
+/// A file from before v22 lacks the tables: nothing to copy.
+fn copy_child_rows(src: &Connection, dst: &Connection, old_id: i64, new_id: i64) -> rusqlite::Result<()> {
+    let tx = db::write_tx(dst)?;
+    for (table, cols) in CHILD_TABLES {
+        if !db::table_exists(src, table)? {
+            continue;
+        }
+        let n = cols.split(',').count();
+        let slots: Vec<String> = (2..n + 2).map(|i| format!("?{i}")).collect();
+        let mut read = src.prepare(&format!("SELECT {cols} FROM {table} WHERE flight_id = ?1 ORDER BY id"))?;
+        let mut write = tx.prepare(&format!(
+            "INSERT INTO {table} (flight_id, {cols}) VALUES (?1, {})",
+            slots.join(", ")
+        ))?;
+        let mut rows = read.query(params![old_id])?;
+        while let Some(row) = rows.next()? {
+            let mut values: Vec<rusqlite::types::Value> = Vec::with_capacity(n + 1);
+            values.push(new_id.into());
+            for i in 0..n {
+                values.push(row.get(i)?);
+            }
+            write.execute(rusqlite::params_from_iter(values))?;
+        }
+    }
+    tx.commit()
+}
+
+/// `flights` columns the shared row writer does not know; an older file lacks them and the target keeps
+/// its NULL. `column` is a hardcoded literal.
+fn copy_flight_column(
+    src: &Connection,
+    dst: &Connection,
+    column: &str,
+    old_id: i64,
+    new_id: i64,
+) -> rusqlite::Result<()> {
+    if !db::column_exists(src, "flights", column)? {
+        return Ok(());
+    }
+    let v: Option<i64> =
+        src.query_row(&format!("SELECT {column} FROM flights WHERE id = ?1"), params![old_id], |r| r.get(0))?;
+    dst.execute(&format!("UPDATE flights SET {column} = ?1 WHERE id = ?2"), params![v, new_id])?;
+    Ok(())
+}
+
+/// An existing library mission (same content hash) keeps its name and notes. While no flight is linked
+/// to it, the file's home, vehicle class and `extra_json` replace its own (they belong to this flight);
+/// once flights hang on it, only what it lacks is filled in. Files from before v22 carry no mission.
+fn copy_flight_mission(src: &Connection, dst: &Connection, old_id: i64, new_id: i64) -> rusqlite::Result<()> {
+    if !db::column_exists(src, "flights", "mission_id")? || !db::table_exists(src, "missions")? {
+        return Ok(());
+    }
+    let Some(m) = db::get_mission_for_flight(src, old_id)? else {
+        return Ok(());
+    };
+    let input = mission_input(m);
+    let mission_id = db::upsert_mission(dst, &input)?;
+    let unlinked: bool = dst.query_row(
+        "SELECT NOT EXISTS(SELECT 1 FROM flights WHERE mission_id = ?1)",
+        params![mission_id],
+        |r| r.get(0),
+    )?;
+    dst.execute(
+        "UPDATE missions SET
+            extra_json = CASE WHEN ?6 THEN COALESCE(?1, extra_json) ELSE COALESCE(extra_json, ?1) END,
+            vehicle_class = CASE WHEN ?6 THEN COALESCE(?2, vehicle_class) ELSE COALESCE(vehicle_class, ?2) END,
+            home_lat = CASE WHEN (?6 AND ?3 IS NOT NULL AND ?4 IS NOT NULL)
+                              OR (home_lat IS NULL AND home_lon IS NULL) THEN ?3 ELSE home_lat END,
+            home_lon = CASE WHEN (?6 AND ?3 IS NOT NULL AND ?4 IS NOT NULL)
+                              OR (home_lat IS NULL AND home_lon IS NULL) THEN ?4 ELSE home_lon END
+         WHERE id = ?5",
+        params![input.extra_json, input.vehicle_class, input.home_lat, input.home_lon, mission_id, unlinked],
+    )?;
+    db::link_flight_mission(dst, new_id, mission_id)
+}
+
+fn mission_input(m: Mission) -> MissionInput {
+    MissionInput {
+        content_hash: m.content_hash,
+        name: m.name,
+        format: m.format,
+        waypoints_json: m.waypoints_json,
+        source_xml: m.source_xml,
+        wp_count: m.wp_count,
+        total_distance_m: m.total_distance_m,
+        alt_diff_m: m.alt_diff_m,
+        max_alt_m: m.max_alt_m,
+        min_alt_m: m.min_alt_m,
+        bndbox_min_lat: m.bndbox_min_lat,
+        bndbox_min_lon: m.bndbox_min_lon,
+        bndbox_max_lat: m.bndbox_max_lat,
+        bndbox_max_lon: m.bndbox_max_lon,
+        notes: m.notes,
+        home_lat: m.home_lat,
+        home_lon: m.home_lon,
+        vehicle_class: m.vehicle_class,
+        extra_json: m.extra_json,
+        created_at: Some(m.created_at),
+        location_name: m.location_name,
+    }
+}
+
+/// `vehicle_id` never travels (it names a vehicle of the source library); an import resolves it against
+/// the target's library.
 fn copy_flight(
     src: &Connection,
     dst: &Connection,
@@ -414,12 +564,24 @@ fn copy_flight(
             .map_err(|e| format!("Insert battery records: {}", e))?;
     }
 
-    // 4. Copy the archived original logs (BLOBs) — not on mobile, whose database never archives
-    //    originals (ANDROID_SUPPORT.md §4); the desktop copy it came from still has them.
+    // Mobile databases never archive originals (ANDROID_SUPPORT.md §4); the desktop copy still has them.
     if cfg!(any(target_os = "android", target_os = "ios")) {
         log::info!("Import: flight {flight_id} — archived original log files are not stored on mobile");
     } else {
         copy_blackbox_files(src, dst, flight_id, new_id)?;
+    }
+
+    // Best effort, each on its own: data this version cannot read must not cost the flight.
+    let extras = [
+        ("gps / weather / video rows", copy_child_rows(src, dst, flight_id, new_id)),
+        ("alt_relative", copy_flight_column(src, dst, "alt_relative", flight_id, new_id)),
+        ("logged_wp_count", copy_flight_column(src, dst, "logged_wp_count", flight_id, new_id)),
+        ("linked mission", copy_flight_mission(src, dst, flight_id, new_id)),
+    ];
+    for (what, result) in extras {
+        if let Err(e) = result {
+            log::warn!("Flight {flight_id}: {what} not copied: {e}");
+        }
     }
 
     Ok(new_id)
@@ -1018,6 +1180,172 @@ mod tests {
         assert_eq!(source_of(&dst, m[&1]), ("live".into(), None));
         assert_eq!(source_of(&dst, m[&2]), ("blackbox".into(), None));
         drop(dst);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn mission(hash: &str, extra: Option<&str>) -> MissionInput {
+        MissionInput {
+            content_hash: hash.into(),
+            name: "Survey".into(),
+            format: "ardupilot".into(),
+            waypoints_json: "[{\"lat\":48.1}]".into(),
+            source_xml: None,
+            wp_count: 1,
+            total_distance_m: Some(120.5),
+            alt_diff_m: None,
+            max_alt_m: None,
+            min_alt_m: None,
+            bndbox_min_lat: None,
+            bndbox_min_lon: None,
+            bndbox_max_lat: None,
+            bndbox_max_lon: None,
+            notes: Some("north field".into()),
+            home_lat: Some(48.1),
+            home_lon: Some(11.5),
+            vehicle_class: Some("plane".into()),
+            extra_json: extra.map(String::from),
+            created_at: Some("2026-10-01 08:00:00".into()),
+            location_name: Some("Testfeld".into()),
+        }
+    }
+
+    fn count(conn: &Connection, table: &str) -> i64 {
+        conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0)).unwrap()
+    }
+
+    /// The linked mission, the v22 child tables and `alt_relative` travel with the flight; two flights
+    /// of one mission share its row, and a target that already holds the mission keeps its own row.
+    #[test]
+    fn kflight_round_trip_carries_the_mission_and_the_v22_tables() {
+        let dir = temp_dir("v22");
+        let file = dir.join("export.kflight");
+        {
+            let src = db::open_database(&dir.join("src").join("flights.db")).unwrap();
+            let a = db::insert_flight(&src, &flight("Wing", None)).unwrap();
+            let mut second = flight("Wing", None);
+            second.start_time += chrono::Duration::hours(1);
+            let b = db::insert_flight(&src, &second).unwrap();
+            let unlinked = db::upsert_mission(&src, &mission("hash-other", None)).unwrap();
+            let m = db::upsert_mission(&src, &mission("hash-a", Some("{\"pattern\":1}"))).unwrap();
+            db::link_flight_mission(&src, a, m).unwrap();
+            db::link_flight_mission(&src, b, m).unwrap();
+            assert_ne!(unlinked, m);
+            src.execute("UPDATE flights SET alt_relative = 1, logged_wp_count = 7 WHERE id = ?1", params![a]).unwrap();
+            db::insert_weather_record(&src, a, 2000, 48.1, 11.5, "open-meteo", "{\"steps\":[]}").unwrap();
+            db::insert_weather_record(&src, a, 302000, 48.1, 11.5, "open-meteo", "{\"steps\":[1]}").unwrap();
+            src.execute(
+                "INSERT INTO gps_records (flight_id, timestamp_ms, instance, fix_raw, num_sat, hdop, lat, yaw_deg)
+                 VALUES (?1, 1000, 1, 6, 17, 0.7, 48.1, NULL)",
+                params![a],
+            )
+            .unwrap();
+            src.execute(
+                "INSERT INTO flight_videos (flight_id, rel_path, sync_a_frame, created_at)
+                 VALUES (?1, 'cam/a.mp4', 12, '2026-11-01 10:00:00')",
+                params![a],
+            )
+            .unwrap();
+            assert_eq!(export_flights(&src, &[a, b], &file).unwrap(), 2);
+        }
+        {
+            let k = Connection::open(&file).unwrap();
+            assert_eq!(count(&k, "missions"), 1, "only the linked mission, once for both flights");
+            assert_eq!(count(&k, "weather_records"), 2);
+        }
+
+        let dst = db::open_database(&dir.join("dst").join("flights.db")).unwrap();
+        let r = import_flights(&dst, &file).unwrap();
+        assert_eq!((r.imported, r.errors.len()), (2, 0));
+        let flights = db::list_flights(&dst).unwrap();
+        let a = flights.iter().min_by_key(|f| f.start_time).unwrap().id;
+        let b = flights.iter().max_by_key(|f| f.start_time).unwrap().id;
+        let m = db::get_mission_for_flight(&dst, a).unwrap().unwrap();
+        assert_eq!(db::get_mission_for_flight(&dst, b).unwrap().unwrap().id, m.id);
+        assert_eq!(count(&dst, "missions"), 1);
+        assert_eq!((m.content_hash.as_str(), m.vehicle_class.as_deref()), ("hash-a", Some("plane")));
+        assert_eq!(m.extra_json.as_deref(), Some("{\"pattern\":1}"));
+        assert_eq!((m.created_at.as_str(), m.location_name.as_deref()), ("2026-10-01 08:00:00", Some("Testfeld")));
+        let extra = |id: i64| -> (Option<i64>, Option<i64>) {
+            dst.query_row("SELECT alt_relative, logged_wp_count FROM flights WHERE id = ?1", params![id], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap()
+        };
+        assert_eq!((extra(a), extra(b)), ((Some(1), Some(7)), (None, None)));
+        for (table, cols) in CHILD_TABLES {
+            let mut listed: Vec<String> = cols.split(',').map(|c| c.trim().to_string()).collect();
+            let mut real: Vec<String> = dst
+                .prepare(&format!("SELECT name FROM pragma_table_info('{table}') WHERE name NOT IN ('id', 'flight_id')"))
+                .unwrap()
+                .query_map([], |r| r.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            listed.sort();
+            real.sort();
+            assert_eq!(listed, real, "CHILD_TABLES lists every column of {table}");
+        }
+        let weather = db::get_flight_weather_records(&dst, a).unwrap();
+        assert_eq!(weather.iter().map(|w| w.timestamp_ms).collect::<Vec<_>>(), vec![2000, 302000]);
+        assert_eq!(weather[1].data_json, "{\"steps\":[1]}");
+        assert!(db::get_flight_weather_records(&dst, b).unwrap().is_empty());
+        let gps: (i64, i64, Option<i64>, f64, Option<f64>) = dst
+            .query_row(
+                "SELECT flight_id, instance, fix_raw, hdop, yaw_deg FROM gps_records",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            )
+            .unwrap();
+        assert_eq!(gps, (a, 1, Some(6), 0.7, None));
+        let video: (i64, String, Option<i64>, String) = dst
+            .query_row("SELECT flight_id, rel_path, sync_a_frame, created_at FROM flight_videos", [], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+            })
+            .unwrap();
+        assert_eq!(video, (a, "cam/a.mp4".into(), Some(12), "2026-11-01 10:00:00".into()));
+        drop(dst);
+
+        // The target already holds the mission. Without a flight on it, the file's home, class and
+        // extra data replace its own; with one, it only gains what it lacks. Its name always stays.
+        for (case, has_flight) in [("dst-own", false), ("dst-own-linked", true)] {
+            let own = db::open_database(&dir.join(case).join("flights.db")).unwrap();
+            let mut mine = mission("hash-a", Some("{\"old\":1}"));
+            mine.name = "My name".into();
+            mine.vehicle_class = None;
+            (mine.home_lat, mine.home_lon) = (Some(1.0), Some(2.0));
+            let own_id = db::upsert_mission(&own, &mine).unwrap();
+            if has_flight {
+                let mut earlier = flight("Wing", None);
+                earlier.start_time -= chrono::Duration::days(1);
+                let id = db::insert_flight(&own, &earlier).unwrap();
+                db::link_flight_mission(&own, id, own_id).unwrap();
+            }
+            assert_eq!(import_flights(&own, &file).unwrap().imported, 2);
+            let newest = db::list_flights(&own).unwrap().into_iter().max_by_key(|f| f.start_time).unwrap().id;
+            let linked = db::get_mission_for_flight(&own, newest).unwrap().unwrap();
+            assert_eq!((linked.id, linked.name.as_str()), (own_id, "My name"), "{case}");
+            assert_eq!(linked.vehicle_class.as_deref(), Some("plane"), "{case}: filled in either way");
+            let (extra, home) = if has_flight { ("{\"old\":1}", (1.0, 2.0)) } else { ("{\"pattern\":1}", (48.1, 11.5)) };
+            assert_eq!(linked.extra_json.as_deref(), Some(extra), "{case}");
+            assert_eq!((linked.home_lat, linked.home_lon), (Some(home.0), Some(home.1)), "{case}");
+            assert_eq!(count(&own, "missions"), 1);
+            drop(own);
+        }
+
+        // A file from before v22: no mission link, none of the tables.
+        {
+            let k = Connection::open(&file).unwrap();
+            k.execute_batch(
+                "DROP TABLE missions; DROP TABLE gps_records; DROP TABLE weather_records; DROP TABLE flight_videos;
+                 ALTER TABLE flights DROP COLUMN mission_id; ALTER TABLE flights DROP COLUMN alt_relative;",
+            )
+            .unwrap();
+        }
+        let old = db::open_database(&dir.join("dst-old").join("flights.db")).unwrap();
+        let r = import_flights(&old, &file).unwrap();
+        assert_eq!((r.imported, r.errors.len()), (2, 0));
+        assert_eq!((count(&old, "missions"), count(&old, "weather_records")), (0, 0));
+        drop(old);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

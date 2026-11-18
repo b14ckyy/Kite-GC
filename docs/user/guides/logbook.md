@@ -148,7 +148,9 @@ PX4 ULog note: PX4 doesn't log a throttle *output*, so a replayed `.ulg` flight 
 ## Exporting
 
 - **`.kflight`** — export selected flights (multi-select supported) as Kite's portable flight file, to
-  move them to another install.
+  move them to another install. The file carries the mission a flight is linked to and the weather
+  recorded with it; on import the mission is added to the Mission Manager's library, or the flight
+  is linked to the entry that is already there.
 - **Original log file** — re-export the onboard log stored with the flight: an INAV Blackbox
   (`.bbl` / `.txt`), ArduPilot Dataflash (`.bin`) or PX4 ULog (`.ulg`). For a flight that came out of a multi-flight
   `.bbl`, this is that flight's own log, not the whole download. Imported `.tlog` / `.rawmsp` telemetry is parsed

@@ -370,7 +370,7 @@ The `.kflight` file format is a self-contained SQLite database used for sharing 
 
 ### Schema
 
-An export holds the per-flight data tables `flights`, `telemetry_records`, `battery_records` and `blackbox_files`, with the same columns as in the main database. The libraries (vehicles, missions, battery packs), group flights and `flight_events` are not exported. On top of that come `blackbox_records` and a metadata table.
+An export holds the per-flight data tables `flights`, `telemetry_records`, `battery_records`, `gps_records`, `weather_records`, `flight_videos` and `blackbox_files`, with the columns of the main database (`flights` without the local `vehicle_id` value), plus a `missions` table that holds only the missions the exported flights are linked to (`flights.mission_id`). The other libraries (vehicles, battery packs), group flights and `flight_events` are not exported. On top of that come `blackbox_records` and a metadata table.
 
 `blackbox_records` holds no decoded rows, only one **marker row** per log flight: `flight_id`, `timestamp_us = 0`, `csv_data = ''`. A log flight is one whose own source is `blackbox`: either `source = 'blackbox'`, or `source = 'both'` with `source_before_link = 'blackbox'`. If `source_before_link` is NULL, the same fallback as on unlink decides (log-importer `protocol`, or an archived log). The table and its markers are there for Kite 1.0. Its importer reads the table for every flight and fails the flight when the table is missing. It copies the marker rows like decoded rows, and its unlink restores a flight to `blackbox` when it has rows there.
 
@@ -385,7 +385,7 @@ An export holds the per-flight data tables `flights`, `telemetry_records`, `batt
 
 1. Creates a fresh SQLite file at `dest_path`
 2. Creates the tables listed above
-3. Copies each flight (with `source_before_link`) and its associated `telemetry_records`, `battery_records`, and `blackbox_files`. A linked pair keeps its link only if both flights are exported. A flight exported without its partner is written as the single flight it was before the link: its own source, `source_before_link` NULL, no link
+3. Copies each flight (with `source_before_link`, `alt_relative` and `logged_wp_count`) and its associated `telemetry_records`, `battery_records`, `gps_records`, `weather_records`, `flight_videos` and `blackbox_files`, and the mission it is linked to (once per mission, by content hash). A linked pair keeps its link only if both flights are exported. A flight exported without its partner is written as the single flight it was before the link: its own source, `source_before_link` NULL, no link
 4. Writes the `blackbox_records` marker rows and the `_kflight_meta` rows
 5. VACUUMs the file for minimal size
 
@@ -397,8 +397,9 @@ An export holds the per-flight data tables `flights`, `telemetry_records`, `batt
 2. Lists all flights in the file
 3. Duplicate detection: skips flights matching `craft_name` + `start_time` within ±10 seconds
 4. Copies non-duplicate flights with all associated records into the main DB, but never the file's `blackbox_records` rows. A file from before `v21` has no `source_before_link` column. For its `both` flights the value is derived from the file: `blackbox` when the flight's `protocol` is `BLACKBOX`, `DATAFLASH` or `ULOG` (only the log importers write these), or when the file holds `blackbox_records` rows (decoded rows or a marker) or a `blackbox_files` row for the flight; `live` otherwise
-5. Restores the links between imported flights. An imported flight that arrived as `both` but ends up without a partner becomes the single flight it was, with its own source and `source_before_link` NULL
-6. Returns `(imported_count, skipped_count)`
+5. Links each imported flight to its mission (best effort — a failure is logged and the flight is kept): a library mission with the same content hash keeps its name and notes. While no flight is linked to it, the file's home position, `vehicle_class` and `extra_json` replace its own (values the file lacks stay); once flights are linked to it, it only gets the ones it lacks filled in, otherwise the file's mission is added to the library. A file from before `v22` has no `missions` table, none of the `v22` tables and no `alt_relative`; nothing is copied for them
+6. Restores the links between imported flights. An imported flight that arrived as `both` but ends up without a partner becomes the single flight it was, with its own source and `source_before_link` NULL
+7. Returns `ImportResult { imported, skipped, errors }`
 
 ### Raw Blackbox export
 

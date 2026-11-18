@@ -386,6 +386,9 @@ inside the box of the feature release they belong to, so the notes for one relea
       second; when unsure, the flight stays unassigned. Existing flights are linked once during
       the database upgrade. The post-flight summary and the flight detail show the vehicle and
       let you change it. [#228]
+    - **`.kflight` files carry the linked mission and the recorded weather** — an imported flight
+      shows its mission again, and the weather widget works in its replay. Kite 1.0 imports such a
+      file without them. [#318]
     - **`.kflight` files of INAV Blackbox flights are smaller** — a file written by 2.0 still
       imports into Kite 1.0. [#232]
     - **Compact Database runs in the background** behind a notice, is refused while a flight is
