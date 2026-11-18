@@ -2004,7 +2004,8 @@ stays <em>Stable releases</em>. <a href="https://github.com/b14ckyy/Kite-GC/pull
   stored as the autopilot sends them (once per second, or at its own rate with Full MAVLink
   Telemetry), and the GPS widget's <strong>CYC</strong> view works in the replay. The Raw
   telemetry popup lists every receiver, and the Telemetry API's <code>gpsReceivers</code> group carries
-  the added values. [#319]</li>
+  the added values. An imported ArduPilot DataFlash or PX4 ULog log brings its receivers'
+  values as well. [#319] · [#322]</li>
 <li><strong>The logbook remembers its sort order.</strong> [#319]</li>
 <li><strong>Weather requests carry a rounded position</strong> — two decimals, about 1 km: enough for the
   forecast model, too coarse to follow the aircraft. Two new switches under Settings → Data →
@@ -2150,6 +2151,9 @@ stays <em>Stable releases</em>. <a href="https://github.com/b14ckyy/Kite-GC/pull
 <p>Every fix of 1.0.1 and 1.0.2 is part of 2.0. This list holds what is fixed in 2.0 only.</p>
 <ul>
 <li><strong>Replay: the altitude reference of a flight is handled more robustly.</strong> [#320]</li>
+<li><strong>Replay of imported ArduPilot and PX4 logs showed the wrong GPS fix type</strong> — a plain 3D fix
+  read as "3D DGPS". Logs imported from now on are right; re-import an older one to correct
+  it. [#322]</li>
 <li><strong>Android: text followed the system font size, the boxes around it did not</strong> — with a larger
   system font, labels ran out of their buttons and digits overlapped the units in number fields;
   with a smaller one everything was smaller than designed. Text now keeps its size. [#301]</li>
