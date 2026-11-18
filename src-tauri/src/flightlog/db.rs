@@ -11,7 +11,7 @@ use rusqlite::{params, Connection, OptionalExtension, Result as SqlResult};
 use super::types::{
     BatteryAggregate, BatteryPack, BatteryPackInput, BatteryRecord, Flight, FlightEvent, FlightGroup,
     FlightSummary, Mission,
-    MissionInput, TelemetryRecord, Vehicle, VehicleAggregate, VehicleInput, VehicleResolution,
+    MissionInput, TelemetryRecord, Vehicle, VehicleAggregate, VehicleInput, VehicleResolution, WeatherRecord,
 };
 use crate::msp::hardware_uid;
 use crate::msp::types::INAV_SITL_UID;
@@ -1687,6 +1687,42 @@ pub fn get_flight_battery_records(conn: &Connection, flight_id: i64) -> SqlResul
     rows.collect()
 }
 
+/// One answer of the weather service, stored whole: `data_json` is the widget's `WindAloft`.
+pub fn insert_weather_record(
+    conn: &Connection,
+    flight_id: i64,
+    timestamp_ms: i64,
+    lat: f64,
+    lon: f64,
+    source: &str,
+    data_json: &str,
+) -> SqlResult<()> {
+    conn.execute(
+        "INSERT INTO weather_records (flight_id, timestamp_ms, lat, lon, source, data_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![flight_id, timestamp_ms, lat, lon, source, data_json],
+    )?;
+    Ok(())
+}
+
+/// The weather answers of a flight, oldest first, for the replay.
+pub fn get_flight_weather_records(conn: &Connection, flight_id: i64) -> SqlResult<Vec<WeatherRecord>> {
+    let mut stmt = conn.prepare(
+        "SELECT timestamp_ms, lat, lon, source, data_json FROM weather_records
+         WHERE flight_id = ?1 ORDER BY timestamp_ms ASC, id ASC",
+    )?;
+    let rows = stmt.query_map(params![flight_id], |r| {
+        Ok(WeatherRecord {
+            timestamp_ms: r.get(0)?,
+            lat: r.get(1)?,
+            lon: r.get(2)?,
+            source: r.get(3)?,
+            data_json: r.get(4)?,
+        })
+    })?;
+    rows.collect()
+}
+
 // ── Live recording: per-session temp store (commit-on-disarm, ADR-040) ──────────────
 
 /// Open a per-session temp SQLite file: `telemetry_records` plus a self-describing `session_meta`, so an
@@ -1702,6 +1738,7 @@ pub fn open_temp_session(path: &Path) -> SqlResult<Connection> {
     )?;
     conn.execute_batch(TELEMETRY_RECORDS_DDL_FULL)?;
     conn.execute_batch(BATTERY_RECORDS_DDL_FULL)?;
+    conn.execute_batch(WEATHER_RECORDS_DDL_FULL)?;
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS session_meta (
             id            INTEGER PRIMARY KEY CHECK (id = 1),
@@ -2005,6 +2042,7 @@ pub fn commit_session_to_main(
             None
         };
         let has_events = attached_table_exists(conn, "session_events")?;
+        let has_weather = attached_table_exists(conn, "weather_records")?;
 
         let tx = write_tx(conn)?;
         let mut row = flight.clone();
@@ -2047,6 +2085,14 @@ pub fn commit_session_to_main(
             ),
             [],
         )?;
+        if has_weather {
+            tx.execute(
+                "INSERT INTO main.weather_records (flight_id, timestamp_ms, lat, lon, source, data_json)
+                 SELECT ?1, timestamp_ms, lat, lon, source, data_json
+                 FROM sess.weather_records ORDER BY timestamp_ms ASC, id ASC",
+                params![flight_id],
+            )?;
+        }
         if has_events {
             tx.execute(
                 "INSERT INTO main.flight_events (flight_id, timestamp_ms, wall_ms, kind, code, text, source)
@@ -4847,10 +4893,22 @@ mod tests {
             let t = open_temp_session(&temp).unwrap();
             insert_telemetry_batch(&t, &[telemetry(0, 0, Some(1_790_000_000_500)), telemetry(0, 200, Some(1_790_000_000_700))])
                 .unwrap();
+            insert_weather_record(&t, 0, 150, 48.1, 11.5, "open-meteo", "{\"elevationM\":520.0,\"steps\":[]}").unwrap();
         }
         let committed = commit_session_to_main(&conn, &temp, &flight("Wall", None)).unwrap();
         let track = get_flight_track(&conn, committed).unwrap();
         assert_eq!(track.iter().map(|r| r.wall_ms).collect::<Vec<_>>(), [Some(1_790_000_000_500), Some(1_790_000_000_700)]);
+        // The weather answers of the session follow the flight to its new id.
+        let weather: (i64, String) = conn
+            .query_row(
+                "SELECT timestamp_ms, data_json FROM weather_records WHERE flight_id = ?1",
+                params![committed],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(weather, (150, "{\"elevationM\":520.0,\"steps\":[]}".to_string()));
+        let read = get_flight_weather_records(&conn, committed).unwrap();
+        assert_eq!((read.len(), read[0].timestamp_ms, read[0].lat), (1, 150, Some(48.1)));
         remove_temp_session(&temp);
 
         // A pre-v20 `.ktmp` (telemetry DDL without wall_ms) is back-filled on open and still commits.

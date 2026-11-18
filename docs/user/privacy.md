@@ -96,7 +96,7 @@ Each provider handles the request under its own privacy policy, which we link be
 | When | Service | What is sent | How to switch it off |
 | --- | --- | --- | --- |
 | **At every app start** | GitHub Releases API ([GitHub privacy statement](https://docs.github.com/site-policy/privacy-policies)) | A request for the latest release (with *Patch releases only* or *Include pre-releases*, and for a beta installed from Google Play: the list of recent releases), including its release notes. No data about you or your installation. Not on iPhone and iPad, where the update check is off | Settings → Updates → *Check for updates: Disabled* (a copy from Google Play: the switch off) |
-| **When a flight is recorded** (the aircraft arms with a valid GPS fix) | Open-Meteo ([privacy](https://open-meteo.com/en/terms)) and OpenStreetMap Nominatim ([privacy](https://osmfoundation.org/wiki/Privacy_Policy)) | The take-off coordinates, to store the weather and the place name in the logbook entry | *(no setting yet — see the note below)* |
+| **When a flight is recorded** (the aircraft arms with a valid GPS fix) | Open-Meteo ([privacy](https://open-meteo.com/en/terms)) and OpenStreetMap Nominatim ([privacy](https://osmfoundation.org/wiki/Privacy_Policy)) | The take-off coordinates — to Open-Meteo rounded to two decimals (about 1 km) — to store the weather and the place name in the logbook entry | Settings → Data → Flight Logbook → *Record Weather with Flights* (Open-Meteo) and *Auto-Detect Flight Location* (Nominatim) |
 | **While the map is shown** | The map tile provider you selected: OpenStreetMap ([privacy](https://osmfoundation.org/wiki/Privacy_Policy)), OpenTopoMap, Esri ArcGIS ([privacy](https://www.esri.com/en-us/privacy/overview)); Kite 1.0.1 and earlier also CARTO ([privacy](https://carto.com/privacy)) for the dark map — or, with a [custom online provider](guides/custom-maps.md#custom-online-providers) selected, the service you added, under its own policy | The map tiles for the area on screen, i.e. which region you are looking at; for a custom online provider also the API key you put into its URL | Use the map without internet — Kite then shows only what the system's web cache still holds |
 | **When a terrain feature needs elevation** (AGL planning, terrain clearance, line-of-sight analysis, terrain radar) | Copernicus DEM on AWS Open Data ([AWS privacy notice](https://aws.amazon.com/privacy/)) | The 1°×1° elevation tile covering the area | Downloads only for areas you plan or fly in; tiles are cached |
 
@@ -113,13 +113,14 @@ Each provider handles the request under its own privacy policy, which we link be
 | --- | --- | --- |
 | **3D map** | Cesium ion ([privacy](https://cesium.com/legal/privacy-policy/)) with the access token *you* created; imagery and terrain from the providers configured in your Cesium account | Terrain and imagery requests for the area on screen — and, with *3D Buildings (OSM)* switched on, the OpenStreetMap building tiles Cesium serves for that area — authenticated with your own token, i.e. under your own Cesium account |
 | **Radar / ADS-B traffic** | adsb.lol, adsb.one, adsb.fi (community ADS-B aggregators; each publishes its own terms) | The query centre (the map viewport or your aircraft's position) and a search radius, polled while the radar is on |
-| **Weather widget** (off by default; not during replay) | Open-Meteo ([privacy](https://open-meteo.com/en/terms)) | The aircraft's position — the home position while there is no GPS fix — every five minutes (every minute while a request fails), to get the forecast wind and weather for that place |
+| **Weather widget** (off by default), and **while a flight is recorded** unless *Record Weather with Flights* is off (Settings → Data → Flight Logbook) — never for a replay | Open-Meteo ([privacy](https://open-meteo.com/en/terms)) | The aircraft's position **rounded to two decimals (about 1 km)** — with the widget also the home position while there is no GPS fix — every five minutes (every minute while a request fails), to get the forecast wind and weather for that place. The rounding is enough for the forecast model and too coarse to follow the aircraft. The answers that arrive during a recorded flight are stored with it in the flight log database |
 | **Airspace Manager** | OpenAIP ([privacy](https://www.openaip.net/privacy)) with the API key *you* registered | A position and radius for the airspace layers you enabled, authenticated with your key |
 
 !!! note "Weather and place-name lookup"
     The logbook enrichment sends the take-off position to Open-Meteo and Nominatim automatically when
-    a recorded flight starts. If you fly without internet, the lookup simply fails and the entry stays
-    without weather and place name.
+    a recorded flight is stored or a log is imported, and again when you open a flight that still lacks the data. If you fly
+    without internet, the lookup simply fails and the entry stays without weather and place name. Both
+    lookups have their own switch under **Settings → Data → Flight Logbook**.
 
 ## Device permissions
 

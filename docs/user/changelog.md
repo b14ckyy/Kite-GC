@@ -292,6 +292,14 @@ inside the box of the feature release they belong to, so the notes for one relea
       with gusts, a weather icon, the direction home and, in the wide size, the wind for the next
       30, 60 and 90 minutes. Needs internet. See
       [Telemetry & display](guides/telemetry-and-display.md). [#299]
+    - **Weather is recorded with the flight** — the forecast wind by height is fetched every five
+      minutes while a flight is recorded, with or without the weather widget, and stored with the
+      flight; in replay the weather widget shows it as it was at the replayed moment. On Android
+      the widget's data now stays current while Kite runs in the background with a connection. [#316]
+    - **Weather requests carry a rounded position** — two decimals, about 1 km: enough for the
+      forecast model, too coarse to follow the aircraft. Two new switches under Settings → Data →
+      Flight Logbook, both on by default: **Record Weather with Flights** and **Auto-Detect Flight
+      Location** (the place-name lookup). See [Privacy](privacy.md). [#316]
     - **Terrain Analysis: Show Map is a tracking strip** — the chart takes the whole height of the
       strip; beside it are only Show Map, Follow, reset and the legend. See
       [Terrain analysis](guides/terrain-analysis.md#map-view-the-chart-on-the-map). [#301]

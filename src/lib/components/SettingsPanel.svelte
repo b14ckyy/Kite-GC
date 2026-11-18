@@ -951,6 +951,14 @@
         <label class="s-label" for="flightlog-raw-always">{$t('settings.continuousRawLogging')}</label>
         <Toggle checked={flightLogRawAlways} id="flightlog-raw-always" disabled={!flightRecordingEnabled} onchange={(c) => onPatch({ flightLogRawAlways: c })} />
       </div>
+      <div class="s-row" title={$t('settings.flightWeatherRecordingHint')}>
+        <label class="s-label" for="flightlog-weather">{$t('settings.flightWeatherRecording')}</label>
+        <Toggle checked={$settings.flightWeatherRecording} id="flightlog-weather" onchange={(c) => onPatch({ flightWeatherRecording: c })} />
+      </div>
+      <div class="s-row" title={$t('settings.flightAutoLocationHint')}>
+        <label class="s-label" for="flightlog-auto-location">{$t('settings.flightAutoLocation')}</label>
+        <Toggle checked={$settings.flightAutoLocation} id="flightlog-auto-location" onchange={(c) => onPatch({ flightAutoLocation: c })} />
+      </div>
       <div class="s-row s-row-stack">
         <span class="s-label">{$t('settings.flightLogDbPath')}</span>
         <div class="path-picker-row">

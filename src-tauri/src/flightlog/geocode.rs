@@ -71,6 +71,17 @@ struct NominatimAddress {
     country: Option<String>,
 }
 
+/// Setting "Auto-detect flight location": the place name of a flight is looked up without being asked for.
+pub static AUTO_FLIGHT_LOCATION: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// Place name of a flight's start point, for every lookup the user did not trigger; `None` with the setting off.
+pub async fn flight_location(lat: f64, lon: f64, lang: &str) -> Option<String> {
+    if !AUTO_FLIGHT_LOCATION.load(std::sync::atomic::Ordering::Relaxed) {
+        return None;
+    }
+    reverse_geocode(lat, lon, lang).await
+}
+
 /// Reverse geocode to a short name ("Garching, Bayern, Germany") in `lang` (BCP 47, Nominatim's
 /// `accept-language`). `None` on any error — never blocks the recorder.
 pub async fn reverse_geocode(lat: f64, lon: f64, lang: &str) -> Option<String> {

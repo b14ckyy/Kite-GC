@@ -56,7 +56,10 @@ Migration history (tracked via `PRAGMA user_version`):
       (`instance` 0 = `GPS_RAW_INT`, 1 = `GPS2_RAW`; unified and raw fix type, satellites, HDOP / VDOP,
       position, MSL altitude, accuracies, speed, course, yaw);
     - `weather_records` + `idx_weather_records_flight` — one row per weather answer during a flight, the
-      answer stored whole as JSON (`data_json`) with the position it was asked for;
+      answer stored whole as JSON (`data_json`) with the position it was asked for. Written by the
+      recorder from the backend weather service (`weather/service.rs`), which polls while a weather
+      widget is on screen, or a flight is recorded and the setting *Record Weather with Flights* is on; `timestamp_ms` is the session time the answer
+      reached the recorder (the answer in hand at the start of a flight is stored too);
     - `flight_videos` + `idx_flight_videos_flight` — videos attached to a flight: a path relative to the
       video folder, basic metadata, and two sync anchors (video frame, time in the video, time on the
       flight's timeline). Prepared; nothing reads or writes it yet.

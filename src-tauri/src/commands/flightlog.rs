@@ -205,6 +205,16 @@ pub fn flightlog_get_battery_records(
     db::get_flight_battery_records(&conn, flight_id).map_err(|e| format!("Query error: {}", e))
 }
 
+/// The weather answers recorded with a flight, oldest first. Empty for flights without any.
+#[tauri::command]
+pub fn flightlog_get_weather_records(
+    flight_id: i64,
+    db_path: Option<String>,
+) -> Result<Vec<crate::flightlog::types::WeatherRecord>, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::get_flight_weather_records(&conn, flight_id).map_err(|e| format!("Query error: {}", e))
+}
+
 /// Save a mission to the library (dedup by content hash). Returns the mission id.
 #[tauri::command]
 pub fn mission_db_save(mission: MissionInput, db_path: Option<String>) -> Result<i64, String> {
@@ -910,7 +920,7 @@ pub async fn flightlog_geocode(
     };
 
     let lang_str = lang.as_deref().unwrap_or("en");
-    let location = crate::flightlog::geocode::reverse_geocode(lat, lon, lang_str).await;
+    let location = crate::flightlog::geocode::flight_location(lat, lon, lang_str).await;
 
     if let Some(ref name) = location {
         conn.execute(
@@ -1029,7 +1039,7 @@ pub async fn flightlog_import_blackbox(
         {
             if flight.location_name.as_deref().unwrap_or("").trim().is_empty() {
                 if let (Some(lat), Some(lon)) = (flight.start_lat, flight.start_lon) {
-                    if let Some(name) = crate::flightlog::geocode::reverse_geocode(lat, lon, lang.as_deref().unwrap_or("en")).await {
+                    if let Some(name) = crate::flightlog::geocode::flight_location(lat, lon, lang.as_deref().unwrap_or("en")).await {
                         // The flight is stored already: a failed location update must not fail the import.
                         if let Err(e) = conn.execute(
                             "UPDATE flights SET location_name = ?1 WHERE id = ?2",
@@ -1379,7 +1389,7 @@ pub async fn flightlog_import_ardupilot(
         {
             if flight.location_name.as_deref().unwrap_or("").trim().is_empty() {
                 if let (Some(lat), Some(lon)) = (flight.start_lat, flight.start_lon) {
-                    if let Some(name) = crate::flightlog::geocode::reverse_geocode(
+                    if let Some(name) = crate::flightlog::geocode::flight_location(
                         lat, lon,
                         lang.as_deref().unwrap_or("en"),
                     ).await {
@@ -1451,7 +1461,7 @@ pub async fn flightlog_import_ulog(
         {
             if flight.location_name.as_deref().unwrap_or("").trim().is_empty() {
                 if let (Some(lat), Some(lon)) = (flight.start_lat, flight.start_lon) {
-                    if let Some(name) = crate::flightlog::geocode::reverse_geocode(
+                    if let Some(name) = crate::flightlog::geocode::flight_location(
                         lat, lon,
                         lang.as_deref().unwrap_or("en"),
                     ).await {

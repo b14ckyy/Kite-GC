@@ -86,6 +86,7 @@
   import { PlaybackController } from '$lib/controllers/playbackController';
   import { refreshSerialPorts, connectFC, disconnectFC, startBleScan, stopBleScan, startBleDeviceListener, stopBleDeviceListener, clearBleDevices, disconnectLink, recoverBackendLinks } from '$lib/controllers/connectionController';
   import * as logbookCtrl from '$lib/controllers/logbookController';
+  import { loadReplayWind, seekReplayWind } from '$lib/controllers/windAloft';
   import * as widgetCtrl from '$lib/controllers/widgetController';
   import * as phoneCtrl from '$lib/controllers/phoneWidgetController';
   import { PHONE_GRID_PAD } from '$lib/config/phoneGrid';
@@ -1252,6 +1253,13 @@
     const g = $gcsLocation;
     if (!g) return;
     void setRadarNode(g.lat, g.lon, gcsGroundAltM ?? 0);
+  });
+
+  // The backend makes these lookups on its own (recorder, imports): it needs the two switches.
+  $effect(() => {
+    const weather = $settings.flightWeatherRecording;
+    const location = $settings.flightAutoLocation;
+    void invoke('flightlog_set_lookups', { weather, location }).catch((e) => console.warn('[settings] lookups not set:', e));
   });
 
   // Telemetry API (Dev-Docs active/TELEMETRY_API.md): push the persisted config on start + every change;
@@ -3097,6 +3105,16 @@
   // Mirror replay-mode state to the store so the map layers can gate mission
   // visibility (replay → follow the MISSION toggle; planning/live → always show).
   $effect(() => { replayActive.set(showPlayer); });
+  $effect(() => {
+    void loadReplayWind(showPlayer ? selectedFlightId : null, activeDbPath);
+  });
+  $effect(() => {
+    const ts = playbackPoint?.timestamp_ms;
+    if (!showPlayer || ts == null || replayStartEpochMs == null) return;
+    // The linked blackbox track counts from the FC's boot, the weather rows from the recording's start.
+    const offset = activeReplayTrack === selectedFlightTrack ? 0 : (activeReplayTrack[0]?.timestamp_ms ?? 0);
+    seekReplayWind(ts - offset, replayStartEpochMs);
+  });
   const playbackBaseMs = $derived(
     selectedTrackWithPosition.length > 0 ? selectedTrackWithPosition[0].timestamp_ms : 0,
   );

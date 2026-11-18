@@ -122,7 +122,7 @@ use commands::terrain::{
     terrain_profile,
 };
 use terrain::TerrainProvider;
-use commands::weather::weather_wind_aloft;
+use commands::weather::{flightlog_set_lookups, weather_set_reference, weather_watch};
 use commands::mission::{
     mission_get, mission_clear, mission_set, mission_add_wp, mission_insert_wp,
     mission_remove_wp, mission_update_wp, mission_reorder_wp,
@@ -449,6 +449,11 @@ pub fn run() {
             #[cfg(target_os = "android")]
             android::log_resolved_dirs(_app.handle());
 
+            {
+                use tauri::Manager;
+                _app.state::<weather::service::WeatherService>().start(_app.handle());
+            }
+
             // Group-flight coordinator: its events go out app-wide, its worker drives the group-end
             // timers (GROUP_FLIGHTS.md §3.2).
             {
@@ -564,6 +569,7 @@ pub fn run() {
         .manage(TerrainProvider::new())
         .manage(RelayHub::new())
         .manage(TelemetryApi::new())
+        .manage(weather::service::WeatherService::new())
         .manage(HidManager::new())
         // As an `Arc` so the start command can hand it to a blocking task (process spawn +
         // readiness poll) without pinning an async runtime thread.
@@ -758,7 +764,10 @@ pub fn run() {
             terrain_elevations,
             terrain_profile,
             terrain_fan,
-            weather_wind_aloft,
+            weather_watch,
+            weather_set_reference,
+            flightlog_set_lookups,
+            commands::flightlog::flightlog_get_weather_records,
             terrain_cache_stats,
             terrain_cache_clear,
             system_on_battery,
