@@ -41,6 +41,7 @@
   import { runUpdateCheck, resolveUpdateKind } from "$lib/controllers/updateCheck";
   import { checkDbBackupPrompt, runPendingDbUpgrade, formatBackupSize, type DbSchemaState, type DbUpgradeOutcome } from "$lib/controllers/dbBackupPrompt";
   import { planDbFolderSwitch, askAboutPreviousDb, type DbFolderPlan } from "$lib/controllers/dbFolderSwitch";
+  import { exportDatabase, importDatabase, exportAllFlights, removeOriginalLogs, type DbTransferUi } from "$lib/controllers/dbTransfer";
   import { importMissionFile } from "$lib/helpers/missionFile";
   import { exportFile, sharesExports, flightFileStem, clearExportCache, setExportErrorReporter } from "$lib/helpers/exportFile";
   import type { LibraryMission } from "$lib/stores/flightlogTypes";
@@ -1037,7 +1038,9 @@
   mavlinkFullTelemetry = saved.mavlinkFullTelemetry;
   flightLoggingEnabled = saved.flightLoggingEnabled;
   flightRecordingEnabled = saved.flightRecordingEnabled ?? false;
-  flightLogDbPath = saved.flightLogDbPath;
+  // Mobile keeps the database in app storage only: a folder set by an earlier version is dropped.
+  flightLogDbPath = isMobile ? '' : saved.flightLogDbPath;
+  if (isMobile && saved.flightLogDbPath) settings.patch({ flightLogDbPath: '' });
   flightLogRawPath = saved.flightLogRawPath ?? '';
   flightLogRawEnabled = saved.flightLogRawEnabled;
   flightLogRawAlways = saved.flightLogRawAlways ?? false;
@@ -1465,9 +1468,8 @@
     }
   }
 
-  /** Folder picker for the storage-location settings. Desktop: a real path. Android: the SAF tree picker —
-   *  the setting stores the content:// grant and a session-end mirror copies the artefacts there (SQLite
-   *  and the raw writers need real paths, so the app keeps writing app-private). */
+  /** Folder picker for the storage-location settings. Desktop: a real path. Android: the SAF tree picker;
+   *  the setting stores the content:// grant, the raw writers stay app-private and closed logs are moved there. */
   async function pickStorageFolder(defaultPath?: string): Promise<string | null> {
     if (isAndroid) {
       return await invoke<string | null>('storage_pick_folder');
@@ -1488,23 +1490,16 @@
   }
 
   let dbMoveBusy = $state<'move' | 'backup' | null>(null);
+  let dbTransferNotice = $state<{ title: string; message: string } | null>(null);
+  const dbTransferUi: DbTransferUi = {
+    show: (opts) => showDialog(opts),
+    tr: (key, values) => $t(key, { values }),
+    notice: (n) => { dbTransferNotice = n; },
+  };
 
-  async function switchFlightLogPath(next: string) {
-    if (get(connection).status !== 'disconnected') return; // the buttons are disabled then
-    const prev = flightLogDbPath;
-    if (next === prev) return;
-    // An import writes to the current database in batches; what it stores after the copy would be lost.
-    if (blackboxImporting) {
-      errorMsg = $t('settings.dbMove.busyImport');
-      return;
-    }
-    const tr = (key: string, values?: Record<string, string>) => $t(key, { values });
-    // Android keeps the database in app storage whatever folder is chosen (it only mirrors there).
-    const plan: DbFolderPlan = isAndroid ? { action: 'same' } : await planDbFolderSwitch(prev, next, showDialog, tr);
-    if (plan.action === 'cancel') return;
-
-    // Row ids restart in every database and the hi-res cache is named by them: nothing of the old
-    // folder may stay selected, loaded or cached.
+  /** Row ids restart in every database and the hi-res cache is named by them: nothing of a replaced
+   *  database may stay selected, loaded or cached. */
+  function forgetDatabaseContent() {
     resetPlayback();
     selectedFlight = null;
     selectedFlightId = null;
@@ -1512,7 +1507,37 @@
     selectedFlightTrackCount = 0;
     loadedMissionId.set(null);
     arduLoadedMissionId.set(null);
-    void hiresCleanup(prev).catch(() => {});
+    void hiresCleanup(flightLogDbPath).catch(() => {});
+  }
+
+  /** An import writes to the database in batches: no copy, replacement or move of it meanwhile. */
+  function refusedDuringLogImport(): boolean {
+    if (blackboxImporting) errorMsg = $t('settings.dbMove.busyImport');
+    return blackboxImporting;
+  }
+
+  async function importDatabaseFile() {
+    if (get(connection).status !== 'disconnected' || refusedDuringLogImport()) return;
+    if (!(await importDatabase(flightLogDbPath, dbTransferUi))) return;
+    forgetDatabaseContent();
+    try {
+      if ((await runPendingDbUpgrade(flightLogDbPath, (p) => { dbUpgrade = p; })) === 'done') await askAboutDbBackup(flightLogDbPath);
+    } catch (e) {
+      errorMsg = String(e);
+    }
+    await loadLogbook();
+  }
+
+  async function switchFlightLogPath(next: string) {
+    if (get(connection).status !== 'disconnected') return; // the buttons are disabled then
+    const prev = flightLogDbPath;
+    if (next === prev) return;
+    if (refusedDuringLogImport()) return;
+    const tr = (key: string, values?: Record<string, string>) => $t(key, { values });
+    const plan: DbFolderPlan = await planDbFolderSwitch(prev, next, showDialog, tr);
+    if (plan.action === 'cancel') return;
+
+    forgetDatabaseContent();
     const use = (path: string) => {
       flightLogDbPath = path;
       settings.patch({ flightLogDbPath: path });
@@ -1572,6 +1597,8 @@
       if (selected) {
         flightLogRawPath = selected;
         settings.patch({ flightLogRawPath });
+        // Android: what waits in app storage goes to the folder now, not after the next flight.
+        if (isAndroid) void invoke('storage_flush_raw_logs', { rawPath: selected }).catch(() => {});
       }
     } catch (e) {
       console.error('Failed to choose raw log path', e);
@@ -3577,6 +3604,10 @@
     // reproducible) — wipe them in passing.
     void hiresCleanup(flightLogDbPath).catch(() => {});
     void scratchClear().catch(() => {});
+    // Android: closed raw logs still in app storage go to the chosen folder; the leftover `db-mirror` copy is deleted.
+    if (isAndroid) void invoke('storage_flush_raw_logs', { rawPath: flightLogRawPath }).catch(() => {});
+    // A database fetched for an import the app was closed on: a full copy nobody will confirm.
+    if (isMobile) void invoke('flightlog_import_database_finish', { replace: false, dbPath: flightLogDbPath }).catch(() => {});
     try {
       for (let round = 0; round < 10; round++) {
         const orphan = await scanOrphanSessions(flightLogDbPath);
@@ -4440,6 +4471,15 @@
             onSetCacheMaxMB={setCacheMaxMB}
             onClearCache={clearCache}
             onCompactDb={compactDb}
+            onExportDatabase={() => { if (!refusedDuringLogImport()) void exportDatabase(flightLogDbPath, dbTransferUi); }}
+            onImportDatabase={() => void importDatabaseFile()}
+            onRemoveOriginalLogs={async (count, sizeBytes) => {
+              if (refusedDuringLogImport()) return;
+              await removeOriginalLogs(flightLogDbPath, count, sizeBytes, dbTransferUi);
+              // An open flight may have lost its original log: HI-RES is decided when a flight opens.
+              forgetDatabaseContent();
+            }}
+            onExportAllFlights={() => void exportAllFlights(flightLogDbPath, dbTransferUi)}
             onChooseFlightLogPath={chooseFlightLogPath}
             onResetFlightLogPath={resetFlightLogPath}
             onChooseRawLogPath={chooseRawLogPath}
@@ -4536,6 +4576,8 @@
       <DbUpgradeNotice title={$t('settings.dbUpgradeTitle')} message={$t('settings.dbUpgradeMsg', { values: { size: formatBackupSize(dbUpgrade.size_bytes) } })} />
     {:else if dbMoveBusy}
       <DbUpgradeNotice title={$t(`settings.dbMove.${dbMoveBusy}BusyTitle`)} message={$t('settings.dbMove.busyMsg')} />
+    {:else if dbTransferNotice}
+      <DbUpgradeNotice title={dbTransferNotice.title} message={dbTransferNotice.message} />
     {/if}
     <UpdateDialog />
     <CesiumKeyPrompt bind:open={cesiumKeyPromptOpen} onSave={cesiumKeySave} onRemindLater={cesiumKeyRemindLater} onIgnore={cesiumKeyIgnore} />

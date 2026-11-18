@@ -21,19 +21,10 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 /**
- * User-chosen storage folders (Settings → Flight Logbook) for the Android build.
- *
- * The Rust side (`android/storage.rs`) calls the static methods here over JNI — same contract as
- * [UsbSerial]: primitives and Strings only, no callbacks back into Rust, one error string to fetch
- * after a failure.
- *
- * The model is scoped storage, deliberately: the user grants **one folder** through the system tree
- * picker ([pickFolder]), Kite takes a persistable grant on exactly that folder, and no storage
- * permission appears in the manifest. Because a SAF grant provides `content://` documents rather
- * than POSIX paths, nothing *lives* in the folder — the SQLite database and the raw-log writers
- * need real paths and stay app-private — instead the session-end mirror ([syncDirToTree]) copies
- * the artefacts into it through the ContentResolver. That copy is what survives an uninstall,
- * which is the reason a user picks a folder at all.
+ * The user-chosen raw-log folder (Settings → Data) for the Android build, called from
+ * `android/storage.rs` over JNI — Strings only, no callbacks. A SAF grant gives `content://`
+ * documents, not paths: the raw writers stay app-private and closed files are moved in
+ * ([moveFilesToTree]).
  */
 object StorageAccess {
     /** How long [pickFolder] waits for the user to finish with the system picker. Generous on
@@ -54,8 +45,8 @@ object StorageAccess {
         this.launcher = launcher
     }
 
-    /** The picker's result callback (runs on the main thread). Take the persistable grant — the
-     *  whole point: it outlives this process, so the mirror still has access next session. */
+    /** The picker's result callback (main thread). The persistable grant keeps the folder writable
+     *  in later sessions. */
     fun onFolderPicked(uri: Uri?) {
         if (uri == null) {
             pickedUri = null // cancelled — not an error
@@ -67,8 +58,8 @@ object StorageAccess {
                 )
                 pickedUri = uri.toString()
             } catch (e: SecurityException) {
-                // A provider that refuses persistable grants is useless as a mirror target: the
-                // grant would die with this process and every later sync would fail confusingly.
+                // A provider without persistable grants loses access with this process; every later
+                // move would fail.
                 lastError = "That location does not allow a lasting grant — pick a folder on the " +
                     "device storage or SD card (${e.message})"
             }
@@ -182,16 +173,12 @@ object StorageAccess {
     }
 
     /**
-     * Mirror every regular file in [srcDir] into the granted tree at [treeUri]. A file already
-     * present with the same size is skipped (raw logs never change after close; the DB snapshot is
-     * freshly written when it differs), anything else is created or rewritten. Flat on purpose —
-     * the two source dirs (raw-log staging, DB snapshot) hold no subdirectories.
-     *
-     * Returns null on success, the error message otherwise (the Rust side turns that into a
-     * `Result::Err` and logs it — a failed mirror must never take the session teardown down).
+     * Move the files in [paths] (one per line) flat into the tree [treeUri]: write, read the size
+     * back, then delete the local file; one already there with the same size counts as written.
+     * Returns null on success, else the last error; a file that failed stays in the app.
      */
     @JvmStatic
-    fun syncDirToTree(treeUri: String, srcDir: String): String? {
+    fun moveFilesToTree(treeUri: String, paths: String): String? {
         return try {
             val tree = Uri.parse(treeUri)
             val resolver = activity.contentResolver
@@ -219,27 +206,45 @@ object StorageAccess {
                 }
             }
 
-            var copied = 0
-            val files = File(srcDir).listFiles() ?: return null // nothing staged yet — fine
-            for (f in files) {
+            var moved = 0
+            var failed: String? = null
+            for (path in paths.split('\n')) {
+                val f = File(path)
                 if (!f.isFile) continue
                 val existing = children[f.name]
-                if (existing != null && existing.second == f.length()) continue
-                val dest = existing?.first ?: DocumentsContract.createDocument(
-                    resolver, parentUri, "application/octet-stream", f.name
-                ) ?: return "could not create ${f.name} in the shared folder"
-                // "wt" = write-truncate: a rewritten file must not keep a longer stale tail.
-                resolver.openOutputStream(dest, "wt")?.use { out ->
-                    f.inputStream().use { it.copyTo(out) }
-                } ?: return "could not open ${f.name} in the shared folder for writing"
-                copied++
+                if (existing == null || existing.second != f.length()) {
+                    val dest = existing?.first ?: DocumentsContract.createDocument(
+                        resolver, parentUri, "application/octet-stream", f.name
+                    )
+                    if (dest == null) {
+                        failed = "could not create ${f.name} in the shared folder"
+                        continue
+                    }
+                    // "wt" = write-truncate: a rewritten file must not keep a longer stale tail.
+                    val opened = resolver.openOutputStream(dest, "wt")?.use { out ->
+                        f.inputStream().use { it.copyTo(out) }
+                    }
+                    if (opened == null) {
+                        failed = "could not open ${f.name} in the shared folder for writing"
+                        continue
+                    }
+                    val written = resolver.query(
+                        dest, arrayOf(DocumentsContract.Document.COLUMN_SIZE), null, null, null
+                    )?.use { c -> if (c.moveToFirst() && !c.isNull(0)) c.getLong(0) else -1L } ?: -1L
+                    // A provider that reports no size cannot confirm the copy: the file stays here.
+                    if (written != f.length()) {
+                        failed = "${f.name} arrived with $written of ${f.length()} bytes — kept in the app"
+                        continue
+                    }
+                }
+                if (f.delete()) moved++
             }
-            android.util.Log.i("StorageAccess", "mirror: $copied file(s) from $srcDir into $treeDocId")
-            null
+            android.util.Log.i("StorageAccess", "moved $moved file(s) into $treeDocId")
+            failed
         } catch (e: SecurityException) {
             "the folder grant is gone (revoked or the folder was deleted) — pick the folder again: ${e.message}"
         } catch (e: Exception) {
-            "mirror failed: ${e.message}"
+            "move failed: ${e.message}"
         }
     }
 }

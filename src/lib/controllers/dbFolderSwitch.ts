@@ -32,7 +32,8 @@ export function dbFolderState(dbPath: string): Promise<DbFolderState> {
   return invoke<DbFolderState>('flightlog_folder_state', { dbPath });
 }
 
-const count = (s: DbFolderState) => (s.flights == null ? '?' : String(s.flights));
+export const flightCount = (s: DbFolderState) => (s.flights == null ? '?' : String(s.flights));
+const count = flightCount;
 const size = (s: DbFolderState) => formatBackupSize(s.size_bytes);
 
 /** Ask what the change from folder `prev` to folder `next` should do. Nothing is written here. */

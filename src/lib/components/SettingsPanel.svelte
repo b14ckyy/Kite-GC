@@ -91,6 +91,10 @@
     onChooseFlightLogPath = () => {},
     onResetFlightLogPath = () => {},
     onCompactDb = () => {},
+    onExportDatabase = () => {},
+    onImportDatabase = () => {},
+    onExportAllFlights = () => {},
+    onRemoveOriginalLogs = async (_count: number, _sizeBytes: number) => {},
     onChooseRawLogPath = () => {},
     onResetRawLogPath = () => {},
     onToggleWidget = (_widgetId: string) => {},
@@ -147,6 +151,10 @@
     onChooseFlightLogPath?: () => void;
     onResetFlightLogPath?: () => void;
     onCompactDb?: () => void;
+    onExportDatabase?: () => void;
+    onImportDatabase?: () => void;
+    onExportAllFlights?: () => void;
+    onRemoveOriginalLogs?: (count: number, sizeBytes: number) => Promise<void>;
     onChooseRawLogPath?: () => void;
     onResetRawLogPath?: () => void;
     onToggleWidget?: (widgetId: string) => void;
@@ -334,6 +342,19 @@
     dbBackupFor = dbPath;
   }
   $effect(() => { void loadDbBackup(); });
+  // Mobile: original log files only arrive with a database imported from a desktop.
+  let originalLogs = $state<{ count: number; size_bytes: number } | null>(null);
+  async function loadOriginalLogs(): Promise<void> {
+    if (!isMobile) return;
+    originalLogs = await invoke<{ count: number; size_bytes: number }>('flightlog_original_logs_info', { dbPath: flightLogDbPath }).catch(() => null);
+  }
+  $effect(() => { void loadOriginalLogs(); });
+  async function removeOriginalLogs(): Promise<void> {
+    if (!originalLogs) return;
+    await onRemoveOriginalLogs(originalLogs.count, originalLogs.size_bytes);
+    await loadOriginalLogs();
+  }
+
   async function deleteDbBackup(): Promise<void> {
     try {
       await invoke('flightlog_backup_delete', { dbPath: dbBackupFor });
@@ -959,13 +980,30 @@
         <label class="s-label" for="flightlog-auto-location">{$t('settings.flightAutoLocation')}</label>
         <Toggle checked={$settings.flightAutoLocation} id="flightlog-auto-location" onchange={(c) => onPatch({ flightAutoLocation: c })} />
       </div>
-      <div class="s-row s-row-stack">
-        <span class="s-label">{$t('settings.flightLogDbPath')}</span>
-        <div class="path-picker-row">
-          <input class="s-input path-input" type="text" readonly value={flightLogDbPath || defaultFlightLogPath || $t('settings.defaultPathUnknown')} />
-          <Button variant="standard" size="sm" disabled={dbFolderLocked} title={dbFolderLocked ? $t('settings.dbFolderLockedHint') : undefined} onclick={onChooseFlightLogPath}>{$t('settings.choose')}</Button>
-          <Button variant="standard" size="sm" disabled={dbFolderLocked} title={dbFolderLocked ? $t('settings.dbFolderLockedHint') : undefined} onclick={onResetFlightLogPath}>{$t('settings.useDefault')}</Button>
+      <!-- Mobile: the database lives in app storage only; it leaves and returns as a file. -->
+      {#if !isMobile}
+        <div class="s-row s-row-stack">
+          <span class="s-label">{$t('settings.flightLogDbPath')}</span>
+          <div class="path-picker-row">
+            <input class="s-input path-input" type="text" readonly value={flightLogDbPath || defaultFlightLogPath || $t('settings.defaultPathUnknown')} />
+            <Button variant="standard" size="sm" disabled={dbFolderLocked} title={dbFolderLocked ? $t('settings.dbFolderLockedHint') : undefined} onclick={onChooseFlightLogPath}>{$t('settings.choose')}</Button>
+            <Button variant="standard" size="sm" disabled={dbFolderLocked} title={dbFolderLocked ? $t('settings.dbFolderLockedHint') : undefined} onclick={onResetFlightLogPath}>{$t('settings.useDefault')}</Button>
+          </div>
         </div>
+      {/if}
+      <div class="s-row">
+        <span class="s-label" title={$t('settings.dbTransfer.exportDbHint')}>{$t('settings.dbTransfer.exportDb')}</span>
+        <Button variant="standard" size="sm" disabled={dbFolderLocked} title={dbFolderLocked ? $t('settings.dbTransfer.lockedHint') : $t('settings.dbTransfer.exportDbHint')} onclick={onExportDatabase}>{$t('settings.dbTransfer.exportBtn')}</Button>
+      </div>
+      {#if isMobile}
+        <div class="s-row">
+          <span class="s-label" title={$t('settings.dbTransfer.importDbHint')}>{$t('settings.dbTransfer.importDb')}</span>
+          <Button variant="standard" size="sm" disabled={dbFolderLocked} title={dbFolderLocked ? $t('settings.dbTransfer.lockedHint') : $t('settings.dbTransfer.importDbHint')} onclick={onImportDatabase}>{$t('settings.dbTransfer.importBtn')}</Button>
+        </div>
+      {/if}
+      <div class="s-row">
+        <span class="s-label" title={$t('settings.dbTransfer.exportFlightsHint')}>{$t('settings.dbTransfer.exportFlights')}</span>
+        <Button variant="standard" size="sm" title={$t('settings.dbTransfer.exportFlightsHint')} onclick={onExportAllFlights}>{$t('settings.dbTransfer.exportBtn')}</Button>
       </div>
       <!-- Desktop only — see `hasDbCompact`. -->
       {#if hasDbCompact}
@@ -981,6 +1019,16 @@
           </span>
           <Button variant="standard" size="sm" onclick={deleteDbBackup} title={$t('settings.dbBackupHint')}>
             {$t('settings.dbBackupDelete')}
+          </Button>
+        </div>
+      {/if}
+      {#if originalLogs && originalLogs.count > 0}
+        <div class="s-row">
+          <span class="s-label" title={$t('settings.dbTransfer.originalLogsHint')}>
+            {$t('settings.dbTransfer.originalLogs')} · {formatBackupSize(originalLogs.size_bytes)}
+          </span>
+          <Button variant="standard" size="sm" disabled={dbFolderLocked} title={dbFolderLocked ? $t('settings.dbTransfer.lockedHint') : $t('settings.dbTransfer.originalLogsHint')} onclick={removeOriginalLogs}>
+            {$t('settings.dbTransfer.originalLogsRemove')}
           </Button>
         </div>
       {/if}

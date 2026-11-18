@@ -8,8 +8,8 @@
 //!
 //! The model is scoped storage: the user grants ONE folder through the system tree picker, the app
 //! holds a persistable grant on it, and no storage permission exists anywhere. Because a SAF grant
-//! provides no POSIX path, nothing *lives* in that folder — the session-end mirror
-//! (`user_file::mirror_session`) copies artefacts into it through the ContentResolver.
+//! provides no POSIX path, nothing *lives* in that folder — finished raw logs are moved into it
+//! through the ContentResolver (`user_file::move_raw_logs`).
 
 use jni::objects::JString;
 
@@ -98,34 +98,33 @@ pub fn take_save_request() -> Result<Option<String>, String> {
         .map_err(|e| format!("reading the save request: {e}"))
 }
 
-/// Mirror every regular file in `src_dir` into the granted tree at `tree_uri` — files already
-/// present with the same size are skipped, everything else is created or rewritten through the
-/// ContentResolver. Flat (no subdirectories), which matches the raw-log staging dir and the DB
-/// snapshot dir.
-pub fn sync_dir_to_tree(tree_uri: &str, src_dir: &str) -> Result<(), String> {
+/// Move `files` into the granted tree at `tree_uri` (flat): each is written through the
+/// ContentResolver, its size read back, and only then deleted here.
+pub fn move_files_to_tree(tree_uri: &str, files: &[std::path::PathBuf]) -> Result<(), String> {
     let mut env = jvm::env()?;
     let class = jvm::app_class(&mut env, BRIDGE)?;
+    let paths: Vec<String> = files.iter().map(|f| f.to_string_lossy().into_owned()).collect();
     let j_uri = env
         .new_string(tree_uri)
         .map_err(|e| format!("building the tree-uri string: {e}"))?;
-    let j_dir = env
-        .new_string(src_dir)
-        .map_err(|e| format!("building the src-dir string: {e}"))?;
+    let j_paths = env
+        .new_string(paths.join("\n"))
+        .map_err(|e| format!("building the file list: {e}"))?;
     let r = env
         .call_static_method(
             &class,
-            "syncDirToTree",
+            "moveFilesToTree",
             "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
-            &[(&j_uri).into(), (&j_dir).into()],
+            &[(&j_uri).into(), (&j_paths).into()],
         )
         .and_then(|v| v.l());
-    let err = jvm::check(&mut env, r, "StorageAccess.syncDirToTree")?;
+    let err = jvm::check(&mut env, r, "StorageAccess.moveFilesToTree")?;
     if err.is_null() {
         return Ok(());
     }
     let msg = env
         .get_string(&JString::from(err))
         .map(String::from)
-        .map_err(|e| format!("reading the sync error: {e}"))?;
+        .map_err(|e| format!("reading the move error: {e}"))?;
     Err(msg)
 }

@@ -66,6 +66,125 @@ fn trash_or_delete(file: &std::path::Path) -> Result<(), String> {
     std::fs::remove_file(file).map_err(|e| format!("could not delete {}: {e}", file.display()))
 }
 
+// ── Database export / import (flightlog/db_move.rs) and the export of every flight ──
+
+/// The database file cannot be copied or replaced under a running recording.
+fn transfer_refusal(state: &crate::state::AppState) -> Result<(), String> {
+    if state.sessions.has_live_session() {
+        return Err("a flight is being recorded — try again after the flight".into());
+    }
+    Ok(())
+}
+
+/// Save a copy of the whole flight database to `output_path` (a document URI on Android).
+#[tauri::command(async)]
+pub fn flightlog_export_database(
+    output_path: String,
+    db_path: Option<String>,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<(), String> {
+    transfer_refusal(&state)?;
+    let db_file = db::resolve_db_path(&db_path.unwrap_or_default(), portable_mode());
+    crate::flightlog::db_move::export_database(&db_file, &output_path)
+        .inspect_err(|e| log::warn!("[flightlog] database not exported: {e}"))
+}
+
+/// Fetch the database file the user picked and report what it holds; nothing is replaced yet.
+#[tauri::command(async)]
+pub fn flightlog_import_database_stage(
+    file_path: String,
+    db_path: Option<String>,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<crate::flightlog::db_move::FolderState, String> {
+    transfer_refusal(&state)?;
+    let db_file = db::resolve_db_path(&db_path.unwrap_or_default(), portable_mode());
+    crate::flightlog::db_move::stage_import(&file_path, &db_file)
+        .inspect_err(|e| log::warn!("[flightlog] database import refused: {e}"))
+}
+
+/// Replace the flight database with the staged one (`replace`), or drop the staged file.
+#[tauri::command(async)]
+pub fn flightlog_import_database_finish(
+    replace: bool,
+    db_path: Option<String>,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<(), String> {
+    let db_file = db::resolve_db_path(&db_path.unwrap_or_default(), portable_mode());
+    if !replace {
+        crate::flightlog::db_move::cancel_import(&db_file);
+        return Ok(());
+    }
+    transfer_refusal(&state)?;
+    crate::flightlog::db_move::commit_import(&db_file)
+        .inspect_err(|e| log::warn!("[flightlog] database not imported: {e}"))
+}
+
+#[derive(serde::Serialize)]
+pub struct OriginalLogsInfo {
+    pub count: i64,
+    pub size_bytes: i64,
+}
+
+/// The original log files a database carries (on mobile only one that came from a desktop).
+#[tauri::command(async)]
+pub fn flightlog_original_logs_info(db_path: Option<String>) -> Result<OriginalLogsInfo, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    let (count, size_bytes) = db::original_logs_total(&conn).map_err(|e| format!("Query error: {e}"))?;
+    Ok(OriginalLogsInfo { count, size_bytes })
+}
+
+/// Remove every original log file from the database; flights, tracks and telemetry stay.
+#[tauri::command(async)]
+pub fn flightlog_original_logs_remove(
+    db_path: Option<String>,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<usize, String> {
+    transfer_refusal(&state)?;
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::remove_original_logs(&conn).map_err(|e| format!("Delete error: {e}"))
+}
+
+/// `no-space:` is a STABLE marker the frontend matches on (`exportAllFlights` in dbTransfer.ts).
+const EXPORT_NO_SPACE_ERROR: &str = "no-space:";
+
+#[derive(serde::Serialize, Clone)]
+pub struct ExportAllResult {
+    pub exported: usize,
+    pub total: usize,
+}
+
+/// Export every flight into one `.kflight`. Needs as much free space as the database is large (the
+/// file is smaller: no vehicles, batteries or unlinked missions). Emits `flightlog-export-progress`.
+#[tauri::command(async)]
+pub fn flightlog_export_all(
+    output_path: String,
+    db_path: Option<String>,
+    app_handle: tauri::AppHandle,
+) -> Result<ExportAllResult, String> {
+    let custom = db_path.unwrap_or_default();
+    let need = std::fs::metadata(db::resolve_db_path(&custom, portable_mode())).map(|m| m.len()).unwrap_or(0);
+    if let Some(free) = crate::user_file::free_bytes(&crate::user_file::write_volume(&output_path)) {
+        if free < need {
+            return Err(format!("{EXPORT_NO_SPACE_ERROR}{need}:{free}"));
+        }
+    }
+    let conn = open_db(&custom)?;
+    let ids = db::all_flight_ids(&conn).map_err(|e| format!("Query error: {e}"))?;
+    let total = ids.len();
+    let mut last = 0;
+    let exported = crate::user_file::with_write_path(&output_path, |p| {
+        exchange::export_flights_with(&conn, &ids, p, &mut |done, total| {
+            // One event per percent is plenty for a notice.
+            if done * 100 / total.max(1) != last || done == total {
+                last = done * 100 / total.max(1);
+                let _ = app_handle.emit("flightlog-export-progress", ExportAllResult { exported: done, total });
+            }
+        })
+    })
+    .inspect_err(|e| log::warn!("[flightlog] export of all flights failed: {e}"))?;
+    Ok(ExportAllResult { exported, total })
+}
+
 // ── Moving the database with its folder (flightlog/db_move.rs) ──
 
 /// Read-only look at the database folder `db_path` (empty = the default folder).

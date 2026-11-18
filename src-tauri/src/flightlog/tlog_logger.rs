@@ -40,8 +40,12 @@ impl TlogLogger {
         let path = log_dir.join(&filename);
         let path_str = path.display().to_string();
 
-        let file =
-            File::create(&path).map_err(|e| format!("Cannot create tlog {}: {}", filename, e))?;
+        // Registered before the file exists: a move of closed logs must never see it unprotected.
+        crate::user_file::raw_log_opened(&path);
+        let file = File::create(&path).map_err(|e| {
+            crate::user_file::raw_log_closed(&path);
+            format!("Cannot create tlog {}: {}", filename, e)
+        })?;
         let writer = BufWriter::new(file);
 
         log::info!("Tlog: {}", path_str);
@@ -71,5 +75,12 @@ impl TlogLogger {
     pub fn close(&mut self) {
         self.writer.flush().ok();
         log::info!("Tlog closed: {}", self.path);
+    }
+}
+
+impl Drop for TlogLogger {
+    fn drop(&mut self) {
+        let _ = self.writer.flush();
+        crate::user_file::raw_log_closed(Path::new(&self.path));
     }
 }

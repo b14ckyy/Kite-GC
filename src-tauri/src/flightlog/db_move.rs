@@ -205,6 +205,133 @@ pub fn move_database(
     Ok(MoveOutcome { source_left: !remove_database(src, &delete) })
 }
 
+/// Write a copy of the database to `dest` (a path, or a document URI on Android) for the user to keep.
+pub fn export_database(db_file: &Path, dest: &str) -> Result<(), String> {
+    if !db_file.exists() {
+        return Err("there is no flight database yet".into());
+    }
+    #[cfg(target_os = "android")]
+    if crate::android::content::is_content_uri(dest) {
+        return stream_database(db_file, dest);
+    }
+    let dest = Path::new(dest);
+    if same_file(db_file, dest) {
+        return Err("this is the database in use".into());
+    }
+    let (conn, _guard) = open_source(db_file)?;
+    copy_verified(&conn, dest)
+}
+
+/// The database file itself goes out block by block — no second copy on a device that may be short of
+/// space. The file is whole only with an empty WAL and no writer, hence checkpoint, then write lock.
+#[cfg(target_os = "android")]
+fn stream_database(db_file: &Path, uri: &str) -> Result<(), String> {
+    let (conn, _guard) = open_source(db_file)?;
+    conn.busy_timeout(std::time::Duration::from_secs(30)).map_err(|e| e.to_string())?;
+    for _ in 0..3 {
+        let busy: i64 = conn
+            .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |r| r.get(0))
+            .map_err(|e| format!("could not prepare the database: {e}"))?;
+        conn.execute_batch("BEGIN IMMEDIATE").map_err(|e| format!("could not lock the database: {e}"))?;
+        let wal = std::fs::metadata(&sidecars(db_file)[0]).map(|m| m.len()).unwrap_or(0);
+        let written = (busy == 0 && wal == 0).then(|| crate::android::content::write_uri(uri, db_file));
+        let _ = conn.execute_batch("ROLLBACK");
+        if let Some(result) = written {
+            return result;
+        }
+    }
+    Err("the database is in use — try again in a moment".into())
+}
+
+/// Fetch a database the user picked (a path, or a document URI on Android) next to `db_file` and look
+/// at it. Nothing is replaced yet; `commit_import` or `cancel_import` follows.
+pub fn stage_import(src: &str, db_file: &Path) -> Result<FolderState, String> {
+    let staged = incoming(db_file);
+    let _ = std::fs::remove_file(&staged);
+    if let Some(dir) = db_file.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("could not create {}: {e}", dir.display()))?;
+    }
+    let fetched = fetch(src, db_file, &staged);
+    let state = fetched.map(|()| folder_state(&staged)).and_then(|state| {
+        // A `.kflight` has a flights table too, but no schema version: it is no database to run on.
+        if state.flights.is_none() || state.schema_version == 0 {
+            return Err("this file is not a Kite flight database".to_string());
+        }
+        if state.schema_version > state.current_version {
+            return Err("this database was written by a newer Kite version".to_string());
+        }
+        let check = Connection::open_with_flags(&staged, OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .and_then(|c| c.query_row("PRAGMA quick_check", [], |r| r.get::<_, String>(0)))
+            .map_err(|e| e.to_string())?;
+        if check != "ok" {
+            return Err(format!("this database is damaged: {check}"));
+        }
+        Ok(state)
+    });
+    if state.is_err() {
+        cancel_import(db_file);
+    }
+    state
+}
+
+fn fetch(src: &str, db_file: &Path, staged: &Path) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    if crate::android::content::is_content_uri(src) {
+        return crate::android::content::read_uri(src, staged);
+    }
+    if same_file(Path::new(src), db_file) {
+        return Err("this is the database in use".into());
+    }
+    std::fs::copy(src, staged).map(|_| ()).map_err(|e| format!("could not read {src}: {e}"))
+}
+
+pub fn cancel_import(db_file: &Path) {
+    let staged = incoming(db_file);
+    for file in sidecars(&staged) {
+        let _ = std::fs::remove_file(file);
+    }
+    let _ = std::fs::remove_file(staged);
+}
+
+/// Put the staged database in the place of `db_file`. The old one is set aside until the new one
+/// has its name, then it and its backup are deleted.
+pub fn commit_import(db_file: &Path) -> Result<(), String> {
+    let staged = incoming(db_file);
+    if !staged.exists() {
+        return Err("no database is waiting to be imported".into());
+    }
+    let mut aside = db_file.as_os_str().to_os_string();
+    aside.push(".replaced");
+    let aside = PathBuf::from(aside);
+    let _guard;
+    if db_file.exists() {
+        let (conn, guard) = open_source(db_file)?;
+        _guard = guard;
+        // The sidecars go below: only with an emptied WAL do they take no committed data along,
+        // should the old database have to come back.
+        let busy: i64 = conn
+            .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |r| r.get(0))
+            .map_err(|e| format!("could not prepare the current database: {e}"))?;
+        drop(conn);
+        if busy != 0 {
+            return Err("the current database is in use — try again in a moment".into());
+        }
+        let _ = std::fs::remove_file(&aside);
+        std::fs::rename(db_file, &aside).map_err(|e| format!("could not set the current database aside: {e}"))?;
+    }
+    for file in sidecars(db_file).into_iter().chain(sidecars(&staged)) {
+        let _ = std::fs::remove_file(file);
+    }
+    if let Err(e) = std::fs::rename(&staged, db_file) {
+        let _ = std::fs::rename(&aside, db_file);
+        return Err(format!("could not put the imported database in place: {e}"));
+    }
+    let _ = std::fs::remove_file(&aside);
+    let _ = std::fs::remove_file(db::backup_path_for(db_file));
+    log::info!("[flightlog] database replaced by an imported one at {}", db_file.display());
+    Ok(())
+}
+
 /// Take the database `old` out of use after `in_use` was opened. With `keep_backup` a checked copy is
 /// written next to `in_use` first and the old files are deleted for good (the point is the freed
 /// space); without it they go to `dispose`. Returns the copy's path.
@@ -384,6 +511,48 @@ mod tests {
         assert_eq!(retire_database(&old, &in_use, false, &dispose).unwrap(), None);
         assert!(!old.exists());
         assert_eq!(*disposed.lock().unwrap(), 1);
+    }
+
+    /// An export is a complete database of its own; an import replaces the current one only at
+    /// `commit_import`, and takes the old database's backup and WAL out of the way.
+    #[test]
+    fn export_then_import_replaces_the_database() {
+        let dirs = Dirs::new("export-import");
+        let src = dirs.make("a", 3);
+        let file = dirs.0.join("backup.db");
+        export_database(&src, &file.to_string_lossy()).unwrap();
+        assert_eq!(flights(&file), 3);
+        assert_eq!(flights(&src), 3);
+
+        let current = dirs.make("b", 1);
+        std::fs::write(db::backup_path_for(&current), b"old backup").unwrap();
+        let staged = stage_import(&file.to_string_lossy(), &current).unwrap();
+        assert_eq!(staged.flights, Some(3));
+        assert_eq!(flights(&current), 1, "staging replaces nothing");
+
+        commit_import(&current).unwrap();
+        assert_eq!(flights(&current), 3);
+        assert!(!db::backup_path_for(&current).exists());
+        assert!(!incoming(&current).exists());
+        assert!(commit_import(&current).is_err(), "nothing is staged any more");
+    }
+
+    /// A file that is no flight database is refused at staging and leaves nothing behind.
+    #[test]
+    fn a_foreign_file_is_not_staged() {
+        let dirs = Dirs::new("foreign");
+        let current = dirs.make("a", 2);
+        let junk = dirs.0.join("junk.db");
+        std::fs::write(&junk, b"not a database at all").unwrap();
+        assert!(stage_import(&junk.to_string_lossy(), &current).is_err());
+        assert!(stage_import(&current.to_string_lossy(), &current).is_err(), "the database in use");
+        let kflight = dirs.0.join("some.kflight");
+        let conn = Connection::open(&kflight).unwrap();
+        conn.execute_batch("CREATE TABLE flights (id INTEGER PRIMARY KEY); INSERT INTO flights DEFAULT VALUES;").unwrap();
+        drop(conn);
+        assert!(stage_import(&kflight.to_string_lossy(), &current).is_err(), "a flight export is no database");
+        assert!(!incoming(&current).exists());
+        assert_eq!(flights(&current), 2);
     }
 
     #[test]
