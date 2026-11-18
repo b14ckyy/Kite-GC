@@ -9,7 +9,8 @@
   // column with its own split).
   import { untrack } from 'svelte';
   import { t } from 'svelte-i18n';
-  import type { InterfaceSettings } from '$lib/stores/settings';
+  import { get } from 'svelte/store';
+  import { settings, type InterfaceSettings } from '$lib/stores/settings';
   import {
     buildFlightTree,
     formatDurationSec,
@@ -137,10 +138,15 @@
       : $t('logbook.title'),
   );
 
-  let logbookSortMode = $state<LogbookSortMode>('aircraft-location-date');
+  const SORT_MODES: LogbookSortMode[] = [
+    'aircraft-location-date', 'location-date-aircraft', 'date-location-aircraft', 'aircraft-date-location',
+  ];
+  const storedSortMode = get(settings).logbookSortMode;
+  const initialSortMode = SORT_MODES.includes(storedSortMode) ? storedSortMode : SORT_MODES[0];
+  let logbookSortMode = $state<LogbookSortMode>(initialSortMode);
   let logbookTreeOpenTop = $state<Set<string>>(new Set());
   let logbookTreeOpenSecond = $state<Set<string>>(new Set());
-  let prevLogbookSortMode = $state<LogbookSortMode>('aircraft-location-date');
+  let prevLogbookSortMode = $state<LogbookSortMode>(initialSortMode);
   let searchQuery = $state('');
   let multiSelectedIds = $state<Set<number>>(new Set());
 
@@ -235,6 +241,7 @@
   $effect(() => {
     if (prevLogbookSortMode === logbookSortMode) return;
     prevLogbookSortMode = logbookSortMode;
+    settings.patch({ logbookSortMode });
     logbookTreeOpenTop = new Set();
     logbookTreeOpenSecond = new Set();
   });
