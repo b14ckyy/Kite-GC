@@ -54,7 +54,11 @@ Migration history (tracked via `PRAGMA user_version`):
   explicitly):
     - `gps_records` + `idx_gps_records_flight` — raw values of every GPS receiver next to the fused track
       (`instance` 0 = `GPS_RAW_INT`, 1 = `GPS2_RAW`; unified and raw fix type, satellites, HDOP / VDOP,
-      position, MSL altitude, accuracies, speed, course, yaw);
+      position, MSL altitude, accuracies, speed, course, yaw). Written by the recorder, one row per
+      `GPS_RAW_INT` / `GPS2_RAW` of a listed receiver while a flight is recorded (Kite asks for 1 Hz;
+      with Full MAVLink Telemetry the FC's own rate), buffered and written with the telemetry batch;
+      `timestamp_ms` is the session time the message arrived. The replay attaches to each track record
+      the newest row per receiver at or before it (older than 5 s = lost, as live);
     - `weather_records` + `idx_weather_records_flight` — one row per weather answer during a flight, the
       answer stored whole as JSON (`data_json`) with the position it was asked for. Written by the
       recorder from the backend weather service (`weather/service.rs`), which polls while a weather

@@ -21,7 +21,8 @@ use super::types::{BatteryRecord, Flight, FlightEvent, FlightLogSettings, Teleme
 use crate::msp::FcInfo;
 use crate::vehicle_registry::emitter::VehicleEmitter;
 use crate::scheduler::telemetry::{
-    AirspeedData, AltitudeData, AnalogData, AttitudeData, BatteryInstanceData, GpsData, GpsStatsData,
+    AirspeedData, AltitudeData, AnalogData, AttitudeData, BatteryInstanceData, GpsData, GpsReceiverData,
+    GpsStatsData,
     LinkStatsData, Misc2Data, NavStatusData, SensorStatusData, StatusData, WindData,
 };
 
@@ -952,6 +953,9 @@ struct ActiveFlight {
     buffer: Vec<TelemetryRecord>,
     /// Accumulated per-instance battery records pending flush (multi-battery; ArduPilot/PX4).
     bat_buffer: Vec<BatteryRecord>,
+    /// Raw GPS receiver samples `(session ms, sample)` pending flush; written with the telemetry batch so
+    /// a crash loses the same tail of both.
+    gps_buffer: Vec<(i64, GpsReceiverData)>,
     /// Sequence number of the last weather answer written to the temp store; 0 = none yet.
     weather_seq: u64,
     // Statistics tracking
@@ -1017,6 +1021,18 @@ pub struct FlightRecorder {
 
 /// Thread-safe handle to the flight recorder
 pub type FlightRecorderHandle = Arc<Mutex<FlightRecorder>>;
+
+/// Write the pending GPS receiver samples to the temp store. The buffer is emptied either way: a
+/// failing store must not grow it for the rest of the flight.
+fn flush_gps(conn: &Connection, buffer: &mut Vec<(i64, GpsReceiverData)>) {
+    if buffer.is_empty() {
+        return;
+    }
+    let rows = std::mem::take(buffer);
+    if let Err(e) = db::insert_gps_records_batch(conn, 0, &rows) {
+        log::error!("Failed to flush GPS receiver batch to temp store: {}", e);
+    }
+}
 
 impl FlightRecorder {
     /// Create a new recorder on the system clock. Returns None if logging is disabled.
@@ -1525,6 +1541,19 @@ impl FlightRecorder {
         }
     }
 
+    /// One raw message of one GPS receiver: a `gps_records` row while a flight is recorded.
+    pub fn on_gps_receiver(&mut self, data: &GpsReceiverData) {
+        let now = self.clock.instant();
+        let Some(flight) = self.active_flight.as_mut() else { return };
+        let Some(conn) = flight.temp_db.as_ref() else { return };
+        let elapsed_ms = now.saturating_duration_since(flight.start_instant).as_millis() as i64;
+        flight.gps_buffer.push((elapsed_ms, *data));
+        // Normally flushed with the telemetry batch; this bounds it while no samples are recorded.
+        if flight.gps_buffer.len() >= FLUSH_THRESHOLD {
+            flush_gps(conn, &mut flight.gps_buffer);
+        }
+    }
+
     /// Feed altitude data from the scheduler
     pub fn on_altitude(&mut self, data: &AltitudeData) {
         self.snapshot.alt_baro = Some(data.altitude);
@@ -1902,6 +1931,7 @@ impl FlightRecorder {
             start_lon: p.flight.start_lon,
             buffer: Vec::with_capacity(FLUSH_THRESHOLD),
             bat_buffer: Vec::new(),
+            gps_buffer: Vec::new(),
             weather_seq: p.weather_seq,
             max_alt: p.flight.max_alt_m.unwrap_or(0.0),
             max_speed: p.flight.max_speed_ms.unwrap_or(0.0),
@@ -2049,6 +2079,7 @@ impl FlightRecorder {
             start_lon: None,
             buffer: Vec::with_capacity(FLUSH_THRESHOLD),
             bat_buffer: Vec::new(),
+            gps_buffer: Vec::new(),
             weather_seq: 0,
             max_alt: 0.0,
             max_speed: 0.0,
@@ -2112,6 +2143,7 @@ impl FlightRecorder {
                 log::error!("Failed to flush final battery batch to temp store: {}", e);
             }
         }
+        flush_gps(&temp_db, &mut flight.gps_buffer);
         let sample_count = db::temp_session_row_count(&temp_db).unwrap_or(0);
         let armed_segments = armed_segments_from(&flight.events, last_timestamp_ms);
         // A group member's stats count its armed segments only (§3.8), recomputed from the file; a read error
@@ -2387,6 +2419,7 @@ impl FlightRecorder {
                         log::error!("Failed to flush battery batch to temp store: {}", e);
                     }
                 }
+                flush_gps(temp_db, &mut flight.gps_buffer);
             }
         }
     }
@@ -3781,6 +3814,49 @@ mod tests {
             .map(Result::unwrap)
             .collect();
         assert_eq!(rows, vec![(2000, 48.1, "{\"a\":1}".to_string()), (8000, 48.2, "{\"a\":2}".to_string())]);
+    }
+
+    /// Every raw receiver message becomes one `gps_records` row on the session timeline, written when
+    /// the session is flushed; nothing is stored before a flight is recorded.
+    #[test]
+    fn gps_receiver_samples_are_stored_per_message() {
+        let rig = Rig::new("gps-receivers");
+        let (mut rec, _) = rig.recorder("L1:S1", fc("Solo", None));
+        let rx = |id: u8, num_sat: u8, yaw_deg: Option<f64>| GpsReceiverData {
+            id,
+            fix_type: 3,
+            fix_raw: 6,
+            num_sat,
+            hdop: Some(0.7),
+            lat: 48.1,
+            lon: 11.5,
+            alt_msl: 520.0,
+            vdop: None,
+            h_acc_m: Some(0.02),
+            v_acc_m: None,
+            speed_ms: Some(12.5),
+            course_deg: Some(90.0),
+            yaw_deg,
+        };
+        rec.on_gps_receiver(&rx(0, 5, None));
+
+        rec.on_gps(&gps(2, 48.1, 11.5));
+        rec.on_status(&status(false));
+        rec.on_status(&status(true));
+        let path = active_path(&rec);
+        rig.advance_s(1);
+        rec.on_gps_receiver(&rx(0, 17, None));
+        rec.on_gps_receiver(&rx(1, 19, Some(271.5)));
+        rig.advance_s(1);
+        rec.on_gps_receiver(&rx(0, 18, None));
+        assert!(db::get_flight_gps_records(&Connection::open(&path).unwrap(), 0).unwrap().is_empty(), "buffered");
+        rec.on_status(&status(false));
+
+        let rows = db::get_flight_gps_records(&Connection::open(&path).unwrap(), 0).unwrap();
+        let seen: Vec<(i64, i64, Option<i64>, Option<f64>)> =
+            rows.iter().map(|r| (r.timestamp_ms, r.instance, r.num_sat, r.yaw_deg)).collect();
+        assert_eq!(seen, vec![(1000, 0, Some(17), None), (1000, 1, Some(19), Some(271.5)), (2000, 0, Some(18), None)]);
+        assert_eq!((rows[0].fix_raw, rows[0].h_acc_m, rows[0].vdop, rows[0].speed_ms), (Some(6), Some(0.02), None, Some(12.5)));
     }
 
     /// A commit while "Compact Database" runs on the main DB fails at once — no busy-timeout wait on the

@@ -775,6 +775,7 @@ pub fn run() {
             weather_set_reference,
             flightlog_set_lookups,
             commands::flightlog::flightlog_get_weather_records,
+            commands::flightlog::flightlog_get_gps_records,
             terrain_cache_stats,
             terrain_cache_clear,
             system_on_battery,

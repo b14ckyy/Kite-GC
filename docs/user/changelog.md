@@ -299,6 +299,13 @@ inside the box of the feature release they belong to, so the notes for one relea
       minutes while a flight is recorded, with or without the weather widget, and stored with the
       flight; in replay the weather widget shows it as it was at the replayed moment. On Android
       the widget's data now stays current while Kite runs in the background with a connection. [#316]
+    - **GPS receivers are recorded with the flight** — on a MAVLink link the raw values of each
+      receiver (position, fix, satellites, HDOP / VDOP, accuracy, speed, course, dual-antenna yaw) are
+      stored as the autopilot sends them (once per second, or at its own rate with Full MAVLink
+      Telemetry), and the GPS widget's **CYC** view works in the replay. The Raw
+      telemetry popup lists every receiver, and the Telemetry API's `gpsReceivers` group carries
+      the added values. [#319]
+    - **The logbook remembers its sort order.** [#319]
     - **Weather requests carry a rounded position** — two decimals, about 1 km: enough for the
       forecast model, too coarse to follow the aircraft. Two new switches under Settings → Data →
       Flight Logbook, both on by default: **Record Weather with Flights** and **Auto-Detect Flight

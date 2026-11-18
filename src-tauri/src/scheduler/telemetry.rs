@@ -103,6 +103,14 @@ pub struct GpsReceiverData {
     pub lat: f64,     // decimal degrees
     pub lon: f64,     // decimal degrees
     pub alt_msl: f64, // meters
+    // The rest is `None` where the receiver or the firmware does not report it.
+    pub vdop: Option<f64>,
+    pub h_acc_m: Option<f64>,
+    pub v_acc_m: Option<f64>,
+    pub speed_ms: Option<f64>,
+    pub course_deg: Option<f64>,
+    /// Heading of a dual-antenna receiver.
+    pub yaw_deg: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

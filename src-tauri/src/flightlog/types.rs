@@ -35,6 +35,27 @@ pub struct WeatherRecord {
     pub data_json: String,
 }
 
+/// One raw sample of one GPS receiver as stored with a flight (row in `gps_records`).
+#[derive(Debug, Clone, Serialize)]
+pub struct GpsRecord {
+    pub timestamp_ms: i64,
+    /// 0 = GPS_RAW_INT, 1 = GPS2_RAW.
+    pub instance: i64,
+    pub fix_type: Option<i64>,
+    pub fix_raw: Option<i64>,
+    pub num_sat: Option<i64>,
+    pub hdop: Option<f64>,
+    pub lat: Option<f64>,
+    pub lon: Option<f64>,
+    pub alt_msl: Option<f64>,
+    pub vdop: Option<f64>,
+    pub h_acc_m: Option<f64>,
+    pub v_acc_m: Option<f64>,
+    pub speed_ms: Option<f64>,
+    pub course_deg: Option<f64>,
+    pub yaw_deg: Option<f64>,
+}
+
 /// A single recorded flight (row in `flights` table)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Flight {

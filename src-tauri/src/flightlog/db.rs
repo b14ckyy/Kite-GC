@@ -9,6 +9,7 @@ use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Result as SqlResult};
 
 use super::types::{
+    GpsRecord,
     BatteryAggregate, BatteryPack, BatteryPackInput, BatteryRecord, Flight, FlightEvent, FlightGroup,
     FlightSummary, Mission,
     MissionInput, TelemetryRecord, Vehicle, VehicleAggregate, VehicleInput, VehicleResolution, WeatherRecord,
@@ -1723,6 +1724,59 @@ pub fn get_flight_weather_records(conn: &Connection, flight_id: i64) -> SqlResul
     rows.collect()
 }
 
+/// The columns of `gps_records` behind `flight_id`, in the order `insert_gps_record` binds them.
+const GPS_RECORDS_COLS: &str = "timestamp_ms, instance, fix_type, fix_raw, num_sat, hdop, lat, lon, alt_msl, \
+    vdop, h_acc_m, v_acc_m, speed_ms, course_deg, yaw_deg";
+
+/// `(timestamp_ms, sample)` pairs of one flight, in one transaction.
+pub fn insert_gps_records_batch(
+    conn: &Connection,
+    flight_id: i64,
+    records: &[(i64, crate::scheduler::telemetry::GpsReceiverData)],
+) -> SqlResult<()> {
+    let tx = write_tx(conn)?;
+    {
+        let mut stmt = tx.prepare_cached(&format!(
+            "INSERT INTO gps_records (flight_id, {GPS_RECORDS_COLS})
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)"
+        ))?;
+        for (timestamp_ms, r) in records {
+            stmt.execute(params![
+                flight_id, timestamp_ms, r.id, r.fix_type, r.fix_raw, r.num_sat, r.hdop, r.lat, r.lon, r.alt_msl,
+                r.vdop, r.h_acc_m, r.v_acc_m, r.speed_ms, r.course_deg, r.yaw_deg,
+            ])?;
+        }
+    }
+    tx.commit()
+}
+
+/// The raw receiver samples of a flight, oldest first, for the replay.
+pub fn get_flight_gps_records(conn: &Connection, flight_id: i64) -> SqlResult<Vec<GpsRecord>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {GPS_RECORDS_COLS} FROM gps_records WHERE flight_id = ?1 ORDER BY timestamp_ms ASC, id ASC"
+    ))?;
+    let rows = stmt.query_map(params![flight_id], |r| {
+        Ok(GpsRecord {
+            timestamp_ms: r.get(0)?,
+            instance: r.get(1)?,
+            fix_type: r.get(2)?,
+            fix_raw: r.get(3)?,
+            num_sat: r.get(4)?,
+            hdop: r.get(5)?,
+            lat: r.get(6)?,
+            lon: r.get(7)?,
+            alt_msl: r.get(8)?,
+            vdop: r.get(9)?,
+            h_acc_m: r.get(10)?,
+            v_acc_m: r.get(11)?,
+            speed_ms: r.get(12)?,
+            course_deg: r.get(13)?,
+            yaw_deg: r.get(14)?,
+        })
+    })?;
+    rows.collect()
+}
+
 // ── Live recording: per-session temp store (commit-on-disarm, ADR-040) ──────────────
 
 /// Open a per-session temp SQLite file: `telemetry_records` plus a self-describing `session_meta`, so an
@@ -1739,6 +1793,7 @@ pub fn open_temp_session(path: &Path) -> SqlResult<Connection> {
     conn.execute_batch(TELEMETRY_RECORDS_DDL_FULL)?;
     conn.execute_batch(BATTERY_RECORDS_DDL_FULL)?;
     conn.execute_batch(WEATHER_RECORDS_DDL_FULL)?;
+    conn.execute_batch(GPS_RECORDS_DDL_FULL)?;
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS session_meta (
             id            INTEGER PRIMARY KEY CHECK (id = 1),
@@ -2043,6 +2098,7 @@ pub fn commit_session_to_main(
         };
         let has_events = attached_table_exists(conn, "session_events")?;
         let has_weather = attached_table_exists(conn, "weather_records")?;
+        let has_gps = attached_table_exists(conn, "gps_records")?;
 
         let tx = write_tx(conn)?;
         let mut row = flight.clone();
@@ -2074,7 +2130,6 @@ pub fn commit_session_to_main(
             ),
             [],
         )?;
-        // Copy per-instance battery samples too (multi-battery), rewriting flight_id like above.
         let bat_select = BATTERY_RECORDS_COLS.replacen("flight_id", &flight_id.to_string(), 1);
         tx.execute(
             &format!(
@@ -2090,6 +2145,15 @@ pub fn commit_session_to_main(
                 "INSERT INTO main.weather_records (flight_id, timestamp_ms, lat, lon, source, data_json)
                  SELECT ?1, timestamp_ms, lat, lon, source, data_json
                  FROM sess.weather_records ORDER BY timestamp_ms ASC, id ASC",
+                params![flight_id],
+            )?;
+        }
+        if has_gps {
+            tx.execute(
+                &format!(
+                    "INSERT INTO main.gps_records (flight_id, {GPS_RECORDS_COLS})
+                     SELECT ?1, {GPS_RECORDS_COLS} FROM sess.gps_records ORDER BY timestamp_ms ASC, id ASC"
+                ),
                 params![flight_id],
             )?;
         }
@@ -4894,6 +4958,12 @@ mod tests {
             insert_telemetry_batch(&t, &[telemetry(0, 0, Some(1_790_000_000_500)), telemetry(0, 200, Some(1_790_000_000_700))])
                 .unwrap();
             insert_weather_record(&t, 0, 150, 48.1, 11.5, "open-meteo", "{\"elevationM\":520.0,\"steps\":[]}").unwrap();
+            t.execute(
+                "INSERT INTO gps_records (flight_id, timestamp_ms, instance, fix_raw, num_sat, lat, yaw_deg)
+                 VALUES (0, 180, 1, 6, 19, 48.1, 271.5)",
+                [],
+            )
+            .unwrap();
         }
         let committed = commit_session_to_main(&conn, &temp, &flight("Wall", None)).unwrap();
         let track = get_flight_track(&conn, committed).unwrap();
@@ -4909,6 +4979,9 @@ mod tests {
         assert_eq!(weather, (150, "{\"elevationM\":520.0,\"steps\":[]}".to_string()));
         let read = get_flight_weather_records(&conn, committed).unwrap();
         assert_eq!((read.len(), read[0].timestamp_ms, read[0].lat), (1, 150, Some(48.1)));
+        let gps = get_flight_gps_records(&conn, committed).unwrap();
+        assert_eq!(gps.len(), 1);
+        assert_eq!((gps[0].timestamp_ms, gps[0].instance, gps[0].fix_raw, gps[0].yaw_deg, gps[0].hdop), (180, 1, Some(6), Some(271.5), None));
         remove_temp_session(&temp);
 
         // A pre-v20 `.ktmp` (telemetry DDL without wall_ms) is back-filled on open and still commits.

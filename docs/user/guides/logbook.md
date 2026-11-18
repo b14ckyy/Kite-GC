@@ -33,7 +33,7 @@ The post-flight summary — save or discard, link the battery (one or several se
 Flights are grouped into a collapsible tree you can re-organise with the **sort** selector — by
 **aircraft**, **location** and **date** in the order you prefer — and narrow with the **search** box
 (it looks in the aircraft name, location, date and notes; a flight number such as `#170` finds exactly
-that flight).
+that flight). The chosen order is kept across restarts.
 Each entry shows the essentials (date, aircraft, location, duration, distance); pick one to open its
 details.
 
