@@ -1303,7 +1303,7 @@ fn ensure_v22_schema(conn: &Connection) -> SqlResult<()> {
     }
     if !column_exists(conn, "flights", "alt_relative")? {
         // Column and back-fill commit together; the back-fill runs only when the column is born. NULL
-        // (a row written before the recorder sets it) = decide from the protocol label as before.
+        // (imported logs) = decide from the protocol label.
         conn.execute_batch("SAVEPOINT v22_alt_relative;")?;
         let added = conn.execute_batch("ALTER TABLE flights ADD COLUMN alt_relative INTEGER;").and_then(|_| {
             conn.execute(
@@ -3309,6 +3309,29 @@ pub fn list_flights_for_vehicle(conn: &Connection, vehicle_id: i64) -> SqlResult
         })
     })?;
     rows.collect()
+}
+
+/// `flights.alt_relative`: the track's altitude is relative to the arming point, not MSL. `None` (the
+/// recorder was never told, e.g. a session recovered from disk) falls back to the protocol label rule.
+pub fn set_flight_alt_relative(conn: &Connection, flight_id: i64, relative: Option<bool>) -> SqlResult<()> {
+    conn.execute(
+        &format!(
+            "UPDATE flights SET alt_relative = COALESCE(?1, CASE WHEN {ALT_RELATIVE_PROTOCOL_SQL} THEN 1 ELSE 0 END)
+             WHERE id = ?2"
+        ),
+        params![relative, flight_id],
+    )?;
+    Ok(())
+}
+
+/// `None` for a flight without a stored value (imported logs, files from before v22).
+pub fn get_flight_alt_relative(conn: &Connection, flight_id: i64) -> SqlResult<Option<bool>> {
+    Ok(conn
+        .query_row("SELECT alt_relative FROM flights WHERE id = ?1", params![flight_id], |row| {
+            row.get::<_, Option<bool>>(0)
+        })
+        .optional()?
+        .flatten())
 }
 
 /// Read the Blackbox-header waypoint count for a flight (fallback `X` for replay).
@@ -5472,6 +5495,25 @@ mod tests {
         plain.created_at = None;
         let id3 = upsert_mission(&conn, &plain).unwrap();
         assert!(!get_mission(&conn, id3).unwrap().unwrap().created_at.is_empty());
+    }
+
+    /// A value the recorder knows is stored as given; without one the protocol label decides.
+    #[test]
+    fn alt_relative_is_stored_or_derived_from_the_label() {
+        let path = temp_db_path("alt-relative-set");
+        cleanup(&path);
+        let conn = open_database(&path).unwrap();
+        let with = |protocol: &str| insert_flight(&conn, &Flight { protocol: protocol.into(), ..flight("Wing", None) }).unwrap();
+        let (crsf, msp, told) = (with("Telemetry (CRSF)"), with("MSP"), with("MSP"));
+        assert_eq!(get_flight_alt_relative(&conn, crsf).unwrap(), None);
+        set_flight_alt_relative(&conn, crsf, None).unwrap();
+        set_flight_alt_relative(&conn, msp, None).unwrap();
+        set_flight_alt_relative(&conn, told, Some(true)).unwrap();
+        let read = |id| get_flight_alt_relative(&conn, id).unwrap();
+        assert_eq!((read(crsf), read(msp), read(told)), (Some(true), Some(false), Some(true)));
+        assert_eq!(get_flight_alt_relative(&conn, 9999).unwrap(), None);
+        drop(conn);
+        cleanup(&path);
     }
 
     /// The v22 child tables carry no FK: `delete_flight` removes their rows, other flights keep theirs.

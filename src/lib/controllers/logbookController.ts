@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
+import { isRelativeAltitudeProtocol } from '$lib/helpers/altReference';
 import {
   listFlights,
   getFlight,
@@ -23,6 +24,7 @@ import {
   unlinkFlight as unlinkFlightStore,
   exportFlights,
   exportBlackboxFile,
+  flightAltRelative,
   blackboxFileInfo as blackboxFileInfoStore,
   deleteBlackboxFile as deleteBlackboxFileStore,
   compactDatabase as compactDatabaseStore,
@@ -48,6 +50,9 @@ export interface FlightSelection {
   weatherWindDir: string;
   weatherDesc: string;
   hasGpsData: boolean;
+  /** The track's altitude is relative to the arming point: the stored `flights.alt_relative`, or the
+   *  protocol label rule for a flight without one. */
+  altRelative: boolean;
 }
 
 /** Load the flight summary list. */
@@ -63,6 +68,10 @@ export async function selectFlightData(
 ): Promise<FlightSelection> {
   let flight = await getFlight(flightId, dbPath);
   const track = await getFlightTrack(flightId, dbPath);
+  const storedAltRelative = await flightAltRelative(flightId, dbPath).catch((e) => {
+    console.warn('[logbook] altitude reference not read:', e);
+    return null;
+  });
   const hasGpsData = track.some((p) => isValidGpsCoordinate(p.lat, p.lon));
 
   // Lazy geocode
@@ -92,6 +101,7 @@ export async function selectFlightData(
     flight,
     track,
     trackCount: track.length,
+    altRelative: storedAltRelative ?? isRelativeAltitudeProtocol(flight?.protocol),
     notes: flight?.notes ?? '',
     weatherTempC: flight?.weather_temp_c != null ? String(flight.weather_temp_c) : '',
     weatherWindMs: flight?.weather_wind_ms != null ? String(flight.weather_wind_ms) : '',

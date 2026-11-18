@@ -65,7 +65,6 @@
   import { loadTileBytes } from "$lib/cache/tileLoader";
   import { isKnownUnavailable, isPlaceholderTile } from "$lib/cache/tileAvailability";
   import { isValidGpsCoordinate, MIN_FIX_SATELLITES } from "$lib/helpers/telemetry";
-  import { isRelativeAltitudeProtocol } from "$lib/helpers/altReference";
   import {
     segmentTrackByFlightMode,
     segmentTrackByAltitude,
@@ -149,7 +148,7 @@
     active = true,
     playbackTrack = [],
     playbackPoint = null,
-    playbackProtocol = null,
+    playbackAltRelative = false,
     replayStartEpochMs = null,
     trackColorMode = 'flightmode' as TrackColorMode,
     platformType = PLATFORM_MULTIROTOR as PlatformType,
@@ -175,9 +174,8 @@
     active?: boolean;
     playbackTrack?: TelemetryRecord[];
     playbackPoint?: TelemetryRecord | null;
-    /** Replayed flight's `protocol` label — decides whether its `alt_m` is true MSL or arming-relative
-     *  (see `helpers/altReference`). Null while live or before a flight is selected. */
-    playbackProtocol?: string | null;
+    /** The replayed flight's `alt_m` is relative to the arming point, not MSL. */
+    playbackAltRelative?: boolean;
     /** Absolute flight-start epoch (ms); playbackPoint.timestamp_ms is relative to this. */
     replayStartEpochMs?: number | null;
     trackColorMode?: TrackColorMode;
@@ -3690,7 +3688,7 @@
 
   $effect(() => {
     if (!viewer) return;
-    updatePlaybackTrack3D(playbackTrack, trackColorMode, playbackProtocol);
+    updatePlaybackTrack3D(playbackTrack, trackColorMode, playbackAltRelative);
   });
 
   /** Terrain MSL (m) at a coordinate, or null when the sample is unavailable (offline / no coverage). */
@@ -3703,7 +3701,7 @@
     }
   }
 
-    async function updatePlaybackTrack3D(track: TelemetryRecord[], colorMode: TrackColorMode, protocol: string | null) {
+    async function updatePlaybackTrack3D(track: TelemetryRecord[], colorMode: TrackColorMode, altRelative: boolean) {
     if (!viewer) return;
 
     // Mark a load in progress and drop the previous track reference up front: this function is async
@@ -3745,7 +3743,7 @@
     // would bury the track by the terrain elevation: they anchor on terrain at the start (as the live path's
     // captureGroundAnchor), so arming on a roof shifts them down by that height.
     startMslGps = firstPt?.alt_m ?? 0;
-    if (isRelativeAltitudeProtocol(protocol) && firstPt) {
+    if (altRelative && firstPt) {
       const ground = await terrainGroundMsl(firstPt.lat!, firstPt.lon!);
       // No terrain sample (offline / gap in coverage) → keep the raw value rather than inventing one.
       if (ground != null) startMslGps = ground;
