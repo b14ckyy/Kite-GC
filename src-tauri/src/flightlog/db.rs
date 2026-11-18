@@ -71,8 +71,9 @@ const BATTERY_RECORDS_DDL_FULL: &str = "CREATE TABLE IF NOT EXISTS battery_recor
     temperature   REAL
 );";
 
-/// Raw values of every GPS receiver next to the fused track (`instance` 0 = GPS_RAW_INT, 1 = GPS2_RAW).
-/// `fix_type` is the unified scale, `fix_raw` MAVLink's `GPS_FIX_TYPE` as sent.
+/// Raw values of every GPS receiver next to the fused track (`instance` 0 = GPS_RAW_INT, 1 = GPS2_RAW;
+/// a log import: the log's receiver instance). `fix_type` is the unified scale, `fix_raw` the number
+/// as sent or logged (MAVLink's `GPS_FIX_TYPE` numbering).
 pub(crate) const GPS_RECORDS_DDL_FULL: &str = "CREATE TABLE IF NOT EXISTS gps_records (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     flight_id     INTEGER NOT NULL,

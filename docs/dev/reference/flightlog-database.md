@@ -58,7 +58,11 @@ Migration history (tracked via `PRAGMA user_version`):
       `GPS_RAW_INT` / `GPS2_RAW` of a listed receiver while a flight is recorded (Kite asks for 1 Hz;
       with Full MAVLink Telemetry the FC's own rate), buffered and written with the telemetry batch;
       `timestamp_ms` is the session time the message arrived. The replay attaches to each track record
-      the newest row per receiver at or before it (older than 5 s = lost, as live);
+      the newest row per receiver at or before it (older than 5 s = lost, as live). The DataFlash and
+      ULog imports fill it too (`flightlog/gps_rows.rs`): at every kept track row (100 ms grid) the
+      newest sample of each receiver, stored once and at its own log time — DataFlash from `GPS`
+      instance 0 / 1 plus `GPA` (VDOP, accuracies), ULog from `sensor_gps` instance 0 / 1. INAV
+      Blackbox has one receiver and no raw stream, the `.tlog` / `.rawmsp` import writes none;
     - `weather_records` + `idx_weather_records_flight` — one row per weather answer during a flight, the
       answer stored whole as JSON (`data_json`) with the position it was asked for. Written by the
       recorder from the backend weather service (`weather/service.rs`), which polls while a weather

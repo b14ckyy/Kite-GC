@@ -3182,10 +3182,16 @@
   );
 
   // Unified telemetry: live data when connected, playback data when replaying. While hi-res is
-  // active the full-rate sample overrides the 10 Hz row (same shape, same clock, denser rows).
+  // active the full-rate sample overrides the 10 Hz row (same shape, same clock, denser rows); the
+  // per-instance lists exist on the stored row only.
   const telem = $derived(
     playbackActive && !isPrimaryConnected && playbackPoint
-      ? toTelemetryData(hiresActive && hiresSamplePoint ? hiresSamplePoint : playbackPoint, replayFcVariant)
+      ? toTelemetryData(
+          hiresActive && hiresSamplePoint
+            ? { ...hiresSamplePoint, gpsReceivers: playbackPoint.gpsReceivers, batteries: playbackPoint.batteries }
+            : playbackPoint,
+          replayFcVariant,
+        )
       : liveTelem,
   );
 

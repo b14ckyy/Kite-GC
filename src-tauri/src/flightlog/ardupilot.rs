@@ -21,7 +21,9 @@ use std::path::Path;
 use chrono::{DateTime, Duration, Utc};
 
 use super::db;
+use super::gps_rows::{GpsRows, GpsSample};
 use super::types::{BatteryRecord, BlackboxImportStatus, Flight, TelemetryRecord};
+use crate::scheduler::telemetry::{unified_fix_from_raw, GpsReceiverData};
 use rusqlite::Connection;
 
 // ─── DataFlash framing constants ─────────────────────────────────────────────
@@ -420,6 +422,8 @@ pub struct NormalizedRecord {
     pub throttle_pct: Option<f64>,
     /// Per-instance battery snapshot at this row (ArduPilot multi-battery). Empty = single battery.
     batteries: Vec<ApBattery>,
+    /// Latest raw sample of each physical receiver (instance 0 / 1) at this row.
+    gps_rx: Vec<GpsSample>,
 
     // ── Attitude ────────────────────────────────────────────────────────────
     pub roll_deg: Option<f64>,
@@ -531,6 +535,8 @@ struct DecoderState {
     gps_ref_time_us: Option<u64>,
     /// TimeUS of the very first valid GPS position (used as origin for timestamp_ms).
     boot_ref_us: Option<u64>,
+    /// Latest `GPS` message per physical receiver (instance 0 / 1), with its `GPA` values.
+    gps_rx: std::collections::BTreeMap<u8, GpsSample>,
 }
 
 #[derive(Default, Clone)]
@@ -753,7 +759,7 @@ fn normalized_to_telemetry(r: &NormalizedRecord, timestamp_ms: i64, fc_variant: 
         roll: r.roll_deg,
         pitch: r.pitch_deg,
         yaw: r.yaw_deg,
-        fix_type: r.fix_type,
+        fix_type: r.fix_type.map(unified_fix_from_raw),
         num_sat: r.num_sat,
         cpu_load: None,
         link_quality: None,
@@ -881,6 +887,7 @@ where
 
     let mut telemetry_rows: Vec<TelemetryRecord> = Vec::new();
     let mut battery_rows: Vec<BatteryRecord> = Vec::new();
+    let mut gps_rows = GpsRows::default();
     let mut start_lat: Option<f64> = None;
     let mut start_lon: Option<f64> = None;
     let mut max_alt_m: Option<f64> = None;
@@ -942,6 +949,7 @@ where
         }
 
         telemetry_rows.push(normalized_to_telemetry(r, timestamp_ms, &fc_variant));
+        gps_rows.offer(first_us, &r.gps_rx);
 
         // Per-instance battery rows for this same timestamp (multi-battery; empty for single battery).
         for b in &r.batteries {
@@ -1031,6 +1039,9 @@ where
         db::insert_battery_records_batch(conn, &battery_rows)
             .map_err(|e| format!("Failed to store ArduPilot battery records: {}", e))?;
     }
+    gps_rows
+        .store(conn, flight_id)
+        .map_err(|e| format!("Failed to store ArduPilot GPS receiver records: {}", e))?;
 
     report(92, "archive", "Archiving original DataFlash file...");
     db::insert_blackbox_file(
@@ -1062,6 +1073,58 @@ fn is_primary_gps(msg: &ParsedMsg) -> bool {
     }
 }
 
+/// Instance of a per-receiver message (`GPS` / `GPA`) when it is a physical receiver: 0 or 1. The
+/// blended instance of GPS_BLEND (2) is none; a log without `I` has one receiver.
+fn gps_receiver_instance(msg: &ParsedMsg) -> Option<u8> {
+    match msg.get_u64("I").unwrap_or(0) {
+        i @ 0..=1 => Some(i as u8),
+        _ => None,
+    }
+}
+
+/// `GPA` completes the sample of its `GPS` (VDOP, accuracies) and is carried into the receiver's next
+/// `GPS`. `Status` uses MAVLink's `GPS_FIX_TYPE` numbering. An accuracy, DOP or yaw of 0 or below
+/// counts as "not reported", as does a DOP at the top of its range (the unknown marker).
+fn note_gps_receiver(msg: &ParsedMsg, state: &mut DecoderState) {
+    if !matches!(msg.type_name.as_str(), "GPS" | "GPA") {
+        return;
+    }
+    let Some(id) = gps_receiver_instance(msg) else { return };
+    let positive = |name: &str| msg.get_f64(name).filter(|v| *v > 0.0);
+    let dop = |name: &str| positive(name).filter(|v| *v < 655.0);
+    match msg.type_name.as_str() {
+        "GPS" => {
+            let fix_raw = msg.get_u64("Status").unwrap_or(0) as u8;
+            let previous = state.gps_rx.get(&id).map(|(_, r)| *r);
+            let sample = GpsReceiverData {
+                id,
+                fix_type: unified_fix_from_raw(fix_raw),
+                fix_raw,
+                num_sat: msg.get_u64("NSats").unwrap_or(0) as u8,
+                hdop: dop("HDop"),
+                lat: msg.get_f64("Lat").unwrap_or(0.0),
+                lon: msg.get_f64("Lng").or_else(|| msg.get_f64("Lon")).unwrap_or(0.0),
+                alt_msl: msg.get_f64("Alt").unwrap_or(0.0),
+                vdop: previous.and_then(|p| p.vdop),
+                h_acc_m: previous.and_then(|p| p.h_acc_m),
+                v_acc_m: previous.and_then(|p| p.v_acc_m),
+                speed_ms: msg.get_f64("Spd"),
+                course_deg: msg.get_f64("GCrs"),
+                yaw_deg: positive("Yaw"),
+            };
+            state.gps_rx.insert(id, (msg.get_u64("TimeUS").unwrap_or(0), sample));
+        }
+        "GPA" => {
+            if let Some((_, sample)) = state.gps_rx.get_mut(&id) {
+                sample.vdop = dop("VDop");
+                sample.h_acc_m = positive("HAcc");
+                sample.v_acc_m = positive("VAcc");
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Process a single parsed message, updating state and optionally emitting GPS rows.
 /// Extracted from `decode_to_normalized_csv` so both CSV and DB paths share the same logic.
 fn process_message(
@@ -1070,6 +1133,7 @@ fn process_message(
     stats: &mut DecodeStats,
     rows: &mut Vec<NormalizedRecord>,
 ) {
+    note_gps_receiver(msg, state);
     match msg.type_name.as_str() {
         // ── GPS ──────────────────────────────────────────────────────────
         // Only the primary receiver becomes a track row — with two receivers the track would
@@ -1183,6 +1247,7 @@ fn process_message(
                     vehicle_type: state.vehicle_type.clone(),
                     fw_version: state.fw_version.clone(),
                     batteries,
+                    gps_rx: state.gps_rx.values().copied().collect(),
                 });
             }
         }
@@ -1502,6 +1567,47 @@ mod tests {
             fields.push(("U".to_string(), DFValue::UInt(u)));
         }
         ParsedMsg { type_name: name.to_string(), fields }
+    }
+
+    /// Both physical receivers are kept with their own values and ride on the row the receiver in use
+    /// emits; `GPA` adds VDOP and the accuracies, the blended instance is no receiver.
+    #[test]
+    fn gps_receivers_ride_on_the_row() {
+        let with = |mut m: ParsedMsg, extra: &[(&str, DFValue)]| {
+            m.fields.extend(extra.iter().map(|(k, v)| (k.to_string(), v.clone())));
+            m
+        };
+        let gpa = |inst: u64, vdop: f64, hacc: f64| ParsedMsg {
+            type_name: "GPA".to_string(),
+            fields: vec![
+                ("TimeUS".to_string(), DFValue::UInt(900_000)),
+                ("I".to_string(), DFValue::UInt(inst)),
+                ("VDop".to_string(), DFValue::Float(vdop)),
+                ("HAcc".to_string(), DFValue::Float(hacc)),
+                ("VAcc".to_string(), DFValue::Float(0.0)),
+            ],
+        };
+        let (_, rows) = run(&[
+            with(gps_msg("GPS", 900_000, Some(1), Some(0), 50.001), &[
+                ("NSats", DFValue::UInt(19)),
+                ("HDop", DFValue::Float(0.7)),
+                ("Spd", DFValue::Float(12.5)),
+                ("Yaw", DFValue::Float(271.5)),
+            ]),
+            gpa(1, 1.2, 0.02),
+            gps_msg("GPS", 950_000, Some(2), Some(0), 50.0005),
+            with(gps_msg("GPS", 1_000_000, Some(0), Some(1), 50.0), &[("Yaw", DFValue::Float(0.0))]),
+        ]);
+        assert_eq!(rows.len(), 1);
+        let rx = &rows[0].gps_rx;
+        assert_eq!(rx.iter().map(|(t, r)| (*t, r.id, r.fix_raw, r.fix_type)).collect::<Vec<_>>(), vec![
+            (1_000_000, 0, 3, 2),
+            (900_000, 1, 3, 2),
+        ]);
+        let (first, second) = (rx[0].1, rx[1].1);
+        assert_eq!((first.yaw_deg, first.vdop, first.lat), (None, None, 50.0));
+        assert_eq!((second.num_sat, second.hdop, second.speed_ms, second.yaw_deg), (19, Some(0.7), Some(12.5), Some(271.5)));
+        assert_eq!((second.vdop, second.h_acc_m, second.v_acc_m), (Some(1.2), Some(0.02), None));
     }
 
     fn run(msgs: &[ParsedMsg]) -> (DecoderState, Vec<NormalizedRecord>) {

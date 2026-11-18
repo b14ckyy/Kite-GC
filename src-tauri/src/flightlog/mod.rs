@@ -9,6 +9,7 @@ pub mod blackbox;
 pub mod decoder;
 pub mod exchange;
 pub mod geocode;
+mod gps_rows;
 pub mod group;
 pub mod group_store;
 pub mod hires;
