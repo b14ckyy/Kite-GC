@@ -135,10 +135,20 @@
   // Re-render the launch marker when home (un)locks: locked → hide "L" (green "H" takes over).
   const unsubHomeLocked = homeLocked.subscribe(() => renderLaunchMarker());
 
-  // Active target waypoint (live MSP_NAV_STATUS / replay record) → the WP icon itself
-  // pulses (brightness + green glow) via the `mission-wp-active` class on its divIcon.
-  let currentActiveWp = $state<number>(get(activeWpNumber));
-  const unsubActiveWp = activeWpNumber.subscribe(v => { currentActiveWp = v; });
+  // The active target waypoint (live or replay) pulses through the `mission-wp-active` class on its
+  // icon. Not reactive state: the class is toggled in place — a re-render for it would take every
+  // marker off the map for a frame.
+  let currentActiveWp = get(activeWpNumber);
+  /** A fly-by-home waypoint is keyed by its house marker. */
+  const markersByWpNumber = new Map<number, L.Marker[]>();
+  function markActiveWp() {
+    for (const [number, markers] of markersByWpNumber) {
+      for (const marker of markers) {
+        marker.getElement()?.classList.toggle('mission-wp-active', currentActiveWp > 0 && number === currentActiveWp);
+      }
+    }
+  }
+  const unsubActiveWp = activeWpNumber.subscribe(v => { currentActiveWp = v; markActiveWp(); });
 
   // svelte-ignore state_referenced_locally
   const missionGroup = L.layerGroup().addTo(map);
@@ -516,6 +526,7 @@
     const keepPopup = editing && !patternActive && popupState.popup && popupState.anchorKey === selIdx && selIdx >= 0;
     missionGroup.clearLayers();
     wpMarkers = []; modifierLines = []; paramLabels = [];
+    markersByWpNumber.clear();
 
     if (!keepPopup) closeEditorPopup(map, popupState);
     // In replay the mission follows the "Show Mission" toggle; in planning/live
@@ -575,6 +586,7 @@
           icon, draggable: editing && !greyed && !patternActive, opacity: greyed ? 0.35 : 1.0,
           title: `WP${dn}: ${$t(WP_ACTION_KEYS[wp.action]) || 'Unknown'}`,
         }).addTo(missionGroup);
+        markersByWpNumber.set(wp.number, [...(markersByWpNumber.get(wp.number) ?? []), marker]);
 
         marker.on('click', () => {
           if (editing) toggleWpSelection(i);
@@ -761,6 +773,7 @@
           icon: fbhDivIcon(fe.dn, fe.inSel, fbhActive), opacity: fe.greyed ? 0.35 : 1.0,
           title: `WP${fe.dn}: ${$t('mission.flagFbh')}`,
         }).addTo(missionGroup);
+        markersByWpNumber.set(wp.number, [...(markersByWpNumber.get(wp.number) ?? []), house]);
 
         // The FBH is edited as a nested section in its parent's popup; selecting it (here
         // or in the list) opens that popup (the parent loop detects its selected child).
@@ -844,7 +857,7 @@
   map.on('zoomend', onMapZoomRerender);
 
   $effect(() => {
-    void currentLaunch; void currentSelSet; void currentShowMission; void currentReplayActive; void currentActiveWp; void activeSurveyPattern.isActive;
+    void currentLaunch; void currentSelSet; void currentShowMission; void currentReplayActive; void activeSurveyPattern.isActive;
     const render = () => renderMission(currentMission, currentSelIdx, currentEditing);
     if (!deferWhileStepping(popupState, render)) render();
   });
