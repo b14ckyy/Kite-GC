@@ -301,7 +301,8 @@ inside the box of the feature release they belong to, so the notes for one relea
       the widget's data now stays current while Kite runs in the background with a connection. [#316]
     - **GPS receivers are recorded with the flight** — on a MAVLink link the raw values of each
       receiver (position, fix, satellites, HDOP / VDOP, accuracy, speed, course, dual-antenna yaw) are
-      stored once per second, and the GPS widget's **CYC** view works in the replay. The Raw
+      stored as the autopilot sends them (once per second, or at its own rate with Full MAVLink
+      Telemetry), and the GPS widget's **CYC** view works in the replay. The Raw
       telemetry popup lists every receiver, and the Telemetry API's `gpsReceivers` group carries
       the added values. [#319]
     - **The logbook remembers its sort order.** [#319]
