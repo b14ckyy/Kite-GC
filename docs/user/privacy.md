@@ -43,7 +43,7 @@ service by the app.
 | **Settings** | Units, layout, connection settings, map providers, API keys you entered (Cesium ion, OpenAIP, and any key inside the URL of a custom online provider), interface options | App data folder of the OS |
 | **Flight log database** | Telemetry recorded during flights: GPS track, altitude, speed, battery, flight modes, events; take-off place name and weather; your vehicle and battery records; the flight controller's hardware ID where the firmware reports one | App data folder of the OS |
 | **Database backup** | A full copy of the flight log database (`flights.pre-migration-backup.db`), written automatically before an update upgrades the database format. Only the latest is kept; Settings → Data → *Database backup* deletes it | Next to the flight log database |
-| **Replay caches** | Temporary decodes of a stored onboard log for **HI-RES** replay (`hires-cache/`), and logs opened for replay without importing them (`scratch/`). Removed when you close the flight or the opened logs, and at the next app start | Next to the flight log database |
+| **Replay caches** | Temporary decodes of a stored onboard log for **HI-RES** replay (`hires-cache/`), and logs opened for replay without importing them (`scratch/`). Removed when you close the flight or the opened logs, and at the next app start | App data folder of the OS |
 | **Missions, geozones, safe homes** | Waypoints and areas you plan, with coordinates | Files you save |
 | **Terrain cache** | Elevation tiles for areas you planned or flew in, kept so terrain features work offline | App data folder of the OS |
 | **Last known position** | A coarse (city-level) position, used to time the automatic night mode on the next start | Settings |
@@ -54,8 +54,9 @@ The exact locations and file formats are listed under
 [Troubleshooting → Connection](troubleshooting/connection.md#getting-a-diagnostic-log).
 
 Deleting the app's data folder, or uninstalling the app on Android and iOS, removes all of it. One
-exception on Android: if you pointed the flight database or the raw logs at a folder of your own
-(Settings → Data), Kite copies them there, and that copy stays when the app is uninstalled.
+exception on Android: if you pointed the raw logs at a folder of your own (Settings → Data), Kite
+moves them there, and they stay when the app is uninstalled. The same goes for every file you
+exported.
 
 ## Data that leaves your device only when you act
 

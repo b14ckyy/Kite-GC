@@ -23,6 +23,16 @@ pub fn export_flights(
     flight_ids: &[i64],
     output_path: &Path,
 ) -> Result<usize, String> {
+    export_flights_with(source_conn, flight_ids, output_path, &mut |_, _| {})
+}
+
+/// `progress(exported, total)` after every flight; failed flights do not count.
+pub fn export_flights_with(
+    source_conn: &Connection,
+    flight_ids: &[i64],
+    output_path: &Path,
+    progress: &mut dyn FnMut(usize, usize),
+) -> Result<usize, String> {
     if flight_ids.is_empty() {
         return Err("No flights selected for export".into());
     }
@@ -52,6 +62,7 @@ pub fn export_flights(
                 log::warn!("Failed to export flight {}: {}", flight_id, e);
             }
         }
+        progress(id_map.len(), flight_ids.len());
     }
 
     for (&old_id, &new_id) in &id_map {

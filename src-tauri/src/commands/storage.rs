@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
 // Storage-access commands: share sheet, folder picker, picked-file names. Android stores the picker's
-// tree URI as the setting value; see `StorageAccess.kt` and `user_file::mirror_session`.
+// tree URI as the setting value; see `StorageAccess.kt` and `user_file::move_raw_logs`.
 
 /// Hand a file to the platform share sheet (Android, iOS). Desktop has none and needs none — files
 /// live on paths the user can reach. `save_label` names an extra "save to device" action (Android 14+).
@@ -113,6 +113,22 @@ pub fn export_scratch_clear(app: tauri::AppHandle) {
 fn export_scratch_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
     use tauri::Manager;
     app.path().app_cache_dir().map(|d| d.join("exports")).map_err(|e| format!("cache folder: {e}"))
+}
+
+/// Android: move the closed raw logs into the folder `raw_path` names and delete the leftover
+/// `db-mirror` folder. Skipped while a session is live: the link teardown moves them.
+#[tauri::command(async)]
+pub fn storage_flush_raw_logs(
+    raw_path: String,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<(), String> {
+    crate::user_file::remove_db_mirror_snapshot();
+    if state.sessions.has_live_session() {
+        return Ok(());
+    }
+    let dir = crate::flightlog::db::resolve_raw_log_dir(&raw_path, false);
+    crate::user_file::move_raw_logs(&dir, &raw_path);
+    Ok(())
 }
 
 /// The shared export the user chose to save to the device from the share sheet (Android), once.

@@ -55,6 +55,9 @@ use commands::flightlog::{
     flightlog_blackbox_log_count,
     flightlog_export, flightlog_export_blackbox, flightlog_blackbox_file_info, flightlog_delete_blackbox_file, flightlog_compact_db, flightlog_export_track, flightlog_import_kflight,
     flightlog_backup_info, flightlog_backup_delete, flightlog_schema_state, flightlog_upgrade_run,
+    flightlog_folder_state, flightlog_db_move, flightlog_db_retire,
+    flightlog_export_database, flightlog_import_database_stage, flightlog_import_database_finish, flightlog_export_all,
+    flightlog_original_logs_info, flightlog_original_logs_remove,
     flightlog_kflight_list, flightlog_kflight_get, flightlog_kflight_track,
     flightlog_probe_ardupilot, flightlog_decode_ardupilot_csv,
     flightlog_import_ardupilot, flightlog_import_raw, flightlog_import_ulog,
@@ -99,7 +102,7 @@ use commands::info::{get_app_version, is_debug_mode, is_fleet_mode, is_fleet_gro
 use commands::system::{system_active_net_is_wifi, system_on_battery};
 use commands::storage::{
     export_copy, export_scratch_clear, export_scratch_path, export_take_save_request, file_display_name,
-    share_file, storage_pick_folder,
+    share_file, storage_pick_folder, storage_flush_raw_logs,
 };
 use commands::video::{
     video_ffmpeg_status, video_hw_transcode_available, video_ffmpeg_download,
@@ -737,6 +740,15 @@ pub fn run() {
             flightlog_backup_delete,
             flightlog_schema_state,
             flightlog_upgrade_run,
+            flightlog_folder_state,
+            flightlog_db_move,
+            flightlog_db_retire,
+            flightlog_export_database,
+            flightlog_import_database_stage,
+            flightlog_import_database_finish,
+            flightlog_export_all,
+            flightlog_original_logs_info,
+            flightlog_original_logs_remove,
             flightlog_export_track,
             flightlog_import_kflight,
             flightlog_kflight_list,
@@ -782,6 +794,7 @@ pub fn run() {
             system_on_battery,
             system_active_net_is_wifi,
             storage_pick_folder,
+            storage_flush_raw_logs,
             share_file,
             file_display_name,
             export_scratch_path,

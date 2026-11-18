@@ -227,6 +227,22 @@ inside the box of the feature release they belong to, so the notes for one relea
       whether to delete it (to the recycle bin on desktop), keep it, or be reminded in 14 days.
       Choosing a database folder with an older database asks before upgrading it. See
       [Logbook](guides/logbook.md#the-database-updates-and-the-automatic-backup). [#313]
+    - **The flight database moves with its folder** — changing the database folder on Windows,
+      Linux and macOS now asks whether to move the database there. A database already in the new
+      folder can be opened or overwritten, and the previous one backed up into the new folder, kept
+      or deleted. Kite's work files (running recordings, the HI-RES replay cache, logs opened
+      without importing) now always stay in its own data folder, so a database on a slow, removable
+      or network drive does not slow them down.
+      See [Logbook](guides/logbook.md#changing-the-database-folder). [#325]
+    - **Export database, Import database, Export all flights** — Settings → Data saves the whole
+      flight database as one file and writes every flight into one `.kflight`, on every platform;
+      Android and iOS can import a database file again, which is the way to keep a logbook across
+      a reinstall. See [Logbook](guides/logbook.md#exporting-and-importing-the-whole-database). [#325]
+    - **Android: no database folder any more, raw logs are moved** — the copy of the database that
+      Kite wrote into a chosen folder at every disconnect doubled the storage and slowed the
+      disconnect; it is replaced by **Export database**. A database copy already in your folder
+      stays there. Raw logs now arrive in the chosen folder — they are moved there at disconnect,
+      and at the first start every raw log recorded so far. [#325]
     - **INAV Blackbox import without a helper program** — Kite decodes INAV Blackbox logs itself;
       imports are faster and no longer lose the frames after a flight-mode change. [#234]
     - **PX4 ULog import** — the logbook imports `.ulg` logs, split into flights like any other

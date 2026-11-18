@@ -40,8 +40,8 @@ Download the `.apk` on the device and open it; Android asks once to allow instal
 or file manager. Phones get a dedicated landscape layout, tablets the desktop one. Links: **USB serial**
 over an OTG cable (Android asks per device — pick Kite in the dialog when you plug the cable in),
 **Bluetooth LE** (the first scan asks for the *Nearby devices* permission) and **Wi-Fi** (UDP / TCP).
-Data lives in the app's private storage; **Settings → Data** can point the flight database and raw
-logs at a shared folder instead. See [Connecting](../guides/connecting.md) for what happens while
+Data lives in the app's private storage; **Settings → Data** exports the flight database as a file
+and can move the raw logs to a shared folder. See [Connecting](../guides/connecting.md) for what happens while
 Kite is in the background.
 
 **iPhone / iPad**: no public download yet — the app builds from source (see

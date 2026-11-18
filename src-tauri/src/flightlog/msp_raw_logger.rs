@@ -58,13 +58,16 @@ impl MspRawLogger {
         let path = log_dir.join(&filename);
         let path_str = path.display().to_string();
 
-        let file =
-            File::create(&path).map_err(|e| format!("Cannot create rawmsp {}: {}", filename, e))?;
-        let mut writer = BufWriter::new(file);
-        writer
-            .write_all(b"v2\n")
-            .map_err(|e| format!("Cannot write rawmsp header: {}", e))?;
-
+        // Registered before the file exists: a move of closed logs must never see it unprotected.
+        crate::user_file::raw_log_opened(&path);
+        let opened = File::create(&path)
+            .map_err(|e| format!("Cannot create rawmsp {}: {}", filename, e))
+            .and_then(|file| {
+                let mut writer = BufWriter::new(file);
+                writer.write_all(b"v2\n").map_err(|e| format!("Cannot write rawmsp header: {}", e))?;
+                Ok(writer)
+            });
+        let writer = opened.inspect_err(|_| crate::user_file::raw_log_closed(&path))?;
         log::info!("MSP raw log: {}", path_str);
 
         Ok(Self {
@@ -97,6 +100,13 @@ impl MspRawLogger {
     pub fn close(&mut self) {
         self.writer.flush().ok();
         log::info!("MSP raw log closed: {}", self.path);
+    }
+}
+
+impl Drop for MspRawLogger {
+    fn drop(&mut self) {
+        let _ = self.writer.flush();
+        crate::user_file::raw_log_closed(Path::new(&self.path));
     }
 }
 

@@ -54,14 +54,184 @@ pub fn flightlog_backup_info(db_path: Option<String>) -> Option<DbBackupInfo> {
 /// fails (none on mobile, network or removable drives, file too large, permission) it is deleted.
 #[tauri::command(async)]
 pub fn flightlog_backup_delete(db_path: Option<String>) -> Result<(), String> {
-    let backup =
-        db::backup_path_for(&db::resolve_db_path(&db_path.unwrap_or_default(), portable_mode()));
+    trash_or_delete(&db::backup_path_for(&db::resolve_db_path(&db_path.unwrap_or_default(), portable_mode())))
+}
+
+fn trash_or_delete(file: &std::path::Path) -> Result<(), String> {
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
-    match move_to_trash(&backup) {
+    match move_to_trash(file) {
         Ok(()) => return Ok(()),
-        Err(e) => log::warn!("[flightlog] backup not moved to the trash ({e}) — deleting it"),
+        Err(e) => log::warn!("[flightlog] {} not moved to the trash ({e}) — deleting it", file.display()),
     }
-    std::fs::remove_file(&backup).map_err(|e| format!("could not delete {}: {e}", backup.display()))
+    std::fs::remove_file(file).map_err(|e| format!("could not delete {}: {e}", file.display()))
+}
+
+// ── Database export / import (flightlog/db_move.rs) and the export of every flight ──
+
+/// The database file cannot be copied or replaced under a running recording.
+fn transfer_refusal(state: &crate::state::AppState) -> Result<(), String> {
+    if state.sessions.has_live_session() {
+        return Err("a flight is being recorded — try again after the flight".into());
+    }
+    Ok(())
+}
+
+/// Save a copy of the whole flight database to `output_path` (a document URI on Android).
+#[tauri::command(async)]
+pub fn flightlog_export_database(
+    output_path: String,
+    db_path: Option<String>,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<(), String> {
+    transfer_refusal(&state)?;
+    let db_file = db::resolve_db_path(&db_path.unwrap_or_default(), portable_mode());
+    crate::flightlog::db_move::export_database(&db_file, &output_path)
+        .inspect_err(|e| log::warn!("[flightlog] database not exported: {e}"))
+}
+
+/// Fetch the database file the user picked and report what it holds; nothing is replaced yet.
+#[tauri::command(async)]
+pub fn flightlog_import_database_stage(
+    file_path: String,
+    db_path: Option<String>,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<crate::flightlog::db_move::FolderState, String> {
+    transfer_refusal(&state)?;
+    let db_file = db::resolve_db_path(&db_path.unwrap_or_default(), portable_mode());
+    crate::flightlog::db_move::stage_import(&file_path, &db_file)
+        .inspect_err(|e| log::warn!("[flightlog] database import refused: {e}"))
+}
+
+/// Replace the flight database with the staged one (`replace`), or drop the staged file.
+#[tauri::command(async)]
+pub fn flightlog_import_database_finish(
+    replace: bool,
+    db_path: Option<String>,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<(), String> {
+    let db_file = db::resolve_db_path(&db_path.unwrap_or_default(), portable_mode());
+    if !replace {
+        crate::flightlog::db_move::cancel_import(&db_file);
+        return Ok(());
+    }
+    transfer_refusal(&state)?;
+    crate::flightlog::db_move::commit_import(&db_file)
+        .inspect_err(|e| log::warn!("[flightlog] database not imported: {e}"))
+}
+
+#[derive(serde::Serialize)]
+pub struct OriginalLogsInfo {
+    pub count: i64,
+    pub size_bytes: i64,
+}
+
+/// The original log files a database carries (on mobile only one that came from a desktop).
+#[tauri::command(async)]
+pub fn flightlog_original_logs_info(db_path: Option<String>) -> Result<OriginalLogsInfo, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    let (count, size_bytes) = db::original_logs_total(&conn).map_err(|e| format!("Query error: {e}"))?;
+    Ok(OriginalLogsInfo { count, size_bytes })
+}
+
+/// Remove every original log file from the database; flights, tracks and telemetry stay.
+#[tauri::command(async)]
+pub fn flightlog_original_logs_remove(
+    db_path: Option<String>,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<usize, String> {
+    transfer_refusal(&state)?;
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::remove_original_logs(&conn).map_err(|e| format!("Delete error: {e}"))
+}
+
+/// `no-space:` is a STABLE marker the frontend matches on (`exportAllFlights` in dbTransfer.ts).
+const EXPORT_NO_SPACE_ERROR: &str = "no-space:";
+
+#[derive(serde::Serialize, Clone)]
+pub struct ExportAllResult {
+    pub exported: usize,
+    pub total: usize,
+}
+
+/// Export every flight into one `.kflight`. Needs as much free space as the database is large (the
+/// file is smaller: no vehicles, batteries or unlinked missions). Emits `flightlog-export-progress`.
+#[tauri::command(async)]
+pub fn flightlog_export_all(
+    output_path: String,
+    db_path: Option<String>,
+    app_handle: tauri::AppHandle,
+) -> Result<ExportAllResult, String> {
+    let custom = db_path.unwrap_or_default();
+    let need = std::fs::metadata(db::resolve_db_path(&custom, portable_mode())).map(|m| m.len()).unwrap_or(0);
+    if let Some(free) = crate::user_file::free_bytes(&crate::user_file::write_volume(&output_path)) {
+        if free < need {
+            return Err(format!("{EXPORT_NO_SPACE_ERROR}{need}:{free}"));
+        }
+    }
+    let conn = open_db(&custom)?;
+    let ids = db::all_flight_ids(&conn).map_err(|e| format!("Query error: {e}"))?;
+    let total = ids.len();
+    let mut last = 0;
+    let exported = crate::user_file::with_write_path(&output_path, |p| {
+        exchange::export_flights_with(&conn, &ids, p, &mut |done, total| {
+            // One event per percent is plenty for a notice.
+            if done * 100 / total.max(1) != last || done == total {
+                last = done * 100 / total.max(1);
+                let _ = app_handle.emit("flightlog-export-progress", ExportAllResult { exported: done, total });
+            }
+        })
+    })
+    .inspect_err(|e| log::warn!("[flightlog] export of all flights failed: {e}"))?;
+    Ok(ExportAllResult { exported, total })
+}
+
+// ── Moving the database with its folder (flightlog/db_move.rs) ──
+
+/// Read-only look at the database folder `db_path` (empty = the default folder).
+#[tauri::command(async)]
+pub fn flightlog_folder_state(db_path: Option<String>) -> crate::flightlog::db_move::FolderState {
+    crate::flightlog::db_move::folder_state(&db::resolve_db_path(&db_path.unwrap_or_default(), portable_mode()))
+}
+
+/// Move the database of folder `from` into folder `to`; one already there is replaced only with
+/// `overwrite` and goes to the trash where there is one.
+#[tauri::command(async)]
+pub fn flightlog_db_move(
+    from: String,
+    to: String,
+    overwrite: bool,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<crate::flightlog::db_move::MoveOutcome, String> {
+    compact_refusal(&state)?;
+    let portable = portable_mode();
+    crate::flightlog::db_move::move_database(
+        &db::resolve_db_path(&from, portable),
+        &db::resolve_db_path(&to, portable),
+        overwrite,
+        &trash_or_delete,
+    )
+    .inspect_err(|e| log::warn!("[flightlog] database not moved: {e}"))
+}
+
+/// Take the database of folder `old` out of use: with `keep_backup` a copy goes into folder `new`
+/// first (its path is returned), otherwise the old files go to the trash where there is one.
+#[tauri::command(async)]
+pub fn flightlog_db_retire(
+    old: String,
+    new: String,
+    keep_backup: bool,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<Option<String>, String> {
+    compact_refusal(&state)?;
+    let portable = portable_mode();
+    crate::flightlog::db_move::retire_database(
+        &db::resolve_db_path(&old, portable),
+        &db::resolve_db_path(&new, portable),
+        keep_backup,
+        &trash_or_delete,
+    )
+    .map(|copy| copy.map(|p| p.to_string_lossy().into_owned()))
+    .inspect_err(|e| log::warn!("[flightlog] previous database not retired: {e}"))
 }
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
@@ -1627,22 +1797,29 @@ fn resolve_main_db_path(custom: &str) -> std::path::PathBuf {
     db::resolve_db_path(custom, portable)
 }
 
-fn sessions_dir(custom: &str) -> std::path::PathBuf {
-    resolve_main_db_path(custom)
-        .parent()
-        .unwrap_or(std::path::Path::new("."))
-        .join("sessions")
+/// Where orphan sessions can lie: the app's own sessions folder, and the one next to a user-chosen
+/// database, where Kite up to 2.0-b1 kept them.
+fn orphan_session_dirs(custom: &str) -> Vec<std::path::PathBuf> {
+    let mut dirs = vec![db::sessions_dir(portable_mode())];
+    let legacy = resolve_main_db_path(custom).parent().unwrap_or(std::path::Path::new(".")).join("sessions");
+    if !dirs.contains(&legacy) {
+        dirs.push(legacy);
+    }
+    dirs
 }
 
 // ── Hi-res replay cache (Dev-Docs active/HIRES_REPLAY.md) ────────────────────────────────
 
-/// Sibling of `sessions/`: the DB folder is where the user provisioned space for flight data, so
-/// the disposable full-rate caches live there too (and follow a configured DB folder).
+/// The app's own data folder: work files stay here whatever database folder is chosen — the space
+/// comes back, and the profile drive is normally the fast one (hi-res scrubbing reads the cache).
+fn app_data_dir() -> std::path::PathBuf {
+    resolve_main_db_path("").parent().unwrap_or(std::path::Path::new(".")).to_path_buf()
+}
+
+/// Cache files are named by flight id, so the scratch store's flights get a cache folder of their own.
 fn hires_cache_dir(custom: &str) -> std::path::PathBuf {
-    resolve_main_db_path(custom)
-        .parent()
-        .unwrap_or(std::path::Path::new("."))
-        .join("hires-cache")
+    let scratch = scratch_dir();
+    if std::path::Path::new(custom) == scratch { scratch } else { app_data_dir() }.join("hires-cache")
 }
 
 /// Gates the HI-RES toggle in the replay player and feeds the parse popup's size estimate.
@@ -1728,20 +1905,25 @@ pub fn flightlog_hires_drop(flight_id: i64, db_path: Option<String>) {
     db::remove_temp_session(&cache);
 }
 
-/// Startup cleanup: wipe crash leftovers from the cache dir (every cache is reproducible on demand).
+/// Wipe the hi-res cache (app start, database folder changed): every cache is reproducible on demand,
+/// and its files are named by flight id only. Also clears the work folders Kite up to 2.0-b1 kept
+/// next to a user-chosen database.
 #[tauri::command]
 pub fn flightlog_hires_cleanup(db_path: Option<String>) {
-    crate::flightlog::hires::cleanup_cache_dir(&hires_cache_dir(&db_path.unwrap_or_default()));
+    crate::flightlog::hires::cleanup_cache_dir(&app_data_dir().join("hires-cache"));
+    let db_dir = resolve_main_db_path(&db_path.unwrap_or_default());
+    let db_dir = db_dir.parent().unwrap_or(std::path::Path::new("."));
+    if db_dir != app_data_dir() {
+        crate::flightlog::hires::remove_cache_dir(&db_dir.join("hires-cache"));
+        let _ = std::fs::remove_dir_all(db_dir.join("scratch"));
+    }
 }
 
 // ── Scratch store: open a log WITHOUT importing it (Dev-Docs active/OPEN_LOG_WITHOUT_IMPORT.md) ──
-// A throwaway flight DB under `<db_dir>/scratch/`, wiped before each open, on close and at app start.
+// A throwaway flight DB under `<app data>/scratch/`, wiped before each open, on close and at app start.
 
-fn scratch_dir(custom: &str) -> std::path::PathBuf {
-    let dir = resolve_main_db_path(custom)
-        .parent()
-        .unwrap_or(std::path::Path::new("."))
-        .join("scratch");
+fn scratch_dir() -> std::path::PathBuf {
+    let dir = app_data_dir().join("scratch");
     // Every caller of the scratch store gets its directory from here, so this is where it is kept out
     // of the free-page reclaim (throwaway data; on Windows the wipe fails while a reclaim holds the file).
     db::exclude_from_reclaim(&dir);
@@ -1750,14 +1932,14 @@ fn scratch_dir(custom: &str) -> std::path::PathBuf {
 
 /// The scratch directory to pass as `db_path` for an opened (not imported) log.
 #[tauri::command]
-pub fn flightlog_scratch_dir(db_path: Option<String>) -> String {
-    scratch_dir(&db_path.unwrap_or_default()).to_string_lossy().to_string()
+pub fn flightlog_scratch_dir() -> String {
+    scratch_dir().to_string_lossy().to_string()
 }
 
 /// Delete the scratch directory (flight DB, its hires cache, everything).
 #[tauri::command]
-pub fn flightlog_scratch_clear(db_path: Option<String>) {
-    let dir = scratch_dir(&db_path.unwrap_or_default());
+pub fn flightlog_scratch_clear() {
+    let dir = scratch_dir();
     if dir.exists() {
         if let Err(e) = std::fs::remove_dir_all(&dir) {
             log::warn!("Failed to clear scratch dir {}: {}", dir.display(), e);
@@ -1776,22 +1958,19 @@ fn protected_temp_paths(state: &crate::state::AppState) -> Vec<std::path::PathBu
 /// shutting down and filling it.
 const EMPTY_TEMP_GRACE: std::time::Duration = std::time::Duration::from_secs(60);
 
-/// Scan `<db_dir>/sessions/*.ktmp` for an orphan session left by a crash/close: sessions live in this
+/// Scan the sessions folders for an orphan `.ktmp` left by a crash/close: sessions live in this
 /// process are skipped, stale empty ones deleted in passing, the newest non-empty one returned.
 #[tauri::command]
 pub fn flightlog_scan_orphan_sessions(
     db_path: Option<String>,
     state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<Option<OrphanInfo>, String> {
-    let dir = sessions_dir(&db_path.unwrap_or_default());
-    let entries = match std::fs::read_dir(&dir) {
-        Ok(e) => e,
-        Err(_) => return Ok(None), // no sessions dir yet → nothing to recover
-    };
+    let dirs = orphan_session_dirs(&db_path.unwrap_or_default());
     let keep = protected_temp_paths(&state);
     let mut candidates = 0usize;
     let mut best: Option<OrphanInfo> = None;
-    for entry in entries.flatten() {
+    // A folder that does not exist yet has nothing to recover.
+    for entry in dirs.iter().filter_map(|dir| std::fs::read_dir(dir).ok()).flatten().flatten() {
         let path = entry.path();
         if path.extension().and_then(|e| e.to_str()) != Some("ktmp") || keep.contains(&path) {
             continue;
@@ -1850,10 +2029,10 @@ pub fn flightlog_scan_orphan_sessions(
     }
     match &best {
         Some(b) => log::info!(
-            "Orphan scan: {} candidate(s) in {}, offering {} ({} samples)",
-            candidates, dir.display(), b.temp_path, b.sample_count,
+            "Orphan scan: {} candidate(s), offering {} ({} samples)",
+            candidates, b.temp_path, b.sample_count,
         ),
-        None => log::debug!("Orphan scan: nothing to recover in {}", dir.display()),
+        None => log::debug!("Orphan scan: nothing to recover in {:?}", dirs),
     }
     Ok(best)
 }

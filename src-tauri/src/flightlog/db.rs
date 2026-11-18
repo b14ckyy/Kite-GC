@@ -17,7 +17,7 @@ use super::types::{
 use crate::msp::hardware_uid;
 use crate::msp::types::INAV_SITL_UID;
 
-const CURRENT_SCHEMA_VERSION: u32 = 22;
+pub(crate) const CURRENT_SCHEMA_VERSION: u32 = 22;
 
 /// Column list (excluding the autoincrement `id`) for `telemetry_records`, shared by the temp-session
 /// copy so the SELECT and INSERT column orders can never drift apart. `flight_id` is first so the
@@ -574,8 +574,7 @@ pub struct CompactStats {
 
 /// The database file: `<db_path>/flights.db`, else `<exe_dir>/data/` (portable) or `<AppData>/kite-gc/`.
 pub fn resolve_db_path(custom_path: &str, portable: bool) -> PathBuf {
-    // Android: a user-chosen location is a SAF tree URI, where SQLite cannot live (no POSIX locks); the DB
-    // stays on the default and the session-end mirror copies a snapshot there (user_file::mirror_session).
+    // Android: the database is always app-private; a `content://` tree URI is no place for SQLite.
     #[cfg(target_os = "android")]
     let custom_path = if custom_path.starts_with("content://") { "" } else { custom_path };
 
@@ -636,11 +635,38 @@ pub fn resolve_db_path(custom_path: &str, portable: bool) -> PathBuf {
     PathBuf::from("flights.db")
 }
 
+/// Number and total size of the archived original log files.
+pub fn original_logs_total(conn: &Connection) -> SqlResult<(i64, i64)> {
+    conn.query_row("SELECT COUNT(*), COALESCE(SUM(file_size), 0) FROM blackbox_files", [], |r| Ok((r.get(0)?, r.get(1)?)))
+}
+
+/// Delete every archived original log file. The pages go back to the file system in the background
+/// (`spawn_reclaim`) — no VACUUM, whose working copy a mobile device cannot hold.
+pub fn remove_original_logs(conn: &Connection) -> SqlResult<usize> {
+    let removed = conn.execute("DELETE FROM blackbox_files", [])?;
+    spawn_reclaim(conn);
+    Ok(removed)
+}
+
+/// Every flight, oldest first.
+pub fn all_flight_ids(conn: &Connection) -> SqlResult<Vec<i64>> {
+    let mut stmt = conn.prepare("SELECT id FROM flights ORDER BY start_time, id")?;
+    let ids = stmt.query_map([], |r| r.get(0))?.collect();
+    ids
+}
+
+/// Where the temp sessions of a recording live: always the app's own data folder, never a database
+/// folder the user chose — they are written all through a flight and must not sit on a removable or
+/// network drive.
+pub fn sessions_dir(portable: bool) -> PathBuf {
+    resolve_db_path("", portable).parent().unwrap_or(Path::new(".")).join("sessions")
+}
+
 /// The raw-log base directory — deliberately NOT the DB folder: raw logs default to `Documents/KiteGC`,
 /// easy to find and hand to Mission Planner. `custom_path` (empty = default) overrides it.
 pub fn resolve_raw_log_dir(custom_path: &str, portable: bool) -> PathBuf {
-    // Android: same as resolve_db_path — a SAF tree URI cannot be written through std::fs, so the
-    // writers stay in the app-private staging dir below and the mirror copies finished files out.
+    // Android: a SAF tree URI cannot be written through std::fs: the writers stay in the app-private
+    // staging dir below and closed files are moved out (`user_file::move_raw_logs`).
     #[cfg(target_os = "android")]
     let custom_path = if custom_path.starts_with("content://") { "" } else { custom_path };
 

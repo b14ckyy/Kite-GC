@@ -90,9 +90,9 @@ it — updates then run at your screen's refresh rate instead of 10 Hz. Combined
 **slow-motion speeds** (0.25× / 0.5×) this is the way to study a manoeuvre frame by frame.
 
 The first switch to HI-RES shows a short **preparation popup** (re-decoding a big log can take a
-moment on slower machines). The decoded file lives in a `hires-cache` folder next to the flight
-database, is reused while the flight stays open, and is **deleted automatically** when you close
-the flight — nothing accumulates. The map track and timeline stay at 10 Hz by design; high-res
+moment on slower machines). The decoded file lives in a `hires-cache` folder in Kite's own data
+folder (not in a database folder you chose), is reused while the flight stays open, and is
+**deleted automatically** when you close the flight — nothing accumulates. The map track and timeline stay at 10 Hz by design; high-res
 feeds the live values.
 
 ### Opening logs without importing them
@@ -186,14 +186,66 @@ drive has one; on a drive without (USB flash drives, on Linux every drive other 
 home folder) it is deleted right away. Kite never removes the backup on its own; only the next upgrade
 replaces it with a new one.
 
-**Choosing another database folder** that already holds a database in an older format asks first
-whether to upgrade it — decline, and the folder setting stays as it was. A database written by a newer
-Kite is refused the same way. The folder cannot be changed while a vehicle is connected. Switching the folder closes the flight that is open in the logbook and
-forgets which library mission the map mission came from: both belong to the previous database.
+### Changing the database folder
+
+**Settings → Data → Database Folder** (Windows, Linux, macOS — on Android and iOS the database always
+lives in the app's own storage) asks what to do with the database when you pick another folder or go
+back to the default one:
+
+- **The new folder holds no database:** **Move** takes the current database and its backup along;
+  **Start new** begins an empty database there and leaves the current one where it is.
+- **The new folder already holds a database:** Kite names the flights and the size of both.
+  **Open** uses the one in the folder (**Upgrade and open** when it is in an older format — it is
+  backed up and upgraded first). **Overwrite** moves the database currently in use there in its
+  place, after a second confirmation; the replaced one goes to the recycle bin / trash where the
+  drive has one. A database written by a newer Kite, or a file Kite cannot read as a database,
+  cannot be opened, only overwritten.
+- **After opening another database** Kite asks about the previous one: **Backup** writes a copy
+  named `flights.backup-<date>-<time>.db` into the new folder and then deletes the previous
+  database and its pre-update backup for good, **Keep** leaves it where it is, **Delete** removes
+  it (recycle bin / trash where there is one).
+
+A move or backup writes a checked copy first and removes the original only afterwards; with a large
+database this takes minutes, and Kite shows a notice meanwhile. **Cancel** in any of these dialogs
+leaves the folder setting as it was. Two databases are never merged — to bring flights from one
+into another, export them as `.kflight` and import them.
+
+Only the database and its backups live in the folder you choose. Kite's work files — the temporary
+files of a running recording, the HI-RES replay cache and logs opened without importing them — always
+stay in Kite's own data folder: a recording is not written to a removable or network drive while it
+runs (the flight is stored in the database when it ends), and the space is freed again.
+
+The folder cannot be changed while a log import is running.
+
+The folder cannot be changed while a vehicle is connected. Changing it closes the flight that is
+open in the logbook and forgets which library mission the map mission came from.
 
 If you ever **downgrade** Kite after such an upgrade, the older version refuses to touch the newer
 database: the logbook shows a notice (and the database stays untouched) until you either install the
 newer Kite again or restore a matching backup.
+
+### Exporting and importing the whole database
+
+**Settings → Data** has two exports that go straight to a place you pick in the system's save
+dialog:
+
+- **Export database** saves a copy of the whole flight database — flights, vehicles, batteries and
+  missions — as one `.db` file. This is the backup to take before you reinstall Kite or move to
+  another device. On Android and iOS the file is written directly from the database, so it needs no
+  extra free space in the app.
+- **Export all flights** writes every flight into one `.kflight` file, so you do not have to select
+  them one by one to bring them into another Kite. Vehicles, batteries and missions that belong to no
+  flight are not part of it. Kite shows the progress and, at the end, how many flights were written;
+  it refuses to start when less space is free than the database is large.
+
+**Import database** (Android and iOS) replaces the database in the app with a `.db` file exported
+this way: Kite names the flights in the file and in the app and asks before it replaces anything —
+the database in the app is deleted, it is not merged. A file in an older format is upgraded after
+the import; a file from a newer Kite is refused. On Windows, Linux and macOS you open an exported
+database by putting it into a folder as `flights.db` and choosing that folder as the
+[database folder](#changing-the-database-folder).
+
+**Export database** and **Import database** are not available while a vehicle is connected.
 
 ## Vehicles & batteries
 

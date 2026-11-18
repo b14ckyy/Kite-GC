@@ -683,7 +683,8 @@ pub fn commit_pending_session(session: &PendingSession) -> Result<i64, String> {
     #[cfg(not(test))]
     if let Some((lat, lon)) = valid_start(session.flight.start_lat, session.flight.start_lon) {
         let db_path = session.db_path.to_string_lossy().to_string();
-        tauri::async_runtime::spawn(enrich_flight_async(flight_id, lat, lon, db_path));
+        let start_time = session.flight.start_time.to_rfc3339();
+        tauri::async_runtime::spawn(enrich_flight_async(flight_id, start_time, lat, lon, db_path));
     }
     log::info!("Pending session committed as flight {}", flight_id);
     Ok(flight_id)
@@ -848,12 +849,16 @@ fn valid_start(lat: Option<f64>, lon: Option<f64>) -> Option<(f64, f64)> {
 
 /// Weather + place name of a committed flight, in the background — never blocks the recorder thread.
 #[cfg_attr(test, allow(dead_code))] // unit tests never go online (`commit_pending_session`)
-async fn enrich_flight_async(flight_id: i64, lat: f64, lon: f64, db_path: String) {
+async fn enrich_flight_async(flight_id: i64, start_time: String, lat: f64, lon: f64, db_path: String) {
     let weather = super::weather::fetch_weather(lat, lon).await;
     let location = super::geocode::flight_location(lat, lon, "en").await;
 
-    // Open a fresh connection for the update (recorder's conn is on another thread)
-    let conn = match db::open_database(std::path::Path::new(&db_path)) {
+    // No CREATE: a database moved away meanwhile must not come back as an empty file. The start time
+    // in the WHERE keeps the answer out of another database imported at this path meanwhile.
+    let conn = match rusqlite::Connection::open_with_flags(
+        std::path::Path::new(&db_path),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE,
+    ) {
         Ok(c) => c,
         Err(e) => {
             log::warn!("Enrichment: failed to open DB: {}", e);
@@ -863,8 +868,8 @@ async fn enrich_flight_async(flight_id: i64, lat: f64, lon: f64, db_path: String
 
     if let Some(w) = weather {
         if let Err(e) = conn.execute(
-            "UPDATE flights SET weather_temp_c = ?1, weather_wind_ms = ?2, weather_wind_deg = ?3, weather_desc = ?4 WHERE id = ?5",
-            rusqlite::params![w.temp_c, w.wind_ms, w.wind_deg, w.description, flight_id],
+            "UPDATE flights SET weather_temp_c = ?1, weather_wind_ms = ?2, weather_wind_deg = ?3, weather_desc = ?4 WHERE id = ?5 AND start_time = ?6",
+            rusqlite::params![w.temp_c, w.wind_ms, w.wind_deg, w.description, flight_id, start_time],
         ) {
             log::warn!("Enrichment: failed to write weather for flight {}: {}", flight_id, e);
         } else {
@@ -874,8 +879,8 @@ async fn enrich_flight_async(flight_id: i64, lat: f64, lon: f64, db_path: String
 
     if let Some(name) = location {
         if let Err(e) = conn.execute(
-            "UPDATE flights SET location_name = ?1 WHERE id = ?2",
-            rusqlite::params![name, flight_id],
+            "UPDATE flights SET location_name = ?1 WHERE id = ?2 AND start_time = ?3",
+            rusqlite::params![name, flight_id, start_time],
         ) {
             log::warn!("Enrichment: failed to write location for flight {}: {}", flight_id, e);
         } else {
@@ -985,6 +990,7 @@ pub struct FlightRecorder {
     /// MAVLink link, which reports MSL.
     alt_relative: Option<bool>,
     db_file_path: std::path::PathBuf,
+    sessions_dir: PathBuf,
     /// Base dir for raw logs (raw_logs/*.tlog | *.rawmsp) — separate from the DB folder.
     raw_log_dir: std::path::PathBuf,
     /// Shared MSP raw-log sink (ADR-049): the transport writes the raw serial bytes into it; the
@@ -1081,12 +1087,18 @@ impl FlightRecorder {
             format!("Failed to open flight log database: {}", e)
         })?;
         slots.attach(emitter.key());
+        #[cfg(not(test))]
+        let sessions_dir = db::sessions_dir(portable);
+        // Tests: next to the rig's database, so every rig keeps its sessions to itself.
+        #[cfg(test)]
+        let sessions_dir = db_path.parent().unwrap_or(Path::new(".")).join("sessions");
 
         Ok(Self {
             settings,
             fc_info,
             protocol: protocol.to_string(),
             alt_relative: None,
+            sessions_dir,
             db_file_path: db_path,
             raw_log_dir,
             msp_raw_sink,
@@ -1227,7 +1239,7 @@ impl FlightRecorder {
 
     /// The folder of this recorder's temp sessions (a group's `.kgrp` goes there too).
     pub(crate) fn sessions_dir(&self) -> PathBuf {
-        self.db_file_path.parent().unwrap_or(Path::new(".")).join("sessions")
+        self.sessions_dir.clone()
     }
 
     /// The group flight this recorder is a member of.
@@ -1796,7 +1808,9 @@ impl FlightRecorder {
     /// Move a finalized session into this vehicle's pending entry and tell the frontend to show the
     /// End-Flight summary (Save/Discard). Used by `on_disarm` and the continue-on-reconnect
     /// disarmed-on-first-poll path.
-    fn stash_pending_and_emit_ended(&self, session: PendingSession) {
+    fn stash_pending_and_emit_ended(&self, mut session: PendingSession) {
+        // A session queued before the database folder changed is saved where the database is now.
+        session.db_path = self.db_file_path.clone();
         let ev = RecordingEndedEvent {
             duration_sec: session.flight.duration_sec.unwrap_or(0),
             max_alt_m: session.flight.max_alt_m.unwrap_or(0.0),
@@ -2013,13 +2027,8 @@ impl FlightRecorder {
 
         let now = self.clock.utc();
 
-        // Open the per-session temp store (DB recording only).
         let (temp_db, temp_path) = if self.settings.db_enabled {
-            let sessions_dir = self
-                .db_file_path
-                .parent()
-                .unwrap_or(std::path::Path::new("."))
-                .join("sessions");
+            let sessions_dir = self.sessions_dir.clone();
             // The vehicle key makes the name unique per recorder: two vehicles arming in the same
             // second ("arm all") must never share a file. Not the FC id — it is missing on secondary /
             // passive links and not unique (ArduPilot SITL instances share one).
@@ -2463,7 +2472,7 @@ impl FlightRecorder {
             self.publish_active_path();
         }
         self.close_continuous_loggers();
-        self.mirror_to_shared_folders();
+        self.move_raw_logs_out();
         self.report_teardown();
         self.slots.detach(self.key());
     }
@@ -2496,7 +2505,7 @@ impl FlightRecorder {
             self.publish_active_path();
         }
         self.close_continuous_loggers();
-        self.mirror_to_shared_folders();
+        self.move_raw_logs_out();
         self.report_teardown();
         self.slots.detach(self.key());
     }
@@ -2516,16 +2525,10 @@ impl FlightRecorder {
         self.publish_active_path();
     }
 
-    /// Mirror the session's artefacts into user-granted shared folders where the settings name one
-    /// (Android SAF tree URIs) — no-op everywhere else. Lives in `user_file`, the module that owns
-    /// user-storage platform differences; called on both teardown paths so a lost link mirrors too.
-    fn mirror_to_shared_folders(&self) {
-        crate::user_file::mirror_session(
-            &self.db_file_path,
-            &self.raw_log_dir,
-            &self.settings.db_path,
-            &self.settings.raw_log_path,
-        );
+    /// Android: the closed raw logs go to the shared folder the setting names. Called on both
+    /// teardown paths, so a lost link moves them too.
+    fn move_raw_logs_out(&self) {
+        crate::user_file::move_raw_logs(&self.raw_log_dir, &self.settings.raw_log_path);
     }
 
     /// Close the continuous (pre-arm) raw/tlog loggers on disconnect.
