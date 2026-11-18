@@ -2167,6 +2167,13 @@ usual Wi-Fi telemetry setup. <strong>Android</strong> offers Serial for a USB ca
 asks per device — pick Kite in the dialog when you plug the cable in). <strong>iPhone and iPad have no Serial transport</strong> — use
 <strong>BLE</strong>, <strong>TCP</strong> or <strong>UDP</strong> there.</p>
 </div>
+<div class="admonition note">
+<p class="admonition-title">RadioMaster AX12</p>
+<p>On the AX12 transmitter Kite talks to the built-in ELRS module directly — no cable, no Wi-Fi
+bridge. Choose <strong>Serial</strong>; the port list carries an extra entry, <strong><code>/dev/ttyS1</code> — Internal UART
+(ELRS module)</strong>. Selecting it sets the baud rate to <strong>460800</strong>, the rate the module runs at; if
+yours is set differently, change it afterwards. Kite always uses the phone layout on this device.</p>
+</div>
 <ol>
 <li><strong>Transport</strong> → <strong>Serial</strong>.</li>
 <li><strong>Port</strong> — pick it from the list. The list refreshes by itself; a freshly plugged-in board is
