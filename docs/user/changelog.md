@@ -305,7 +305,7 @@ inside the box of the feature release they belong to, so the notes for one relea
       Telemetry), and the GPS widget's **CYC** view works in the replay. The Raw
       telemetry popup lists every receiver, and the Telemetry API's `gpsReceivers` group carries
       the added values. An imported ArduPilot DataFlash or PX4 ULog log brings its receivers'
-      values as well. [#319] · [#321]
+      values as well. [#319] · [#322]
     - **The logbook remembers its sort order.** [#319]
     - **Weather requests carry a rounded position** — two decimals, about 1 km: enough for the
       forecast model, too coarse to follow the aircraft. Two new switches under Settings → Data →
@@ -455,7 +455,7 @@ inside the box of the feature release they belong to, so the notes for one relea
     - **Replay: the altitude reference of a flight is handled more robustly.** [#320]
     - **Replay of imported ArduPilot and PX4 logs showed the wrong GPS fix type** — a plain 3D fix
       read as "3D DGPS". Logs imported from now on are right; re-import an older one to correct
-      it. [#321]
+      it. [#322]
     - **Android: text followed the system font size, the boxes around it did not** — with a larger
       system font, labels ran out of their buttons and digits overlapped the units in number fields;
       with a smaller one everything was smaller than designed. Text now keeps its size. [#301]
