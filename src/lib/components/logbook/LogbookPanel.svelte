@@ -30,6 +30,7 @@
   import { batteryManagerOpen } from '$lib/stores/batteryManager';
   import VehicleManager from './VehicleManager.svelte';
   import { vehicleManagerOpen } from '$lib/stores/vehicleManager';
+  import { isMobile } from '$lib/platform';
 
   let {
     flightLoggingEnabled,
@@ -344,9 +345,12 @@
 {#snippet exportGroup()}
   <div class="tb-right">
     {#if !fileMode}
-      <Button variant="data" icon="export" disabled={!hasBlackboxFile} onclick={onExportBlackbox}>
-        {$t('logbook.exportBlackbox')}
-      </Button>
+      <!-- A mobile database never stores the original log, so there is nothing to export. -->
+      {#if !isMobile}
+        <Button variant="data" icon="export" disabled={!hasBlackboxFile} onclick={onExportBlackbox}>
+          {$t('logbook.exportBlackbox')}
+        </Button>
+      {/if}
       <Button variant="data" icon="export" disabled={getExportIds().length === 0} onclick={() => onExportFlights(getExportIds())}>
         {$t('logbook.exportKflight')}{#if hasMultiSelection} ({multiSelectedIds.size}){/if}
       </Button>
