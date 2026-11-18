@@ -16,7 +16,7 @@ use ::mavlink::ardupilotmega::{GpsFixType, MavAutopilot, MavMessage, MavModeFlag
 use super::db;
 use super::timezone;
 use super::types::{Flight, TelemetryRecord};
-use crate::mavlink_proto::parser::{MavParser, Parsed};
+use crate::mavlink_proto::parser::{MavFrame, MavParser};
 use crate::msp::{
     MspParser, MSPV2_INAV_AIR_SPEED, MSPV2_INAV_ANALOG, MSPV2_INAV_MIXER, MSPV2_INAV_STATUS,
     MSP_ALTITUDE, MSP_ATTITUDE, MSP_BOARD_INFO, MSP_FC_VARIANT, MSP_FC_VERSION, MSP_GPSSTATISTICS,
@@ -274,9 +274,33 @@ fn update_from_msp(code: u16, payload: &[u8], s: &mut Snap, armed: &mut bool, id
     }
 }
 
-/// Decode a MAVLink tlog: a sequence of `[u64 BE µs][raw frame]`. Returns (samples, identity).
-fn decode_tlog(bytes: &[u8]) -> (Vec<Sample>, Identity) {
+// ── MAVLink (.tlog) ──────────────────────────────────────────────────────────
+
+/// Length of the MAVLink frame whose header starts `b`, STX through CRC (a signature not counted).
+fn mav_frame_len(b: &[u8]) -> Option<usize> {
+    let payload = *b.get(1)? as usize;
+    match b[0] {
+        0xFE => Some(8 + payload),
+        0xFD => Some(12 + payload),
+        _ => None,
+    }
+}
+
+/// The tlog record at `pos`: its frame and the offset behind it (a MAVLink 2 signature not counted).
+fn tlog_record(bytes: &[u8], pos: usize) -> Option<(&[u8], usize)> {
+    let start = pos.checked_add(8)?;
+    let len = mav_frame_len(bytes.get(start..)?)?;
+    Some((bytes.get(start..start + len)?, start + len))
+}
+
+/// `None` for a damaged frame, a message outside the typed dialect and a TUNNEL frame alike.
+fn parse_frame(frame: &[u8]) -> Option<MavFrame> {
     let mut parser = MavParser::new();
+    frame.iter().find_map(|&b| parser.push(b))
+}
+
+/// Decode a MAVLink tlog: a sequence of `[u64 BE µs][raw frame]`.
+fn decode_tlog(bytes: &[u8]) -> (Vec<Sample>, Identity) {
     let mut snap = Snap::default();
     let mut armed = false;
     let mut samples = Vec::new();
@@ -286,62 +310,67 @@ fn decode_tlog(bytes: &[u8]) -> (Vec<Sample>, Identity) {
     // The autopilot's (system, component) id, locked onto the first HEARTBEAT that identifies one.
     let mut fc_id: Option<(u8, u8)> = None;
     let mut i = 0usize;
+    let mut in_sync = true;
+    let mut last_us = 0u64;
+    let mut skipped = 0usize;
 
-    while i + 8 <= bytes.len() {
-        let ts_us = u64::from_be_bytes(bytes[i..i + 8].try_into().unwrap());
-        i += 8;
-        let t_ms = (ts_us / 1000) as i64;
-        // Feed bytes until exactly one frame completes (records are one frame each; well-formed logs
-        // pass CRC so `push` returns at the frame boundary). A guard prevents runaway on corruption.
-        let mut got = false;
-        let mut guard = 0;
-        while i < bytes.len() && !got && guard < 600 {
-            let b = bytes[i];
+    let readable = |pos: usize| tlog_record(bytes, pos).and_then(|(frame, _)| parse_frame(frame)).is_some();
+    let follows = |pos: usize| pos == bytes.len() || tlog_record(bytes, pos).is_some();
+
+    while i < bytes.len() {
+        // Records are cut by the frame's own length, so a frame the parser cannot read is still one
+        // record, but only while the next record lines up behind it. After damage the walk resumes at
+        // the first frame that parses and whose timestamp is not a day behind (damage reaching into it).
+        let record = tlog_record(bytes, i).and_then(|(frame, end)| {
+            let ts_us = u64::from_be_bytes(bytes[i..i + 8].try_into().unwrap());
+            // A signed frame carries a 13-byte signature. Kite's own recording keeps the flag but not
+            // the signature, so both shapes occur.
+            let signed = frame[0] == 0xFD && frame[2] & 0x01 != 0;
+            let next = if signed && follows(end + 13) && !readable(end) { end + 13 } else { end };
+            let parsed = parse_frame(frame);
+            let resumes = parsed.is_some() && ts_us.saturating_add(86_400_000_000) >= last_us;
+            (if in_sync { parsed.is_some() || follows(next) } else { resumes }).then_some((ts_us, parsed, next))
+        });
+        let Some((ts_us, parsed, next)) = record else {
+            in_sync = false;
+            skipped += 1;
             i += 1;
-            guard += 1;
-            let parsed = parser.push_any(b);
-            // TUNNEL (#385) — Kite's own MSP-over-MAVLink traffic, recorded into every tlog of a tunnel
-            // link. A complete record like any other (so the importer stays on the frame boundary), but
-            // not telemetry: skipped.
-            if matches!(parsed, Some(Parsed::Tunnel { .. })) {
-                got = true;
-                continue;
+            continue;
+        };
+        in_sync = true;
+        last_us = ts_us;
+        let t_ms = (ts_us / 1000) as i64;
+        i = next;
+        let Some(frame) = parsed else { continue };
+
+        // A tlog carries every component: peripherals on the vehicle's sysid (camera, gimbal) send their own
+        // HEARTBEATs, which would make the mode flap and overwrite `variant` (the mode table). Lock onto the
+        // autopilot like the live handshake; other message types stay unfiltered, as in the live handler.
+        let mut consume = true;
+        if let MavMessage::HEARTBEAT(hb) = &frame.message {
+            let id = (frame.header.system_id, frame.header.component_id);
+            let is_autopilot = hb.mavtype != MavType::MAV_TYPE_GCS
+                && (hb.autopilot != MavAutopilot::MAV_AUTOPILOT_INVALID || id.1 == 1);
+            if fc_id.is_none() && is_autopilot {
+                fc_id = Some(id);
             }
-            if let Some(Parsed::Msg(frame)) = parsed {
-                got = true;
-                // A tlog carries every component: peripherals on the vehicle's sysid (camera, gimbal) send their own
-                // HEARTBEATs, which would make the mode flap and overwrite `variant` (the mode table). Lock onto the
-                // autopilot like the live handshake; other message types stay unfiltered, as in the live handler.
-                let mut consume = true;
-                if let MavMessage::HEARTBEAT(hb) = &frame.message {
-                    let id = (frame.header.system_id, frame.header.component_id);
-                    let is_autopilot = hb.mavtype != MavType::MAV_TYPE_GCS
-                        && (hb.autopilot != MavAutopilot::MAV_AUTOPILOT_INVALID || id.1 == 1);
-                    if fc_id.is_none() && is_autopilot {
-                        fc_id = Some(id);
-                    }
-                    consume = fc_id == Some(id);
-                    if consume {
-                        // Vehicle identity → drives the mode table + flight model.
-                        let (v, p) =
-                            crate::mavlink_proto::vehicle::identify(hb.autopilot, hb.mavtype);
-                        variant = v;
-                        platform = p;
-                    }
-                } else if let Some((sysid, _)) = fc_id {
-                    // A tlog of a link shared by several vehicles (fleet mode) carries every vehicle's
-                    // frames: once the autopilot is locked, another system id's telemetry is not this
-                    // flight's — merged, it would replay as one garbled track.
-                    consume = frame.header.system_id == sysid;
-                }
-                if consume && update_from_mav(&frame.message, &mut snap, &mut armed, &variant) {
-                    samples.push(Sample { t_ms, rec: snap_to_record(&snap, t_ms), armed });
-                }
+            consume = fc_id == Some(id);
+            if consume {
+                let (v, p) = crate::mavlink_proto::vehicle::identify(hb.autopilot, hb.mavtype);
+                variant = v;
+                platform = p;
             }
+        } else if let Some((sysid, _)) = fc_id {
+            // A tlog of a link shared by several vehicles carries every vehicle's frames: once the
+            // autopilot is locked, another system id's telemetry is not this flight's.
+            consume = frame.header.system_id == sysid;
         }
-        if !got {
-            break;
+        if consume && update_from_mav(&frame.message, &mut snap, &mut armed, &variant) {
+            samples.push(Sample { t_ms, rec: snap_to_record(&snap, t_ms), armed });
         }
+    }
+    if skipped > 0 {
+        log::warn!("tlog import: skipped {} unreadable bytes", skipped);
     }
     let fc_variant = if variant.is_empty() { None } else { Some(variant) };
     (samples, Identity { fc_variant, platform_type: platform, ..Default::default() })
@@ -840,5 +869,102 @@ mod tests {
         let (n, e) = (rec.wind_n_ms.expect("wind north"), rec.wind_e_ms.expect("wind east"));
         assert!((n - -3.0).abs() < 0.01, "wind north {n}");
         assert!((e - -5.196).abs() < 0.01, "wind east {e}");
+    }
+
+    /// Epoch timestamp (µs) of the records below; none of its bytes is a MAVLink start byte.
+    const T0_US: u64 = 1_795_000_000_000_000;
+    const ATTITUDE_CRC_EXTRA: u8 = 39;
+
+    fn record(log: &mut Vec<u8>, ts_us: u64, frame: &[u8]) {
+        log.extend_from_slice(&ts_us.to_be_bytes());
+        log.extend_from_slice(frame);
+    }
+
+    /// One ATTITUDE frame from the autopilot, its header patched by `edit` and the checksum redone.
+    fn attitude_frame(seq: &mut MavSequence, roll: f32, edit: impl FnOnce(&mut Vec<u8>), crc_extra: u8) -> Vec<u8> {
+        let fc = MavHeader { system_id: 1, component_id: 1, sequence: 0 };
+        let msg = MavMessage::ATTITUDE(ATTITUDE_DATA { roll, ..Default::default() });
+        let mut f = serialize_v2(&fc, &msg, seq);
+        edit(&mut f);
+        let n = f.len();
+        let mut crc: u16 = 0xFFFF;
+        for &b in f[1..n - 2].iter().chain([crc_extra].iter()) {
+            let mut t = b ^ (crc as u8);
+            t ^= t << 4;
+            crc = (crc >> 8) ^ ((t as u16) << 8) ^ ((t as u16) << 3) ^ ((t as u16) >> 4);
+        }
+        f[n - 2..].copy_from_slice(&crc.to_le_bytes());
+        f
+    }
+
+    fn sample_times(log: &[u8]) -> Vec<i64> {
+        decode_tlog(log).0.iter().map(|s| s.t_ms).collect()
+    }
+
+    fn ms(times_us: &[u64]) -> Vec<i64> {
+        times_us.iter().map(|us| (us / 1000) as i64).collect()
+    }
+
+    /// A message outside the typed dialect (MLRS_RADIO_LINK_STATS, id 60045) is still one whole record:
+    /// the records behind it keep their own timestamps, also when a timestamp holds 0xFD (MAVLink 2 STX).
+    #[test]
+    fn frames_outside_the_dialect_keep_the_record_boundary() {
+        let mut seq = MavSequence::new();
+        let plain = |seq: &mut MavSequence, roll| attitude_frame(seq, roll, |_| {}, ATTITUDE_CRC_EXTRA);
+        let unknown = |seq: &mut MavSequence| {
+            attitude_frame(seq, 0.0, |f| f[7..10].copy_from_slice(&60045u32.to_le_bytes()[..3]), 14)
+        };
+        let ts_with_stx = ((T0_US + 200_000) & !0xFF) | 0xFD;
+
+        let mut log = Vec::new();
+        record(&mut log, T0_US + 100_000, &unknown(&mut seq));
+        record(&mut log, ts_with_stx, &plain(&mut seq, 0.1));
+        record(&mut log, T0_US + 300_000, &plain(&mut seq, 0.2));
+        record(&mut log, T0_US + 400_000, &unknown(&mut seq));
+        record(&mut log, T0_US + 500_000, &plain(&mut seq, 0.3));
+
+        assert_eq!(sample_times(&log), ms(&[ts_with_stx, T0_US + 300_000, T0_US + 500_000]));
+    }
+
+    /// A log cut by a crash can hold a zero-filled block, and its last record can be incomplete: the
+    /// records behind the block are still imported, but not one whose timestamp the block reaches into.
+    #[test]
+    fn a_damaged_block_does_not_end_the_import() {
+        let mut seq = MavSequence::new();
+        let plain = |seq: &mut MavSequence, roll| attitude_frame(seq, roll, |_| {}, ATTITUDE_CRC_EXTRA);
+
+        let mut log = Vec::new();
+        record(&mut log, T0_US + 100_000, &plain(&mut seq, 0.1));
+        log.extend_from_slice(&[0u8; 4096]);
+        let reached = log.len();
+        record(&mut log, T0_US + 4_900_000, &plain(&mut seq, 0.15));
+        log[reached..reached + 2].fill(0);
+        record(&mut log, T0_US + 5_000_000, &plain(&mut seq, 0.2));
+        record(&mut log, T0_US + 5_100_000, &plain(&mut seq, 0.3));
+        let cut = plain(&mut seq, 0.4);
+        record(&mut log, T0_US + 5_200_000, &cut[..cut.len() - 5]);
+
+        assert_eq!(sample_times(&log), ms(&[T0_US + 100_000, T0_US + 5_000_000, T0_US + 5_100_000]));
+    }
+
+    /// A signed link: Kite's own recording keeps the signed flag without the 13-byte signature, a
+    /// log of another ground station carries the signature. Both keep every record and its time, also
+    /// when a start byte sits where the record behind a signature would begin.
+    #[test]
+    fn signed_frames_with_and_without_the_signature() {
+        for with_signature in [false, true] {
+            let mut seq = MavSequence::new();
+            let mut log = Vec::new();
+            let mut expected = Vec::new();
+            for k in 1..=6u64 {
+                let mut f = attitude_frame(&mut seq, 0.1 * k as f32, |f| (f[2], f[13], f[14]) = (1, 0xFD, 0), ATTITUDE_CRC_EXTRA);
+                if with_signature {
+                    f.extend_from_slice(&[0xFD, 0xFE, 3, 4, 5, 6, 7, 8, 0xFD, 10, 11, 12, 13]);
+                }
+                record(&mut log, T0_US + k * 100_000, &f);
+                expected.push(T0_US + k * 100_000);
+            }
+            assert_eq!(sample_times(&log), ms(&expected), "signature present: {with_signature}");
+        }
     }
 }
