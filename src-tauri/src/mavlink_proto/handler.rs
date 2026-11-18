@@ -1231,10 +1231,11 @@ fn on_gps_receiver(rx: RawGps, fused: &mut FusedPos, app_handle: &VehicleEmitter
     let listed = fused.receivers.get(rx.data.id as usize).is_some_and(|r| r.is_some());
     if let Some(ref rec) = recorder {
         if let Ok(mut r) = rec.lock() {
+            // `on_gps` first: the first fix can be what starts the session.
+            r.on_gps(&data);
             if listed {
                 r.on_gps_receiver(&rx.data);
             }
-            r.on_gps(&data);
         }
     }
 }
@@ -1724,7 +1725,17 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
 
 #[cfg(test)]
 mod tests {
-    use super::active_wp_from_mission_current;
+    use super::{active_wp_from_mission_current, gps_yaw_deg};
+
+    #[test]
+    fn gps_yaw_sentinels() {
+        assert_eq!(gps_yaw_deg(0), None, "not provided");
+        assert_eq!(gps_yaw_deg(u16::MAX), None, "configured but not available");
+        assert_eq!(gps_yaw_deg(36001), None);
+        assert_eq!(gps_yaw_deg(1), Some(0.01));
+        assert_eq!(gps_yaw_deg(27150), Some(271.5));
+        assert_eq!(gps_yaw_deg(36000), Some(0.0), "north");
+    }
 
     #[test]
     fn mission_current_numbering_per_autopilot() {

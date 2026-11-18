@@ -1728,21 +1728,26 @@ pub fn get_flight_weather_records(conn: &Connection, flight_id: i64) -> SqlResul
 const GPS_RECORDS_COLS: &str = "timestamp_ms, instance, fix_type, fix_raw, num_sat, hdop, lat, lon, alt_msl, \
     vdop, h_acc_m, v_acc_m, speed_ms, course_deg, yaw_deg";
 
-pub fn insert_gps_record(
+/// `(timestamp_ms, sample)` pairs of one flight, in one transaction.
+pub fn insert_gps_records_batch(
     conn: &Connection,
     flight_id: i64,
-    timestamp_ms: i64,
-    r: &crate::scheduler::telemetry::GpsReceiverData,
+    records: &[(i64, crate::scheduler::telemetry::GpsReceiverData)],
 ) -> SqlResult<()> {
-    conn.prepare_cached(&format!(
-        "INSERT INTO gps_records (flight_id, {GPS_RECORDS_COLS})
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)"
-    ))?
-    .execute(params![
-        flight_id, timestamp_ms, r.id, r.fix_type, r.fix_raw, r.num_sat, r.hdop, r.lat, r.lon, r.alt_msl,
-        r.vdop, r.h_acc_m, r.v_acc_m, r.speed_ms, r.course_deg, r.yaw_deg,
-    ])?;
-    Ok(())
+    let tx = write_tx(conn)?;
+    {
+        let mut stmt = tx.prepare_cached(&format!(
+            "INSERT INTO gps_records (flight_id, {GPS_RECORDS_COLS})
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)"
+        ))?;
+        for (timestamp_ms, r) in records {
+            stmt.execute(params![
+                flight_id, timestamp_ms, r.id, r.fix_type, r.fix_raw, r.num_sat, r.hdop, r.lat, r.lon, r.alt_msl,
+                r.vdop, r.h_acc_m, r.v_acc_m, r.speed_ms, r.course_deg, r.yaw_deg,
+            ])?;
+        }
+    }
+    tx.commit()
 }
 
 /// The raw receiver samples of a flight, oldest first, for the replay.
@@ -2125,7 +2130,6 @@ pub fn commit_session_to_main(
             ),
             [],
         )?;
-        // Copy per-instance battery samples too (multi-battery), rewriting flight_id like above.
         let bat_select = BATTERY_RECORDS_COLS.replacen("flight_id", &flight_id.to_string(), 1);
         tx.execute(
             &format!(

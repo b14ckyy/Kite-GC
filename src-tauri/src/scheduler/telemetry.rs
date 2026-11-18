@@ -103,7 +103,7 @@ pub struct GpsReceiverData {
     pub lat: f64,     // decimal degrees
     pub lon: f64,     // decimal degrees
     pub alt_msl: f64, // meters
-    /// The rest is `None` where the receiver or the firmware does not report it.
+    // The rest is `None` where the receiver or the firmware does not report it.
     pub vdop: Option<f64>,
     pub h_acc_m: Option<f64>,
     pub v_acc_m: Option<f64>,

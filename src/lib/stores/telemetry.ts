@@ -26,7 +26,7 @@ export interface BatteryInstance {
   temperature: number | null;
 }
 
-/** One physical GPS receiver (MAVLink GPS_RAW_INT / GPS2_RAW), raw values; live only, not recorded. */
+/** One physical GPS receiver (MAVLink GPS_RAW_INT / GPS2_RAW), raw values. */
 export interface GpsReceiver {
   /** 0 = GPS1. */
   id: number;
@@ -39,7 +39,7 @@ export interface GpsReceiver {
   lat: number;
   lon: number;
   altMsl: number;
-  /** Null where the receiver or the firmware does not report it. */
+  // Null where the receiver or the firmware does not report it.
   vdop: number | null;
   hAccM: number | null;
   vAccM: number | null;

@@ -409,9 +409,13 @@ export async function getFlightTrack(id: number, dbPath: string): Promise<Teleme
       if (list) rec.batteries = list;
     }
   }
+  // The receivers are an extra: failing to read them must not cost the replay.
   const gps = await invoke<GpsRecord[]>('flightlog_get_gps_records', {
     flightId: id,
     dbPath: dbPath || undefined,
+  }).catch((e) => {
+    console.warn('[flightlog] GPS receiver rows not loaded:', e);
+    return [] as GpsRecord[];
   });
   if (gps.length > 0) attachGpsReceivers(track, gps);
   return track;

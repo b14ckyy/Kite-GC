@@ -400,7 +400,6 @@ export interface AppSettings {
   flightWeatherRecording: boolean;
   /** Look up the place name of a flight's start point. */
   flightAutoLocation: boolean;
-  /** Grouping order of the logbook tree. */
   logbookSortMode: LogbookSortMode;
   // Mission Control
   defaultWpAltitudeM: number;

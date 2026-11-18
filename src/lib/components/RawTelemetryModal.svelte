@@ -139,7 +139,7 @@
     return g;
   });
 
-  /** Group title: the per-instance battery groups carry their id, everything else a plain key. */
+  /** Group title: battery and GPS receiver groups carry their id, everything else is a plain key. */
   function groupTitle(key: string): string {
     if (key.startsWith('battery-')) {
       return $t('rawTelemetry.groups.batteryInstance', { values: { id: key.slice('battery-'.length) } });
