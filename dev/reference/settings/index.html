@@ -2589,9 +2589,29 @@ switch them off to save bandwidth on a slow over-the-air radio, and on when the 
 <td>On</td>
 </tr>
 <tr>
-<td><strong>Database Folder</strong></td>
-<td>Where the logbook database lives — <strong>Choose</strong> a folder or <strong>Use Default</strong>.</td>
+<td><strong>Database Folder</strong> <em>(desktop only)</em></td>
+<td>Where the logbook database lives — <strong>Choose</strong> a folder or <strong>Use Default</strong>. Kite asks whether to move the database along, see <a href="../../guides/logbook/#changing-the-database-folder">Logbook</a>.</td>
 <td>default path</td>
+</tr>
+<tr>
+<td><strong>Export database</strong></td>
+<td>Saves a copy of the whole flight database (flights, vehicles, batteries, missions) as one file. Not while a vehicle is connected. See <a href="../../guides/logbook/#exporting-and-importing-the-whole-database">Logbook</a>.</td>
+<td>—</td>
+</tr>
+<tr>
+<td><strong>Import database</strong> <em>(Android, iOS)</em></td>
+<td>Replaces the flight database with a file from <strong>Export database</strong>, after a confirmation. Not while a vehicle is connected.</td>
+<td>—</td>
+</tr>
+<tr>
+<td><strong>Export all flights</strong></td>
+<td>Writes every flight into one <code>.kflight</code> file.</td>
+<td>—</td>
+</tr>
+<tr>
+<td><strong>Original log files</strong> <em>(Android, iOS)</em></td>
+<td>Shown only when the database holds original log files — one imported from a desktop install — with their size. <strong>Remove</strong> deletes them after a confirmation; flights, tracks and telemetry stay.</td>
+<td>—</td>
 </tr>
 <tr>
 <td><strong>Compact Database</strong> <em>(desktop only)</em></td>
@@ -2605,7 +2625,7 @@ switch them off to save bandwidth on a slow over-the-air radio, and on when the 
 </tr>
 <tr>
 <td><strong>Raw Log Folder</strong></td>
-<td>Where raw <code>.rawmsp</code> / <code>.tlog</code> files are written.</td>
+<td>Where raw <code>.rawmsp</code> / <code>.tlog</code> files are written. On Android they are written in the app's storage and moved into the chosen folder when the vehicle disconnects.</td>
 <td>default path</td>
 </tr>
 </tbody>

@@ -2084,11 +2084,14 @@ markers, the same as a live recording.</p>
 <h2 id="where-your-data-lives">Where your data lives<a class="headerlink" href="#where-your-data-lives" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Flight database</strong> — your logbook (flights, vehicles, batteries, saved missions) is one local SQLite
-  database; its location is configurable in <strong><a href="../settings/">Settings → Data</a></strong>.</li>
+  database; on Windows, Linux and macOS its location is configurable in <strong><a href="../settings/">Settings → Data</a></strong>.</li>
 <li><strong>Next to the database</strong> — <code>flights.pre-migration-backup.db</code>, the full backup Kite writes before an
-  update upgrades the database format (only the latest is kept), and a <code>hires-cache/</code> folder that holds
-  the temporary decode of a flight in <strong>HI-RES</strong> replay and is emptied when you close the flight. See
+  update upgrades the database format (only the latest is kept). See
   <strong><a href="../../guides/logbook/#the-database-updates-and-the-automatic-backup">Flight logbook</a></strong>.</li>
+<li><strong>Work files</strong> — always in Kite's own data folder, whatever database folder is set: the temporary
+  files of a running recording (<code>sessions/</code>), the decode of a flight in <strong>HI-RES</strong> replay
+  (<code>hires-cache/</code>, emptied when you close the flight) and logs opened without importing them
+  (<code>scratch/</code>).</li>
 <li><strong>Caches</strong> — 2D map tiles and terrain are cached on disk (under Settings → Map → Cache); these are the
   files that make the 2D map usable offline.</li>
 <li><strong>Custom maps</strong> (desktop) — your own map tiles in the custom map location, one <code>Z/X/Y</code> folder per

@@ -1924,6 +1924,22 @@ stays <em>Stable releases</em>. <a href="https://github.com/b14ckyy/Kite-GC/pull
   whether to delete it (to the recycle bin on desktop), keep it, or be reminded in 14 days.
   Choosing a database folder with an older database asks before upgrading it. See
   <a href="../guides/logbook/#the-database-updates-and-the-automatic-backup">Logbook</a>. [#313]</li>
+<li><strong>The flight database moves with its folder</strong> — changing the database folder on Windows,
+  Linux and macOS now asks whether to move the database there. A database already in the new
+  folder can be opened or overwritten, and the previous one backed up into the new folder, kept
+  or deleted. Kite's work files (running recordings, the HI-RES replay cache, logs opened
+  without importing) now always stay in its own data folder, so a database on a slow, removable
+  or network drive does not slow them down.
+  See <a href="../guides/logbook/#changing-the-database-folder">Logbook</a>. [#325]</li>
+<li><strong>Export database, Import database, Export all flights</strong> — Settings → Data saves the whole
+  flight database as one file and writes every flight into one <code>.kflight</code>, on every platform;
+  Android and iOS can import a database file again, which is the way to keep a logbook across
+  a reinstall. See <a href="../guides/logbook/#exporting-and-importing-the-whole-database">Logbook</a>. [#325]</li>
+<li><strong>Android: no database folder any more, raw logs are moved</strong> — the copy of the database that
+  Kite wrote into a chosen folder at every disconnect doubled the storage and slowed the
+  disconnect; it is replaced by <strong>Export database</strong>. A database copy already in your folder
+  stays there. Raw logs now arrive in the chosen folder — they are moved there at disconnect,
+  and at the first start every raw log recorded so far. [#325]</li>
 <li><strong>INAV Blackbox import without a helper program</strong> — Kite decodes INAV Blackbox logs itself;
   imports are faster and no longer lose the frames after a flight-mode change. <a href="https://github.com/b14ckyy/Kite-GC/pull/234">#234</a></li>
 <li><strong>PX4 ULog import</strong> — the logbook imports <code>.ulg</code> logs, split into flights like any other

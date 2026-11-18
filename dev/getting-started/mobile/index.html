@@ -2001,10 +2001,16 @@ or use that setting.</p>
 <li><strong>Import</strong> takes <strong><code>.kflight</code></strong>, <strong><code>.tlog</code></strong> and <strong><code>.rawmsp</code></strong> files. Onboard logs — INAV Blackbox,
   ArduPilot Dataflash, PX4 ULog — are imported on a desktop install and moved over as <code>.kflight</code>.</li>
 <li>The mobile database keeps <strong>no original log files</strong>, so <strong>HI-RES</strong> replay, the original-log export
-  and the <strong>Open</strong> button (replay without importing) are desktop features.</li>
-<li><strong>Android:</strong> the database and raw logs live in the app's private storage. <strong>Settings → Data</strong> can
-  point them at a folder of your own; Kite copies them there, and that copy survives uninstalling the
-  app.</li>
+  and the <strong>Open</strong> button (replay without importing) are desktop features. The exception is a
+  database imported from a desktop install with <strong>Import database</strong>: it arrives complete, original
+  log files included. <strong>Settings → Data → Original log files</strong> then shows their size, and <strong>Remove</strong>
+  deletes them to free the space — the flights, their tracks and telemetry stay.</li>
+<li>The <strong>flight database</strong> lives in the app's private storage and goes away with the app when you
+  uninstall it. <strong>Settings → Data → Export database</strong> saves it as one file before that, and <strong>Import
+  database</strong> brings it back; <strong>Export all flights</strong> writes every flight into one <code>.kflight</code> for a
+  desktop install. See <a href="../../guides/logbook/#exporting-and-importing-the-whole-database">Logbook</a>.</li>
+<li><strong>Android:</strong> <strong>Settings → Data → Raw Log Folder</strong> can name a folder of your own (an SD card, for
+  example). Raw logs are then moved there when the vehicle disconnects, and stay when the app is uninstalled.</li>
 </ul>
 <p>See <strong><a href="../../guides/logbook/">Flight logbook</a></strong>.</p>
 <h2 id="video">Video<a class="headerlink" href="#video" title="Permanent link">&para;</a></h2>

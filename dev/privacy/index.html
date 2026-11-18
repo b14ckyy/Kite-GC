@@ -2069,7 +2069,7 @@ service by the app.</p>
 <tr>
 <td><strong>Replay caches</strong></td>
 <td>Temporary decodes of a stored onboard log for <strong>HI-RES</strong> replay (<code>hires-cache/</code>), and logs opened for replay without importing them (<code>scratch/</code>). Removed when you close the flight or the opened logs, and at the next app start</td>
-<td>Next to the flight log database</td>
+<td>App data folder of the OS</td>
 </tr>
 <tr>
 <td><strong>Missions, geozones, safe homes</strong></td>
@@ -2097,8 +2097,9 @@ service by the app.</p>
 <a href="../reference/file-formats/">Reference → File formats</a> and
 <a href="../troubleshooting/connection/#getting-a-diagnostic-log">Troubleshooting → Connection</a>.</p>
 <p>Deleting the app's data folder, or uninstalling the app on Android and iOS, removes all of it. One
-exception on Android: if you pointed the flight database or the raw logs at a folder of your own
-(Settings → Data), Kite copies them there, and that copy stays when the app is uninstalled.</p>
+exception on Android: if you pointed the raw logs at a folder of your own (Settings → Data), Kite
+moves them there, and they stay when the app is uninstalled. The same goes for every file you
+exported.</p>
 <h2 id="data-that-leaves-your-device-only-when-you-act">Data that leaves your device only when you act<a class="headerlink" href="#data-that-leaves-your-device-only-when-you-act" title="Permanent link">&para;</a></h2>
 <p>These transfers happen only because you trigger them, and you choose the recipient every time:</p>
 <ul>

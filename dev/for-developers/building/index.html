@@ -2454,9 +2454,9 @@ up itself, so only the bare <code>cargo check</code> needs it. (On Windows the p
 <td>Runs entirely on Kite's built-in RTSP client — no engine helpers (an Android app cannot spawn them, so the desktop engines are not offered). H.264/HEVC decode in device hardware onto a native surface below the WebView; MJPEG rides the multipart path. Native capture (ffmpeg) is not offered — the OS's own capture devices arrive through the camera kind.</td>
 </tr>
 <tr>
-<td>Custom database / raw-log folder</td>
-<td>✅ mirror</td>
-<td>Browse grants ONE folder via the system picker (scoped storage — no permission). The app keeps working app-private (SQLite and the raw writers need real paths, which a SAF grant cannot provide) and <strong>mirrors into the folder at session end</strong>: raw logs as files, the database as an atomic snapshot. That copy survives an uninstall.</td>
+<td>Raw-log folder</td>
+<td>✅ move</td>
+<td>Browse grants ONE folder via the system picker (scoped storage — no permission). The raw writers need real paths, which a SAF grant cannot provide, so they write app-private and the closed files are <strong>moved into the folder at session end</strong> (size read back, then the local file is deleted). The database stays app-private; it leaves and returns as a file (Settings → Data → Export / Import database).</td>
 </tr>
 <tr>
 <td>Exports to <code>Documents/</code></td>
