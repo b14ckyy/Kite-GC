@@ -145,6 +145,19 @@ size/position**, because that path can't be redirected.)
     anywhere in **Settings** — handy for putting the database on a larger or faster drive. On Windows
     the Documents path follows a OneDrive relocation automatically.
 
+## Memory requirements
+
+Kite's memory use is almost entirely the map: tiles are held as textures by the web view, so it grows
+with the size of the window in pixels. The 3D view and a larger screen need more, video adds very little.
+
+| | Minimum free RAM | Recommended free RAM |
+|---|---|---|
+| **Android** | 1 GB | 2 GB |
+| **Desktop** (Windows, Linux, macOS) | 2 GB | 4 GB |
+
+"Free" means available to Kite while it runs, on top of the system and your other apps. The recommended
+values also cover 4K and ultrawide screens with headroom.
+
 ## Storage requirements
 
 The app itself is small. What grows over time is your flight data:

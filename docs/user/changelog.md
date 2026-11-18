@@ -164,6 +164,9 @@ inside the box of the feature release they belong to, so the notes for one relea
       follows later). [#79]
     - **iPhone & iPad support** — native iOS/iPadOS build with phone and tablet layouts, Bluetooth
       LE and Wi-Fi MAVLink (App Store only, follows later). Contributed by Sebastian Kumor. [#16]
+    - **RadioMaster AX12** — on this Android transmitter Kite connects through the built-in ELRS
+      module: the serial port list offers the internal UART and presets its baud rate, and the
+      phone layout is used whatever the display density is set to. [#317]
     - **Phone layout** — landscape interface with a full-screen map, a connection pop-out, a widget
       column with two pages, three widget slots on the map's bottom edge and long-press editing.
       [#102] · [#173]
