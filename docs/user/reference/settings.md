@@ -169,10 +169,14 @@ switch them off to save bandwidth on a slow over-the-air radio, and on when the 
 | **Continuous Raw Logging** | Record the raw stream the whole time connected, not just while armed. | Off |
 | **Record Weather with Flights** | While a flight is recorded, fetch the forecast wind by height every five minutes and store it with the flight; also fetch the current weather for a stored flight. The position is sent to Open-Meteo rounded to two decimals (about 1 km). With a **Weather** widget on screen the wind is fetched and recorded in any case. | On |
 | **Auto-Detect Flight Location** | Look up the place name of a flight's start point at OpenStreetMap Nominatim when a flight is stored, imported or opened without one. Off: a flight without a place name stays without one. | On |
-| **Database Folder** | Where the logbook database lives — **Choose** a folder or **Use Default**. Kite asks whether to move the database along, see [Logbook](../guides/logbook.md#changing-the-database-folder). | default path |
+| **Database Folder** *(desktop only)* | Where the logbook database lives — **Choose** a folder or **Use Default**. Kite asks whether to move the database along, see [Logbook](../guides/logbook.md#changing-the-database-folder). | default path |
+| **Export database** | Saves a copy of the whole flight database (flights, vehicles, batteries, missions) as one file. Not while a vehicle is connected. See [Logbook](../guides/logbook.md#exporting-and-importing-the-whole-database). | — |
+| **Import database** *(Android, iOS)* | Replaces the flight database with a file from **Export database**, after a confirmation. Not while a vehicle is connected. | — |
+| **Export all flights** | Writes every flight into one `.kflight` file. | — |
+| **Original log files** *(Android, iOS)* | Shown only when the database holds original log files — one imported from a desktop install — with their size. **Remove** deletes them after a confirmation; flights, tracks and telemetry stay. | — |
 | **Compact Database** *(desktop only)* | **Compact now** rebuilds the database file to reclaim space (rarely needed — deleting flights already frees space in the background). Kite shows a blocking notice until it is done; on a hard disk or an SD card this can take several minutes. If a flight is being recorded or an import is running, Kite refuses with a message. While it runs it needs free space: up to the size of the database next to the database file, and about the same again in the system's temporary folder. On Android and iOS the button is not shown: the database holds no original log files there, and deleting flights already gives the space back. | — |
 | **Database backup (pre-update)** | Shown only once a backup exists: the backup Kite wrote before it last upgraded the database format, with its size and a **Delete** button. See **[Flight logbook](../guides/logbook.md#the-database-updates-and-the-automatic-backup)**. | — |
-| **Raw Log Folder** | Where raw `.rawmsp` / `.tlog` files are written. | default path |
+| **Raw Log Folder** | Where raw `.rawmsp` / `.tlog` files are written. On Android they are written in the app's storage and moved into the chosen folder when the vehicle disconnects. | default path |
 
 See **[Flight logbook](../guides/logbook.md)** for how these are used.
 

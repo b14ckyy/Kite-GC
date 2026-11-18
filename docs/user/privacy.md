@@ -54,8 +54,9 @@ The exact locations and file formats are listed under
 [Troubleshooting → Connection](troubleshooting/connection.md#getting-a-diagnostic-log).
 
 Deleting the app's data folder, or uninstalling the app on Android and iOS, removes all of it. One
-exception on Android: if you pointed the flight database or the raw logs at a folder of your own
-(Settings → Data), Kite copies them there, and that copy stays when the app is uninstalled.
+exception on Android: if you pointed the raw logs at a folder of your own (Settings → Data), Kite
+moves them there, and they stay when the app is uninstalled. The same goes for every file you
+exported.
 
 ## Data that leaves your device only when you act
 

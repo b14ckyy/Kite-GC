@@ -56,10 +56,16 @@ or use that setting.
 - **Import** takes **`.kflight`**, **`.tlog`** and **`.rawmsp`** files. Onboard logs — INAV Blackbox,
   ArduPilot Dataflash, PX4 ULog — are imported on a desktop install and moved over as `.kflight`.
 - The mobile database keeps **no original log files**, so **HI-RES** replay, the original-log export
-  and the **Open** button (replay without importing) are desktop features.
-- **Android:** the database and raw logs live in the app's private storage. **Settings → Data** can
-  point them at a folder of your own; Kite copies them there, and that copy survives uninstalling the
-  app.
+  and the **Open** button (replay without importing) are desktop features. The exception is a
+  database imported from a desktop install with **Import database**: it arrives complete, original
+  log files included. **Settings → Data → Original log files** then shows their size, and **Remove**
+  deletes them to free the space — the flights, their tracks and telemetry stay.
+- The **flight database** lives in the app's private storage and goes away with the app when you
+  uninstall it. **Settings → Data → Export database** saves it as one file before that, and **Import
+  database** brings it back; **Export all flights** writes every flight into one `.kflight` for a
+  desktop install. See [Logbook](../guides/logbook.md#exporting-and-importing-the-whole-database).
+- **Android:** **Settings → Data → Raw Log Folder** can name a folder of your own (an SD card, for
+  example). Raw logs are then moved there when the vehicle disconnects, and stay when the app is uninstalled.
 
 See **[Flight logbook](../guides/logbook.md)**.
 

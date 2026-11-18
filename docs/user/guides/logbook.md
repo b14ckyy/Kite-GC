@@ -188,8 +188,9 @@ replaces it with a new one.
 
 ### Changing the database folder
 
-**Settings → Data → Database Folder** (Windows, Linux, macOS) asks what to do with the database
-when you pick another folder or go back to the default one:
+**Settings → Data → Database Folder** (Windows, Linux, macOS — on Android and iOS the database always
+lives in the app's own storage) asks what to do with the database when you pick another folder or go
+back to the default one:
 
 - **The new folder holds no database:** **Move** takes the current database and its backup along;
   **Start new** begins an empty database there and leaves the current one where it is.
@@ -222,6 +223,29 @@ open in the logbook and forgets which library mission the map mission came from.
 If you ever **downgrade** Kite after such an upgrade, the older version refuses to touch the newer
 database: the logbook shows a notice (and the database stays untouched) until you either install the
 newer Kite again or restore a matching backup.
+
+### Exporting and importing the whole database
+
+**Settings → Data** has two exports that go straight to a place you pick in the system's save
+dialog:
+
+- **Export database** saves a copy of the whole flight database — flights, vehicles, batteries and
+  missions — as one `.db` file. This is the backup to take before you reinstall Kite or move to
+  another device. On Android and iOS the file is written directly from the database, so it needs no
+  extra free space in the app.
+- **Export all flights** writes every flight into one `.kflight` file, so you do not have to select
+  them one by one to bring them into another Kite. Vehicles, batteries and missions that belong to no
+  flight are not part of it. Kite shows the progress and, at the end, how many flights were written;
+  it refuses to start when less space is free than the database is large.
+
+**Import database** (Android and iOS) replaces the database in the app with a `.db` file exported
+this way: Kite names the flights in the file and in the app and asks before it replaces anything —
+the database in the app is deleted, it is not merged. A file in an older format is upgraded after
+the import; a file from a newer Kite is refused. On Windows, Linux and macOS you open an exported
+database by putting it into a folder as `flights.db` and choosing that folder as the
+[database folder](#changing-the-database-folder).
+
+**Export database** and **Import database** are not available while a vehicle is connected.
 
 ## Vehicles & batteries
 
