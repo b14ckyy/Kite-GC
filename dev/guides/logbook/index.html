@@ -2173,7 +2173,9 @@ original-log export are desktop features, and so is the <strong>Open</strong> bu
 <h2 id="exporting">Exporting<a class="headerlink" href="#exporting" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong><code>.kflight</code></strong> — export selected flights (multi-select supported) as Kite's portable flight file, to
-  move them to another install.</li>
+  move them to another install. The file carries the mission a flight is linked to and the weather
+  recorded with it; on import the mission is added to the Mission Manager's library, or the flight
+  is linked to the entry that is already there.</li>
 <li><strong>Original log file</strong> — re-export the onboard log stored with the flight: an INAV Blackbox
   (<code>.bbl</code> / <code>.txt</code>), ArduPilot Dataflash (<code>.bin</code>) or PX4 ULog (<code>.ulg</code>). For a flight that came out of a multi-flight
   <code>.bbl</code>, this is that flight's own log, not the whole download. Imported <code>.tlog</code> / <code>.rawmsp</code> telemetry is parsed

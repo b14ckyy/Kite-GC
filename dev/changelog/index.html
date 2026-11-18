@@ -2085,6 +2085,9 @@ stays <em>Stable releases</em>. <a href="https://github.com/b14ckyy/Kite-GC/pull
   second; when unsure, the flight stays unassigned. Existing flights are linked once during
   the database upgrade. The post-flight summary and the flight detail show the vehicle and
   let you change it. <a href="https://github.com/b14ckyy/Kite-GC/pull/228">#228</a></li>
+<li><strong><code>.kflight</code> files carry the linked mission and the recorded weather</strong> — an imported flight
+  shows its mission again, and the weather widget works in its replay. Kite 1.0 imports such a
+  file without them. [#318]</li>
 <li><strong><code>.kflight</code> files of INAV Blackbox flights are smaller</strong> — a file written by 2.0 still
   imports into Kite 1.0. <a href="https://github.com/b14ckyy/Kite-GC/pull/232">#232</a></li>
 <li><strong>Compact Database runs in the background</strong> behind a notice, is refused while a flight is
