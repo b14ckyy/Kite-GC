@@ -145,9 +145,25 @@ PX4 ULog note: PX4 doesn't log a throttle *output*, so a replayed `.ulg` flight 
     flight, its track and its records, but not the stored original), so **HI-RES** replay and the
     original-log export are desktop features, and so is the **Open** button.
 
+## Selecting several flights
+
+Press **Select** next to the search field. The panel shows only the list, and every flight and every
+group in it gets a tick box: a tap on a flight ticks it instead of opening it, the box of a group
+ticks all its flights. **All** ticks everything the search currently shows, **None** clears the
+ticks. They stay when you change the search, so you can collect flights over several searches.
+**Done** leaves the mode and drops the ticks. A long press on a flight (touch) or **Ctrl/⌘-click**
+(desktop) starts the same mode with that flight ticked.
+
+- **.kflight** exports the ticked flights into one file. A linked partner flight goes with its
+  flight, ticked or not.
+- **Delete** removes the ticked flights after a confirmation — exactly those: a linked partner
+  that is not ticked stays. The confirmation offers to add the battery usage of the deleted
+  flights to the lifetime totals of their batteries first.
+
 ## Exporting
 
-- **`.kflight`** — export selected flights (multi-select supported) as Kite's portable flight file, to
+- **`.kflight`** — export the open flight, or several at once (see
+  [Selecting several flights](#selecting-several-flights)), as Kite's portable flight file, to
   move them to another install. The file carries the mission a flight is linked to and the weather
   recorded with it; on import the mission is added to the Mission Manager's library, or the flight
   is linked to the entry that is already there.

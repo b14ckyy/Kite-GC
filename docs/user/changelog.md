@@ -243,6 +243,10 @@ inside the box of the feature release they belong to, so the notes for one relea
       disconnect; it is replaced by **Export database**. A database copy already in your folder
       stays there. Raw logs now arrive in the chosen folder — they are moved there at disconnect,
       and at the first start every raw log recorded so far. [#325]
+    - **Logbook: select several flights** — **Select** next to the search field puts a tick box
+      on every flight and every group, so several flights can be exported into one `.kflight` or
+      deleted in one go, by touch as well. An export now shows its progress instead of leaving
+      the window unresponsive. See [Logbook](guides/logbook.md#selecting-several-flights). [#327]
     - **INAV Blackbox import without a helper program** — Kite decodes INAV Blackbox logs itself;
       imports are faster and no longer lose the frames after a flight-mode change. [#234]
     - **PX4 ULog import** — the logbook imports `.ulg` logs, split into flights like any other
