@@ -12,7 +12,7 @@
   import type { FcInfo, PortInfo, BleDeviceInfo, TransportType, ProtocolType } from "$lib/stores/connection";
   import { settings } from "$lib/stores/settings";
   import { tickSnapshot } from "$lib/helpers/telemetryTick.svelte";
-  import { isAndroid, isMobile, isTablet, isPhone as isPhoneDevice, hasSerialPorts, hasVideo, hasRcControl, logPlayerWidth } from "$lib/platform";
+  import { isAndroid, isMobile, isTablet, isPhone as isPhoneDevice, hasSerialPorts, hasVideo, hasRcControl, logPlayerWidth, deviceProfile } from "$lib/platform";
   import { isDebugMode } from "$lib/stores/debug";
   import { telemetry } from "$lib/stores/telemetry";
   import { startRadarListeners, configureRadar, setRadarCenter, setRadarNode } from "$lib/stores/radarTracking";
@@ -660,12 +660,22 @@
   $effect(() => {
     if (selectedProtocol !== prevProtocol) {
       prevProtocol = selectedProtocol;
+      if (onInternalUart) return;
       if (selectedProtocol === 'mavlink') {
         selectedBaud = 57600;
       } else {
         selectedBaud = 115200;
       }
     }
+  });
+  // The internal UART runs at its radio module's baud (AX12 ELRS: 460800): set once when the
+  // selection moves onto it; the protocol default never overrides it.
+  const INTERNAL_UART_BAUD = 460800;
+  let onInternalUart = false;
+  $effect(() => {
+    const internal = ports.some((p) => p.path === selectedPort && p.port_type === 'internal-uart');
+    if (internal && !onInternalUart) selectedBaud = INTERNAL_UART_BAUD;
+    onInternalUart = internal;
   });
   bleDevices.subscribe((d) => {
     bleDeviceList = d;
@@ -988,6 +998,8 @@
   const saved = get(settings);
   selectedPort = saved.lastPort;
   selectedBaud = saved.lastBaud;
+  // A restored internal UART keeps its saved baud instead of being reset to the module default.
+  onInternalUart = deviceProfile !== null && saved.lastPort.startsWith('/dev/tty');
   const startupProtocol = resolveStartupProtocol(saved);
   selectedProtocol = startupProtocol;
   // Restore the full last-used connection path so nothing has to be re-entered. A serial value is only
@@ -1072,6 +1084,8 @@
       flightLog: s.flightLoggingEnabled, rawLog: s.flightLogRawEnabled,
       batteryAlertPct: s.batteryAlertPct, mapProvider: s.mapProvider,
       uiScale: s.uiScale, logLevel: savedLogLevel,
+      device: deviceProfile, viewport: `${window.innerWidth}x${window.innerHeight}@${window.devicePixelRatio}`,
+      ua: navigator.userAgent,
     });
     void invoke('log_session_settings', { summary }).catch(() => {});
   }

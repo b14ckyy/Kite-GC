@@ -68,6 +68,7 @@
     "bleScanning": "Vyhľadáva sa...",
     "bleScan": "Vyhľadať BLE zariadenia",
     "bluetooth": "Bluetooth",
+    "internalUart": "Interný UART (modul ELRS)",
     "renameBtPort": "Premenovať tento Bluetooth port",
     "btNamePlaceholder": "Vlastný názov",
     "btNameSave": "Uložiť názov",
@@ -712,6 +713,7 @@
     "privacy": "Zásady ochrany súkromia",
     "community": "Komunita",
     "supportedFirmware": "Podporovaný firmvér autopilota",
+    "runtime": "Prostredie",
     "thirdParty": "Licencie tretích strán",
     "thirdPartyNote": "Pribalené komponenty a ich licencie. Nepriame závislosti majú kompatibilné permisívne licencie.",
     "close": "Zavrieť"

@@ -13,6 +13,8 @@ mod flightlog;
 mod flightmode;
 mod github_release;
 mod hid;
+#[cfg(target_os = "ios")]
+mod ios_device;
 mod link_presence;
 mod link_stats;
 mod link_status;
@@ -448,6 +450,11 @@ pub fn run() {
             // own idea of it (see `android::log_resolved_dirs`).
             #[cfg(target_os = "android")]
             android::log_resolved_dirs(_app.handle());
+            // At startup, so every mobile log carries the hardware identification.
+            #[cfg(target_os = "android")]
+            android::device::profile();
+            #[cfg(target_os = "ios")]
+            ios_device::log_model();
 
             {
                 use tauri::Manager;

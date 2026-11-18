@@ -51,3 +51,6 @@
 -keep class com.kitegc.app.LinkService { *; }
 # Install-source lookup (android/install_source.rs → InstallSource) — JNI-only, same rule.
 -keep class com.kitegc.app.InstallSource { *; }
+# Device profile (android/device.rs → DeviceProfile): profile/internalSerialPorts are JNI-only,
+# same rule.
+-keep class com.kitegc.app.DeviceProfile { *; }

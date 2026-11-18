@@ -68,6 +68,7 @@
     "bleScanning": "Сканиране...",
     "bleScan": "Сканиране за BLE устройства",
     "bluetooth": "Bluetooth",
+    "internalUart": "Вътрешен UART (модул ELRS)",
     "renameBtPort": "Преименувай този Bluetooth порт",
     "btNamePlaceholder": "Персонализирано име",
     "btNameSave": "Запази името",
@@ -712,6 +713,7 @@
     "privacy": "Поверителност",
     "community": "Общност",
     "supportedFirmware": "Поддържан фърмуер на автопилот",
+    "runtime": "Среда",
     "thirdParty": "Лицензи на трети страни",
     "thirdPartyNote": "Пакетни компоненти и техните лицензи. Преходните зависимости носят съвместими разрешителни лицензи.",
     "close": "затвори"

@@ -68,6 +68,7 @@
     "bleScanning": "Buscando...",
     "bleScan": "Buscar dispositivos BLE",
     "bluetooth": "Bluetooth",
+    "internalUart": "UART interno (módulo ELRS)",
     "renameBtPort": "Renombrar este puerto Bluetooth",
     "btNamePlaceholder": "Nombre personalizado",
     "btNameSave": "Guardar nombre",
@@ -712,6 +713,7 @@
     "privacy": "Política de privacidad",
     "community": "Comunidad",
     "supportedFirmware": "Firmware de autopiloto compatible",
+    "runtime": "Entorno",
     "thirdParty": "Licencias de terceros",
     "thirdPartyNote": "Componentes incluidos y sus licencias. Las dependencias transitivas tienen licencias permisivas compatibles.",
     "close": "Cerrar"

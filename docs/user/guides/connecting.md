@@ -88,6 +88,12 @@ COM ports — Windows and Linux present both as serial ports.
     asks per device — pick Kite in the dialog when you plug the cable in). **iPhone and iPad have no Serial transport** — use
     **BLE**, **TCP** or **UDP** there.
 
+!!! note "RadioMaster AX12"
+    On the AX12 transmitter Kite talks to the built-in ELRS module directly — no cable, no Wi-Fi
+    bridge. Choose **Serial**; the port list carries an extra entry, **`/dev/ttyS1` — Internal UART
+    (ELRS module)**. Selecting it sets the baud rate to **460800**, the rate the module runs at; if
+    yours is set differently, change it afterwards. Kite always uses the phone layout on this device.
+
 1. **Transport** → **Serial**.
 2. **Port** — pick it from the list. The list refreshes by itself; a freshly plugged-in board is
    auto-selected. (Unsure which port is yours? Open the dropdown, unplug the board, reopen — the entry

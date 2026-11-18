@@ -24,10 +24,22 @@ export const isAndroid = /Android/i.test(ua);
  *  mobile defaults) — never gate a capability on it: use the `has*` flags (Android has USB serial, iOS none). */
 export const isMobile = isIOS || isAndroid;
 
-/** True on a phone: iPhone/iPod, or Android carrying the "Mobile" UA token (Chromium sets it on
- *  phones and omits it on tablets). UA-based, so orientation-independent — a landscape phone never
- *  becomes a tablet. Used to gate phone-only layout that must NOT affect tablets. */
-export const isPhone = /iPhone|iPod/i.test(ua) || (isAndroid && /Mobile/i.test(ua));
+/** Known ground-station hardware, from the `KiteDevice/<name>` token the Android app module appends
+ *  to the WebView user-agent (DeviceProfile.kt — the identification rule lives there, in one place).
+ *  `null` on every device it does not recognise, which is every stock phone and tablet. */
+export const deviceProfile: string | null = (() => {
+  const m = /KiteDevice\/([A-Za-z0-9_-]+)/.exec(ua);
+  return m ? m[1] : null;
+})();
+
+/** RadioMaster AX12: its density setting puts it on either side of Chromium's 600 dp "Mobile"
+ *  threshold, so the profile forces the phone chrome on this handheld. */
+export const isAx12 = deviceProfile === 'ax12';
+
+/** True on a phone: iPhone/iPod, Android with the "Mobile" UA token (absent on tablets), or a known
+ *  handheld transmitter. UA-based, so orientation-independent. Gates phone-only layout that must
+ *  NOT affect tablets. */
+export const isPhone = /iPhone|iPod/i.test(ua) || (isAndroid && /Mobile/i.test(ua)) || isAx12;
 
 /** True on a tablet (iPad, Android tablets): a mobile build that is not a phone. */
 export const isTablet = isMobile && !isPhone;
@@ -85,6 +97,8 @@ if (typeof document !== 'undefined' && isMobile) {
   if (isPhone) document.documentElement.classList.add('is-phone');
   // Separate tablet tag (iPad, future Android tablets) for tablet-only rules that must not touch the phone.
   else document.documentElement.classList.add('is-tablet');
+  // Known hardware (`data-device="ax12"`) for device-specific rules; absent on stock devices.
+  if (deviceProfile) document.documentElement.dataset.device = deviceProfile;
   document.documentElement.style.setProperty('--safe-bottom', 'env(safe-area-inset-bottom, 0px)');
   // `--safe-top` covers the status bar / notch strip so the toolbar and top-anchored map layers
   // are not overlaid by the iOS status bar (clock, battery). Same viewport-fit=cover requirement.

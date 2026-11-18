@@ -6,7 +6,7 @@
 
 // Platform seam: every transport module exists on EVERY target under one name, chosen only here — callers
 // never carry a target cfg. iOS gets a serial stand-in (opens fail, empty list); Android serial is USB
-// Host (UsbSerial.kt); BLE is btleplug / CoreBluetooth / BleSerial.kt behind one surface.
+// Host (UsbSerial.kt) plus built-in tty nodes; BLE is btleplug / CoreBluetooth / BleSerial.kt behind one surface.
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod serial;
 #[cfg(target_os = "ios")]

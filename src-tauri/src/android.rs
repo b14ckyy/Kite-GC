@@ -5,6 +5,7 @@
 //! than Tauri's `app_data_dir()` because the file logger needs it before the Tauri builder exists.
 
 pub mod content;
+pub mod device;
 pub mod install_source;
 pub mod jvm;
 pub mod link_service;

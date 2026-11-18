@@ -68,6 +68,7 @@
     "bleScanning": "扫描中...",
     "bleScan": "扫描蓝牙设备",
     "bluetooth": "蓝牙",
+    "internalUart": "内置 UART（ELRS 模块）",
     "renameBtPort": "重命名此蓝牙端口",
     "btNamePlaceholder": "自定义名称",
     "btNameSave": "保存名称",
@@ -712,6 +713,7 @@
     "privacy": "隐私政策",
     "community": "社区",
     "supportedFirmware": "支持的飞控固件",
+    "runtime": "运行环境",
     "thirdParty": "第三方许可证",
     "thirdPartyNote": "捆绑组件及其许可证。传递依赖带有兼容的宽松许可证。",
     "close": "关闭"

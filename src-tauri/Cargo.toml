@@ -52,8 +52,8 @@ mavlink = { version = "0.17", default-features = false, features = ["std", "ardu
 num-traits = "0.2"  # FromPrimitive for lossless MavCmd/MavFrame <-> int (mission codec round-trip)
 tiff = "0.9"  # decode Copernicus GLO-30 GeoTIFF DEM tiles (Float32, DEFLATE, predictor 3)
 
-# Desktop-only: no mobile backend (serialport, btleplug, starship-battery; keepawake does not compile
-# off Windows/Linux/macOS) or no mobile meaning (window-state, updater). Mobile swaps in its own
+# Desktop-only: no mobile backend (btleplug, starship-battery; keepawake does not compile off
+# Windows/Linux/macOS; serialport is Android's tty backend only, see below) or no mobile meaning (window-state, updater). Mobile swaps in its own
 # implementation behind transport/ (transport/mod.rs) or a platform stand-in.
 [target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
 serialport = "4"
@@ -71,6 +71,9 @@ trash = "5"  # recycle bin / trash for the database backup the user removes (com
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.21"
 ndk-context = "0.1"
+# Posix tty backend for built-in UARTs of Android RC transmitters (/dev/ttyS1); USB stays on the USB
+# Host API. No udev on Android, hence no default features.
+serialport = { version = "4", default-features = false }
 # MediaCodec hardware video decode + ANativeWindow for the native RTSP sink (MOBILE_RTSP P2.2):
 # the safe wrappers over the NDK's AMediaCodec/AMediaFormat C API (video/android_sink.rs).
 ndk = { version = "0.9", default-features = false, features = ["media", "api-level-30"] }
