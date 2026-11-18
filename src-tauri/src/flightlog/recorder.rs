@@ -683,7 +683,7 @@ pub fn commit_pending_session(session: &PendingSession) -> Result<i64, String> {
     #[cfg(not(test))]
     if let Some((lat, lon)) = valid_start(session.flight.start_lat, session.flight.start_lon) {
         let db_path = session.db_path.to_string_lossy().to_string();
-        let start_time = session.flight.start_time.clone();
+        let start_time = session.flight.start_time.to_rfc3339();
         tauri::async_runtime::spawn(enrich_flight_async(flight_id, start_time, lat, lon, db_path));
     }
     log::info!("Pending session committed as flight {}", flight_id);
