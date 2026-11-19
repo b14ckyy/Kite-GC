@@ -14,7 +14,7 @@
     mission, geoWaypoints, selectedWpIndex, selectedWpIndices,
     selectWpSingle, toggleWpSelection, clearWpSelection, editMode, showMission, replayActive, launchPoint,
     missionAddWp, missionUpdateWp, missionRemoveWp, missionInsertWp,
-    missionReorderWp, beginUndoGroup, endUndoGroup,
+    missionSetWaypoints, normalizeSlot, pushUndo, beginUndoGroup, endUndoGroup,
     getTotalWpCount, MAX_WAYPOINTS_TOTAL,
     ALT_MODE_REL, ALT_MODE_AMSL, ALT_MODE_AGL,
     type Waypoint, type Mission, type LaunchPoint, WpAction, hasLocation, isModifier, toDeg, fromDeg, altFromM,
@@ -170,6 +170,59 @@
       else break;
     }
     return mods;
+  }
+
+  /** A waypoint with what belongs to it: its modifiers and its fly-by-home child. */
+  function wpGroups(waypoints: Waypoint[]): Waypoint[][] {
+    const groups: Waypoint[][] = [];
+    for (const w of waypoints) {
+      if ((isModifier(w.action) || isFlyByHome(w)) && groups.length > 0) groups[groups.length - 1].push(w);
+      else groups.push([w]);
+    }
+    return groups;
+  }
+
+  function groupIndexOf(groups: Waypoint[][], idx: number): number {
+    let start = 0;
+    for (let g = 0; g < groups.length; g++) {
+      if (idx < start + groups[g].length) return g;
+      start += groups[g].length;
+    }
+    return -1;
+  }
+
+  /** An RTH ends the mission. Its group trades places with none: a waypoint moved behind it is out of reach. */
+  function canMoveWp(waypoints: Waypoint[], idx: number, dir: -1 | 1): boolean {
+    const groups = wpGroups(waypoints);
+    const from = groupIndexOf(groups, idx);
+    const to = from + dir;
+    const endsMission = (g: Waypoint[]) => g.some((w) => w.action === WpAction.Rth);
+    return from >= 0 && to >= 0 && to < groups.length && !endsMission(groups[from]) && !endsMission(groups[to]);
+  }
+
+  /** Move a waypoint one place, together with its group: moved alone it would leave its modifiers behind,
+   *  and a modifier at the head of the list belongs to no waypoint. */
+  async function moveWpGroup(idx: number, dir: -1 | 1) {
+    const before = currentMission.waypoints;
+    if (!canMoveWp(before, idx, dir)) return;
+    const groups = wpGroups(before);
+    const from = groupIndexOf(groups, idx);
+    const to = from + dir;
+    const [moved] = groups.splice(from, 1);
+    groups.splice(to, 0, moved);
+    const order = groups.flat();
+    // A jump names its target by list position: it follows the waypoint it pointed at.
+    const after = order.map((w) => {
+      if (w.action !== WpAction.Jump) return w;
+      const target = before[w.p1 - 1];
+      const at = target ? order.indexOf(target) : -1;
+      return at >= 0 ? { ...w, p1: at + 1 } : w;
+    });
+    const newIdx = groups.slice(0, to).reduce((n, g) => n + g.length, 0);
+    pushUndo();
+    // `mission_set` takes the list as it is: numbers and the end flag are set here.
+    await missionSetWaypoints(normalizeSlot(after));
+    selectWpSingle(newIdx);
   }
 
   function isFlightPathWp(action: WpAction): boolean {
@@ -360,8 +413,8 @@
     html += `</select></div>`;
 
     html += `<div class="wpe-actions">`;
-    html += `<button data-action="moveUp" ${idx <= 0 ? 'disabled' : ''} title="${$t('missionLayer.moveUp')}">▲</button>`;
-    html += `<button data-action="moveDown" ${idx >= total - 1 ? 'disabled' : ''} title="${$t('missionLayer.moveDown')}">▼</button>`;
+    html += `<button data-action="moveUp" ${canMoveWp(currentMission.waypoints, idx, -1) ? '' : 'disabled'} title="${$t('missionLayer.moveUp')}">▲</button>`;
+    html += `<button data-action="moveDown" ${canMoveWp(currentMission.waypoints, idx, 1) ? '' : 'disabled'} title="${$t('missionLayer.moveDown')}">▼</button>`;
     html += `<button data-action="remove" class="wpe-remove" title="${$t('missionLayer.removeWp')}">✕</button>`;
     html += `</div></div>`;
     return html;
@@ -514,12 +567,8 @@
       missionInsertWp(insertIdx, modAction, 0, 0, 0, p1, p2);
     });
 
-    el.querySelector('button[data-action="moveUp"]')?.addEventListener('click', () => {
-      if (idx > 0) { missionReorderWp(idx, idx - 1); selectWpSingle(idx - 1); }
-    });
-    el.querySelector('button[data-action="moveDown"]')?.addEventListener('click', () => {
-      if (idx < currentMission.waypoints.length - 1) { missionReorderWp(idx, idx + 1); selectWpSingle(idx + 1); }
-    });
+    el.querySelector('button[data-action="moveUp"]')?.addEventListener('click', () => { void moveWpGroup(idx, -1); });
+    el.querySelector('button[data-action="moveDown"]')?.addEventListener('click', () => { void moveWpGroup(idx, 1); });
     el.querySelector('button[data-action="remove"]')?.addEventListener('click', () => {
       // WP + its attached modifiers = a single undo step.
       beginUndoGroup();
@@ -641,7 +690,14 @@
 
         if (editing && primaryForPopup && !greyed && !patternActive) {
           const htmlContent = buildEditorHtml(wp, i, m.waypoints.length, dn, modifiers, fbhChild);
-          const doAttach = () => setTimeout(() => { if (editorPopup) attachEditorEvents(editorPopup, wp, i, modifiers, fbhChild); }, 50);
+          // Wired only onto the content this render wrote: a second render within the delay has its own
+          // wiring, and this one's waypoint must not land on that content as well.
+          const doAttach = () => {
+            const popup = editorPopup;
+            setTimeout(() => {
+              if (popup && popup === editorPopup && htmlContent === editorPopupHtml) attachEditorEvents(popup, wp, i, modifiers, fbhChild);
+            }, 50);
+          };
           if (keepPopup && editorPopup) {
             editorPopup.setLatLng(latLng);
             // Redraw guard: rewrite + re-wire only when the content actually changed, so unrelated map
