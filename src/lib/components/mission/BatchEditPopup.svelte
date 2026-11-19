@@ -122,10 +122,16 @@
     beginUndoGroup(); // batch alt-mode change = one undo step
     try {
       const target = ((altModeCommon ?? ALT_MODE_REL) + 1) % 3;
-      for (const { i, wp } of altWps) {
+      // All or none: one waypoint without terrain data leaves every mode as it is.
+      const altitudes: number[] = [];
+      for (const { wp } of altWps) {
         const from = wpMode(wp);
         const altitude = from === target ? wp.altitude : await convertAltCm(wp, from, target);
-        await missionUpdateWp(i, { ...wp, alt_mode: target, altitude });
+        if (altitude == null) return;
+        altitudes.push(altitude);
+      }
+      for (const [k, { i, wp }] of altWps.entries()) {
+        await missionUpdateWp(i, { ...wp, alt_mode: target, altitude: altitudes[k] });
       }
       load();
     } finally {

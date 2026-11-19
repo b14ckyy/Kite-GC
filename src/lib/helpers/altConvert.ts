@@ -19,7 +19,7 @@ async function terrainElev(lat: number, lon: number): Promise<number | null> {
   }
 }
 
-export async function convertAltCm(wp: Waypoint, fromMode: number, toMode: number): Promise<number> {
+export async function convertAltCm(wp: Waypoint, fromMode: number, toMode: number): Promise<number | null> {
   if (fromMode === toMode) return wp.altitude;
   const valM = wp.altitude / 100;
   const lp = get(launchPoint);
@@ -28,7 +28,8 @@ export async function convertAltCm(wp: Waypoint, fromMode: number, toMode: numbe
   const wpGround = needWpGround ? await terrainElev(toDeg(wp.lat), toDeg(wp.lon)) : 0;
   const launchGround = needLaunch ? (lp ? await terrainElev(lp.lat, lp.lng) : null) : 0;
   if ((needWpGround && wpGround == null) || (needLaunch && launchGround == null)) {
-    return wp.altitude; // can't convert safely → keep value
+    // No ground reference: the number must not be carried into another mode (30 m AGL is not 30 m REL).
+    return null;
   }
   // to absolute MSL
   let absM: number;
