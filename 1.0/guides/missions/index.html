@@ -2244,7 +2244,11 @@ take-off is anchored on it). On PX4 there's no reserved home item at all.</p>
 <li><strong>INAV</strong> offers three modes: <strong>REL</strong> (relative to the home/launch point — the usual default), <strong>AMSL</strong>
   (absolute, above mean sea level) and <strong>AGL</strong> (above ground level / terrain-following). AGL is a
   <strong>planning aid</strong>: because INAV itself only stores REL/AMSL, Kite resolves each AGL point to an absolute
-  altitude (using terrain elevation) when the mission is uploaded or exported.</li>
+  altitude (using terrain elevation) when the mission is uploaded or exported. Without terrain data for
+  an AGL point — no internet connection and the area not loaded before, or a location without elevation
+  data such as open sea — the upload or export is refused and names the waypoint; nothing is sent to
+  the aircraft. For the same reason the altitude mode of a waypoint cannot be switched while the
+  terrain data it needs is missing.</li>
 <li><strong>ArduPilot / PX4</strong> set a MAVLink <strong>altitude frame</strong> per item — <strong>relative</strong> (to home), <strong>absolute</strong>
   (AMSL) or <strong>terrain</strong> (terrain-following).</li>
 </ul>
