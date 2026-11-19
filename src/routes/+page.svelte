@@ -116,7 +116,7 @@
   import { homePosition, setVehicleHome } from '$lib/stores/home';
   import { isActive, links, activeVehicleId, refreshLinks } from '$lib/stores/vehicles';
   import { parseVehicleId } from '$lib/helpers/vehicleId';
-  import { ingestFcGuidedTarget, ingestVehicleGuidedTarget } from '$lib/controllers/vehicleControl';
+  import { ingestFcGuidedTarget, ingestVehicleGuidedTarget, ingestLandedState, ingestSystemStatus } from '$lib/controllers/vehicleControl';
   import { MAP_PROVIDERS } from "$lib/config/mapProviders";
   import { tileCacheStats, setCacheMaxMB, clearCache } from "$lib/cache/tileCache";
   import { weatherTempDisplayFromC, weatherWindDisplayFromMs, weatherTempCFromDisplay, weatherWindMsFromDisplay, canonicalWeatherDescription } from "$lib/helpers/weather";
@@ -4013,6 +4013,11 @@
       if (event.payload.vehicleId) ingestVehicleGuidedTarget(event.payload.vehicleId, event.payload.lat, event.payload.lon);
       if (!isActive(event.payload)) return;
       ingestFcGuidedTarget(event.payload.lat, event.payload.lon);
+    });
+    void listen<{ landed_state?: number; system_status?: number; vehicleId?: string }>('vehicle-flight-state', (event) => {
+      if (!isActive(event.payload)) return;
+      if (event.payload.landed_state != null) ingestLandedState(event.payload.landed_state);
+      if (event.payload.system_status != null) ingestSystemStatus(event.payload.system_status);
     });
   }
 

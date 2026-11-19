@@ -1278,6 +1278,13 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
                     r.on_flightmode(&fm);
                 }
             }
+            // MAV_STATE: ArduPlane / ArduCopter report ACTIVE only while flying, PX4 while armed.
+            let _ = app_handle.emit("vehicle-flight-state", serde_json::json!({ "system_status": hb.system_status as u8 }));
+        }
+
+        // ── EXTENDED_SYS_STATE → vehicle-flight-state (MAV_LANDED_STATE) ─
+        MavMessage::EXTENDED_SYS_STATE(st) => {
+            let _ = app_handle.emit("vehicle-flight-state", serde_json::json!({ "landed_state": st.landed_state as u8 }));
         }
 
         // ── HOME_POSITION → home-position ───────────────────────────
