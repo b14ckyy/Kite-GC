@@ -1317,7 +1317,12 @@ const ALT_RELATIVE_PROTOCOL_SQL: &str =
 fn add_nav_target_columns(conn: &Connection) -> SqlResult<()> {
     for column in ["target_lat", "target_lon", "target_alt_m"] {
         if !column_exists(conn, "telemetry_records", column)? {
-            conn.execute_batch(&format!("ALTER TABLE telemetry_records ADD COLUMN {column} REAL;"))?;
+            // Two opens of a database already at v22 run this unlocked: the loser's ALTER finds the column.
+            if let Err(e) = conn.execute_batch(&format!("ALTER TABLE telemetry_records ADD COLUMN {column} REAL;")) {
+                if !column_exists(conn, "telemetry_records", column)? {
+                    return Err(e);
+                }
+            }
         }
     }
     Ok(())

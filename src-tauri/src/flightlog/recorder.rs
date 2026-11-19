@@ -1734,6 +1734,11 @@ impl FlightRecorder {
     /// Feed the canonical flight mode (protocol-agnostic). Stored per telemetry row so replay reads
     /// it directly — no re-classification. See docs/active/FLIGHT_MODE_UNIFIED.md.
     pub fn on_flightmode(&mut self, fm: &crate::flightmode::FlightModeState) {
+        // The target belongs to the mode it was reported in: until the FC reports the new mode's own, the
+        // last mission item must not stand in as a guided target.
+        if self.snapshot.mode_primary.as_deref() != Some(fm.primary.as_str()) {
+            self.snapshot.target = None;
+        }
         self.snapshot.mode_primary = Some(fm.primary.clone());
         self.snapshot.mode_modifiers = if fm.modifiers.is_empty() {
             None

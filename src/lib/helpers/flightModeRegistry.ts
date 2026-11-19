@@ -139,7 +139,6 @@ function def(id: string | null | undefined): ModeDef {
   return MODE_REGISTRY[id] ?? { label: id, category: 'other' };
 }
 
-/** Display label for a canonical mode id (primary badge). */
 /** The canonical modes in which the FC's position target is the guided ("Fly Here") point — the modes
  *  the live Guided toggle stands for (`MavMode.guided`). In any other mode the same record field holds
  *  the mission item or home. */
@@ -151,6 +150,7 @@ export function guidedTargetOf(r: { mode_primary: string | null; target_lat: num
   return { lat: r.target_lat, lon: r.target_lon };
 }
 
+/** Display label for a canonical mode id (primary badge). */
 export function modeLabel(id: string | null | undefined): string {
   return def(id).label;
 }

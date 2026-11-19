@@ -1065,8 +1065,8 @@
     return L.divIcon({ className: 'guided-target-divicon', html, iconSize: [20, 20], iconAnchor: [10, 24] });
   }
 
-  /** Show/move/hide the Guided target marker + loiter ring: while connected and Guided is armed OR the FC is
-   *  in its guided mode (a target from another GCS shows too; FC-confirmed via POSITION_TARGET_GLOBAL_INT). The
+  /** Show/move/hide the Guided target marker + loiter ring: live while Guided is armed or the FC is in its
+   *  guided mode (FC-confirmed via POSITION_TARGET_GLOBAL_INT); in replay the recorded target, no ring. The
    *  fixed-wing ring is the loiter actually flown: the Fly-Here radius, else WP_LOITER_RAD / NAV_LOITER_RAD. */
   function updateGuidedTarget() {
     if (!map) return;

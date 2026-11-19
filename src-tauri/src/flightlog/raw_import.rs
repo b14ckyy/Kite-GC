@@ -391,6 +391,10 @@ fn update_from_mav(msg: &MavMessage, s: &mut Snap, armed: &mut bool, variant: &s
                 *armed = hb.base_mode.bits() & MavModeFlag::MAV_MODE_FLAG_SAFETY_ARMED.bits() != 0;
                 s.flight_mode_flags = Some(hb.custom_mode);
                 let fm = crate::flightmode::classify_mavlink(hb.custom_mode, variant);
+                // As in the live recorder: a target does not outlive the mode it was reported in.
+                if s.mode_primary.as_deref() != Some(fm.primary.as_str()) {
+                    s.target = None;
+                }
                 s.mode_primary = Some(fm.primary);
                 s.mode_modifiers = if fm.modifiers.is_empty() { None } else { Some(fm.modifiers.join(",")) };
             }
@@ -817,9 +821,6 @@ mod tests {
         assert_eq!(samples[0].t_ms, 4000);
     }
 
-    /// The `heading` column is course over ground, not the vehicle heading — `GLOBAL_POSITION_INT.hdg`
-    /// is the latter, so deriving the course from the fused velocity is what keeps a replayed crab
-    /// angle honest. WIND rides along here because both are read off the same message stream.
     #[test]
     fn the_position_target_is_recorded_and_zero_means_none() {
         let target = |lat_int: i32, lon_int: i32| {
@@ -837,12 +838,21 @@ mod tests {
             (1, 1, att()),
             (1, 1, target(0, 0)),
             (1, 1, att()),
+            (1, 1, target(481_000_000, 115_000_000)),
+            (1, 1, att()),
+            // A mode change (15 guided → 10 auto): the old mode's target does not carry over.
+            (1, 1, heartbeat(MavType::MAV_TYPE_FIXED_WING, MavAutopilot::MAV_AUTOPILOT_ARDUPILOTMEGA, 10)),
+            (1, 1, att()),
         ]);
         let (samples, _) = decode_tlog(&log);
         let targets: Vec<_> = samples.iter().map(|s| (s.rec.target_lat, s.rec.target_lon, s.rec.target_alt_m)).collect();
-        assert_eq!(targets, [(Some(48.1), Some(11.5), Some(120.0)), (None, None, None)]);
+        let set = (Some(48.1), Some(11.5), Some(120.0));
+        assert_eq!(targets, [set, (None, None, None), set, (None, None, None)]);
     }
 
+    /// The `heading` column is course over ground, not the vehicle heading — `GLOBAL_POSITION_INT.hdg`
+    /// is the latter, so deriving the course from the fused velocity is what keeps a replayed crab
+    /// angle honest. WIND rides along here because both are read off the same message stream.
     #[test]
     fn course_comes_from_velocity_and_wind_is_captured() {
         // Heading due east, but travelling due north: a 90° crab that `hdg` alone would hide.
