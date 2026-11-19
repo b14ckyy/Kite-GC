@@ -100,7 +100,11 @@ Each waypoint carries an altitude against a **reference**:
           offline) marks it with an **amber ring** on the map and an amber altitude in the list.
           **FC Upload**, **EEPROM Save** and saving a `.mission` file are locked, and the panel
           names the waypoint. **Save to library** stays available and keeps the AGL altitudes, so
-          nothing is lost until the terrain data is back.
+          nothing is lost until the terrain data is back. Saving a `.mission` file is locked only
+          for the mission that has such a waypoint; an upload sends all missions and is locked by
+          any of them.
+        - Kite asks for the terrain of an area once per session. If it was offline at that moment,
+          **restart Kite** once the connection is back; the lock then clears.
         - Switching a waypoint between altitude modes converts its altitude with the terrain, so
           it stays at the same height. That conversion is a convenience: while the data for it is
           missing the mode still changes and the **number is kept as it is** — set the right value
@@ -237,7 +241,8 @@ the aircraft will fly. If the library already holds exactly this mission, it is 
 and counts as that library entry — saving it again or linking it to a flight uses the entry instead of
 creating a second one. For INAV this also holds for a mission planned with **AGL** altitudes: the
 aircraft stores them converted to AMSL, Kite recognises the mission all the same and shows it as it is
-in the library, with its AGL altitudes. This needs the terrain data of the mission's area.
+in the library, with its AGL altitudes. The same holds for a `.mission` file you open. This needs the
+terrain data of the mission's area.
 
 ## Files & the mission library
 
