@@ -320,13 +320,9 @@
   let playbackLayerGroup: L.LayerGroup | undefined;
   let playbackMarker: L.Marker | undefined;
 
-  // ── Direction marker lines (heading + course-over-ground) ────────────
-  // Two short lines from the UAV nose: HDG (solid blue) along the FC heading, COG (dashed amber) along
-  // the ground track — the angle between them is the crab. Colours match the compass widget. Drawn from
-  // the SMOOTHED follow state (same filtering as the marker).
-  // One marker at the aircraft holds them as elements: a follow frame moves and turns them (compositor
-  // only) and repaints nothing but a line whose length changed. A map-sized canvas or SVG that changes
-  // on every follow frame costs the GPU its whole area per frame.
+  // ── Direction lines (HDG / COG / turn arc) ── colours match the compass widget. Elements of ONE marker at
+  // the aircraft, fed from the smoothed follow state: a follow frame only moves and turns them. A map-sized
+  // canvas or SVG changed per follow frame costs the GPU its whole area per frame.
   let dirMarker: L.Marker | undefined;
   let dirEls: { root: HTMLElement; hdg: HTMLElement[]; cog: HTMLElement[]; arc: SVGSVGElement; arcPaths: SVGPathElement[] } | undefined;
   // What is written to the elements, so an unchanged value writes no style.
@@ -1928,9 +1924,6 @@
     map.fire('moveend');
   }
 
-  /** Redraw the HDG/COG nose lines from the SMOOTHED follow state (so they track the UAV stably, the
-   *  same filtering as the marker). Hidden when there's no active marker; the COG line hides below walking
-   *  pace (COG is noise there). */
   function redrawDirLines() {
     if (!map) return;
     if (!$settings.directionLines || !activeFollowMarker || !followCurrent) {
@@ -1975,7 +1968,7 @@
     const zoom = map.getZoom();
     const ref = destinationPoint(lat, lon, 0, 100);
     const pxPerM = map.project([lat, lon], zoom).distanceTo(map.project([ref.lat, ref.lon], zoom)) / 100;
-    const lenPx = speed * DIR_LEAD_S * pxPerM; // 15 s of travel → the lines represent ground speed
+    const lenPx = speed * DIR_LEAD_S * pxPerM; // the lines represent ground speed
     const px = (v: number) => `${Math.round(v * 2) / 2}px`;
     const turn = (deg: number) => `rotate(${Math.round(deg * 10) / 10}deg)`;
     const write = (els: HTMLElement[], key: 'hdg' | 'cog', len: string, rot: string) => {
@@ -1985,9 +1978,7 @@
     write(dirEls.hdg, 'hdg', px(lenPx), turn(heading));
     write(dirEls.cog, 'cog', speed > DIR_COG_MIN_SPEED ? px(lenPx) : '0px', turn(course));
 
-    // Turn-radius arc: predicted ground path starting at the aircraft along COG, curving at the filtered
-    // turn rate. Arc length = 15 s of travel but capped at a 180° sweep (no spiral). Hidden when slow
-    // or nearly straight (the COG line already shows that case).
+    // Turn arc: hidden when slow or nearly straight — the COG line already shows that case.
     const rate = followCurrent.turnRate; // eased per-frame → smooth
     const sweep = Math.max(-TURN_MAX_SWEEP, Math.min(TURN_MAX_SWEEP, rate * DIR_LEAD_S)); // signed deg
     let d = '';
@@ -2521,6 +2512,7 @@
     map.on("moveend", saveMapState);
     map.on("zoomend", saveMapState);
     map.on("zoomend", onZoomEnd);   // resize the model canvas to the new zoom
+    map.on("zoom", redrawDirLines); // their lengths are pixels: a pinch must scale them with the map
     map.on("moveend", recomputeNight); // auto night: re-check after panning to a new region
     map.on("contextmenu", onMapContextMenu); // right-click → "Set GCS here" (manual)
     map.on("click", () => { if (gcsSelected) { gcsSelected = false; updateGcsAccuracyCircle(); } }); // deselect GCS
@@ -3273,7 +3265,7 @@
        browser pan may claim the touch. Leaflet's pinch runs on touch events and is not affected. */
     touch-action: none;
   }
-  .map.mini :global(.leaflet-marker-icon:not(.mission-wp-icon):not(.mission-fbh-icon) > *) {
+  .map.mini :global(.leaflet-marker-icon:not(.mission-wp-icon):not(.mission-fbh-icon):not(.dir-lines-icon) > *) {
     transform: scale(var(--marker-scale));
     transform-origin: 50% 50%;
   }

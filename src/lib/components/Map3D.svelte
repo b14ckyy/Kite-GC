@@ -388,9 +388,9 @@
   let chaseTarget = { lat: 0, lon: 0, alt: 0, heading: 0 };
   let chaseCurrent = { lat: 0, lon: 0, alt: 0, heading: 0 };
   let chaseInited = false;
-  // Lerp factor PER FRAME on purpose, camera loops at the display's rate (not on the frame limiter): a
-  // time-based factor makes the aircraft jitter fore / aft against the camera (0.3 m instead of 0.12 m
-  // per frame at 25 m/s). The price: the lag (230 ms at 60 Hz) shrinks on a faster display.
+  // Lerp factor PER FRAME on purpose, the camera loops run at the display's rate (not the frame limiter):
+  // a time-based factor makes the aircraft jitter fore / aft against the camera. Price: the lag (230 ms
+  // at 60 Hz) shrinks on a faster display.
   const CHASE_SMOOTHING = 0.07; // 0..1 — lower = smoother
   /** Whether an exponential camera lerp has effectively reached its target (≈cm / centi-degree —
    *  far below anything visible), so its rAF loop may go to sleep instead of rendering forever. */
@@ -847,13 +847,14 @@
     };
     const loaded = viewer.scene.globe.getHeight(Cesium.Cartographic.fromDegrees(lon, lat));
     place(loaded !== undefined && Number.isFinite(loaded) ? loaded : 0);
-    const placed = { lon: cam.positionCartographic.longitude, lat: cam.positionCartographic.latitude, heading: cam.heading };
+    const placed = { lon: cam.positionCartographic.longitude, lat: cam.positionCartographic.latitude, height: cam.positionCartographic.height, heading: cam.heading };
     void waitForTerrain(viewer).then(() => groundHeightAt(lat, lon)).then((ground) => {
       if (!viewer || viewer.isDestroyed() || !active || !isFreeLook()) return;
       const c = viewer.camera;
-      // Terrain collision may have lifted the camera; a pan or a turn is the pilot's.
+      // Terrain collision may have lifted the camera; a pan, a turn or a zoom in is the pilot's.
       const untouched = Math.abs(c.positionCartographic.longitude - placed.lon) < 1e-7
-        && Math.abs(c.positionCartographic.latitude - placed.lat) < 1e-7 && Math.abs(c.heading - placed.heading) < 1e-3;
+        && Math.abs(c.positionCartographic.latitude - placed.lat) < 1e-7 && Math.abs(c.heading - placed.heading) < 1e-3
+        && c.positionCartographic.height >= placed.height - 1;
       if (!untouched) return;
       place(ground);
       viewer.scene.requestRender();
@@ -1595,7 +1596,7 @@
     onDestroy(() => {
     chaseLerpActive = false;
     orbitLerpActive = false;
-    if (smRaf) cancelAnimationFrame(smRaf);
+    if (smRaf) cancelFrame(smRaf);
     if (radar3dCreateRaf) cancelAnimationFrame(radar3dCreateRaf);
     if (nightTimer3D) clearInterval(nightTimer3D);
     if (batteryPollId) clearInterval(batteryPollId);
@@ -1943,7 +1944,6 @@
       if (e instanceof Cesium.Entity) { viewer?.entities.remove(e); (rec as unknown as Record<string, unknown>)[k] = undefined; }
     }
   }
-  /** Whether any fleet record holds an entity. */
   function fleet3dDraws(): boolean {
     for (const r of fleet3d.values()) {
       if (r.model || r.trail || r.home || r.target || r.line || r.ring || r.mission?.length) return true;
@@ -2176,6 +2176,7 @@
   function clearFleet3D() {
     for (const rec of fleet3d.values()) { fleet3dRemove(rec, ['model', 'trail', 'home', 'target', 'line', 'ring']); for (const e of rec.mission ?? []) viewer?.entities.remove(e); }
     fleet3d.clear();
+    viewer?.scene.requestRender();
   }
   const unsubFleet3d: (() => void)[] = [
     fleetEnabled.subscribe((on) => {
@@ -3377,16 +3378,15 @@
     return Math.min(SM_MAX, Math.max(SM_MIN, median(buf) * SM_LEAD));
   };
   const cart = (lat: number, lon: number, alt: number) => Cesium.Cartesian3.fromDegrees(lon, lat, alt);
-  // A small AND slow change (under 0.25 m/s, 1°/s) after a long quiet gap is estimator drift on a standing
-  // aircraft: glided over the gap it would keep the view rendering for seconds per centimetre. It gets a
-  // short glide and stays out of the interval history; a sample of a moving aircraft never qualifies.
+  // A small AND slow change (under 0.5 m / 0.25 m/s, 0.5° / 1°/s) after a long gap is estimator drift on a
+  // standing aircraft: it gets a short glide and stays out of the interval history, so the view does not
+  // render for seconds per centimetre. A vehicle creeping below those rates on a slow link steps the same way.
   const SM_JITTER_M = 0.5, SM_JITTER_MPS = 0.25, SM_JITTER_RAD = 0.5 * Math.PI / 180, SM_JITTER_RADPS = Math.PI / 180, SM_JITTER_GLIDE = 0.25;
   const isJitter = (change: number, maxChange: number, maxRate: number, gap: number, interval: number) =>
     change < maxChange && gap > 2 * interval && change / gap < maxRate;
 
-  // ── Off-screen gate ── In the FREE camera an off-frustum craft still forced display-rate renders (every
-  // entity write marks the scene dirty, visible or not). Off screen the loop parks; `wakeSmoothingIfVisible`
-  // (preRender — only user camera motion renders then) wakes it.
+  // ── Off-screen gate ── free camera, craft off the frustum: the loop parks (no entity write, no frame);
+  // `wakeSmoothingIfVisible` (preRender — only camera motion renders then) wakes it.
   let smHidden = false;
   let smParked = false; // the 3D view is not shown
   const CRAFT_CULL_RADIUS_M = 60; // generous bound around the model + label
@@ -3488,8 +3488,9 @@
       aT0 = now;
     }
     // A sample that moved nothing draws nothing: a standing aircraft with a live link must not render
-    // at the telemetry rate. A parked loop (craft out of view) still gets its one try per sample.
-    if ((moved || smHidden) && !smRaf) smRaf = requestFrame(smTick);
+    // at the telemetry rate. A parked loop (craft out of view) still gets its one try per sample, and
+    // FPV re-checks its eye height against terrain that may have refined since.
+    if ((moved || smHidden || cameraMode === 'fpv') && !smRaf) smRaf = requestFrame(smTick);
   }
 
   function smTick() {
@@ -3549,7 +3550,7 @@
       applyUavLabel(); // fleet mode: the active vehicle's name instead of "UAV"
       viewer.scene.requestRender();
     } else if (uavEntity.model && color !== uavModelColor) {
-      // Only on a change: a new property marks the scene dirty, and this runs per telemetry event.
+      // Only on a change (this runs per telemetry event); an entity write requests no frame by itself.
       uavEntity.model.color = new Cesium.ConstantProperty(cesiumColor);
       viewer.scene.requestRender();
     }
@@ -4863,7 +4864,8 @@
           pitchDragLastY = e.endPosition.y;
           // Drag down → look further down (more negative); up → toward horizon. 0 … −90°.
           followPitch = Math.max(-Math.PI / 2, Math.min(0, followPitch - dy * FOLLOW_PITCH_SENS));
-          viewer?.scene.requestRender();
+          // Only the chase loop applies the pitch, and it rests while the aircraft stands.
+          if (!chaseLerpActive) { chaseLerpActive = true; requestAnimationFrame(chaseAnimationLoop); }
         }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
         camDragHandler.setInputAction(() => { pitchDragActive = false; }, Cesium.ScreenSpaceEventType.LEFT_UP);
       }
