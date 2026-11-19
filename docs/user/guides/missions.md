@@ -89,8 +89,9 @@ Each waypoint carries an altitude against a **reference**:
   altitude (using terrain elevation) when the mission is uploaded or exported. Without terrain data for
   an AGL point — no internet connection and the area not loaded before, or a location without elevation
   data such as open sea — the upload or export is refused and names the waypoint; nothing is sent to
-  the aircraft. For the same reason the altitude mode of a waypoint cannot be switched while the
-  terrain data it needs is missing.
+  the aircraft. Switching a waypoint between altitude modes converts its altitude with the terrain;
+  while that data is missing the mode still changes and the number is kept as it is — set the right
+  value for the new mode yourself.
 - **ArduPilot / PX4** set a MAVLink **altitude frame** per item — **relative** (to home), **absolute**
   (AMSL) or **terrain** (terrain-following).
 
