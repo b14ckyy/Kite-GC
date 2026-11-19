@@ -336,7 +336,7 @@ function saveCurrentToSlot() {
 
 /** Number and end flag as `Mission::renumber` sets them — a slot is only cached here, and a waypoint moved
  *  in from another mission brings its own. */
-function normalizeSlot(wps: Waypoint[]): Waypoint[] {
+export function normalizeSlot(wps: Waypoint[]): Waypoint[] {
   const last = wps.length - 1;
   return wps.map((w, i) => ({
     ...w,
