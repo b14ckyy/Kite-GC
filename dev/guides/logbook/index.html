@@ -2273,7 +2273,8 @@ ticks. They stay when you change the search, so you can collect flights over sev
   <a href="#selecting-several-flights">Selecting several flights</a>), as Kite's portable flight file, to
   move them to another install. The file carries the mission a flight is linked to and the weather
   recorded with it; on import the mission is added to the Mission Manager's library, or the flight
-  is linked to the entry that is already there.</li>
+  is linked to the entry that is already there. A file written by a <strong>newer</strong> Kite version is still
+  imported: Kite takes over what it knows and tells you that not all data could be imported.</li>
 <li><strong>Original log file</strong> — re-export the onboard log stored with the flight: an INAV Blackbox
   (<code>.bbl</code> / <code>.txt</code>), ArduPilot Dataflash (<code>.bin</code>) or PX4 ULog (<code>.ulg</code>). For a flight that came out of a multi-flight
   <code>.bbl</code>, this is that flight's own log, not the whole download. Imported <code>.tlog</code> / <code>.rawmsp</code> telemetry is parsed

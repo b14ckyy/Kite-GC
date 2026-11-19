@@ -1977,6 +1977,12 @@ stays <em>Stable releases</em>. <a href="https://github.com/b14ckyy/Kite-GC/pull
   See <a href="../guides/vehicle-control/#takeoff-return-and-landing">Vehicle control</a>. [#330]</li>
 <li><strong>Dialogs close through their buttons</strong> — a click beside a dialog that asks for a decision
   or holds input no longer dismisses it (and with it what you typed); Escape still cancels. [#330]</li>
+<li><strong>Replay shows the guided target</strong> (ArduPilot, PX4) — a flight recorded by Kite, or imported from
+  a <code>.tlog</code>, keeps the target the flight controller reported; in replay the Fly Here marker is back
+  wherever the aircraft flew in its guided mode.
+  See <a href="../guides/vehicle-control/#guided-flight-fly-here">Vehicle control</a>. [#331]</li>
+<li><strong><code>.kflight</code> from a newer Kite version</strong> — the import takes over what this version knows and
+  says that not all data could be imported, instead of leaving it out silently. [#331]</li>
 <li><strong>Storage use is shown</strong> — Settings → Data names the size of the flight database, and a
   flight's detail view shows what its data and its stored original log take. [#330]</li>
 <li><strong>INAV Blackbox import without a helper program</strong> — Kite decodes INAV Blackbox logs itself;

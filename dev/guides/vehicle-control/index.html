@@ -2147,6 +2147,10 @@ ground station shows up too. For a <strong>fixed-wing</strong> vehicle a dashed 
 loiter track the aircraft will actually fly: the radius you set for this Fly Here, or the firmware's
 configured default (<code>WP_LOITER_RAD</code> / <code>NAV_LOITER_RAD</code>) when you didn't set one. A copter simply holds
 the point, so it gets no circle. Both disappear when the FC leaves guided or the link drops.</p>
+<p><strong>In a replay</strong> of a flight recorded by Kite (or imported from a <code>.tlog</code>) the target is shown again, on
+both maps, wherever the aircraft was in its guided mode — without the loiter circle, whose radius is not
+recorded. Flights recorded before this was added, and flights imported from an onboard log, carry no
+target.</p>
 <p><strong>On the 3D map</strong> the target the flight controller reports is a green point on the ground with a dashed
 line from the aircraft, without the loiter circle. It appears with the FC's next report, about a second
 after you send it.</p>
