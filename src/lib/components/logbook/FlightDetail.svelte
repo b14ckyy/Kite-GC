@@ -6,7 +6,7 @@
 <script lang="ts">
   import { t } from 'svelte-i18n';
   import { convertAltitude, convertDistance, convertSpeed, convertTemperature, formatConverted } from '$lib/utils/units';
-  import { formatDurationSec, formatFlightDateTime, flightTzLabel, missionDbForFlight, flightLoggedWpCount, flightLinkMission, flightUnlinkMission, missionDbSave, missionDbFindByHash, missionDbGeocode, flightSetBatterySerial, batteryDbFindBySerial, batteryDbList, vehicleDbList, flightSetVehicle, getFlight } from '$lib/stores/flightlog';
+  import { formatDurationSec, formatFlightDateTime, flightTzLabel, flightDataSizes, type FlightDataSize, missionDbForFlight, flightLoggedWpCount, flightLinkMission, flightUnlinkMission, missionDbSave, missionDbFindByHash, missionDbGeocode, flightSetBatterySerial, batteryDbFindBySerial, batteryDbList, vehicleDbList, flightSetVehicle, getFlight } from '$lib/stores/flightlog';
   import type { Flight, LibraryMission, BatteryPack, Vehicle } from '$lib/stores/flightlogTypes';
   import type { InterfaceSettings } from '$lib/stores/settings';
   import { mission, missionFlags, loadedMissionId, markMissionSynced, filledMissionCount } from '$lib/stores/mission';
@@ -91,6 +91,17 @@
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   }
+
+  // What the flight's rows take in the database; a linked pair shows both parts.
+  let dataSizes = $state<FlightDataSize[]>([]);
+  $effect(() => {
+    const id = flight.id;
+    dataSizes = [];
+    if (minimized) return;
+    void flightDataSizes(id, dbPath)
+      .then((sizes) => { if (flight.id === id) dataSizes = sizes; })
+      .catch(() => {});
+  });
 
   let craftNameEditing = $state(false);
   let craftNameDraft = $state('');
@@ -593,8 +604,13 @@
       {formatFlightSource(flight.source)}
       {#if !minimized}<span class="flight-id-tag">#{flight.id}</span>{/if}
       {#if flight.linked_flight_id} 🔗 #{flight.linked_flight_id}{/if}
+      {#if !minimized}
+        {#each dataSizes as s (s.flight_id)}
+          <span class="raw-size" title={$t('logbook.dataSizeTip')}>{dataSizes.length > 1 ? `${formatFlightSource(s.source)} ` : ''}≈ {formatBytes(s.bytes)}</span>
+        {/each}
+      {/if}
       {#if !minimized && blackboxFile}
-        <span class="raw-size" title={blackboxFile.filename}>{formatBytes(blackboxFile.size_bytes)}</span>
+        <span class="raw-size" title={blackboxFile.filename}>{$t('logbook.rawFileSize', { values: { size: formatBytes(blackboxFile.size_bytes) } })}</span>
         {#if editable && onDeleteBlackbox}
           <button class="raw-del-btn" onclick={onDeleteBlackbox} title={$t('logbook.deleteBlackboxTitle')}>
             🗑 {$t('logbook.deleteBlackbox')}

@@ -1391,6 +1391,13 @@ pub fn flightlog_blackbox_file_info(
     Ok(info.map(|(filename, size_bytes)| BlackboxFileInfo { filename, size_bytes }))
 }
 
+/// Estimated database size of a flight's rows and of its linked partner's (`db::flight_data_sizes`).
+#[tauri::command(async)]
+pub fn flightlog_flight_data_sizes(flight_id: i64, db_path: Option<String>) -> Result<Vec<db::FlightDataSize>, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::flight_data_sizes(&conn, flight_id).map_err(|e| format!("DB error: {}", e))
+}
+
 /// Delete the stored original blackbox file, keeping the parsed flight; returns its original filename.
 #[tauri::command]
 pub fn flightlog_delete_blackbox_file(

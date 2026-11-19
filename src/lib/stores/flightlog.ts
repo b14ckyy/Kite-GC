@@ -818,6 +818,16 @@ export async function blackboxFileInfo(
   });
 }
 
+export interface FlightDataSize {
+  flight_id: number;
+  source: 'live' | 'blackbox';
+  bytes: number;
+}
+/** Estimated database size of a flight's own rows, and of its linked partner's — without the stored original log. */
+export async function flightDataSizes(flightId: number, dbPath: string): Promise<FlightDataSize[]> {
+  return invoke<FlightDataSize[]>('flightlog_flight_data_sizes', { flightId, dbPath: dbPath || undefined });
+}
+
 /** Delete the stored original blackbox file for a flight (keeps the parsed flight + replay data).
  *  Returns the deleted file's original filename, or null if there was nothing to delete. */
 export async function deleteBlackboxFile(flightId: number, dbPath: string): Promise<string | null> {
