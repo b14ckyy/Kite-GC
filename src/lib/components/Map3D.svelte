@@ -77,6 +77,7 @@
   } from "$lib/helpers/trackColors";
   import { modeColor, guidedTargetOf } from "$lib/helpers/flightModeRegistry";
   import { requestFrame, cancelFrame } from "$lib/helpers/frameLimiter";
+  import { isMobile } from "$lib/platform";
   import type { TelemetryRecord } from "$lib/stores/flightlog";
   import { toTelemetryData } from "$lib/adapters/telemetryAdapter";
   import type { PlatformType, UavModelOverride } from "$lib/helpers/uavIcons";
@@ -1205,8 +1206,10 @@
     viewer.scene.fog.enabled = true;
     viewer.scene.fog.density = 2.5e-4;       // default 2e-4, slightly denser
     viewer.scene.fog.minimumBrightness = 0.1;
-    // Limit tile cache to reduce RAM usage
-    viewer.scene.globe.tileCacheSize = 100;   // default 100 tiles
+    // Tiles kept after they leave the view. A low, flat look holds ~550 on its own and a full turn ~1800:
+    // below that every look back reloads terrain and imagery. About 0.6 MB of GPU memory per tile, hence
+    // the smaller pool on mobile.
+    viewer.scene.globe.tileCacheSize = isMobile ? 500 : 2000;
     // FXAA instead of MSAA (see msaaSamples: 0) — much cheaper anti-aliasing for the same look.
     viewer.scene.postProcessStages.fxaa.enabled = true;
 
