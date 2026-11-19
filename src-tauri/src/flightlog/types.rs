@@ -531,6 +531,12 @@ pub struct TelemetryRecord {
     pub nav_lat: Option<f64>,
     pub nav_lon: Option<f64>,
     pub nav_alt_m: Option<f64>,
+    /// The FC's position target (MAVLink POSITION_TARGET_GLOBAL_INT): the Fly-Here point in the guided
+    /// mode, the mission item or home in others — a reader picks by flight mode. The altitude is stored as
+    /// reported; its frame is not recorded.
+    pub target_lat: Option<f64>,
+    pub target_lon: Option<f64>,
+    pub target_alt_m: Option<f64>,
     /// Canonical flight mode (protocol-agnostic, see docs/active/FLIGHT_MODE_UNIFIED.md):
     /// `mode_primary` = canonical primary id; `mode_modifiers` = comma-separated modifier ids
     /// (None when none). The raw `active_flight_mode_flags` stays as a forensic field.

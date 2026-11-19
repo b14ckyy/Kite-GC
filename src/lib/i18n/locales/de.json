@@ -1436,6 +1436,7 @@
     "exportSuccess": "{count} Flug/Flüge erfolgreich exportiert.",
     "importKflightTitle": "Import abgeschlossen",
     "importKflightResult": "Importiert: {imported}, Übersprungen (Duplikate): {skipped}",
+    "importKflightNewer": "Diese Datei wurde von einer neueren Kite-Version geschrieben. Nicht alle Daten konnten übernommen werden – aktualisiere Kite, um alles zu erhalten.",
     "deleteTitle": "Flug löschen",
     "deleteWarning": "Diese Aktion kann nicht rückgängig gemacht werden. Welche Daten möchtest du löschen?",
     "deleteConsolidateBattery": "Akku-Nutzung dieses Flugs in die Lebensdauer-Summen des Akkus übernehmen",

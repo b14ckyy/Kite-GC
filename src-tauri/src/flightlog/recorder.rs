@@ -940,6 +940,8 @@ struct TelemetrySnapshot {
     // Navigation (MSP_NAV_STATUS) — mission context for replay
     active_wp_number: Option<i32>,
     nav_state: Option<i32>,
+    // The FC's position target (POSITION_TARGET_GLOBAL_INT), in any mode
+    target: Option<(f64, f64, f64)>,
     // GPS quality (MSP_GPSSTATISTICS)
     gps_hdop: Option<f64>,
     gps_eph: Option<f64>,
@@ -1695,6 +1697,12 @@ impl FlightRecorder {
         self.snapshot.nav_state = Some(data.nav_state as i32);
     }
 
+    /// Feed the FC's position target `(lat, lon, alt_m)` — see `TelemetryRecord::target_lat`. `None` = the
+    /// FC reports no target.
+    pub fn on_nav_target(&mut self, target: Option<(f64, f64, f64)>) {
+        self.snapshot.target = target;
+    }
+
     /// Feed GPS quality stats (MSP_GPSSTATISTICS) — HDOP/EPH/EPV carried in one message.
     pub fn on_gps_stats(&mut self, data: &GpsStatsData) {
         self.snapshot.gps_hdop = Some(data.hdop);
@@ -1726,6 +1734,11 @@ impl FlightRecorder {
     /// Feed the canonical flight mode (protocol-agnostic). Stored per telemetry row so replay reads
     /// it directly — no re-classification. See docs/active/FLIGHT_MODE_UNIFIED.md.
     pub fn on_flightmode(&mut self, fm: &crate::flightmode::FlightModeState) {
+        // The target belongs to the mode it was reported in: until the FC reports the new mode's own, the
+        // last mission item must not stand in as a guided target.
+        if self.snapshot.mode_primary.as_deref() != Some(fm.primary.as_str()) {
+            self.snapshot.target = None;
+        }
         self.snapshot.mode_primary = Some(fm.primary.clone());
         self.snapshot.mode_modifiers = if fm.modifiers.is_empty() {
             None
@@ -2362,6 +2375,9 @@ impl FlightRecorder {
             nav_lat: None,
             nav_lon: None,
             nav_alt_m: None,
+            target_lat: self.snapshot.target.map(|t| t.0),
+            target_lon: self.snapshot.target.map(|t| t.1),
+            target_alt_m: self.snapshot.target.map(|t| t.2),
             mode_primary: self.snapshot.mode_primary.clone(),
             mode_modifiers: self.snapshot.mode_modifiers.clone(),
             link_snr: self.snapshot.link_snr,
@@ -2606,6 +2622,9 @@ mod tests {
             nav_lat: None,
             nav_lon: None,
             nav_alt_m: None,
+            target_lat: None,
+            target_lon: None,
+            target_alt_m: None,
             mode_primary: None,
             mode_modifiers: None,
             link_snr: None,

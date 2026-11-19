@@ -350,6 +350,10 @@ export interface TelemetryRecord {
   nav_lat: number | null;
   nav_lon: number | null;
   nav_alt_m: number | null;
+  /** The FC's position target, recorded in every mode: a reader picks by flight mode (`guidedTargetOf`). */
+  target_lat: number | null;
+  target_lon: number | null;
+  target_alt_m: number | null;
   /** Canonical flight mode (protocol-agnostic, see flightModeRegistry). `mode_modifiers` is a
    *  comma-separated list of modifier ids (null when none). */
   mode_primary: string | null;
@@ -467,4 +471,6 @@ export interface KflightImportResult {
   imported: number;
   skipped: number;
   errors: string[];
+  /** Written by a newer Kite: what this version knows was imported, the rest was left out. */
+  newer_format: boolean;
 }

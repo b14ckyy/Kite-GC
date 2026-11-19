@@ -30,7 +30,7 @@ const TELEMETRY_COLS: &str = "flight_id, timestamp_ms, lat, lon, alt_m, speed_ms
     rx_signal_received, hw_health_status, baro_temperature, \
     wind_n_ms, wind_e_ms, wind_d_ms, rc_data_json, rc_command_json, \
     nav_lat, nav_lon, nav_alt_m, mode_primary, mode_modifiers, link_snr, link_rssi_dbm, airspeed_ms, \
-    throttle_pct, wall_ms";
+    throttle_pct, wall_ms, target_lat, target_lon, target_alt_m";
 
 /// Single-statement DDL for `telemetry_records` at the current field set, for the per-session temp DB (no
 /// migration history). MUST describe the same columns as the migration chain builds — the temp rows are
@@ -48,7 +48,8 @@ const TELEMETRY_RECORDS_DDL_FULL: &str = "CREATE TABLE IF NOT EXISTS telemetry_r
     baro_temperature REAL, wind_n_ms REAL, wind_e_ms REAL, wind_d_ms REAL,
     rc_data_json TEXT, rc_command_json TEXT, nav_lat REAL, nav_lon REAL, nav_alt_m REAL,
     mode_primary TEXT, mode_modifiers TEXT, link_snr INTEGER, link_rssi_dbm INTEGER,
-    airspeed_ms REAL, throttle_pct REAL, wall_ms INTEGER
+    airspeed_ms REAL, throttle_pct REAL, wall_ms INTEGER,
+    target_lat REAL, target_lon REAL, target_alt_m REAL
 );";
 
 /// Per-instance battery samples (ArduPilot/PX4 multi-monitor). `flight_id` first so the temp-session
@@ -1311,6 +1312,22 @@ fn migrate_v20_to_v21(conn: &Connection) -> SqlResult<()> {
 const ALT_RELATIVE_PROTOCOL_SQL: &str =
     "protocol LIKE 'Telemetry (%' AND (protocol LIKE '%CRSF%' OR protocol LIKE '%LTM%')";
 
+/// The nav target columns of `telemetry_records` (v22), for a table that predates them: the main database
+/// and a `.ktmp` session file left by an older build.
+fn add_nav_target_columns(conn: &Connection) -> SqlResult<()> {
+    for column in ["target_lat", "target_lon", "target_alt_m"] {
+        if !column_exists(conn, "telemetry_records", column)? {
+            // Two opens of a database already at v22 run this unlocked: the loser's ALTER finds the column.
+            if let Err(e) = conn.execute_batch(&format!("ALTER TABLE telemetry_records ADD COLUMN {column} REAL;")) {
+                if !column_exists(conn, "telemetry_records", column)? {
+                    return Err(e);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// v22 (Dev-Docs active/SCHEMA_V22.md). `missions.extra_json` is kept opaque: data this version does not
 /// know.
 fn ensure_v22_schema(conn: &Connection) -> SqlResult<()> {
@@ -1322,6 +1339,7 @@ fn ensure_v22_schema(conn: &Connection) -> SqlResult<()> {
          CREATE INDEX IF NOT EXISTS idx_weather_records_flight ON weather_records(flight_id, timestamp_ms);
          CREATE INDEX IF NOT EXISTS idx_flight_videos_flight ON flight_videos(flight_id);",
     )?;
+    add_nav_target_columns(conn)?;
     if !column_exists(conn, "missions", "extra_json")? {
         conn.execute_batch("ALTER TABLE missions ADD COLUMN extra_json TEXT;")?;
     }
@@ -1589,7 +1607,8 @@ pub fn insert_telemetry_batch(
                 rc_data_json, rc_command_json,
                 nav_lat, nav_lon, nav_alt_m,
                 mode_primary, mode_modifiers,
-                link_snr, link_rssi_dbm, airspeed_ms, throttle_pct, wall_ms
+                link_snr, link_rssi_dbm, airspeed_ms, throttle_pct, wall_ms,
+                target_lat, target_lon, target_alt_m
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
                 ?14, ?15, ?16, ?17, ?18, ?19, ?20,
@@ -1600,7 +1619,8 @@ pub fn insert_telemetry_batch(
                 ?36, ?37,
                 ?38, ?39, ?40,
                 ?41, ?42,
-                ?43, ?44, ?45, ?46, ?47
+                ?43, ?44, ?45, ?46, ?47,
+                ?48, ?49, ?50
             )",
         )?;
         for r in records {
@@ -1652,6 +1672,9 @@ pub fn insert_telemetry_batch(
                 r.airspeed_ms,
                 r.throttle_pct,
                 r.wall_ms,
+                r.target_lat,
+                r.target_lon,
+                r.target_alt_m,
             ])?;
         }
     }
@@ -1859,6 +1882,7 @@ pub fn open_temp_session(path: &Path) -> SqlResult<Connection> {
     if !column_exists(&conn, "telemetry_records", "wall_ms")? {
         conn.execute_batch("ALTER TABLE telemetry_records ADD COLUMN wall_ms INTEGER;")?;
     }
+    add_nav_target_columns(&conn)?;
     // …and the group-flight membership (GROUP_FLIGHTS.md §3.3). `role` stays NULL on such a file: it
     // marks a session whose arm/disarm history was never recorded (see `SessionMetaRow::role`).
     for column in ["vehicle_key", "role", "group_id", "group_file"] {
@@ -3491,6 +3515,9 @@ fn read_telemetry_record(row: &rusqlite::Row) -> SqlResult<TelemetryRecord> {
         airspeed_ms: row.get(45)?,
         throttle_pct: row.get(46)?,
         wall_ms: row.get(47)?,
+        target_lat: row.get(48)?,
+        target_lon: row.get(49)?,
+        target_alt_m: row.get(50)?,
     })
 }
 
@@ -4570,6 +4597,9 @@ mod tests {
                 nav_lat: None,
                 nav_lon: None,
                 nav_alt_m: None,
+                target_lat: None,
+                target_lon: None,
+                target_alt_m: None,
                 mode_primary: None,
                 mode_modifiers: None,
                 link_snr: None,
@@ -4667,6 +4697,9 @@ mod tests {
             nav_lat: None,
             nav_lon: None,
             nav_alt_m: None,
+            target_lat: None,
+            target_lon: None,
+            target_alt_m: None,
             mode_primary: None,
             mode_modifiers: None,
             link_snr: None,
@@ -4859,6 +4892,9 @@ mod tests {
             nav_lat: None,
             nav_lon: None,
             nav_alt_m: None,
+            target_lat: None,
+            target_lon: None,
+            target_alt_m: None,
             mode_primary: Some("manual".into()),
             mode_modifiers: None,
             link_snr: None,
@@ -5153,6 +5189,59 @@ mod tests {
         assert!(track[0].wall_ms.is_none());
         remove_temp_session(&temp);
         cleanup(&temp);
+    }
+
+    /// The nav target round-trips through the main DB and a temp session commit; a database and a `.ktmp`
+    /// that predate the columns get them.
+    #[test]
+    fn nav_target_round_trips_and_older_tables_get_the_columns() {
+        let with_target = |flight_id: i64, timestamp_ms: i64| TelemetryRecord {
+            target_lat: Some(48.1),
+            target_lon: Some(11.5),
+            target_alt_m: Some(620.0),
+            ..telemetry(flight_id, timestamp_ms, None)
+        };
+        let target = |r: &TelemetryRecord| (r.target_lat, r.target_lon, r.target_alt_m);
+
+        let conn = test_db();
+        let id = insert_flight(&conn, &flight("Target", None)).unwrap();
+        insert_telemetry_batch(&conn, &[with_target(id, 0), telemetry(id, 100, None)]).unwrap();
+        let track = get_flight_track(&conn, id).unwrap();
+        assert_eq!(target(&track[0]), (Some(48.1), Some(11.5), Some(620.0)));
+        assert_eq!(target(&track[1]), (None, None, None));
+
+        let temp = temp_db_path("nav-target-ktmp").with_file_name("active_test_L1-S2.ktmp");
+        remove_temp_session(&temp);
+        {
+            let t = open_temp_session(&temp).unwrap();
+            insert_telemetry_batch(&t, &[with_target(0, 0)]).unwrap();
+        }
+        let committed = commit_session_to_main(&conn, &temp, &flight("Target", None)).unwrap();
+        assert_eq!(target(&get_flight_track(&conn, committed).unwrap()[0]), (Some(48.1), Some(11.5), Some(620.0)));
+        remove_temp_session(&temp);
+
+        // A `.ktmp` of a build without the columns is back-filled on open and still commits.
+        {
+            let legacy = Connection::open(&temp).unwrap();
+            let ddl = TELEMETRY_RECORDS_DDL_FULL.replace(",\n    target_lat REAL, target_lon REAL, target_alt_m REAL", "");
+            assert_ne!(ddl, TELEMETRY_RECORDS_DDL_FULL);
+            legacy.execute_batch(&ddl).unwrap();
+            legacy.execute_batch(BATTERY_RECORDS_DDL_FULL).unwrap();
+            legacy.execute("INSERT INTO telemetry_records (flight_id, timestamp_ms) VALUES (0, 0)", []).unwrap();
+        }
+        drop(open_temp_session(&temp).unwrap());
+        let committed = commit_session_to_main(&conn, &temp, &flight("Legacy target", None)).unwrap();
+        assert_eq!(target(&get_flight_track(&conn, committed).unwrap()[0]), (None, None, None));
+        remove_temp_session(&temp);
+        cleanup(&temp);
+
+        // A v22 database written before the columns joined v22 gets them at the next open.
+        for column in ["target_lat", "target_lon", "target_alt_m"] {
+            conn.execute_batch(&format!("ALTER TABLE telemetry_records DROP COLUMN {column};")).unwrap();
+        }
+        ensure_v22_schema(&conn).unwrap();
+        assert!(column_exists(&conn, "telemetry_records", "target_alt_m").unwrap());
+        assert_eq!(get_flight_track(&conn, id).unwrap().len(), 2);
     }
 
     // ── Schema v20: flight → library vehicle (`flights.vehicle_id`) ─────────────────────────

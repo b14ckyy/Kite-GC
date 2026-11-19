@@ -75,7 +75,7 @@
     type TrackColorMode,
     type TrackSegment,
   } from "$lib/helpers/trackColors";
-  import { modeColor } from "$lib/helpers/flightModeRegistry";
+  import { modeColor, guidedTargetOf } from "$lib/helpers/flightModeRegistry";
   import type { TelemetryRecord } from "$lib/stores/flightlog";
   import { toTelemetryData } from "$lib/adapters/telemetryAdapter";
   import type { PlatformType, UavModelOverride } from "$lib/helpers/uavIcons";
@@ -4635,10 +4635,45 @@
     if (replayTimeEnabled && !devTimeActive) applyClockTime();
   });
 
+  // The recorded guided target of the replayed sample: point on the ground + line from the aircraft, as
+  // the live view draws them.
+  let replayTarget: { point: Cesium.Entity; line: Cesium.Entity } | undefined;
+  const REPLAY_TARGET_COLOR = Cesium.Color.fromCssColorString('#59aa29');
+
+  function updateReplayTarget3D(point: TelemetryRecord | null, aircraft?: Cesium.Cartesian3, altitude = 0) {
+    if (!viewer) return;
+    const tgt = point && aircraft ? guidedTargetOf(point) : null;
+    if (!tgt || !aircraft || !isValidGpsCoordinate(tgt.lat, tgt.lon)) {
+      if (replayTarget) {
+        viewer.entities.remove(replayTarget.point);
+        viewer.entities.remove(replayTarget.line);
+        replayTarget = undefined;
+      }
+      return;
+    }
+    const ground = Cesium.Cartesian3.fromDegrees(tgt.lon, tgt.lat);
+    const ends = [aircraft, Cesium.Cartesian3.fromDegrees(tgt.lon, tgt.lat, altitude)]; // at the aircraft's altitude
+    if (!replayTarget) {
+      replayTarget = {
+        point: viewer.entities.add({
+          position: ground,
+          point: { pixelSize: 12, color: REPLAY_TARGET_COLOR, outlineColor: Cesium.Color.WHITE, outlineWidth: 2, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+        }),
+        line: viewer.entities.add({
+          polyline: { positions: ends, width: 2, material: new Cesium.PolylineDashMaterialProperty({ color: REPLAY_TARGET_COLOR, dashLength: 16 }) },
+        }),
+      };
+    } else {
+      (replayTarget.point.position as Cesium.ConstantPositionProperty).setValue(ground);
+      if (replayTarget.line.polyline) replayTarget.line.polyline.positions = new Cesium.ConstantProperty(ends);
+    }
+  }
+
   function updatePlaybackMarker3D(point: TelemetryRecord | null) {
     if (!viewer) return;
 
     if (!point || point.lat == null || point.lon == null || !isValidGpsCoordinate(point.lat, point.lon)) {
+      updateReplayTarget3D(null);
       if (playbackMarkerEntity) {
         resetUavSmoothing();
         viewer.entities.remove(playbackMarkerEntity);
@@ -4681,6 +4716,7 @@
     }
     // Position + attitude (and the follow/orbit camera) go through the adaptive smoother.
     pushUavSample(playbackMarkerEntity, lat, lon, alt, heading, orientation);
+    updateReplayTarget3D(point, position, alt);
 
     viewer.scene.requestRender();
   }

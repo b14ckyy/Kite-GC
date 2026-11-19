@@ -156,6 +156,11 @@ loiter track the aircraft will actually fly: the radius you set for this Fly Her
 configured default (`WP_LOITER_RAD` / `NAV_LOITER_RAD`) when you didn't set one. A copter simply holds
 the point, so it gets no circle. Both disappear when the FC leaves guided or the link drops.
 
+**In a replay** of a flight recorded by Kite (or imported from a `.tlog`) the target is shown again, on
+both maps, wherever the aircraft was in its guided mode — without the loiter circle, whose radius is not
+recorded. Flights recorded before this was added, and flights imported from an onboard log, carry no
+target.
+
 **On the 3D map** the target the flight controller reports is a green point on the ground with a dashed
 line from the aircraft, without the loiter circle. It appears with the FC's next report, about a second
 after you send it.

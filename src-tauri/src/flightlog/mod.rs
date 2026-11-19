@@ -24,3 +24,12 @@ pub mod track_export;
 pub mod types;
 pub mod ulog;
 pub mod weather;
+
+/// A POSITION_TARGET_GLOBAL_INT as the recorded nav target `(lat, lon, alt_m)`; `None` for the 0 / 0 an FC
+/// sends while it has no target.
+pub fn nav_target(lat_int: i32, lon_int: i32, alt: f32) -> Option<(f64, f64, f64)> {
+    if lat_int == 0 && lon_int == 0 {
+        return None;
+    }
+    Some((lat_int as f64 / 1e7, lon_int as f64 / 1e7, alt as f64))
+}
