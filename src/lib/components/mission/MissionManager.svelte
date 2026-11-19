@@ -33,12 +33,14 @@
     type ArduWaypoint,
   } from '$lib/stores/missionArdupilot';
   import { frameMissionOnMap } from '$lib/stores/mapCamera';
+  import { requestMapAccess } from '$lib/stores/panelYield';
+  import { tick } from 'svelte';
   import {
     autopilotSystem, autopilotLocked, setAutopilotSystem, confirmSystemSwitch,
     pendingSystemSwitch, type AutopilotSystem,
   } from '$lib/stores/autopilotContext';
   import { missionManagerSelectedId, requestOpenFlightId, missionLibraryRevision } from '$lib/stores/missionManager';
-  import { buildMissionInput, findLibraryMissionId } from '$lib/helpers/missionLibrary';
+  import { buildMissionInput, findLibraryMission } from '$lib/helpers/missionLibrary';
   import { importMissionFile } from '$lib/helpers/missionFile';
   import { exportFile, fileSafeName } from '$lib/helpers/exportFile';
   import type { VehicleClass } from '$lib/helpers/arduCommandCatalog';
@@ -279,6 +281,9 @@
       }
       frameMissionOnMap(); // standalone library load → frame the mission (not a replay-linked attach)
       onBack();
+      // After the manager's wide shell is gone: the request measures the panel that is left.
+      await tick();
+      requestMapAccess();
     } catch (e) {
       statusMessage = $t('missionMgr.loadToMapFailed', { values: { error: String(e) } });
     }
@@ -351,7 +356,16 @@
   /** After a file is loaded onto the map, ask whether to also save it to the library. */
   async function importMission(loadedWps: Waypoint[], suggestedName: string) {
     const markDb = () => (missionSetSize(loadedWps) > 1 ? markAllMissionsSynced('db') : markMissionSynced('db'));
-    const existingId = await findLibraryMissionId(loadedWps, dbPath()).catch(() => null);
+    const entry = await findLibraryMission(loadedWps, dbPath()).catch(() => null);
+    const existingId = entry?.id ?? null;
+    // An entry with AGL waypoints is shown in its own form: left in the file's AMSL form, an overwrite
+    // would turn the entry into it.
+    const adoptEntry = async () => {
+      if (!entry) return;
+      if (!entry.sameForm) await missionLoadLibrary(entry.waypoints);
+      loadedMissionId.set(entry.id);
+      markDb();
+    };
     const ans = await confirmDialog.show({
       title: $t('missionMgr.importTitle'),
       message: $t('missionMgr.importMsg'),
@@ -363,8 +377,7 @@
     if (ans == null) return;
     if (ans === 'db') {
       if (existingId != null) {
-        loadedMissionId.set(existingId);
-        markDb();
+        await adoptEntry();
       } else {
         const input = await buildMissionInput(loadedWps, { name: suggestedName });
         const id = await missionDbSave(input, dbPath());
@@ -375,7 +388,7 @@
       await reload();
       statusMessage = $t('missionMgr.imported');
     } else {
-      if (existingId != null) { loadedMissionId.set(existingId); markDb(); }
+      await adoptEntry();
       statusMessage = $t('missionMgr.loadedToMap');
     }
   }

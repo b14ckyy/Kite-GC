@@ -37,6 +37,7 @@ const ID_HOME_POSITION: f32 = 242.0;
 const ID_WIND: f32 = 168.0;
 const ID_WIND_COV: f32 = 231.0;
 const ID_POSITION_TARGET_GLOBAL_INT: f32 = 87.0;
+const ID_EXTENDED_SYS_STATE: f32 = 245.0;
 
 // Rate kinds for the wanted messages (resolved against the two settings at apply time).
 const R_ATTITUDE: u8 = 0;
@@ -69,6 +70,9 @@ const WANTED: &[(f32, u8)] = &[
     // FC's active navigation target → the map's Guided marker (FC-confirmed, incl. external GCS
     // changes). Small message; the frontend ignores it outside the guided mode.
     (ID_POSITION_TARGET_GLOBAL_INT, R_FIXED_1HZ),
+    // Landed state: on the ground or flying, for the control panel — which switches it off once the
+    // vehicle flies and on again at disarm (`mav_landed_state_stream`).
+    (ID_EXTENDED_SYS_STATE, R_FIXED_1HZ),
 ];
 
 // ── Ballast: high-rate messages no widget consumes — disabled (interval = -1) ────────────────

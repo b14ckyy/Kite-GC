@@ -99,9 +99,34 @@ export async function removeOriginalLogs(dbPath: string, files: number, sizeByte
   }
 }
 
+/** Runs a `.kflight` export under a blocking notice that counts the flights written. */
+export async function withExportProgress<T>(
+  ui: Pick<DbTransferUi, 'tr' | 'notice'>,
+  title: string,
+  total: number,
+  run: () => Promise<T>,
+): Promise<T> {
+  const progress = (done: number, of: number) =>
+    ui.notice({ title, message: ui.tr(`${K}.flightsBusyMsg`, { done: String(done), total: String(of) }) });
+  // An event can arrive after the command's answer: it must not put the notice back up.
+  let running = true;
+  let unlisten = () => {};
+  try {
+    progress(0, total);
+    unlisten = await listen<{ exported: number; total: number }>('flightlog-export-progress', (e) => {
+      if (running) progress(e.payload.exported, e.payload.total);
+    });
+    return await run();
+  } finally {
+    running = false;
+    unlisten();
+    ui.notice(null);
+  }
+}
+
 /** Every flight into one `.kflight`, with the count shown while it runs. */
 export async function exportAllFlights(dbPath: string, ui: DbTransferUi): Promise<void> {
-  const { show, tr, notice } = ui;
+  const { show, tr } = ui;
   const state = await dbFolderState(dbPath);
   if (state.flights === 0 || !state.exists) {
     await show({ title: tr(`${K}.exportFlights`), message: tr(`${K}.flightsNone`) });
@@ -113,28 +138,14 @@ export async function exportAllFlights(dbPath: string, ui: DbTransferUi): Promis
     filters: [{ name: tr('logbook.kflightFileFilter'), extensions: ['kflight'] }],
   });
   if (!outputPath) return;
-  const progress = (done: number, total: number) =>
-    notice({ title: tr(`${K}.flightsBusyTitle`), message: tr(`${K}.flightsBusyMsg`, { done: String(done), total: String(total) }) });
-  progress(0, state.flights ?? 0);
-  // An event can arrive after the command's answer: it must not put the notice back up.
-  let running = true;
-  const unlisten = await listen<{ exported: number; total: number }>('flightlog-export-progress', (e) => {
-    if (running) progress(e.payload.exported, e.payload.total);
-  });
-  const done = () => {
-    running = false;
-    unlisten();
-    notice(null);
-  };
   try {
-    const result = await invoke<{ exported: number; total: number }>('flightlog_export_all', { outputPath, dbPath });
-    done();
+    const result = await withExportProgress(ui, tr(`${K}.flightsBusyTitle`), state.flights ?? 0, () =>
+      invoke<{ exported: number; total: number }>('flightlog_export_all', { outputPath, dbPath }));
     await show({
       title: tr(`${K}.exportFlights`),
       message: tr(`${K}.flightsDone`, { exported: String(result.exported), total: String(result.total) }),
     });
   } catch (e) {
-    done();
     // `no-space:<needed>:<free>` — the marker of EXPORT_NO_SPACE_ERROR (commands/flightlog.rs).
     const space = /^no-space:(\d+):(\d+)$/.exec(String(e));
     const message = space

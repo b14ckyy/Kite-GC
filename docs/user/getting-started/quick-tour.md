@@ -48,7 +48,12 @@ The strip down the **left edge** is the navigation rail. Click an icon to open i
 **same icon again** to **park** the panel: it slides out to the left and the map gets the whole screen,
 but nothing is lost — a mission you are editing stays in edit mode, a half-filled form keeps its values,
 and the next click brings the panel straight back (the icon shows a dashed frame while it is parked).
-Switching to another tool or closing the rail with its toggle closes the panel for real. Only one panel
+Switching to another tool or closing the rail with its toggle closes the panel for real. Where a panel
+covers a large part of the map — a small window, a tablet, a phone — it **parks itself** when you start
+something that goes on on the map: placing a waypoint or tapping one in the list while editing,
+starting a survey pattern, loading a library mission onto the map, adding a geozone, a fence or a rally
+point, switching their editing on or pressing **Show on map**, setting a safehome, or switching
+**Guided** on. It does not come back on its own; tap its icon when you need it again. Only one panel
 is open at a time, and the map stays live behind it. Some tools appear **only when relevant** (e.g.
 *Control* only on an ArduPilot/PX4 link), so the rail stays uncluttered.
 

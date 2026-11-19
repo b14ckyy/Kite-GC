@@ -10,6 +10,7 @@
 
 <script lang="ts">
   import { t } from 'svelte-i18n';
+  import { escapeKey } from '$lib/actions/escapeKey';
 
   let open = $state(false);
   let name = $state('');
@@ -29,13 +30,12 @@
     if (resolver) { resolver(value); resolver = null; }
   }
   function confirm() { close({ name: name.trim(), notes: notes.trim() }); }
-  function handleKeydown(e: KeyboardEvent) { if (e.key === 'Escape') close(null); }
 </script>
 
 {#if open}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="dialog-backdrop" onclick={() => close(null)} onkeydown={handleKeydown}>
+  <div class="dialog-backdrop" use:escapeKey={() => close(null)}>
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="dialog-box" onclick={(e) => e.stopPropagation()}>

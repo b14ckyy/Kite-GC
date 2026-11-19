@@ -50,16 +50,18 @@
   } from "$lib/config/mapSearch";
   import CustomMapCoverageLayer from "./CustomMapCoverageLayer.svelte";
   import { homePosition, homeMarkerShown, vehicleHomes, type VehicleHome } from "$lib/stores/home";
-  import { editMode, geoWaypoints, launchPoint, replayActive, toDeg } from "$lib/stores/mission";
+  import { editMode, geoWaypoints, launchPoint, replayActive, toDeg, selectedWpIndex } from "$lib/stores/mission";
   import { autopilotSystem } from "$lib/stores/autopilotContext";
-  import { arduMission, arduVehicleClass, arduEditMode, detectVehicleClass, arduMissionsByVehicle, arduSetWpSelection, type ArduWaypoint } from "$lib/stores/missionArdupilot";
+  import { arduMission, arduVehicleClass, arduEditMode, detectVehicleClass, arduMissionsByVehicle, arduSetWpSelection, arduSelectedWpIndex, type ArduWaypoint } from "$lib/stores/missionArdupilot";
   import { activeSurveyPattern } from "$lib/stores/surveyPattern.svelte";
   import { guidedActive, guidedTarget, guidedTargets, activeMode, guidedParams, fcLoiterRadius, type GuidedParams } from "$lib/controllers/vehicleControl";
   import { guidedClickArmed, mapClickOwnedByEditor, guidedTargetMultirotor, sendGuidedTarget } from "$lib/controllers/guidedClick";
   import GuidedTargetForm from "$lib/components/control/GuidedTargetForm.svelte";
   import { cmdHasLocation } from "$lib/helpers/arduCommandCatalog";
   import { connection, linkHasMsp } from "$lib/stores/connection";
-  import { frameMissionSignal, frameFleetSignal } from "$lib/stores/mapCamera";
+  import { frameMissionSignal, frameFleetSignal, onWaypointFocus, type WaypointFocus } from "$lib/stores/mapCamera";
+  import { coveredEdges } from "$lib/helpers/missionEditorPopup.svelte";
+  import { panelDockRight } from "$lib/stores/panelDock";
   import { destinationPoint, haversineDistance } from "$lib/utils/geo";
   import { buildApproachGeometry } from "$lib/helpers/autolandGeometry";
   import MissionLayer from "./mission/MissionLayer.svelte";
@@ -252,6 +254,7 @@
   let unsubTelemetry: (() => void) | undefined;
   let unsubSettings: (() => void) | undefined;
   let unsubFrameMission: (() => void) | undefined;
+  let unsubWpFocus: (() => void)[] = [];
   let unsubConnForJump: (() => void) | undefined;
 
   // Active tile layers (base + overlays)
@@ -1829,12 +1832,12 @@
     }
     redrawDirLines();
     // The rotation is independent of Leaflet's view, so it keeps turning through a zoom or a pinch.
-    if (viewMode === 'heading-follow') {
+    if (viewMode === 'heading-follow' && !followHeld()) {
       mapHeading = followCurrent.heading;
       setMapRotation(-mapHeading);
     }
     // Don't fight a zoom animation (it would snap mid-zoom; the zoomanim hook in onMount heads for the aircraft).
-    if ((viewMode === 'follow' || viewMode === 'heading-follow') && !(map as unknown as { _animatingZoom?: boolean })._animatingZoom) {
+    if ((viewMode === 'follow' || viewMode === 'heading-follow') && !followHeld() && !(map as unknown as { _animatingZoom?: boolean })._animatingZoom) {
       followDrivingView = true;
       if (pinching()) anchorPinch(ll);
       else panToVisualCentre(ll); // fires moveend synchronously → saveMapState (guarded)
@@ -2196,6 +2199,114 @@
     return pts;
   }
 
+  // ── Waypoint focus + follow hold ── a follow camera stays off the aircraft while a waypoint is
+  // selected: position and heading-up rotation stand still. The follow button hands the camera back
+  // without dropping the selection.
+  let wpSelected = false;
+  let followHoldReleased = false;
+  const followHeld = () => wpSelected && !followHoldReleased && !miniControls;
+
+  let heldWpIdx = -1;
+  function onWpSelection() {
+    const idx = get(autopilotSystem) === 'inav' ? get(selectedWpIndex) : get(arduSelectedWpIndex);
+    if (idx === heldWpIdx) return;
+    heldWpIdx = idx;
+    const was = followHeld();
+    wpSelected = idx >= 0;
+    // Picked while the 3D view shows: this map was not moved to the waypoint, so it keeps the aircraft.
+    followHoldReleased = mapViewMode !== '2d';
+    if (!map || (viewMode !== 'follow' && viewMode !== 'heading-follow')) return;
+    if (followHeld() && !was) {
+      followDrivingView = true;
+      followMoveEnd(); // the hold ends the run of follow pans
+      followDrivingView = false;
+    } else if (!followHeld() && was) applyFollowFrame();
+  }
+
+  /** The uncovered map area in screen px: without a docked panel on the left, the toolbar, the widget
+   *  column and the bottom tiles. */
+  function freeMapArea(): { left: number; top: number; right: number; bottom: number } {
+    const wrap = (mapContainer.parentElement ?? mapContainer).getBoundingClientRect();
+    const covered = coveredEdges(wrap);
+    // A parked panel keeps its published edge.
+    const panelRight = document.querySelector('.panels-hidden') ? 0 : get(panelDockRight);
+    const free = {
+      left: Math.max(wrap.left, panelRight),
+      top: wrap.top + covered.top,
+      right: wrap.right - Math.max(covered.right, centerInsetRight),
+      bottom: wrap.bottom - Math.max(covered.bottom, centerInsetBottom),
+    };
+    // A map that is not the full-screen layer (floating window) may lie under all of it.
+    const min = 2 * WP_FOCUS_FIT_PAD_PX;
+    if (free.right - free.left < min || free.bottom - free.top < min) return { left: wrap.left, top: wrap.top, right: wrap.right, bottom: wrap.bottom };
+    return free;
+  }
+
+  const headingUp = () => mapContainer.classList.contains('heading-up');
+  /** Rotation of the map container, radians, clockwise on screen. */
+  const containerRotation = () => (headingUp() ? (-mapHeading * Math.PI) / 180 : 0);
+
+  function rotatePoint(p: L.Point, rad: number): L.Point {
+    const c = Math.cos(rad), s = Math.sin(rad);
+    return L.point(p.x * c - p.y * s, p.x * s + p.y * c);
+  }
+
+  /** Where a map position is drawn on screen, the heading-up rotation included. */
+  function screenPointOf(m: L.Map, ll: L.LatLngExpression): L.Point {
+    const r = mapContainer.getBoundingClientRect();
+    const fromCentre = m.latLngToContainerPoint(ll).subtract(m.getSize().divideBy(2));
+    return L.point(r.left + r.width / 2, r.top + r.height / 2).add(rotatePoint(fromCentre, containerRotation()));
+  }
+
+  const WP_FOCUS_FIT_PAD_PX = 40;
+  const WP_FOCUS_MOVE_S = 0.5;
+
+  function focusWaypoint(f: WaypointFocus) {
+    const m = map;
+    if (!m || miniControls || mapViewMode !== '2d') return;
+    const following = viewMode === 'follow' || viewMode === 'heading-follow';
+    if (f.source === 'marker' && !following) return;
+    if (viewMode === 'fleet') viewMode = 'free'; // the fleet fit would undo the move on its next frame
+    pendingUavJump = false;
+    const free = freeMapArea();
+    const inFree = (ll: L.LatLng) => {
+      const p = screenPointOf(m, ll);
+      return p.x >= free.left && p.x <= free.right && p.y >= free.top && p.y <= free.bottom;
+    };
+    const pts = collectMissionLatLngs();
+    m.stop();
+    if (f.source === 'list' && pts.length > 0 && !pts.some(inFree)) {
+      const bounds = L.latLngBounds(pts);
+      if (headingUp()) {
+        // The mission lands on the pivot, turned by the frozen rotation: fit its diagonal into the
+        // free area around the pivot.
+        const r = mapContainer.getBoundingClientRect();
+        const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+        const half = Math.min(cx - free.left, free.right - cx, cy - free.top, free.bottom - cy) - WP_FOCUS_FIT_PAD_PX;
+        const side = Math.max(1, (2 * half) / Math.SQRT2);
+        const size = m.getSize();
+        m.setView(bounds.getCenter(), Math.min(16, m.getBoundsZoom(bounds, false, L.point(size.x - side, size.y - side))), { animate: true, duration: WP_FOCUS_MOVE_S });
+      } else {
+        const wrap = (mapContainer.parentElement ?? mapContainer).getBoundingClientRect();
+        m.fitBounds(bounds, {
+          paddingTopLeft: [WP_FOCUS_FIT_PAD_PX + free.left - wrap.left, WP_FOCUS_FIT_PAD_PX + free.top - wrap.top],
+          paddingBottomRight: [WP_FOCUS_FIT_PAD_PX + wrap.right - free.right, WP_FOCUS_FIT_PAD_PX + wrap.bottom - free.bottom],
+          maxZoom: 16,
+          animate: true,
+          duration: WP_FOCUS_MOVE_S,
+        });
+      }
+      return;
+    }
+    // In heading-up the container centre is the visual centre and the zoom anchor.
+    const r = mapContainer.getBoundingClientRect();
+    const target = headingUp()
+      ? L.point(r.left + r.width / 2, r.top + r.height / 2)
+      : L.point((free.left + free.right) / 2, (free.top + free.bottom) / 2);
+    const offset = rotatePoint(screenPointOf(m, [f.lat, f.lon]).subtract(target), -containerRotation());
+    m.panBy(offset.round(), { animate: true, duration: WP_FOCUS_MOVE_S });
+  }
+
   /** Frame the whole loaded mission once — free pan only, and never over a replay (the replay frames
    *  its own track; a replay-linked mission must not steal the view). */
   function frameMission() {
@@ -2383,11 +2494,11 @@
     // Initialize tile cache with persisted size limit
     initTileCache(s.mapCacheMaxMB);
 
-    // Every zoom ANIMATION in a follow mode heads for the aircraft: Leaflet animates around the container centre,
+    // A zoom ANIMATION in a follow mode (unless held on a waypoint) heads for the aircraft: Leaflet animates around the container centre,
     // which on the phone is not the visual centre (centerInsetRight/Bottom). Registered BEFORE any layer:
     // listeners run in order, and tiles, markers and renderers read `e.center` when they set up.
     map.on('zoomanim', (e) => {
-      if (viewMode === 'free' || !followCurrent || !map) return;
+      if (viewMode === 'free' || followHeld() || !followCurrent || !map) return;
       const c = containerCentreFor(map, [followCurrent.lat, followCurrent.lon], e.zoom);
       e.center = c;
       (map as unknown as MapInternals)._animateToCenter = c;
@@ -2532,6 +2643,13 @@
       frameMission();
     });
 
+    unsubWpFocus = [
+      onWaypointFocus(focusWaypoint),
+      selectedWpIndex.subscribe(onWpSelection),
+      arduSelectedWpIndex.subscribe(onWpSelection),
+      autopilotSystem.subscribe(onWpSelection),
+    ];
+
     // Go-to-UAV: arm a one-shot jump on a fresh connect (not on a 2D↔3D remount while connected).
     let prevConnStatus = get(connection).status;
     unsubConnForJump = connection.subscribe((c) => {
@@ -2619,6 +2737,7 @@
     if (!map || !mapContainer) return;
     if (!miniControls) {
       map.doubleClickZoom.enable();
+      followHoldReleased = true; // back from the mini map, which followed the aircraft
       return;
     }
     const m = map;
@@ -2849,9 +2968,15 @@
     followDrivingView = false;
   }
 
-  // The toolbar button just cycles the mode; the $effect applies the side-effects (same path as an
-  // external change), so the two can never desync. The fleet step only exists with 2+ vehicles.
+  // The $effect applies a mode's side-effects (same path as an external change), so the two never desync.
+  // A held follow camera is only released by the first press; the fleet step needs 2+ vehicles.
   function toggleViewMode() {
+    if (followHeld() && (viewMode === 'follow' || viewMode === 'heading-follow')) {
+      followHoldReleased = true;
+      applyFollowFrame();
+      return;
+    }
+    followHoldReleased = true; // a mode picked with a waypoint still selected means the aircraft
     if (viewMode === 'free') viewMode = 'follow';
     else if (viewMode === 'follow') viewMode = 'heading-follow';
     else if (viewMode === 'heading-follow') viewMode = fleetOn && fleetCount >= 2 ? 'fleet' : 'free';
@@ -2919,6 +3044,7 @@
     unsubCustomFocus?.();
     clearSearchPin();
     unsubFrameMission?.();
+    for (const u of unsubWpFocus) u();
     unsubConnForJump?.();
     unsubSafehome?.();
     guidedTargetMarker?.remove();

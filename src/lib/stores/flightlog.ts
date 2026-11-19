@@ -84,6 +84,12 @@ export async function missionDbList(dbPath: string): Promise<LibraryMission[]> {
   });
 }
 
+/** Replace a library mission's content hash while it still is `oldHash`; `false` = the entry changed
+ *  meanwhile, or another entry holds the new hash. */
+export async function missionDbSetHash(id: number, contentHash: string, oldHash: string, dbPath: string): Promise<boolean> {
+  return invoke<boolean>('mission_db_set_hash', { id, contentHash, oldHash, dbPath: dbPath || undefined });
+}
+
 /** Update a mission's name + notes (Manager rename / notes edit). */
 export async function missionDbSetMeta(id: number, name: string, notes: string | null, dbPath: string): Promise<void> {
   return invoke<void>('mission_db_set_meta', {
@@ -811,6 +817,16 @@ export async function blackboxFileInfo(
     flightId,
     dbPath: dbPath || undefined,
   });
+}
+
+export interface FlightDataSize {
+  flight_id: number;
+  source: 'live' | 'blackbox';
+  bytes: number;
+}
+/** Estimated database size of a flight's own rows, and of its linked partner's — without the stored original log. */
+export async function flightDataSizes(flightId: number, dbPath: string): Promise<FlightDataSize[]> {
+  return invoke<FlightDataSize[]>('flightlog_flight_data_sizes', { flightId, dbPath: dbPath || undefined });
 }
 
 /** Delete the stored original blackbox file for a flight (keeps the parsed flight + replay data).

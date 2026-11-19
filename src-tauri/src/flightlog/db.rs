@@ -2517,6 +2517,16 @@ pub fn set_mission_extra(conn: &Connection, id: i64, extra_json: Option<&str>) -
     Ok(())
 }
 
+/// Replace a mission's content hash, as long as it still is `old_hash`: the new one was computed
+/// from the content behind that. `false` when the entry changed meanwhile or another row holds the hash.
+pub fn set_mission_hash(conn: &Connection, id: i64, content_hash: &str, old_hash: &str) -> SqlResult<bool> {
+    let n = conn.execute(
+        "UPDATE OR IGNORE missions SET content_hash = ?1 WHERE id = ?2 AND content_hash = ?3",
+        params![content_hash, id, old_hash],
+    )?;
+    Ok(n > 0)
+}
+
 /// Update only a mission's name + notes (rename / notes edit in the Manager; content unchanged).
 pub fn update_mission_meta(
     conn: &Connection,
@@ -4003,6 +4013,80 @@ pub fn get_blackbox_file(
     Ok(None)
 }
 
+/// A flight's share of the database, by the source of its rows.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct FlightDataSize {
+    pub flight_id: i64,
+    /// `live` or `blackbox`.
+    pub source: String,
+    pub bytes: u64,
+}
+
+/// Estimated row bytes of a flight and of its linked partner (SQLite record encoding per column).
+/// Indexes, page slack and `blackbox_files` are not counted.
+pub fn flight_data_sizes(conn: &Connection, flight_id: i64) -> SqlResult<Vec<FlightDataSize>> {
+    let linked: Option<i64> = conn
+        .query_row("SELECT linked_flight_id FROM flights WHERE id = ?1", params![flight_id], |r| r.get(0))
+        .optional()?
+        .flatten();
+    let mut tables: Vec<String> = Vec::new();
+    {
+        let mut stmt = conn.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")?;
+        for name in stmt.query_map([], |r| r.get::<_, String>(0))? {
+            let name = name?;
+            if name != "blackbox_files" {
+                tables.push(name.replace('"', "\"\""));
+            }
+        }
+    }
+    let mut row_bytes: Vec<(String, String)> = Vec::new();
+    for table in tables {
+        let mut cols: Vec<String> = Vec::new();
+        let mut stmt = conn.prepare(&format!("PRAGMA table_info(\"{table}\")"))?;
+        for col in stmt.query_map([], |r| r.get::<_, String>(1))? {
+            // Quoted below as an identifier.
+            cols.push(col?.replace('"', "\"\""));
+        }
+        if !cols.iter().any(|c| c == "flight_id") {
+            continue;
+        }
+        let per_col: Vec<String> = cols
+            .iter()
+            .map(|c| {
+                format!(
+                    "1 + CASE typeof(\"{c}\") WHEN 'null' THEN 0 WHEN 'real' THEN 8 WHEN 'integer' THEN \
+                     CASE WHEN \"{c}\" BETWEEN -128 AND 127 THEN 1 WHEN \"{c}\" BETWEEN -32768 AND 32767 THEN 2 \
+                     WHEN \"{c}\" BETWEEN -2147483648 AND 2147483647 THEN 4 ELSE 8 END \
+                     ELSE LENGTH(CAST(\"{c}\" AS BLOB)) END"
+                )
+            })
+            .collect();
+        row_bytes.push((table, per_col.join(" + ")));
+    }
+    let mut out = Vec::new();
+    for id in std::iter::once(flight_id).chain(linked) {
+        let source: Option<String> = conn
+            .query_row(
+                &format!("SELECT CASE WHEN source = 'both' THEN {OWN_SOURCE_SQL} ELSE source END FROM flights WHERE id = ?1"),
+                params![id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let Some(source) = source else { continue };
+        let mut bytes: i64 = 0;
+        for (table, expr) in &row_bytes {
+            // 4 bytes per row for the cell header and the row id.
+            bytes += conn.query_row(
+                &format!("SELECT COALESCE(SUM(4 + {expr}), 0) FROM \"{table}\" WHERE flight_id = ?1"),
+                params![id],
+                |r| r.get::<_, i64>(0),
+            )?;
+        }
+        out.push(FlightDataSize { flight_id: id, source, bytes: bytes.max(0) as u64 });
+    }
+    Ok(out)
+}
+
 /// Original blackbox file info (filename, bytes) of this flight or its partner, without loading the BLOB.
 pub fn blackbox_file_info(conn: &Connection, flight_id: i64) -> SqlResult<Option<(String, i64)>> {
     let here: Option<(String, i64)> = conn
@@ -4987,6 +5071,24 @@ mod tests {
         assert!(delete_flight(&conn, id).unwrap());
         assert_eq!(count(&conn, "SELECT COUNT(*) FROM battery_records WHERE flight_id = ?1", id), 0);
         assert_eq!(count(&conn, "SELECT COUNT(*) FROM flight_events WHERE flight_id = ?1", id), 0);
+    }
+
+    /// The size is the flight's own rows only, grows with them, and names each flight of a pair.
+    #[test]
+    fn flight_data_sizes_count_only_the_flights_own_rows() {
+        let conn = test_db();
+        let a = insert_flight(&conn, &flight("A", None)).unwrap();
+        let b = insert_flight(&conn, &flight("B", None)).unwrap();
+        insert_telemetry_batch(&conn, &[telemetry(a, 0, None)]).unwrap();
+        let one = flight_data_sizes(&conn, a).unwrap();
+        assert_eq!((one.len(), one[0].flight_id), (1, a));
+        assert!(one[0].bytes > 0);
+
+        insert_telemetry_batch(&conn, &[telemetry(a, 100, None), telemetry(b, 0, None)]).unwrap();
+        let two = flight_data_sizes(&conn, a).unwrap();
+        assert!(two[0].bytes > one[0].bytes && two[0].bytes < one[0].bytes * 3);
+        assert_eq!(flight_data_sizes(&conn, b).unwrap()[0].bytes, one[0].bytes);
+        assert!(flight_data_sizes(&conn, 9999).unwrap().is_empty());
     }
 
     /// `wall_ms` round-trips through the main DB, and through a temp session commit — including a

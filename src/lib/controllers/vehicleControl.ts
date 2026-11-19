@@ -10,7 +10,8 @@ import { writable, derived, get, type Readable } from 'svelte/store';
 import { telemetry } from '$lib/stores/telemetry';
 import { connection, isArduPilotLink, linkIsArduPilot } from '$lib/stores/connection';
 import { activeVehicleId, activeVehicle } from '$lib/stores/vehicles';
-import { autopilotSystem } from '$lib/stores/autopilotContext';
+import { autopilotSystem, type AutopilotSystem } from '$lib/stores/autopilotContext';
+import { settings } from '$lib/stores/settings';
 import { arduVehicleClass, downloadArduMissionFromFc } from '$lib/stores/missionArdupilot';
 import { rcEngaged } from '$lib/stores/rcEngage';
 import { activeFcModes } from '$lib/stores/fcModes';
@@ -52,6 +53,62 @@ async function runCommand(action: string, cmd: string, args?: Record<string, unk
   }
 }
 
+// ── On the ground or flying ─────────────────────────────────────────────────
+
+/** Whether the active vehicle has taken off since it was armed, as its FC reports it. Stays set until
+ *  the disarm: the question is whether a takeoff is still ahead, not whether the wheels are down. */
+export const airborne = writable<boolean>(false);
+
+const MAV_LANDED_STATE_ON_GROUND = 1;
+const MAV_STATE_ACTIVE = 4;
+const ARMED_FLAG = 0x04;
+// The EXTENDED_SYS_STATE stream is requested at connect and only needed until the vehicle flies:
+// the vehicles it is switched off for.
+const landedStreamOff = new Set<string>();
+
+/** The active vehicle's own system: `autopilotSystem` follows a vehicle switch a few IPC turns late. */
+function activeSystem(): AutopilotSystem | null {
+  const v = get(activeVehicle);
+  return v ? vehicleSystem(v) : null;
+}
+
+function setLandedStream(on: boolean): void {
+  const id = get(activeVehicleId);
+  if (!id || activeSystem() == null || landedStreamOff.has(id) === !on) return;
+  // "Full MAVLink Telemetry" leaves the stream rates to the FC.
+  if (!on && get(settings).mavlinkFullTelemetry) return;
+  if (on) landedStreamOff.delete(id);
+  else landedStreamOff.add(id);
+  invoke('mav_landed_state_stream', targeted({ on })).catch(() => {
+    if (on) landedStreamOff.add(id);
+    else landedStreamOff.delete(id);
+  });
+}
+
+function markAirborne(): void {
+  if (get(airborne) || (get(telemetry).armingFlags & ARMED_FLAG) === 0) return;
+  airborne.set(true);
+  setLandedStream(false);
+}
+
+/** MAV_LANDED_STATE of the active vehicle: in the air, taking off or landing (0 = no statement). */
+export function ingestLandedState(state: number): void {
+  if (state > MAV_LANDED_STATE_ON_GROUND) markAirborne();
+}
+
+/** MAV_STATE of the active vehicle's heartbeat. Only ArduPilot ties ACTIVE to flying (PX4: to armed). */
+export function ingestSystemStatus(status: number): void {
+  if (status === MAV_STATE_ACTIVE && activeSystem() === 'ardupilot') markAirborne();
+}
+
+/** `connected`: the vehicle may have had its stream switched off earlier — request it again. A new
+ *  connection requests it by itself. */
+function resetFlightState(connected: boolean): void {
+  airborne.set(false);
+  if (connected) setLandedStream(true);
+  else landedStreamOff.clear();
+}
+
 // ── Guided toggle + reposition params ───────────────────────────────────────
 
 /** Map-interaction "Guided" intent: when on, a map click opens the Fly-Here popup. */
@@ -88,6 +145,7 @@ connection.subscribe((c) => {
   if (c.status !== 'connected') {
     loiterRadiusRequested = false;
     fcLoiterRadius.set(null); // never carry a stale radius into the next session
+    resetFlightState(false);
   }
 });
 
@@ -440,4 +498,12 @@ activeVehicleId.subscribe((id) => {
   headingOverrideActive = false;
   loiterRadiusRequested = false;
   fcLoiterRadius.set(null);
+  resetFlightState(id != null);
+});
+
+// The disarm ends the flight: the next takeoff is ahead again.
+let wasArmed = false;
+isArmed.subscribe((armed) => {
+  if (wasArmed && !armed) resetFlightState(true);
+  wasArmed = armed;
 });

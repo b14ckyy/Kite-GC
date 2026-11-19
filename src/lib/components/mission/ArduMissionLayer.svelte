@@ -13,6 +13,9 @@
   import { onDestroy } from 'svelte';
   import L from 'leaflet';
   import { get } from 'svelte/store';
+  import { wrapLng } from '$lib/utils/geo';
+  import { requestMapAccess } from '$lib/stores/panelYield';
+  import { focusWaypointOnMap } from '$lib/stores/mapCamera';
   import { t } from 'svelte-i18n';
   import {
     arduMission, arduSelectedWpIndex, arduSelectedWpIndices, arduEditMode, arduVehicleClass,
@@ -39,7 +42,7 @@
   import {
     newPopupState, renderEditorPopup, closeEditorPopup, deferWhileStepping,
     numInputHtml, enumSelectHtml, paramRow, canonicalLabel, actionsHtml, modifierSection,
-    addModifierSelect, disablePopupPropagation,
+    addModifierSelect, disablePopupPropagation, editorMarkerTarget,
   } from '$lib/helpers/missionEditorPopup.svelte';
   import { iconForArduWp } from '$lib/helpers/missionIconsArdupilot';
   import { settings } from '$lib/stores/settings';
@@ -481,7 +484,7 @@
         marker.on('click', () => {
           if (editing) arduToggleWpSelection(i);
           else if (currentSelIdx === i) arduClearWpSelection();
-          else arduSelectWpSingle(i);
+          else { arduSelectWpSingle(i); focusWaypointOnMap(latLng.lat, latLng.lng, 'marker'); }
         });
         marker.on('contextmenu', (e: L.LeafletMouseEvent) => {
           if (patternActive) return; // non-interactive while the pattern generator is open
@@ -529,7 +532,7 @@
               return;
             }
             const cur = get(arduMission)[i];
-            if (cur) arduUpdateWp(i, { ...cur, lat: Math.round(pos.lat * 1e7), lon: Math.round(pos.lng * 1e7) });
+            if (cur) arduUpdateWp(i, { ...cur, lat: Math.round(pos.lat * 1e7), lon: Math.round(wrapLng(pos.lng) * 1e7) });
           });
         }
 
@@ -636,12 +639,8 @@
           // window under the panels — the WP ends up behind the mission panel. Off, like the INAV
           // layer, and centred in the visible area ourselves on popup creation only.
           popupOptions: { maxWidth: 310, minWidth: 230, autoPan: false },
-          // Biased right (clears the mission panel on the left) and below centre (the popup opens
-          // upward). The map is unzoomed, so this pixel math is independent of the UI scale.
           onCreate: (_popup, ll) => {
-            const size = map.getSize();
-            const wpPt = map.latLngToContainerPoint(ll);
-            map.panBy(wpPt.subtract(L.point(size.x * 0.55, size.y * 0.6)), { animate: true });
+            map.panBy(map.latLngToContainerPoint(ll).subtract(editorMarkerTarget(map)), { animate: true });
           },
         },
       );
@@ -654,7 +653,7 @@
     return {
       command: MAV_CMD_NAV_WAYPOINT, frame: MAV_FRAME_GLOBAL_RELATIVE_ALT,
       param1: 0, param2: 0, param3: 0, param4: 0,
-      lat: Math.round(latlng.lat * 1e7), lon: Math.round(latlng.lng * 1e7),
+      lat: Math.round(latlng.lat * 1e7), lon: Math.round(wrapLng(latlng.lng) * 1e7),
       alt: get(settings).defaultWpAltitudeM, autocontinue: true,
     };
   }
@@ -669,6 +668,7 @@
     // A tap on empty map with an active selection clears it (instead of adding a WP) — mirrors INAV.
     if (currentSelSet.size > 0) { arduClearWpSelection(); return; }
     arduAddWp(newWaypointAt(e.latlng));
+    requestMapAccess();
   }
 
   // svelte-ignore state_referenced_locally
@@ -677,6 +677,8 @@
   $effect(() => {
     void activeSurveyPattern.isActive; // re-render (clear / restore) when entering or leaving pattern mode
     void currentSelSet; // re-render when the multi-selection changes (red icons follow set membership)
+    // Read here, not only inside `render`: a deferred run reads nothing, and the effect would lose them.
+    void currentWps; void currentSelIdx; void currentEditing; void currentHome; void currentVehicle; void connected;
     const render = () => renderMission(currentWps, currentSelIdx, currentEditing, currentHome, currentVehicle, currentActiveWp, connected);
     if (!deferWhileStepping(popupState, render)) render();
   });

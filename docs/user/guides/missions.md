@@ -87,6 +87,28 @@ Each waypoint carries an altitude against a **reference**:
   (absolute, above mean sea level) and **AGL** (above ground level / terrain-following). AGL is a
   **planning aid**: because INAV itself only stores REL/AMSL, Kite resolves each AGL point to an absolute
   altitude (using terrain elevation) when the mission is uploaded or exported.
+
+    !!! warning "AGL needs terrain data"
+        Without terrain data for a waypoint — no internet connection and the area not loaded before,
+        or a location without elevation data such as open sea — an AGL altitude cannot be converted,
+        and sent as it is the aircraft would fly it as a height above home. Kite therefore does not
+        let that happen:
+
+        - The altitude-mode button of such a waypoint leaves **AGL** out, and a pattern with
+          altitudes above ground is not generated.
+        - A mission that already has such a waypoint (a library mission or a `.kmission` opened
+          offline) marks it with an **amber ring** on the map and an amber altitude in the list.
+          **FC Upload**, **EEPROM Save** and saving a `.mission` file are locked, and the panel
+          names the waypoint. **Save to library** stays available and keeps the AGL altitudes, so
+          nothing is lost until the terrain data is back. Saving a `.mission` file is locked only
+          for the mission that has such a waypoint; an upload sends all missions and is locked by
+          any of them.
+        - Kite asks for the terrain of an area once per session. If it was offline at that moment,
+          **restart Kite** once the connection is back; the lock then clears.
+        - Switching a waypoint between altitude modes converts its altitude with the terrain, so
+          it stays at the same height. That conversion is a convenience: while the data for it is
+          missing the mode still changes and the **number is kept as it is** — set the right value
+          for the new mode yourself.
 - **ArduPilot / PX4** set a MAVLink **altitude frame** per item — **relative** (to home), **absolute**
   (AMSL) or **terrain** (terrain-following).
 
@@ -99,6 +121,16 @@ Each waypoint carries an altitude against a **reference**:
 - **Add** points by clicking on the map; **drag** a marker to move it; **reorder** in the list.
 - **Edit** a point (type, altitude, parameters) from its popup or the list. The popup's number fields
   are the same **+ / −** fields as everywhere in Kite: click into one and the mouse wheel steps it.
+  The **trash can** buttons remove the waypoint or one of its modifiers; a tap on the map closes the
+  popup. A popup too tall for the map — several modifiers, a small screen — leaves its marker and
+  **docks at the right edge** of the map, beside the widgets, where it scrolls; the map moves so the
+  waypoint stays visible next to it.
+- **Click a waypoint in the list** (outside edit mode) to find it on the map: the map centres on it,
+  or — when no part of the mission is in view — shows the whole mission. The 3D map does the same
+  with its free camera.
+- **A selected waypoint holds a follow camera.** While the 2D map follows the aircraft, selecting a
+  waypoint — in the list, on the map, or by opening its editor — keeps the map on that waypoint
+  instead, and a heading-up map stops turning. Deselect it (tap the map) or press the follow button, and the map is back on the aircraft.
 - **Multi-select** (while **editing**) to act on several waypoints at once:
     - In the **list**: **Ctrl/⌘-click** rows to toggle them, **Shift-click** for an inclusive range, or
       tap a number **badge** to toggle a single one.
@@ -211,7 +243,12 @@ INAV column: Kite carries the MSP transfer inside the MAVLink stream, EEPROM sav
 included — see **[Connecting → INAV over MAVLink](connecting.md#inav-over-mavlink-mspmav)**.
 
 After a download the plan is tagged **FC** (see provenance below); the mission you see is exactly what
-the aircraft will fly.
+the aircraft will fly. If the library already holds exactly this mission, it is tagged **DB** as well
+and counts as that library entry — saving it again or linking it to a flight uses the entry instead of
+creating a second one. For INAV this also holds for a mission planned with **AGL** altitudes: the
+aircraft stores them converted to AMSL, Kite recognises the mission all the same and shows it as it is
+in the library, with its AGL altitudes. The same holds for a `.mission` file you open. This needs the
+terrain data of the mission's area.
 
 ## Files & the mission library
 

@@ -197,6 +197,19 @@ pub fn mav_mission_set_current(vehicle_id: Option<String>, seq: u16, state: Stat
     )
 }
 
+/// Switch the EXTENDED_SYS_STATE stream (landed state, 1 Hz) on or off via `MAV_CMD_SET_MESSAGE_INTERVAL`.
+#[tauri::command(async)]
+pub fn mav_landed_state_stream(vehicle_id: Option<String>, on: bool, state: State<'_, AppState>) -> Result<(), String> {
+    let (cmd_tx, fc_sysid) = mav_handle(&state, vehicle_id.as_deref())?;
+    // param1 = message id (245), param2 = interval in µs (-1 = off).
+    control::send_command_long_no_ack(
+        &cmd_tx,
+        fc_sysid,
+        MavCmd::MAV_CMD_SET_MESSAGE_INTERVAL,
+        [245.0, if on { 1_000_000.0 } else { -1.0 }, 0.0, 0.0, 0.0, 0.0, 0.0],
+    )
+}
+
 /// Set the home position to the vehicle's current location via `MAV_CMD_DO_SET_HOME` (param1 = 1).
 #[tauri::command(async)]
 pub fn mav_set_home_here(vehicle_id: Option<String>, state: State<'_, AppState>) -> Result<(), String> {

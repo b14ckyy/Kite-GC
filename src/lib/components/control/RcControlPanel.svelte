@@ -11,6 +11,7 @@
      device/FC — the user manages the matching FC config themselves. -->
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
+  import { escapeKey } from '$lib/actions/escapeKey';
   import { get } from 'svelte/store';
   import { untrack } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
@@ -600,7 +601,7 @@
 
 {#if newOpen}
   <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
-  <div class="rc-modal-backdrop" onclick={() => (newOpen = false)} onkeydown={(e) => { if (e.key === 'Escape') newOpen = false; }}>
+  <div class="rc-modal-backdrop" use:escapeKey={() => (newOpen = false)}>
     <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
     <div class="rc-modal" onclick={(e) => e.stopPropagation()}>
       <div class="rc-modal-title">{$t('rc.newTitle')}</div>

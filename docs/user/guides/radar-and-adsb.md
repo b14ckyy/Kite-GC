@@ -184,7 +184,9 @@ Alerts surface as a **banner** along the top of the map (listing every affected 
 select it), an **audible** tone and an optional **spoken** callout (in your UI language), and a **pulsing
 highlight** on the contact on both maps. Sound and voice have separate switches, and the numeric
 thresholds (warn radius, vertical separation, CPA miss distances and look-ahead) are **adjustable** in
-the same group.
+the same group. The banner never lies over an open panel, so it cannot cover a control you are about to
+use. Where a panel hides it — a small window, a phone — the **title bar of the panel turns red or
+amber** with the alert instead; park the panel to see the banner.
 
 ![A collision alert](../assets/guides/radar/radar_alert.png)
 /// caption

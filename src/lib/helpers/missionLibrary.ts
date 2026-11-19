@@ -1,16 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Mission-library helpers (frontend side).
-// Builds the `LibraryMissionInput` payload for the DB: a content hash (identity, for dedup)
-// plus computed geometry metadata. The hash is a SHA-256 of the SAME canonical serialization
-// the provenance system uses (hashWaypoints), so DB identity and provenance stay consistent.
-// See docs/archive/MISSION_LIBRARY_AND_DB.md.
+// Library payload: content hash (hashWaypoints over the form the FC gets, AGL → AMSL) + metadata.
+// Dev-Docs archive/MISSION_LIBRARY_AND_DB.md.
 
 import { get } from 'svelte/store';
-import { hashWaypoints, hasLocation, toDeg, altToM, WpAction, WP_FLAG_LAST, launchPoint, type Waypoint } from '$lib/stores/mission';
+import { invoke } from '@tauri-apps/api/core';
+import { hashWaypoints, hasLocation, toDeg, altToM, WpAction, WP_FLAG_LAST, ALT_MODE_AGL, launchPoint, type Waypoint } from '$lib/stores/mission';
 import type { LibraryMissionInput } from '$lib/stores/flightlogTypes';
-import { missionDbFindByHash } from '$lib/stores/flightlog';
+import { missionDbFindByHash, missionDbList, missionDbSetHash } from '$lib/stores/flightlog';
 import { computeRouteStats, simulateRoute, type RouteCommand } from '$lib/helpers/missionStats';
 
 const EARTH_R = 6371000;
@@ -33,17 +31,62 @@ export async function sha256Hex(s: string): Promise<string> {
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-/** Stable content-hash identity of a mission (SHA-256 of the provenance serialization). */
-export function missionContentHash(wps: Waypoint[]): Promise<string> {
-  return sha256Hex(hashWaypoints(wps));
+const hasAgl = (wps: Waypoint[]) => wps.some((w) => (w.alt_mode ?? 0) === ALT_MODE_AGL);
+
+/** SHA-256 over the FC form (AGL resolved). Without terrain the AGL form is hashed; `rehashAglMissions`
+ *  fixes it later. */
+export async function missionContentHash(wps: Waypoint[]): Promise<string> {
+  let resolved = wps;
+  if (hasAgl(wps)) {
+    try {
+      resolved = await invoke<Waypoint[]>('mission_resolve_agl', { waypoints: wps });
+    } catch (e) {
+      // `no-terrain:<wp number>` — NO_TERRAIN_ERROR (commands/mission.rs).
+      if (!String(e).startsWith('no-terrain:')) throw e;
+    }
+  }
+  return sha256Hex(hashWaypoints(resolved));
+}
+
+/** Entries saved before the hash was taken over the resolved form still carry the hash of their AGL
+ *  form. They are found by exactly that and re-hashed; one whose terrain is not available stays for
+ *  the next run. */
+export async function rehashAglMissions(dbPath: string): Promise<void> {
+  for (const m of await missionDbList(dbPath)) {
+    if (m.format !== 'inav') continue;
+    let wps: Waypoint[];
+    try {
+      wps = JSON.parse(m.waypoints_json);
+    } catch {
+      continue;
+    }
+    if (!Array.isArray(wps) || !hasAgl(wps)) continue;
+    if (m.content_hash !== (await sha256Hex(hashWaypoints(wps)))) continue;
+    try {
+      const hash = await missionContentHash(wps);
+      if (hash !== m.content_hash) await missionDbSetHash(m.id, hash, m.content_hash, dbPath);
+    } catch (e) {
+      console.warn(`[mission] library entry ${m.id} keeps its old hash`, e);
+    }
+  }
 }
 
 /** The library mission id matching these waypoints by content hash, or null (no match).
  *  Used by the import flow to set `loadedMissionId` when an imported mission already exists. */
 export async function findLibraryMissionId(wps: Waypoint[], dbPath: string): Promise<number | null> {
-  const hash = await missionContentHash(wps);
-  const m = await missionDbFindByHash(hash, dbPath);
-  return m ? m.id : null;
+  return (await findLibraryMission(wps, dbPath))?.id ?? null;
+}
+
+/** The library entry of these waypoints and its own waypoint list — which differs from `wps` where the
+ *  entry holds AGL waypoints and `wps` is the resolved form (`sameForm` false). */
+export async function findLibraryMission(
+  wps: Waypoint[],
+  dbPath: string,
+): Promise<{ id: number; waypoints: Waypoint[]; sameForm: boolean } | null> {
+  const m = await missionDbFindByHash(await missionContentHash(wps), dbPath);
+  if (!m) return null;
+  const waypoints: Waypoint[] = JSON.parse(m.waypoints_json);
+  return { id: m.id, waypoints, sameForm: hashWaypoints(waypoints) === hashWaypoints(wps) };
 }
 
 export interface MissionMetadata {

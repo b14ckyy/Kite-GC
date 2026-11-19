@@ -171,18 +171,23 @@ pub fn flightlog_export_all(
     let conn = open_db(&custom)?;
     let ids = db::all_flight_ids(&conn).map_err(|e| format!("Query error: {e}"))?;
     let total = ids.len();
-    let mut last = 0;
     let exported = crate::user_file::with_write_path(&output_path, |p| {
-        exchange::export_flights_with(&conn, &ids, p, &mut |done, total| {
-            // One event per percent is plenty for a notice.
-            if done * 100 / total.max(1) != last || done == total {
-                last = done * 100 / total.max(1);
-                let _ = app_handle.emit("flightlog-export-progress", ExportAllResult { exported: done, total });
-            }
-        })
+        exchange::export_flights_with(&conn, &ids, p, &mut export_progress(&app_handle))
     })
     .inspect_err(|e| log::warn!("[flightlog] export of all flights failed: {e}"))?;
     Ok(ExportAllResult { exported, total })
+}
+
+/// Progress callback of a `.kflight` export: event `flightlog-export-progress`, one per percent.
+fn export_progress(app_handle: &tauri::AppHandle) -> impl FnMut(usize, usize) + '_ {
+    let mut last = usize::MAX;
+    move |done, total| {
+        let percent = done * 100 / total.max(1);
+        if percent != last || done == total {
+            last = percent;
+            let _ = app_handle.emit("flightlog-export-progress", ExportAllResult { exported: done, total });
+        }
+    }
 }
 
 // ── Moving the database with its folder (flightlog/db_move.rs) ──
@@ -413,6 +418,14 @@ pub fn mission_db_get(id: i64, db_path: Option<String>) -> Result<Option<Mission
 pub fn mission_db_list(db_path: Option<String>) -> Result<Vec<Mission>, String> {
     let conn = open_db(&db_path.unwrap_or_default())?;
     db::list_missions(&conn).map_err(|e| format!("Query error: {}", e))
+}
+
+/// Replace a library mission's content hash (an entry hashed by an older rule); `false` = the entry
+/// changed meanwhile, or another entry holds that hash.
+#[tauri::command]
+pub fn mission_db_set_hash(id: i64, content_hash: String, old_hash: String, db_path: Option<String>) -> Result<bool, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::set_mission_hash(&conn, id, &content_hash, &old_hash).map_err(|e| format!("Update error: {}", e))
 }
 
 /// Update a mission's name + notes (Manager rename / notes edit).
@@ -1378,6 +1391,13 @@ pub fn flightlog_blackbox_file_info(
     Ok(info.map(|(filename, size_bytes)| BlackboxFileInfo { filename, size_bytes }))
 }
 
+/// Estimated database size of a flight's rows and of its linked partner's (`db::flight_data_sizes`).
+#[tauri::command(async)]
+pub fn flightlog_flight_data_sizes(flight_id: i64, db_path: Option<String>) -> Result<Vec<db::FlightDataSize>, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::flight_data_sizes(&conn, flight_id).map_err(|e| format!("DB error: {}", e))
+}
+
 /// Delete the stored original blackbox file, keeping the parsed flight; returns its original filename.
 #[tauri::command]
 pub fn flightlog_delete_blackbox_file(
@@ -1424,15 +1444,16 @@ fn compact_refusal(state: &crate::state::AppState) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn flightlog_export(
     flight_ids: Vec<i64>,
     output_path: String,
     db_path: Option<String>,
+    app_handle: tauri::AppHandle,
 ) -> Result<usize, String> {
     let conn = open_db(&db_path.unwrap_or_default())?;
     crate::user_file::with_write_path(&output_path, |p| {
-        exchange::export_flights(&conn, &flight_ids, p)
+        exchange::export_flights_with(&conn, &flight_ids, p, &mut export_progress(&app_handle))
     })
 }
 

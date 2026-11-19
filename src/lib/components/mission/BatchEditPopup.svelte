@@ -10,12 +10,12 @@
   import { t } from 'svelte-i18n';
   import {
     mission, selectedWpIndices, missionUpdateWp, WpAction, hasLocation,
-    ALT_MODE_REL, ALT_MODE_AMSL, beginUndoGroup, endUndoGroup, type Waypoint,
+    ALT_MODE_REL, ALT_MODE_AMSL, ALT_MODE_AGL, beginUndoGroup, endUndoGroup, type Waypoint,
   } from '$lib/stores/mission';
   import { batchEdit, closeBatchEdit } from '$lib/stores/batchEdit';
   import { autopilotSystem } from '$lib/stores/autopilotContext';
   import { get } from 'svelte/store';
-  import { convertAltCm } from '$lib/helpers/altConvert';
+  import { convertAltCm, hasTerrain } from '$lib/helpers/altConvert';
   import UnitStepper from '$lib/components/UnitStepper.svelte';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
   import type { InterfaceSettings } from '$lib/stores/settings';
@@ -114,10 +114,17 @@
     busy = true;
     beginUndoGroup(); // batch alt-mode change = one undo step
     try {
-      const target = ((altModeCommon ?? ALT_MODE_REL) + 1) % 3;
+      let target = ((altModeCommon ?? ALT_MODE_REL) + 1) % 3;
+      // AGL only where every selected waypoint has terrain data; else the cycle goes on to REL.
+      if (target === ALT_MODE_AGL) {
+        for (const { wp } of altWps) {
+          if (!(await hasTerrain(wp))) { target = ALT_MODE_REL; break; }
+        }
+      }
       for (const { i, wp } of altWps) {
         const from = wpMode(wp);
-        const altitude = from === target ? wp.altitude : await convertAltCm(wp, from, target);
+        // Without a ground reference the number is kept: the operator sets the value.
+        const altitude = from === target ? wp.altitude : (await convertAltCm(wp, from, target)) ?? wp.altitude;
         await missionUpdateWp(i, { ...wp, alt_mode: target, altitude });
       }
       load();

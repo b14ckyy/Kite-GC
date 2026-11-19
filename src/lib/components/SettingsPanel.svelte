@@ -150,7 +150,7 @@
     onClearCache?: () => void;
     onChooseFlightLogPath?: () => void;
     onResetFlightLogPath?: () => void;
-    onCompactDb?: () => void;
+    onCompactDb?: () => void | Promise<void>;
     onExportDatabase?: () => void;
     onImportDatabase?: () => void;
     onExportAllFlights?: () => void;
@@ -342,6 +342,13 @@
     dbBackupFor = dbPath;
   }
   $effect(() => { void loadDbBackup(); });
+  let dbSizeBytes = $state<number | null>(null);
+  async function loadDbSize(): Promise<void> {
+    const state = await invoke<{ exists: boolean; size_bytes: number }>('flightlog_folder_state', { dbPath: flightLogDbPath }).catch(() => null);
+    dbSizeBytes = state?.exists ? state.size_bytes : null;
+  }
+  $effect(() => { void loadDbSize(); });
+
   // Mobile: original log files only arrive with a database imported from a desktop.
   let originalLogs = $state<{ count: number; size_bytes: number } | null>(null);
   async function loadOriginalLogs(): Promise<void> {
@@ -353,6 +360,7 @@
     if (!originalLogs) return;
     await onRemoveOriginalLogs(originalLogs.count, originalLogs.size_bytes);
     await loadOriginalLogs();
+    void loadDbSize();
   }
 
   async function deleteDbBackup(): Promise<void> {
@@ -1009,7 +1017,13 @@
       {#if hasDbCompact}
         <div class="s-row">
           <span class="s-label" title={$t('settings.compactDbHint')}>{$t('settings.compactDb')}</span>
-          <Button variant="standard" size="sm" onclick={onCompactDb} title={$t('settings.compactDbHint')}>{$t('settings.compactDbBtn')}</Button>
+          <Button variant="standard" size="sm" onclick={async () => { await onCompactDb(); void loadDbSize(); }} title={$t('settings.compactDbHint')}>{$t('settings.compactDbBtn')}</Button>
+        </div>
+      {/if}
+      {#if dbSizeBytes != null}
+        <div class="s-row">
+          <span class="s-label">{$t('settings.dbSize')}</span>
+          <span class="s-readout">{formatBackupSize(dbSizeBytes)}</span>
         </div>
       {/if}
       {#if dbBackup}

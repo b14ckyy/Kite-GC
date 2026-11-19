@@ -17,7 +17,7 @@
   import { telemetry } from "$lib/stores/telemetry";
   import { startRadarListeners, configureRadar, setRadarCenter, setRadarNode } from "$lib/stores/radarTracking";
   import { effectiveLink } from "$lib/helpers/radarPorts";
-  import { startRadarAlerts } from "$lib/controllers/radarAlerts";
+  import { startRadarAlerts, radarAlerts } from "$lib/controllers/radarAlerts";
   import { startBreachMonitor } from "$lib/controllers/breachMonitor";
   import { startTelemetryLostNotice } from "$lib/controllers/telemetryLostNotice";
   import { startAlertAudio } from "$lib/controllers/alertAudio";
@@ -41,7 +41,8 @@
   import { runUpdateCheck, resolveUpdateKind } from "$lib/controllers/updateCheck";
   import { checkDbBackupPrompt, runPendingDbUpgrade, formatBackupSize, type DbSchemaState, type DbUpgradeOutcome } from "$lib/controllers/dbBackupPrompt";
   import { planDbFolderSwitch, askAboutPreviousDb, type DbFolderPlan } from "$lib/controllers/dbFolderSwitch";
-  import { exportDatabase, importDatabase, exportAllFlights, removeOriginalLogs, type DbTransferUi } from "$lib/controllers/dbTransfer";
+  import { rehashAglMissions } from "$lib/helpers/missionLibrary";
+  import { exportDatabase, importDatabase, exportAllFlights, removeOriginalLogs, withExportProgress, type DbTransferUi } from "$lib/controllers/dbTransfer";
   import { importMissionFile } from "$lib/helpers/missionFile";
   import { exportFile, sharesExports, flightFileStem, clearExportCache, setExportErrorReporter } from "$lib/helpers/exportFile";
   import type { LibraryMission } from "$lib/stores/flightlogTypes";
@@ -80,7 +81,8 @@
   import RadarAlertBanner from "$lib/components/RadarAlertBanner.svelte";
   import StatusTextToasts from "$lib/components/StatusTextToasts.svelte";
   import { startStatusText } from "$lib/stores/statusText";
-  import { panelDockRight } from "$lib/stores/panelDock";
+  import { panelDockRight, panelAlertLevel } from "$lib/stores/panelDock";
+  import { onMapAccessRequested, PANEL_YIELD_MAP_FRACTION } from "$lib/stores/panelYield";
   import SettingsPanel from "$lib/components/SettingsPanel.svelte";
   import { ensureUserLocation, requestUserLocation, userGeoLocation } from "$lib/helpers/userLocation";
   import { gcsLocation, gcsAccuracyM } from "$lib/stores/gcsLocation";
@@ -114,7 +116,7 @@
   import { homePosition, setVehicleHome } from '$lib/stores/home';
   import { isActive, links, activeVehicleId, refreshLinks } from '$lib/stores/vehicles';
   import { parseVehicleId } from '$lib/helpers/vehicleId';
-  import { ingestFcGuidedTarget, ingestVehicleGuidedTarget } from '$lib/controllers/vehicleControl';
+  import { ingestFcGuidedTarget, ingestVehicleGuidedTarget, ingestLandedState, ingestSystemStatus } from '$lib/controllers/vehicleControl';
   import { MAP_PROVIDERS } from "$lib/config/mapProviders";
   import { tileCacheStats, setCacheMaxMB, clearCache } from "$lib/cache/tileCache";
   import { weatherTempDisplayFromC, weatherWindDisplayFromMs, weatherTempCFromDisplay, weatherWindMsFromDisplay, canonicalWeatherDescription } from "$lib/helpers/weather";
@@ -301,12 +303,6 @@
   // Fully populated nav rail in logical px: hamburger 44 + 4 top margin + 9 tabs ×40 + 8 gaps ×2
   // (DEV excluded). A fixed reference on purpose — the live rail height varies with connection state.
   const NAV_RAIL_FULL_HEIGHT = 424;
-  // Bottom reserve for the floating panels: they stop above the widget dock unless that would make them
-  // shorter than the nav rail, then they overlay the dock. Logical px (adapts to the UI scale); the 6px keeps
-  // the rail's gap above the status bar. PanelShell's tablet block reads the reserve too.
-  const panelBottomReserve = $derived(
-    winH / uiScale - toolbarH - bottomDockH - 24 - 12 < NAV_RAIL_FULL_HEIGHT ? '6px' : gridBottomHeight
-  );
 
   // Floating-window rect: ONE computation (`floatFrameRect`) for the window, the map swapped into its frame
   // and the dock reserve. In the zoomed layer's logical px; the unzoomed map's rect is that × uiScale,
@@ -330,6 +326,29 @@
   const floatW = $derived(phoneUi ? dockW : floatFrame.width);
   const floatLeft = $derived(phoneUi ? dockLeft : floatFrame.left);
   const floatTop = $derived(phoneUi ? dockTop : floatFrame.top);
+
+  // Panel bottom reserve (logical px): above the docked video, else above the dock tiles; each is given up when the
+  // panel would get shorter than the nav rail. A panel left of the tiles runs down to the rail's 6px gap.
+  // PanelShell's tablet block reads it too.
+  const PANEL_VIDEO_GAP_PX = 6;
+  /** Left edge of the widget tiles in the bottom dock, in screen px like `panelDockRight`; Infinity while
+   *  the dock shows none. */
+  let bottomTilesLeft = $state(Infinity);
+  const videoDockedUnderPanels = $derived(
+    !phoneUi && $videoState.enabled && !$videoState.undocked && $videoState.floating && $videoState.floatSnapped,
+  );
+  const panelLeftOfDockTiles = $derived(
+    $panelDockRight > 0 && $panelDockRight + PANEL_VIDEO_GAP_PX * uiScale <= bottomTilesLeft,
+  );
+  const panelBottomReserve = $derived.by(() => {
+    const panelRoom = (reservePx: number) => logicalH - toolbarH - reservePx - 24 - 12;
+    // The panel's bottom edge is the reserve plus the status bar (24px) above the frame's bottom.
+    const videoPx = videoDockedUnderPanels ? logicalH - floatTop - 24 + PANEL_VIDEO_GAP_PX : 0;
+    const dockPx = panelLeftOfDockTiles ? 6 : bottomDockH;
+    if (videoPx > dockPx && panelRoom(videoPx) >= NAV_RAIL_FULL_HEIGHT) return `${Math.round(videoPx)}px`;
+    if (panelLeftOfDockTiles) return '6px';
+    return panelRoom(bottomDockH) < NAV_RAIL_FULL_HEIGHT ? '6px' : gridBottomHeight;
+  });
   // The phone's docked frame is chromeless (its body fills the frame); the desktop frame's bezel
   // insets the picture — and the swapped-in map — by this much.
   const floatBezel = $derived(phoneUi ? 0 : FLOAT_BEZEL_PX);
@@ -351,6 +370,23 @@
     bottomDockLeft = bottomDockEl?.offsetLeft ?? 0;
   });
   const videoReserveDock = $derived(Math.max(0, videoReserve - bottomDockLeft));
+  // The tile strip is centred: it moves with the dock's width and the video's reserve.
+  $effect(() => {
+    const dock = bottomDockEl;
+    void winW; void bottomDockW; void videoReserveDock; void uiScale;
+    const shown = $layout.bottomDock.visible;
+    if (!dock) return;
+    const measure = () => {
+      const r = dock.querySelector<HTMLElement>('.widget-panel')?.getBoundingClientRect();
+      bottomTilesLeft = shown && r && r.width > 0 ? r.left : Infinity;
+    };
+    const strip = dock.querySelector<HTMLElement>('.widget-panel');
+    const ro = new ResizeObserver(measure);
+    ro.observe(dock);
+    if (strip) ro.observe(strip);
+    const frame = requestAnimationFrame(measure);
+    return () => { ro.disconnect(); cancelAnimationFrame(frame); };
+  });
   // The phone's widget column overlays the map: no native surface may show through it (the docked
   // frame parks behind it) — the surface router clips at its edge.
   $effect(() => {
@@ -1327,6 +1363,58 @@
     }
   }
 
+  function hidePanel() {
+    if (!navPanelOpen || panelHidden) return;
+    panelHidden = true;
+    setTimeout(() => window.dispatchEvent(new Event("resize")), 320);
+  }
+
+  // The traffic banner lies under the panels. Where an open panel covers it, the panel's title bar shows
+  // the alert level instead (stores/panelDock.ts).
+  $effect(() => {
+    const alerts = $radarAlerts;
+    void $panelDockRight; void activeTab;
+    if (alerts.length === 0 || !navPanelOpen || panelHidden) { panelAlertLevel.set(null); return; }
+    const level = alerts.some((a) => a.level === 'warning') ? 'warning' : 'caution';
+    // Measured after the banner and the panel have their boxes.
+    const frame = requestAnimationFrame(() => {
+      const banner = document.querySelector('.app-toasts .alert-stack')?.getBoundingClientRect();
+      const panel = document.querySelector('.panels-host .ps')?.getBoundingClientRect();
+      const covered = banner != null && panel != null
+        && banner.left < panel.right && panel.left < banner.right && banner.top < panel.bottom && panel.top < banner.bottom;
+      panelAlertLevel.set(covered ? level : null);
+    });
+    return () => cancelAnimationFrame(frame);
+  });
+
+  /** Width of the area the map shows in: the window, on a phone without the widget column at its side. */
+  function mapAreaWidth(): number {
+    const column = document.querySelector('.pwp')?.getBoundingClientRect();
+    const atSide = column != null && column.height > column.width && column.left > window.innerWidth / 2;
+    return window.innerWidth - (atSide ? column.width : 0);
+  }
+
+  // A panel action that goes on on the map hides a panel that covers too much of it (stores/panelYield.ts).
+  $effect(() => onMapAccessRequested(() => {
+    // The terrain strip spans the width by design and is watched while waypoints are placed.
+    if (terrainOpen) return;
+    const panel = document.querySelector('.panels-host .ps')?.getBoundingClientRect();
+    if (panel && panel.width > mapAreaWidth() * PANEL_YIELD_MAP_FRACTION) hidePanel();
+  }));
+
+  /** After the collapse to the info card: where the card still lies over the replay player, the panel
+   *  goes out of the way as well. Measured once the variant transition has settled. */
+  function hideLogbookOverPlayer() {
+    setTimeout(() => {
+      if (!logbookMinimized || panelHidden || activeTab !== 'logbook') return;
+      const card = document.querySelector('.panels-host .ps')?.getBoundingClientRect();
+      const player = document.querySelector('.log-player')?.getBoundingClientRect();
+      if (!card || !player || player.width === 0) return;
+      const overlap = card.left < player.right && player.left < card.right && card.top < player.bottom && player.top < card.bottom;
+      if (overlap) hidePanel();
+    }, 300);
+  }
+
   // Collapse-anywhere (Dev-Docs active/REPLAY_PANEL_COMPACT.md): a click outside the logbook or a dialog
   // collapses the flight view to its info card. Capture phase, so surfaces that stop propagation count.
   // The handler reads state at event time (not tracked).
@@ -1336,6 +1424,8 @@
       const target = e.target as Element | null;
       if (target?.closest('.logbook-host, .dialog-backdrop')) return;
       minimizeLogbook();
+      // Only on this collapse: a card brought back by hand stays through the next tap on the map.
+      hideLogbookOverPlayer();
     };
     window.addEventListener('pointerdown', onDown, true);
     return () => window.removeEventListener('pointerdown', onDown, true);
@@ -2025,6 +2115,7 @@
 
   async function performKflightImport(filePath: string) {
     const result = await logbookCtrl.importFromKflight(filePath, flightLogDbPath);
+    void rehashAglMissions(flightLogDbPath).catch(() => {});
     await loadLogbook();
     let msg = $t('logbook.importKflightResult', {
       values: { imported: result.imported, skipped: result.skipped },
@@ -2275,7 +2366,10 @@
       const outputPath = await exportFile({
         name: `${stem}.kflight`,
         filters: [{ name: $t('logbook.kflightFileFilter'), extensions: ['kflight'] }],
-        write: async (path) => { count = await logbookCtrl.exportSelectedFlights(exportIds, path, flightLogDbPath); },
+        write: async (path) => {
+          count = await withExportProgress(dbTransferUi, $t('logbook.exportBusyTitle'), exportIds.length, () =>
+            logbookCtrl.exportSelectedFlights(exportIds, path, flightLogDbPath));
+        },
       });
       if (!outputPath) return;
       // The share sheet is the confirmation on mobile; a dialog under it would only be in the way.
@@ -2799,25 +2893,66 @@
       idsToDelete.push(bbxId);
     }
 
-    // Consolidate the deleted flights' battery usage into their packs first (opt-in).
-    if (consolidateBattery) {
-      for (const id of idsToDelete) {
-        const f = id === flightId ? selectedFlight : await getFlight(id, flightLogDbPath).catch(() => null);
-        if (!f?.battery_serial) continue;
-        const pack = f.battery_serial === linkedPack?.serial
-          ? linkedPack
-          : await batteryDbFindBySerial(f.battery_serial, flightLogDbPath).catch(() => null);
-        if (!pack) continue;
-        const mah = f.battery_used_mah ?? 0;
-        const cycles = pack.capacity_mah ? mah / pack.capacity_mah : 0;
-        await batteryDbAddUsage(pack.id, f.duration_sec ?? 0, mah, cycles, 0, flightLogDbPath);
-      }
-    }
-
     for (const id of idsToDelete) {
+      if (consolidateBattery) await consolidateBatteryUsage(id);
       await logbookCtrl.removeFlight(id, flightLogDbPath);
     }
 
+    forgetSelectedFlight();
+    await loadLogbook();
+  }
+
+  /** Add a flight's battery usage to its pack's lifetime totals — done before the flight is deleted. */
+  async function consolidateBatteryUsage(flightId: number) {
+    const f = await getFlight(flightId, flightLogDbPath).catch(() => null);
+    if (!f?.battery_serial) return;
+    const mah = f.battery_used_mah ?? 0;
+    // A flight on several packs lists their serials comma-separated; each pack gets the whole flight,
+    // as the packs' own totals count it.
+    for (const serial of f.battery_serial.split(',').map((s) => s.trim()).filter(Boolean)) {
+      const pack = await batteryDbFindBySerial(serial, flightLogDbPath).catch(() => null);
+      if (!pack) continue;
+      const cycles = pack.capacity_mah ? mah / pack.capacity_mah : 0;
+      await batteryDbAddUsage(pack.id, f.duration_sec ?? 0, mah, cycles, 0, flightLogDbPath);
+    }
+  }
+
+  /** Delete exactly the ticked flights; a linked partner that is not ticked stays. */
+  async function removeFlights(ids: number[]) {
+    if (ids.length === 0) return;
+    const count = String(ids.length);
+    const value = await showDialog({
+      title: $t('logbook.deleteManyTitle'),
+      message: $t('logbook.deleteManyWarning', { values: { count } }),
+      buttons: [{ label: $t('logbook.deleteManyConfirm', { values: { count } }), value: 'delete', danger: true }],
+      checkbox: { label: $t('logbook.deleteManyConsolidate') },
+    });
+    if (value !== 'delete') return;
+    const consolidateBattery = confirmDialog.checkboxResult();
+    const progress = (done: number) => {
+      dbTransferNotice = {
+        title: $t('logbook.deleteManyBusyTitle'),
+        message: $t('settings.dbTransfer.flightsBusyMsg', { values: { done: String(done), total: count } }),
+      };
+    };
+    try {
+      // The open flight goes when it is deleted — or its partner, whose track and link it still shows.
+      const partner = selectedFlight?.linked_flight_id ?? null;
+      if (selectedFlightId != null && (ids.includes(selectedFlightId) || (partner != null && ids.includes(partner)))) forgetSelectedFlight();
+      for (const [i, id] of ids.entries()) {
+        progress(i);
+        if (consolidateBattery) await consolidateBatteryUsage(id);
+        await logbookCtrl.removeFlight(id, flightLogDbPath);
+      }
+    } catch (e) {
+      errorMsg = String(e);
+    } finally {
+      dbTransferNotice = null;
+      await loadLogbook();
+    }
+  }
+
+  function forgetSelectedFlight() {
     resetPlayback();
     selectedFlight = null;
     selectedFlightTrack = [];
@@ -2830,7 +2965,6 @@
     weatherWindDir = '';
     weatherDesc = '';
     weatherEditing = false;
-    await loadLogbook();
   }
 
   async function loadInfo() {
@@ -3604,6 +3738,7 @@
     // reproducible) — wipe them in passing.
     void hiresCleanup(flightLogDbPath).catch(() => {});
     void scratchClear().catch(() => {});
+    void rehashAglMissions(flightLogDbPath).catch(() => {});
     // Android: closed raw logs still in app storage go to the chosen folder; the leftover `db-mirror` copy is deleted.
     if (isAndroid) void invoke('storage_flush_raw_logs', { rawPath: flightLogRawPath }).catch(() => {});
     // A database fetched for an import the app was closed on: a full copy nobody will confirm.
@@ -3879,6 +4014,11 @@
       if (!isActive(event.payload)) return;
       ingestFcGuidedTarget(event.payload.lat, event.payload.lon);
     });
+    void listen<{ landed_state?: number; system_status?: number; vehicleId?: string }>('vehicle-flight-state', (event) => {
+      if (!isActive(event.payload)) return;
+      if (event.payload.landed_state != null) ingestLandedState(event.payload.landed_state);
+      if (event.payload.system_status != null) ingestSystemStatus(event.payload.system_status);
+    });
   }
 
   onDestroy(() => {
@@ -3989,18 +4129,21 @@
        floating window or a widget tile, and map-bound banners would then cover that tiny tile. This
        container sits above everything in the content area so alerts stay readable. -->
   <!-- --toast-dock-inset = the open left-docked panel's right edge (0 when none); the system-message
-       toasts centre beside the panel with it. The radar banner ignores it and stays frame-centred + on top. -->
+       toasts centre beside the panel with it. The radar banner ignores it and stays frame-centred; both lie
+       UNDER the panels, so a banner with no room beside a panel never covers its controls. -->
   <div class="app-toasts" inert={dbCompacting} style:--toast-dock-inset="{panelHidden ? 0 : $panelDockRight}px">
     <!-- Conflict-alert banner (renders nothing when idle). -->
     <RadarAlertBanner {interfaceSettings} />
     <!-- FC system messages (MAVLink STATUSTEXT) as top-edge toasts (renders nothing when idle). -->
     <StatusTextToasts />
-    <!-- Multi-vehicle group commands, bottom-centre (renders nothing with fewer than 2 MAVLink vehicles;
-         behind the fleet feature gate). -->
-    {#if $fleetEnabled}
-      <GroupCommandBar />
-    {/if}
   </div>
+  <!-- Multi-vehicle group commands, bottom-centre (renders nothing with fewer than 2 MAVLink vehicles;
+       behind the fleet feature gate). A control bar, so it stays over the panels. -->
+  {#if $fleetEnabled}
+    <div class="app-toasts over-panels" inert={dbCompacting} style:--toast-dock-inset="{panelHidden ? 0 : $panelDockRight}px">
+      <GroupCommandBar />
+    </div>
+  {/if}
 
   <!-- Floating-frame map controls, top-level/unzoomed so they sit ABOVE the in-frame map: only the two
        corner handles (the map goes back by double-clicking the full-screen video). Not while parked. -->
@@ -4286,12 +4429,6 @@
     hiresRecord={hiresActive ? hiresSamplePoint : null}
   />
 
-  {#if hiresParsing}
-    <HiresParseModal progress={hiresProgress} estimateBytes={hiresEstimateBytes} />
-  {/if}
-  {#if rawTelemetryOpen && connStatus === 'connected'}
-    <RawTelemetryModal {telem} onclose={() => (rawTelemetryOpen = false)} />
-  {/if}
 
   <!-- ======= FLOATING NAV PANEL SYSTEM ======= -->
   <!-- The rail lives here in .app; the panels themselves render in the panels layer AFTER
@@ -4518,6 +4655,7 @@
             onSavePilot={saveSelectedFlightPilot}
             onDeleteFlight={removeSelectedFlight}
             onExportFlights={exportFlightsToKflight}
+            onDeleteFlights={(ids) => { void removeFlights(ids); }}
             onExportBlackbox={exportBlackbox}
             onDeleteBlackbox={deleteBlackbox}
             {blackboxFileInfo}
@@ -4570,6 +4708,13 @@
       <div class="phone-debug-btn">
         <PhoneDebugButton bind:debugOpen />
       </div>
+    {/if}
+    <!-- Modal windows live in this layer: in the main UI layer they would lie under the panels. -->
+    {#if hiresParsing}
+      <HiresParseModal progress={hiresProgress} estimateBytes={hiresEstimateBytes} />
+    {/if}
+    {#if rawTelemetryOpen && connStatus === 'connected'}
+      <RawTelemetryModal {telem} onclose={() => (rawTelemetryOpen = false)} />
     {/if}
     <ConfirmDialog bind:this={confirmDialog} />
     {#if dbUpgrade}
@@ -4884,14 +5029,16 @@
   .layer-map.in-frame :global(.leaflet-control-attribution) {
     display: none;
   }
-  /* Toasts & alerts container — pinned to the app frame's top, above the map/video layers (z2/z0) so
-     banners are never tied to (or clipped by) a shrunken in-frame map. Zero-height (children are
-     absolutely positioned) so it never blocks clicks. */
+  /* Toasts & alerts container — pinned to the app frame's top, above the map/video layers (z2/z0) and under
+     the panels. Zero-height (children are absolutely positioned) so it never blocks clicks. */
   .app-toasts {
     position: absolute;
     top: 0;
     left: 0;
     right: 0;
+    z-index: 3; /* over the map and the main UI (2 / 1), under the panels layer (4) */
+  }
+  .app-toasts.over-panels {
     z-index: 40;
   }
   /* Mini-map frame controls — overlay the in-frame map's top corners (z above the map). */

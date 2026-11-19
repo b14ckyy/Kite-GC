@@ -8,6 +8,7 @@
      controllers/vehicleLinkController.ts and docs/active/VEHICLE_DB.md. -->
 <script lang="ts">
   import { t } from 'svelte-i18n';
+  import { escapeKey } from '$lib/actions/escapeKey';
   import { anyCase } from '$lib/helpers/fileFilters';
   import { exportFile } from '$lib/helpers/exportFile';
   import { vehicleTypeForPlatform } from '$lib/helpers/vehicleTypes';
@@ -864,7 +865,7 @@
 {#if editing}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="modal-backdrop" onclick={cancelEdit}>
+  <div class="modal-backdrop" use:escapeKey={cancelEdit}>
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="modal-card" onclick={(e) => e.stopPropagation()}>
@@ -877,7 +878,7 @@
 {#if importFile}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="modal-backdrop" onclick={cancelImport}>
+  <div class="modal-backdrop" use:escapeKey={cancelImport}>
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="modal-card" onclick={(e) => e.stopPropagation()}>
@@ -907,7 +908,7 @@
 {#if deleteAsk}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="modal-backdrop" onclick={() => { if (!deleteBusy) deleteAsk = null; }}>
+  <div class="modal-backdrop" use:escapeKey={() => { if (!deleteBusy) deleteAsk = null; }}>
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="modal-card" onclick={(e) => e.stopPropagation()}>
