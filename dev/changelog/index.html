@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../assets/branding/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -2203,6 +2203,18 @@ stays <em>Stable releases</em>. <a href="https://github.com/b14ckyy/Kite-GC/pull
   panel off the map without losing its state; click once more to bring it back. <a href="https://github.com/b14ckyy/Kite-GC/pull/102">#102</a></li>
 <li><strong>The mouse wheel steps any + / − number field</strong> that has the focus; a field without focus
   never reacts, so scrolling a panel stays safe. <a href="https://github.com/b14ckyy/Kite-GC/pull/189">#189</a> · <a href="https://github.com/b14ckyy/Kite-GC/pull/191">#191</a></li>
+<li><strong>Less graphics load while an aircraft moves</strong> — the heading and course lines on the 2D map no
+  longer redraw a map-sized layer for every frame. On a laptop-class graphics chip the map's share
+  of the load fell to a fraction in free pan and to about half while following. [#332]</li>
+<li><strong>Power Saving also slows the 2D map's motion to 20 frames per second</strong>, like the 3D view; the
+  setting now reads Off / On / Auto. On a tablet this roughly halves the battery current while the
+  map follows a moving aircraft. [#332]</li>
+<li><strong>The 3D view rests while the aircraft stands</strong> — with a live link it kept drawing the globe at
+  the telemetry rate even when nothing moved; it now draws only what changed. [#332]</li>
+<li><strong>The 3D view keeps more of the terrain it has shown</strong> — on the desktop, looking away and back
+  no longer rebuilds terrain and imagery; phones and tablets keep a smaller part. [#332]</li>
+<li><strong>The + / − map buttons zoom continuously while held</strong>, and in the free 3D camera one press
+  now zooms as far as one mouse wheel click instead of a fixed 80 m. [#332]</li>
 <li><strong>Power Saving also drops the glass blur</strong> of panels and widgets. <a href="https://github.com/b14ckyy/Kite-GC/pull/174">#174</a></li>
 <li><strong>Live AGL: the projected flight line is smoother</strong>, and the compass and horizon have the
   frosted-glass look of the other widgets. <a href="https://github.com/b14ckyy/Kite-GC/pull/101">#101</a></li>
