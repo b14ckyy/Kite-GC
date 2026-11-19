@@ -62,6 +62,7 @@
   import { frameMissionSignal, frameFleetSignal, onWaypointFocus, type WaypointFocus } from "$lib/stores/mapCamera";
   import { coveredEdges } from "$lib/helpers/missionEditorPopup.svelte";
   import { panelDockRight } from "$lib/stores/panelDock";
+  import { requestFrame, cancelFrame } from "$lib/helpers/frameLimiter";
   import { destinationPoint, haversineDistance } from "$lib/utils/geo";
   import { buildApproachGeometry } from "$lib/helpers/autolandGeometry";
   import MissionLayer from "./mission/MissionLayer.svelte";
@@ -1734,7 +1735,7 @@
     }
     if (followRaf == null) {
       followLastT = 0;
-      followRaf = requestAnimationFrame(followLoop);
+      followRaf = requestFrame(followLoop);
     }
   }
 
@@ -1766,7 +1767,7 @@
       followRaf = null;
       return;
     }
-    followRaf = requestAnimationFrame(followLoop);
+    followRaf = requestFrame(followLoop);
   }
 
   /** How far (container px) the VISUAL centre sits left of / above Leaflet's container centre. Only the
@@ -3036,7 +3037,7 @@
   });
 
   onDestroy(() => {
-    if (followRaf != null) cancelAnimationFrame(followRaf);
+    if (followRaf != null) cancelFrame(followRaf);
     if (nightTimer) clearInterval(nightTimer);
     unsubUserGeo?.();
     unsubGeoCenter?.();
