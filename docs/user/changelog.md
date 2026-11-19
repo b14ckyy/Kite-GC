@@ -512,6 +512,8 @@ inside the box of the feature release they belong to, so the notes for one relea
       moving aircraft. [#332]
     - **The 3D view rests while the aircraft stands** — with a live link it kept drawing the globe at
       the telemetry rate even when nothing moved; it now draws only what changed. [#332]
+    - **The 3D view keeps the terrain it has shown** — looking away and back no longer rebuilds
+      terrain and imagery each time. [#332]
     - **Power Saving also drops the glass blur** of panels and widgets. [#174]
     - **Live AGL: the projected flight line is smoother**, and the compass and horizon have the
       frosted-glass look of the other widgets. [#101]
