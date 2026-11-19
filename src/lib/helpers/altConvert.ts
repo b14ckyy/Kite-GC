@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Convert a waypoint's altitude (cm) between REL / AMSL / AGL using terrain +
-// the launch point as the home reference. Shared by the single-WP editor and
-// the batch-edit popup. Best-effort: returns the original value if a needed
-// terrain sample is unavailable (no garbage).
+// Convert a waypoint's altitude (cm) between REL / AMSL / AGL using terrain + the launch point as the
+// home reference. null when a needed ground reference is missing; the callers keep the number.
 
 import { get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
@@ -28,7 +26,7 @@ export async function convertAltCm(wp: Waypoint, fromMode: number, toMode: numbe
   const wpGround = needWpGround ? await terrainElev(toDeg(wp.lat), toDeg(wp.lon)) : 0;
   const launchGround = needLaunch ? (lp ? await terrainElev(lp.lat, lp.lng) : null) : 0;
   if ((needWpGround && wpGround == null) || (needLaunch && launchGround == null)) {
-    return null; // no ground reference
+    return null;
   }
   // to absolute MSL
   let absM: number;
