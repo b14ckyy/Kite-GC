@@ -508,12 +508,12 @@ inside the box of the feature release they belong to, so the notes for one relea
       longer redraw a map-sized layer for every frame. On a laptop-class graphics chip the map's share
       of the load fell to a fraction in free pan and to about half while following. [#332]
     - **Power Saving also slows the 2D map's motion to 20 frames per second**, like the 3D view; the
-      setting now reads Off / On / Auto. On a tablet this roughly halves the extra battery drain of a
-      moving aircraft. [#332]
+      setting now reads Off / On / Auto. On a tablet this roughly halves the battery current while the
+      map follows a moving aircraft. [#332]
     - **The 3D view rests while the aircraft stands** — with a live link it kept drawing the globe at
       the telemetry rate even when nothing moved; it now draws only what changed. [#332]
-    - **The 3D view keeps the terrain it has shown** — looking away and back no longer rebuilds
-      terrain and imagery each time. [#332]
+    - **The 3D view keeps more of the terrain it has shown** — on the desktop, looking away and back
+      no longer rebuilds terrain and imagery; phones and tablets keep a smaller part. [#332]
     - **Power Saving also drops the glass blur** of panels and widgets. [#174]
     - **Live AGL: the projected flight line is smoother**, and the compass and horizon have the
       frosted-glass look of the other widgets. [#101]
