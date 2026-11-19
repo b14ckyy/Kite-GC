@@ -117,6 +117,10 @@ Each waypoint carries an altitude against a **reference**:
 - **Add** points by clicking on the map; **drag** a marker to move it; **reorder** in the list.
 - **Edit** a point (type, altitude, parameters) from its popup or the list. The popup's number fields
   are the same **+ / −** fields as everywhere in Kite: click into one and the mouse wheel steps it.
+  The **trash can** buttons remove the waypoint or one of its modifiers; a tap on the map closes the
+  popup. A popup too tall for the map — several modifiers, a small screen — leaves its marker and
+  **docks at the right edge** of the map, beside the widgets, where it scrolls; the map moves so the
+  waypoint stays visible next to it.
 - **Multi-select** (while **editing**) to act on several waypoints at once:
     - In the **list**: **Ctrl/⌘-click** rows to toggle them, **Shift-click** for an inclusive range, or
       tap a number **badge** to toggle a single one.

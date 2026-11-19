@@ -264,6 +264,10 @@ inside the box of the feature release they belong to, so the notes for one relea
       over an open panel's controls; where the panel hides it, the panel's title bar takes the
       alert's colour. The raw-telemetry window and the HI-RES progress window now open in front
       of the panels and dim them. [#327]
+    - **Waypoint editor** — its remove buttons show a trash can instead of an X, and an editor too
+      tall for the map docks at the right edge and scrolls instead of growing out of the screen. [#327]
+    - **Dialogs close through their buttons** — a click beside a dialog that asks for a decision
+      or holds input no longer dismisses it (and with it what you typed); Escape still cancels. [#327]
     - **Storage use is shown** — Settings → Data names the size of the flight database, and a
       flight's detail view shows what its data and its stored original log take. [#327]
     - **INAV Blackbox import without a helper program** — Kite decodes INAV Blackbox logs itself;
