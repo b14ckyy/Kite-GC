@@ -17,7 +17,7 @@
   import { telemetry } from "$lib/stores/telemetry";
   import { startRadarListeners, configureRadar, setRadarCenter, setRadarNode } from "$lib/stores/radarTracking";
   import { effectiveLink } from "$lib/helpers/radarPorts";
-  import { startRadarAlerts } from "$lib/controllers/radarAlerts";
+  import { startRadarAlerts, radarAlerts } from "$lib/controllers/radarAlerts";
   import { startBreachMonitor } from "$lib/controllers/breachMonitor";
   import { startTelemetryLostNotice } from "$lib/controllers/telemetryLostNotice";
   import { startAlertAudio } from "$lib/controllers/alertAudio";
@@ -81,7 +81,7 @@
   import RadarAlertBanner from "$lib/components/RadarAlertBanner.svelte";
   import StatusTextToasts from "$lib/components/StatusTextToasts.svelte";
   import { startStatusText } from "$lib/stores/statusText";
-  import { panelDockRight } from "$lib/stores/panelDock";
+  import { panelDockRight, panelAlertLevel } from "$lib/stores/panelDock";
   import { onMapAccessRequested, PANEL_YIELD_MAP_FRACTION } from "$lib/stores/panelYield";
   import SettingsPanel from "$lib/components/SettingsPanel.svelte";
   import { ensureUserLocation, requestUserLocation, userGeoLocation } from "$lib/helpers/userLocation";
@@ -1334,6 +1334,24 @@
     panelHidden = true;
     setTimeout(() => window.dispatchEvent(new Event("resize")), 320);
   }
+
+  // The traffic banner lies under the panels. Where an open panel covers it, the panel's title bar shows
+  // the alert level instead (stores/panelDock.ts).
+  $effect(() => {
+    const alerts = $radarAlerts;
+    void $panelDockRight; void activeTab;
+    if (alerts.length === 0 || !navPanelOpen || panelHidden) { panelAlertLevel.set(null); return; }
+    const level = alerts.some((a) => a.level === 'warning') ? 'warning' : 'caution';
+    // Measured after the banner and the panel have their boxes.
+    const frame = requestAnimationFrame(() => {
+      const banner = document.querySelector('.app-toasts .alert-stack')?.getBoundingClientRect();
+      const panel = document.querySelector('.panels-host .ps')?.getBoundingClientRect();
+      const covered = banner != null && panel != null
+        && banner.left < panel.right && panel.left < banner.right && banner.top < panel.bottom && panel.top < banner.bottom;
+      panelAlertLevel.set(covered ? level : null);
+    });
+    return () => cancelAnimationFrame(frame);
+  });
 
   /** Width of the area the map shows in: the window, on a phone without the widget column at its side. */
   function mapAreaWidth(): number {
@@ -4064,18 +4082,21 @@
        floating window or a widget tile, and map-bound banners would then cover that tiny tile. This
        container sits above everything in the content area so alerts stay readable. -->
   <!-- --toast-dock-inset = the open left-docked panel's right edge (0 when none); the system-message
-       toasts centre beside the panel with it. The radar banner ignores it and stays frame-centred + on top. -->
+       toasts centre beside the panel with it. The radar banner ignores it and stays frame-centred; both lie
+       UNDER the panels, so a banner with no room beside a panel never covers its controls. -->
   <div class="app-toasts" inert={dbCompacting} style:--toast-dock-inset="{panelHidden ? 0 : $panelDockRight}px">
     <!-- Conflict-alert banner (renders nothing when idle). -->
     <RadarAlertBanner {interfaceSettings} />
     <!-- FC system messages (MAVLink STATUSTEXT) as top-edge toasts (renders nothing when idle). -->
     <StatusTextToasts />
-    <!-- Multi-vehicle group commands, bottom-centre (renders nothing with fewer than 2 MAVLink vehicles;
-         behind the fleet feature gate). -->
-    {#if $fleetEnabled}
-      <GroupCommandBar />
-    {/if}
   </div>
+  <!-- Multi-vehicle group commands, bottom-centre (renders nothing with fewer than 2 MAVLink vehicles;
+       behind the fleet feature gate). A control bar, so it stays over the panels. -->
+  {#if $fleetEnabled}
+    <div class="app-toasts over-panels" inert={dbCompacting} style:--toast-dock-inset="{panelHidden ? 0 : $panelDockRight}px">
+      <GroupCommandBar />
+    </div>
+  {/if}
 
   <!-- Floating-frame map controls, top-level/unzoomed so they sit ABOVE the in-frame map: only the two
        corner handles (the map goes back by double-clicking the full-screen video). Not while parked. -->
@@ -4361,12 +4382,6 @@
     hiresRecord={hiresActive ? hiresSamplePoint : null}
   />
 
-  {#if hiresParsing}
-    <HiresParseModal progress={hiresProgress} estimateBytes={hiresEstimateBytes} />
-  {/if}
-  {#if rawTelemetryOpen && connStatus === 'connected'}
-    <RawTelemetryModal {telem} onclose={() => (rawTelemetryOpen = false)} />
-  {/if}
 
   <!-- ======= FLOATING NAV PANEL SYSTEM ======= -->
   <!-- The rail lives here in .app; the panels themselves render in the panels layer AFTER
@@ -4646,6 +4661,13 @@
       <div class="phone-debug-btn">
         <PhoneDebugButton bind:debugOpen />
       </div>
+    {/if}
+    <!-- Modal windows live in this layer: in the main UI layer they would lie under the panels. -->
+    {#if hiresParsing}
+      <HiresParseModal progress={hiresProgress} estimateBytes={hiresEstimateBytes} />
+    {/if}
+    {#if rawTelemetryOpen && connStatus === 'connected'}
+      <RawTelemetryModal {telem} onclose={() => (rawTelemetryOpen = false)} />
     {/if}
     <ConfirmDialog bind:this={confirmDialog} />
     {#if dbUpgrade}
@@ -4968,6 +4990,9 @@
     top: 0;
     left: 0;
     right: 0;
+    z-index: 3; /* over the map and the main UI (2 / 1), under the panels layer (4) */
+  }
+  .app-toasts.over-panels {
     z-index: 40;
   }
   /* Mini-map frame controls — overlay the in-frame map's top corners (z above the map). */

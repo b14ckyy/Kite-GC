@@ -9,7 +9,7 @@
 
 <script lang="ts">
   import type { Snippet } from 'svelte';
-  import { panelDockRight } from '$lib/stores/panelDock';
+  import { panelDockRight, panelAlertLevel } from '$lib/stores/panelDock';
 
   // Reusable panel frame (docs/active/PANEL_FRAMEWORK.md): owns frame, positioning, per-variant sizing, the
   // framed field's scroll/bounds and the live variant transition; callers fill the snippet slots. Lives inside
@@ -67,7 +67,7 @@
   });
 </script>
 
-<div class="ps ps-{variant}" bind:this={root}>
+<div class="ps ps-{variant}" class:ps-alert-warning={$panelAlertLevel === 'warning'} class:ps-alert-caution={$panelAlertLevel === 'caution'} bind:this={root}>
   {#if variant === 'fullscreen' || variant === 'wide-compact'}
     {#if title || headerActions}
       <header class="ps-head">
@@ -305,6 +305,18 @@
     flex-shrink: 0;
     min-height: 26px;
   }
+  /* A traffic alert whose banner lies behind this panel: the title bar carries its colour. */
+  .ps-alert-warning .ps-head,
+  .ps-alert-caution .ps-head {
+    margin: -4px -6px 4px;
+    padding: 4px 6px;
+    border-radius: 4px;
+  }
+  .ps-alert-warning .ps-head { background: #d40000; }
+  .ps-alert-caution .ps-head { background: #f4c020; }
+  .ps-alert-warning .ps-title { color: #fff; }
+  .ps-alert-caution .ps-title { color: #1a1400; }
+
   .ps-title {
     flex: 1;
     font-weight: 600;
