@@ -63,6 +63,7 @@
   import { coveredEdges } from "$lib/helpers/missionEditorPopup.svelte";
   import { panelDockRight } from "$lib/stores/panelDock";
   import { requestFrame, cancelFrame } from "$lib/helpers/frameLimiter";
+  import { holdRepeat } from "$lib/helpers/holdRepeat";
   import { destinationPoint, haversineDistance } from "$lib/utils/geo";
   import { buildApproachGeometry } from "$lib/helpers/autolandGeometry";
   import MissionLayer from "./mission/MissionLayer.svelte";
@@ -3006,6 +3007,8 @@
     map.options.touchZoom = v;
   }
 
+  // Longer than Leaflet's zoom animation (250 ms): a zoom requested during one is dropped.
+  const ZOOM_HOLD_MS = 300;
   function zoomIn() {
     map?.zoomIn();
   }
@@ -3123,8 +3126,8 @@
       </button>
     {/if}
 
-    <button class="map-control-btn map-zoom-btn map-zoom-in" onclick={zoomIn} title="Zoom in" aria-label="Zoom in">+</button>
-    <button class="map-control-btn map-zoom-btn map-zoom-out" onclick={zoomOut} title="Zoom out" aria-label="Zoom out">-</button>
+    <button class="map-control-btn map-zoom-btn map-zoom-in" use:holdRepeat={{ step: zoomIn, everyMs: ZOOM_HOLD_MS }} title="Zoom in" aria-label="Zoom in">+</button>
+    <button class="map-control-btn map-zoom-btn map-zoom-out" use:holdRepeat={{ step: zoomOut, everyMs: ZOOM_HOLD_MS }} title="Zoom out" aria-label="Zoom out">-</button>
   </div>
 
   {#if map}

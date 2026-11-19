@@ -78,6 +78,7 @@
   import { modeColor, guidedTargetOf } from "$lib/helpers/flightModeRegistry";
   import { requestFrame, cancelFrame } from "$lib/helpers/frameLimiter";
   import { isMobile } from "$lib/platform";
+  import { holdRepeat } from "$lib/helpers/holdRepeat";
   import type { TelemetryRecord } from "$lib/stores/flightlog";
   import { toTelemetryData } from "$lib/adapters/telemetryAdapter";
   import type { PlatformType, UavModelOverride } from "$lib/helpers/uavIcons";
@@ -1597,6 +1598,7 @@
     chaseLerpActive = false;
     orbitLerpActive = false;
     if (smRaf) cancelFrame(smRaf);
+    if (zoomRaf) cancelFrame(zoomRaf);
     if (radar3dCreateRaf) cancelAnimationFrame(radar3dCreateRaf);
     if (nightTimer3D) clearInterval(nightTimer3D);
     if (batteryPollId) clearInterval(batteryPollId);
@@ -5260,22 +5262,54 @@
   // Zoom limits for follow / orbit modes
   const LOCK_ZOOM_MIN = 20;
   const LOCK_ZOOM_MAX = 1500; // max zoom-out distance to the UAV (m)
+  // A held zoom button: a fifth of a step every 50 ms = one step per 250 ms, without visible steps.
+  const ZOOM_HOLD_MS = 50, ZOOM_HOLD_PART = 0.2;
 
-  function zoom3D(dir: 1 | -1) {
+  // Steps still to apply (+ in, − out): a press glides instead of jumping, and presses add up.
+  let zoomPending = 0;
+  let zoomRaf = 0;
+  let zoomLastT = 0;
+  const ZOOM_EASE_MS = 90;
+
+  /** One zoom step, about a mouse wheel click; `strength` < 1 = a part of it (held button). */
+  function zoom3D(dir: 1 | -1, strength = 1) {
+    zoomPending += dir * strength;
+    if (!zoomRaf) { zoomLastT = 0; zoomRaf = requestFrame(zoomTick); }
+  }
+
+  function zoomTick(t: number) {
+    zoomRaf = 0;
+    const dt = zoomLastT ? Math.min(100, t - zoomLastT) : 1000 / 60;
+    zoomLastT = t;
+    const part = Math.abs(zoomPending) < 0.02 ? zoomPending : zoomPending * (1 - Math.exp(-dt / ZOOM_EASE_MS));
+    zoomPending -= part;
+    applyZoom3D(part > 0 ? 1 : -1, Math.abs(part));
+    if (zoomPending !== 0) zoomRaf = requestFrame(zoomTick);
+  }
+
+  function applyZoom3D(dir: 1 | -1, strength: number) {
     if (!viewer) return;
     if (cameraMode === 'fpv') {
       // FPV "zoom" = the lens FOV (narrower = zoom in), 30°…120°.
-      fpvFov = Math.max(FPV_FOV_MIN, Math.min(FPV_FOV_MAX, fpvFov + (dir > 0 ? -10 : 10)));
+      fpvFov = Math.max(FPV_FOV_MIN, Math.min(FPV_FOV_MAX, fpvFov + (dir > 0 ? -10 : 10) * strength));
       applyFpvFov();
       return;
     }
+    const factor = (dir > 0 ? 0.75 : 1.35) ** strength;
     if (cameraMode === 'free') {
-      if (dir > 0) viewer.camera.zoomIn(80);
-      else viewer.camera.zoomOut(80);
+      // Relative to what the view centre looks at; the height above ground when it looks past the horizon.
+      const cam = viewer.camera;
+      const ray = cam.getPickRay(new Cesium.Cartesian2(viewer.canvas.clientWidth / 2, viewer.canvas.clientHeight / 2));
+      const hit = ray && viewer.scene.globe.pick(ray, viewer.scene);
+      const carto = cam.positionCartographic;
+      const range = hit ? Cesium.Cartesian3.distance(hit, cam.positionWC) : carto.height - (viewer.scene.globe.getHeight(carto) ?? 0);
+      const max = viewer.scene.screenSpaceCameraController.maximumZoomDistance;
+      if (dir > 0 && range > LOCK_ZOOM_MIN) cam.zoomIn(range * (1 - factor));
+      else if (dir < 0 && carto.height < max) cam.zoomOut(Math.max(range, LOCK_ZOOM_MIN) * (factor - 1));
       viewer.scene.requestRender();
       return;
     }
-    lockRange = Math.max(LOCK_ZOOM_MIN, Math.min(LOCK_ZOOM_MAX, lockRange * (dir > 0 ? 0.75 : 1.35)));
+    lockRange = Math.max(LOCK_ZOOM_MIN, Math.min(LOCK_ZOOM_MAX, lockRange * factor));
     // Apply directly so zoom works even when no telemetry is driving the animation loops.
     const center = cameraMode === 'orbit'
       ? orbitCenter
@@ -5679,8 +5713,8 @@
       {/if}
     </button>
 
-    <button class="map-control-btn map-zoom-btn" onclick={() => zoom3D(1)}  title="Zoom in"  aria-label="Zoom in">+</button>
-    <button class="map-control-btn map-zoom-btn" onclick={() => zoom3D(-1)} title="Zoom out" aria-label="Zoom out">-</button>
+    <button class="map-control-btn map-zoom-btn" use:holdRepeat={{ step: () => zoom3D(1), hold: () => zoom3D(1, ZOOM_HOLD_PART), everyMs: ZOOM_HOLD_MS }} title="Zoom in" aria-label="Zoom in">+</button>
+    <button class="map-control-btn map-zoom-btn" use:holdRepeat={{ step: () => zoom3D(-1), hold: () => zoom3D(-1, ZOOM_HOLD_PART), everyMs: ZOOM_HOLD_MS }} title="Zoom out" aria-label="Zoom out">-</button>
   </div>
 
 </div>
