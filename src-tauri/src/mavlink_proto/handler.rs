@@ -1310,6 +1310,11 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
                 alt: pt.alt as f64, // m AMSL
             };
             let _ = app_handle.emit("guided-target", &data);
+            if let Some(ref rec) = recorder {
+                if let Ok(mut r) = rec.lock() {
+                    r.on_nav_target(crate::flightlog::nav_target(pt.lat_int, pt.lon_int, pt.alt));
+                }
+            }
         }
 
         // ── MISSION_CURRENT → telemetry-nav-status (active waypoint) ─

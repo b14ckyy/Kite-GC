@@ -177,7 +177,8 @@ fn compare_record(a: &TelemetryRecord, b: &TelemetryRecord, mut diff: impl FnMut
         num_sat, cpu_load, link_quality, baro_alt_m, gps_hdop, gps_eph, gps_epv, active_wp_number,
         active_flight_mode_flags, state_flags, nav_state, nav_flags, rx_signal_received, hw_health_status,
         baro_temperature, wind_n_ms, wind_e_ms, wind_d_ms, rc_data_json, rc_command_json, nav_lat, nav_lon,
-        nav_alt_m, mode_primary, mode_modifiers, link_snr, link_rssi_dbm, wall_ms,
+        nav_alt_m, mode_primary, mode_modifiers, link_snr, link_rssi_dbm, wall_ms, target_lat, target_lon,
+        target_alt_m,
     ]);
 }
 

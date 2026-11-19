@@ -884,6 +884,9 @@ fn build_telemetry_record_indexed<R: CellReader + ?Sized>(
         nav_lon: None,
         // navPos[2] = fused altitude in cm relative to home, always /100
         nav_alt_m: read_f64(cols.nav_pos_up, record).map(|v| v / 100.0),
+        target_lat: None,
+        target_lon: None,
+        target_alt_m: None,
         mode_primary,
         mode_modifiers,
         link_snr: None,      // INAV blackbox has no SNR column

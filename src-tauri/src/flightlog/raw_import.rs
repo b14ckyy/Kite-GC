@@ -71,6 +71,7 @@ struct Snap {
     epv: Option<f64>,
     wind_n: Option<f64>,
     wind_e: Option<f64>,
+    target: Option<(f64, f64, f64)>,
 }
 
 /// Vehicle identity recovered from the log (MSP handshake frames, if captured — continuous mode — or
@@ -140,6 +141,9 @@ fn snap_to_record(s: &Snap, t_ms: i64) -> TelemetryRecord {
         nav_lat: None,
         nav_lon: None,
         nav_alt_m: None,
+        target_lat: s.target.map(|t| t.0),
+        target_lon: s.target.map(|t| t.1),
+        target_alt_m: s.target.map(|t| t.2),
         mode_primary: s.mode_primary.clone(),
         mode_modifiers: s.mode_modifiers.clone(),
         link_snr: None,
@@ -463,6 +467,10 @@ fn update_from_mav(msg: &MavMessage, s: &mut Snap, armed: &mut bool, variant: &s
             if bat.current_consumed >= 0 {
                 s.mah = Some(bat.current_consumed as u32);
             }
+            false
+        }
+        MavMessage::POSITION_TARGET_GLOBAL_INT(pt) => {
+            s.target = super::nav_target(pt.lat_int, pt.lon_int, pt.alt);
             false
         }
         _ => false,
@@ -812,6 +820,29 @@ mod tests {
     /// The `heading` column is course over ground, not the vehicle heading — `GLOBAL_POSITION_INT.hdg`
     /// is the latter, so deriving the course from the fused velocity is what keeps a replayed crab
     /// angle honest. WIND rides along here because both are read off the same message stream.
+    #[test]
+    fn the_position_target_is_recorded_and_zero_means_none() {
+        let target = |lat_int: i32, lon_int: i32| {
+            MavMessage::POSITION_TARGET_GLOBAL_INT(::mavlink::ardupilotmega::POSITION_TARGET_GLOBAL_INT_DATA {
+                lat_int,
+                lon_int,
+                alt: 120.0,
+                ..Default::default()
+            })
+        };
+        let att = || MavMessage::ATTITUDE(ATTITUDE_DATA::default());
+        let log = tlog(vec![
+            (1, 1, heartbeat(MavType::MAV_TYPE_FIXED_WING, MavAutopilot::MAV_AUTOPILOT_ARDUPILOTMEGA, 15)),
+            (1, 1, target(481_000_000, 115_000_000)),
+            (1, 1, att()),
+            (1, 1, target(0, 0)),
+            (1, 1, att()),
+        ]);
+        let (samples, _) = decode_tlog(&log);
+        let targets: Vec<_> = samples.iter().map(|s| (s.rec.target_lat, s.rec.target_lon, s.rec.target_alt_m)).collect();
+        assert_eq!(targets, [(Some(48.1), Some(11.5), Some(120.0)), (None, None, None)]);
+    }
+
     #[test]
     fn course_comes_from_velocity_and_wind_is_captured() {
         // Heading due east, but travelling due north: a 90° crab that `hdg` alone would hide.

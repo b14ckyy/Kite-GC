@@ -326,7 +326,10 @@ fn create_export_db(path: &Path) -> Result<Connection, String> {
             link_rssi_dbm INTEGER,
             airspeed_ms  REAL,
             throttle_pct REAL,
-            wall_ms      INTEGER
+            wall_ms      INTEGER,
+            target_lat   REAL,
+            target_lon   REAL,
+            target_alt_m REAL
         );
 
         CREATE TABLE IF NOT EXISTS battery_records (
@@ -846,6 +849,9 @@ fn add_missing_columns(conn: &Connection) {
         ("flights", "group_id", "ALTER TABLE flights ADD COLUMN group_id TEXT;"),
         ("flights", "vehicle_id", "ALTER TABLE flights ADD COLUMN vehicle_id INTEGER;"),
         ("telemetry_records", "wall_ms", "ALTER TABLE telemetry_records ADD COLUMN wall_ms INTEGER;"),
+        ("telemetry_records", "target_lat", "ALTER TABLE telemetry_records ADD COLUMN target_lat REAL;"),
+        ("telemetry_records", "target_lon", "ALTER TABLE telemetry_records ADD COLUMN target_lon REAL;"),
+        ("telemetry_records", "target_alt_m", "ALTER TABLE telemetry_records ADD COLUMN target_alt_m REAL;"),
     ] {
         if !db::column_exists(conn, table, column).unwrap_or(true) {
             if let Err(e) = conn.execute_batch(ddl) {
