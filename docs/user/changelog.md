@@ -514,6 +514,8 @@ inside the box of the feature release they belong to, so the notes for one relea
       the telemetry rate even when nothing moved; it now draws only what changed. [#332]
     - **The 3D view keeps more of the terrain it has shown** — on the desktop, looking away and back
       no longer rebuilds terrain and imagery; phones and tablets keep a smaller part. [#332]
+    - **The + / − map buttons zoom continuously while held**, and in the free 3D camera one press
+      now zooms as far as one mouse wheel click instead of a fixed 80 m. [#332]
     - **Power Saving also drops the glass blur** of panels and widgets. [#174]
     - **Live AGL: the projected flight line is smoother**, and the compass and horizon have the
       frosted-glass look of the other widgets. [#101]
