@@ -394,8 +394,8 @@
       // stays at the same physical height (terrain + launch point as references).
       const cur = wp.alt_mode ?? ((wp.p3 & 1) ? 1 : 0);
       const next = (cur + 1) % 3;
-      const newAlt = await convertAltCm(wp, cur, next);
-      if (newAlt == null) return; // no terrain data: the mode stays
+      // Without a ground reference the number is kept: the conversion is a convenience, the operator sets the value.
+      const newAlt = (await convertAltCm(wp, cur, next)) ?? wp.altitude;
       missionUpdateWp(idx, { ...wp, alt_mode: next, altitude: newAlt });
     });
 
@@ -463,8 +463,7 @@
       fAltToggle?.addEventListener('click', async () => {
         const cur = fwp.alt_mode ?? ((fwp.p3 & 1) ? 1 : 0);
         const next = (cur + 1) % 3;
-        const newAlt = await convertAltCm(fwp, cur, next);
-        if (newAlt == null) return; // no terrain data: the mode stays
+        const newAlt = (await convertAltCm(fwp, cur, next)) ?? fwp.altitude;
         missionUpdateWp(fi, { ...fwp, alt_mode: next, altitude: newAlt });
       });
       const fP1Input = el.querySelector('input[data-field="fbh-p1"]') as HTMLInputElement | null;
