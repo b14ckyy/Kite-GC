@@ -255,6 +255,11 @@ inside the box of the feature release they belong to, so the notes for one relea
       the map, and FC upload and `.mission` export stay locked until the terrain data is there;
       the altitude-mode button no longer offers AGL where it cannot be converted.
       See [Missions](guides/missions.md). [#327]
+    - **Panels get out of the way on small screens** — a panel that covers a large part of the map
+      parks itself when you start an action that goes on on the map (place or edit a waypoint,
+      start a survey pattern, load a library mission, add or show a zone, a fence or a rally point,
+      set a safehome, switch Guided on), and the Logbook parks itself where
+      its info card would cover the replay player. A tap on the icon brings it back. [#327]
     - **Storage use is shown** — Settings → Data names the size of the flight database, and a
       flight's detail view shows what its data and its stored original log take. [#327]
     - **INAV Blackbox import without a helper program** — Kite decodes INAV Blackbox logs itself;

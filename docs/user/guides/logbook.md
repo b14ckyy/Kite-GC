@@ -82,6 +82,8 @@ into the area the full player occupies (or tap it on a touch screen) and it unfo
 open, so changing the speed, the track colouring or scrubbing never fights a folding panel. A map
 drag that ends in that area doesn't unfold it — only releasing the button there does. Clicking or
 tapping anywhere outside the Logbook panel collapses it to its info card, giving the map the room.
+On a small screen, where even the info card would lie over the replay player, the panel parks itself
+completely at that moment; its icon brings the info card back, and it then stays until you park it.
 
 ### High-resolution replay
 
