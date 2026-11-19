@@ -125,6 +125,12 @@ Each waypoint carries an altitude against a **reference**:
   popup. A popup too tall for the map — several modifiers, a small screen — leaves its marker and
   **docks at the right edge** of the map, beside the widgets, where it scrolls; the map moves so the
   waypoint stays visible next to it.
+- **Click a waypoint in the list** (outside edit mode) to find it on the map: the map centres on it,
+  or — when no part of the mission is in view — shows the whole mission. The 3D map does the same
+  with its free camera.
+- **A selected waypoint holds a follow camera.** While the 2D map follows the aircraft, selecting a
+  waypoint — in the list, on the map, or by opening its editor — keeps the map on that waypoint
+  instead, and a heading-up map stops turning. Deselect it (tap the map) or press the follow button, and the map is back on the aircraft.
 - **Multi-select** (while **editing**) to act on several waypoints at once:
     - In the **list**: **Ctrl/⌘-click** rows to toggle them, **Shift-click** for an inclusive range, or
       tap a number **badge** to toggle a single one.

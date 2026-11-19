@@ -270,6 +270,14 @@ inside the box of the feature release they belong to, so the notes for one relea
       of the panels and dim them. [#330]
     - **Waypoint editor** — its remove buttons show a trash can instead of an X, and an editor too
       tall for the map docks at the right edge and scrolls instead of growing out of the screen. [#330]
+    - **Missions: a click in the waypoint list shows the waypoint on the map** — the map centres on
+      it, or shows the whole mission when none of it is in view. A selected waypoint also holds a
+      follow camera, so the map stays on it until you deselect it.
+      See [Missions](guides/missions.md#building-a-mission). [#330]
+    - **Control panel: Takeoff and AUTO swap places** (ArduPilot, PX4) — once the vehicle flies, or
+      when the mission begins with a takeoff waypoint, the mission mode sits under the mode readout
+      and the takeoff moves to the other modes. From the ground it is a **Hold to AUTO**.
+      See [Vehicle control](guides/vehicle-control.md#takeoff-return-and-landing). [#330]
     - **Dialogs close through their buttons** — a click beside a dialog that asks for a decision
       or holds input no longer dismisses it (and with it what you typed); Escape still cancels. [#330]
     - **Storage use is shown** — Settings → Data names the size of the flight database, and a
@@ -505,6 +513,9 @@ inside the box of the feature release they belong to, so the notes for one relea
     - **Missions: waypoints could not be set on a repeated copy of the world map** — with the view
       east of the date line, or panned once around the world, a new waypoint was refused and a
       dragged one jumped back. [#330]
+    - **Missions: the waypoint editor was pulled away by a follow camera** — with the map following
+      the aircraft, opening a waypoint's editor moved the map to the waypoint and the next position
+      update took it back to the aircraft. The map now stays on the waypoint while it is selected. [#330]
     - **Missions (INAV): Move up / down left the modifiers behind** — a waypoint moved in the
       editor without its Jump, RTH or Set Heading; a single waypoint with an RTH ended up behind
       the end of its own mission. A waypoint now moves together with what belongs to it. [#329]

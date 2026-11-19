@@ -31,7 +31,8 @@ on a stray click.
 
 - **Arm is a slide, not a tap.** Arming uses a **slide-to-ARM** control; disarm is a **hold-to-confirm**.
 - **RTL, Land, Abort Landing, Takeoff and VTOL transitions all hold-to-confirm.** A momentary press
-  does nothing — you must hold the button until it completes.
+  does nothing — you must hold the button until it completes. The same goes for the mission mode
+  while the vehicle is on the ground (**Hold to AUTO**), where it starts the flight.
 - **Force Arm / Force Disarm only appear *after* a refusal.** If the FC rejects a normal arm/disarm
   (for example a failed pre-arm check), a separate **Force** button appears with a longer hold and
   danger styling. It **bypasses the FC's pre-arm checks** — use it only when you understand *why* the
@@ -99,7 +100,21 @@ If the flight controller's list has no Guided mode, the **Guided** toggle is gre
     ArduPlane does not wait for the throttle stick in TAKEOFF mode. With the firmware's default
     parameters the motor runs up about 0.2 seconds after arming, without waiting for a throw. While
     the plane sits disarmed in TAKEOFF mode, the panel shows a warning line under the arm slider.
-    Hold the plane ready for launch before you arm.
+    Hold the plane ready for launch before you arm. The same applies to **AUTO** when the mission
+    begins with a takeoff waypoint, and the panel warns there too.
+
+- **Takeoff and the mission mode swap places.** The takeoff control sits under the flight-mode
+  readout, the mission mode (**AUTO**, on PX4 **Mission**) among the other mode buttons. The two
+  change places in two cases:
+    - **The vehicle has taken off.** The takeoff is behind it; **AUTO** is one click away, and the
+      takeoff takes AUTO's place among the other modes (on PX4 the last place), as a hold-to-confirm
+      button that uses the altitude last set. It stays that way until the disarm.
+    - **The mission begins with a takeoff waypoint.** The takeoff is part of the mission, so the
+      mission mode is on top from the start, as **Hold to AUTO** while the vehicle is on the ground.
+      This needs the flight controller's mission on screen (downloaded or uploaded, not edited
+      since).
+
+    Whether the vehicle has taken off is what its flight controller reports.
 
 - **RTL** returns to the launch/home point. Not on ArduSub, which has no such mode.
 - **Land** lands in place (Copter, PX4). A rover or boat has no Land button.
