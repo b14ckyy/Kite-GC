@@ -1189,10 +1189,16 @@
   }
   /** Distance/bearing reference for ALL tracked vehicles: the connected UAV (valid fix), else the
    *  GCS marker location (null when the GCS marker is OFF). (MSP is implicitly the UAV; others inherit.) */
+  // In steps (~11 m, 5 m of altitude) and the SAME object until a step is crossed: every consumer rebuilds
+  // its contact markers when the reference changes, and telemetry arrives many times a second.
+  let radarRefHeld: { lat: number; lon: number } | null = null;
   const radarReference = $derived.by<{ lat: number; lon: number } | null>(() => {
     const t = $telemetry;
     if (connStatus === 'connected' && isValidGpsCoordinate(t.lat, t.lon) && t.fixType >= 2) {
-      return { lat: t.lat, lon: t.lon };
+      const lat = Math.round(t.lat * 1e4) / 1e4;
+      const lon = Math.round(t.lon * 1e4) / 1e4;
+      if (!radarRefHeld || radarRefHeld.lat !== lat || radarRefHeld.lon !== lon) radarRefHeld = { lat, lon };
+      return radarRefHeld;
     }
     return $gcsLocation;
   });
@@ -1213,7 +1219,7 @@
   const radarRefAltM = $derived.by<number | null>(() => {
     const t = $telemetry;
     if (connStatus === 'connected' && isValidGpsCoordinate(t.lat, t.lon) && t.fixType >= 2) {
-      return t.altMsl;
+      return Math.round(t.altMsl / 5) * 5;
     }
     return gcsGroundAltM;
   });

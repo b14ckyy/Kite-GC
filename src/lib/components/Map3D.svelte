@@ -1012,6 +1012,7 @@
       if (on) {
         v.useDefaultRenderLoop = true;
         v.resize();
+        resumeSmoothing();
         // Restore the remembered camera mode for this 3D session.
         if (cameraMode === 'fpv') enterFpv();
         else if (cameraMode !== 'free' && pHas) reanchorLockCamera();
@@ -3324,6 +3325,7 @@
   // entity write marks the scene dirty, visible or not). Off screen the loop parks; `wakeSmoothingIfVisible`
   // (preRender — only user camera motion renders then) wakes it.
   let smHidden = false;
+  let smParked = false; // the 3D view is not shown
   const CRAFT_CULL_RADIUS_M = 60; // generous bound around the model + label
   const WP_FOCUS_RANGE_MIN_M = 150;
   const WP_FOCUS_RANGE_MAX_M = 20000;
@@ -3369,6 +3371,16 @@
     if (!smRaf) smRaf = requestAnimationFrame(smTick);
   }
 
+  /** Back in the 3D view: show the newest sample at once instead of gliding in from where the view was left. */
+  function resumeSmoothing() {
+    if (!smParked) return;
+    smParked = false;
+    if (!smEntity || !pHas || !aTo) return;
+    pFromLat = pToLat; pFromLon = pToLon; pFromAlt = pToAlt;
+    aFrom = aTo; aFromHead = aToHead;
+    applySmoothed(cart(pToLat, pToLon, pToAlt), aTo, pToLat, pToLon, pToAlt, aToHead);
+  }
+
   function resetUavSmoothing() {
     if (smRaf) cancelAnimationFrame(smRaf);
     smRaf = 0; smEntity = undefined; pHas = false; aFrom = aTo = null;
@@ -3408,6 +3420,9 @@
   function smTick() {
     smRaf = 0;
     if (!viewer || !smEntity || !pHas || !aFrom || !aTo) return;
+    // Not the shown view: nothing of this is drawn. Samples keep the targets current; `resumeSmoothing`
+    // snaps to them when the view comes back.
+    if (!active) { smParked = true; return; }
     // Free camera + craft off-screen: park (no entity write, no render, no re-queue). Every feed
     // tick still tries once, and the preRender hook wakes the loop when visibility can change.
     if (cameraMode === 'free' && !craftInView(cart(pToLat, pToLon, pToAlt))) {
