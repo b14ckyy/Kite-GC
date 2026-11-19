@@ -44,6 +44,7 @@
   import { anyCase } from '$lib/helpers/fileFilters';
   import { exportFile } from '$lib/helpers/exportFile';
   import { contextMenu } from '$lib/actions/contextMenu';
+  import { requestMapAccess } from '$lib/stores/panelYield';
   import { buildWaypointMenu } from '$lib/helpers/waypointMenu';
   import { connection, hasMsp } from '$lib/stores/connection';
   import { telemetry, type TelemetryData } from '$lib/stores/telemetry';
@@ -394,7 +395,7 @@
     if (showPatternPanel) {
       import('$lib/stores/surveyPattern.svelte').then(m => { m.exitPatternMode(); showPatternPanel = false; });
     } else {
-      import('$lib/stores/surveyPattern.svelte').then(m => { m.enterPatternMode('rectangle'); showPatternPanel = true; });
+      import('$lib/stores/surveyPattern.svelte').then(m => { m.enterPatternMode('rectangle'); showPatternPanel = true; requestMapAccess(); });
     }
   }
 
@@ -411,6 +412,8 @@
     } else {
       selectWpSingle(i);
       selAnchor = i;
+      // The waypoint's editor opens at its marker.
+      if (currentEditing) requestMapAccess();
     }
   }
   function onBadgeClick(e: MouseEvent, i: number) {

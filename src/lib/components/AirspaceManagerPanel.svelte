@@ -43,6 +43,7 @@
   import NumberStepper from '$lib/components/NumberStepper.svelte';
   import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
   import { invoke } from '@tauri-apps/api/core';
+  import { requestMapAccess } from '$lib/stores/panelYield';
 
   let { reference = null, distanceUnit = 'metric' }: {
     reference?: { lat: number; lon: number } | null;
@@ -152,7 +153,7 @@
 
   function onAddZone(shape: number) {
     const id = addGeozone(shape);
-    if (id != null) { expandedZone = id; geozoneEditing.set(true); }
+    if (id != null) { expandedZone = id; geozoneEditing.set(true); requestMapAccess(); }
   }
   function onDeleteZone(id: number) {
     deleteGeozone(id);
@@ -179,6 +180,12 @@
     } finally {
       busy = false;
     }
+  }
+
+  /** "Show on map": the map goes there, and a panel that covers it gets out of the way. */
+  function showOnMap(lat: number, lon: number) {
+    focusAero(lat, lon);
+    requestMapAccess();
   }
 
   /** Representative point of a zone (circle centre / polygon centroid) for the focus-on-click. */
@@ -214,7 +221,7 @@
 
   function onAddFence(shape: number) {
     const i = addFenceZone(FENCE_KIND_INCLUSION, shape);
-    if (i != null) { expandedFence = i; fenceEditing.set(true); }
+    if (i != null) { expandedFence = i; fenceEditing.set(true); requestMapAccess(); }
   }
   function onDeleteFence(i: number) {
     deleteFenceZone(i);
@@ -328,6 +335,11 @@
   // ── Rally-point editing (ArduPilot/PX4) ──
   const rallyPoints = $derived($rallyWorking?.points ?? []);
   const rallyParams = $derived($rallyWorking?.params ?? []);
+
+  // "Edit on map" is switched off with the last item: its toggle is disabled while there is nothing to edit.
+  $effect(() => { if (zones.length === 0 && $geozoneEditing) geozoneEditing.set(false); });
+  $effect(() => { if (fenceZones.length === 0 && $fenceEditing) fenceEditing.set(false); });
+  $effect(() => { if (rallyPoints.length === 0 && $rallyEditing) rallyEditing.set(false); });
   let expandedRally = $state<number | null>(null);
   function toggleRally(i: number) { expandedRally = expandedRally === i ? null : i; }
   // SAFETY: rally editing stays available while armed too — same in-flight recovery rationale as the
@@ -343,7 +355,7 @@
 
   function onAddRally() {
     const i = addRallyPoint();
-    if (i != null) { expandedRally = i; rallyEditing.set(true); }
+    if (i != null) { expandedRally = i; rallyEditing.set(true); requestMapAccess(); }
   }
   function onDeleteRally(i: number) { deleteRallyPoint(i); expandedRally = null; }
   function onRevertRally() { revertRallyWorking(); expandedRally = null; }
@@ -472,7 +484,7 @@
           <span class="gz-spacer"></span>
           <label class="gz-editlock" title={$t('geozone.editLockHint')}>
             <span>{$t('geozone.editLock')}</span>
-            <Toggle checked={$geozoneEditing} disabled={armed} onchange={(c) => geozoneEditing.set(c)} />
+            <Toggle checked={$geozoneEditing} disabled={armed || zones.length === 0} onchange={(c) => { geozoneEditing.set(c); if (c) requestMapAccess(); }} />
           </label>
         </div>
 
@@ -536,7 +548,7 @@
                   {#if terrainNote}<div class="gz-hint">{terrainNote}</div>{/if}
                   <div class="gz-rowactions">
                     {#if center}
-                      <button class="gz-focus" onclick={() => focusAero(center.lat, center.lon)}>{$t('geozone.focus')}</button>
+                      <button class="gz-focus" onclick={() => showOnMap(center.lat, center.lon)}>{$t('geozone.focus')}</button>
                     {/if}
                     <button class="gz-delete" disabled={armed} onclick={() => onDeleteZone(zone.id)}>{$t('geozone.delete')}</button>
                   </div>
@@ -587,7 +599,7 @@
           <span class="gz-spacer"></span>
           <label class="gz-editlock" title={$t('geozone.editLockHint')}>
             <span>{$t('geozone.editLock')}</span>
-            <Toggle checked={$fenceEditing} onchange={(c) => fenceEditing.set(c)} />
+            <Toggle checked={$fenceEditing} disabled={fenceZones.length === 0} onchange={(c) => { fenceEditing.set(c); if (c) requestMapAccess(); }} />
           </label>
         </div>
 
@@ -625,7 +637,7 @@
                   {/if}
                   <div class="gz-rowactions">
                     {#if center}
-                      <button class="gz-focus" onclick={() => focusAero(center.lat, center.lon)}>{$t('geozone.focus')}</button>
+                      <button class="gz-focus" onclick={() => showOnMap(center.lat, center.lon)}>{$t('geozone.focus')}</button>
                     {/if}
                     <button class="gz-delete" onclick={() => onDeleteFence(i)}>{$t('geozone.delete')}</button>
                   </div>
@@ -702,7 +714,7 @@
           <span class="gz-spacer"></span>
           <label class="gz-editlock" title={$t('geozone.editLockHint')}>
             <span>{$t('geozone.editLock')}</span>
-            <Toggle checked={$rallyEditing} onchange={(c) => rallyEditing.set(c)} />
+            <Toggle checked={$rallyEditing} disabled={rallyPoints.length === 0} onchange={(c) => { rallyEditing.set(c); if (c) requestMapAccess(); }} />
           </label>
         </div>
 
@@ -725,7 +737,7 @@
                     <NumberStepper bind:value={editRallyAltM} min={0} step={5} unit="m" onchange={() => commitRallyAlt(i)} />
                   </div>
                   <div class="gz-rowactions">
-                    <button class="gz-focus" onclick={() => focusAero(center.lat, center.lon)}>{$t('geozone.focus')}</button>
+                    <button class="gz-focus" onclick={() => showOnMap(center.lat, center.lon)}>{$t('geozone.focus')}</button>
                     <button class="gz-delete" onclick={() => onDeleteRally(i)}>{$t('geozone.delete')}</button>
                   </div>
                 </div>
@@ -830,7 +842,7 @@
     <!-- Obstacles -->
     <div class="am-group-head">{$t('airspace.layerObstacles')} <span class="am-group-count">{nearObstacles.length}</span></div>
     {#each nearObstacles as { p, d }}
-      <button class="am-item" onclick={() => focusAero(p.lat, p.lon)}>
+      <button class="am-item" onclick={() => showOnMap(p.lat, p.lon)}>
         <span class="am-item-name">{p.name || p.subtype}</span>
         <span class="am-item-sub">{p.subtype}{p.heightM != null ? ` · ${Math.round(p.heightM)} m` : ''}</span>
         <span class="am-item-dist">{fmtDist(d)}</span>
@@ -840,7 +852,7 @@
     <!-- Airspaces -->
     <div class="am-group-head">{$t('airspace.layerAirspaces')} <span class="am-group-count">{nearAirspaces.length}</span></div>
     {#each nearAirspaces as { a, d }}
-      <button class="am-item" onclick={() => { const o = a.outlines[0]?.[0]; if (o) focusAero(o[1], o[0]); }}>
+      <button class="am-item" onclick={() => { const o = a.outlines[0]?.[0]; if (o) showOnMap(o[1], o[0]); }}>
         <span class="am-item-name">{a.name}</span>
         <span class="am-item-sub">{a.typeName} · {a.lower.label}–{a.upper.label}</span>
         <span class="am-item-dist">{fmtDist(d)}</span>
@@ -850,7 +862,7 @@
     <!-- Airfields -->
     <div class="am-group-head">{$t('airspace.layerAirfields')} <span class="am-group-count">{nearAirfields.length}</span></div>
     {#each nearAirfields as { p, d }}
-      <button class="am-item" onclick={() => focusAero(p.lat, p.lon)}>
+      <button class="am-item" onclick={() => showOnMap(p.lat, p.lon)}>
         <span class="am-item-name">{p.name || p.subtype}</span>
         <span class="am-item-sub">{p.kind === 'rc' ? 'RC' : p.subtype}{aeroPointInfo(p) ? ` · ${aeroPointInfo(p)}` : ''}</span>
         <span class="am-item-dist">{fmtDist(d)}</span>

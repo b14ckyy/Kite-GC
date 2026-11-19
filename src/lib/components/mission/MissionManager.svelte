@@ -33,6 +33,7 @@
     type ArduWaypoint,
   } from '$lib/stores/missionArdupilot';
   import { frameMissionOnMap } from '$lib/stores/mapCamera';
+  import { requestMapAccess } from '$lib/stores/panelYield';
   import {
     autopilotSystem, autopilotLocked, setAutopilotSystem, confirmSystemSwitch,
     pendingSystemSwitch, type AutopilotSystem,
@@ -279,6 +280,7 @@
       }
       frameMissionOnMap(); // standalone library load → frame the mission (not a replay-linked attach)
       onBack();
+      requestMapAccess();
     } catch (e) {
       statusMessage = $t('missionMgr.loadToMapFailed', { values: { error: String(e) } });
     }

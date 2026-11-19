@@ -82,6 +82,7 @@
   import StatusTextToasts from "$lib/components/StatusTextToasts.svelte";
   import { startStatusText } from "$lib/stores/statusText";
   import { panelDockRight } from "$lib/stores/panelDock";
+  import { onMapAccessRequested, PANEL_YIELD_MAP_FRACTION } from "$lib/stores/panelYield";
   import SettingsPanel from "$lib/components/SettingsPanel.svelte";
   import { ensureUserLocation, requestUserLocation, userGeoLocation } from "$lib/helpers/userLocation";
   import { gcsLocation, gcsAccuracyM } from "$lib/stores/gcsLocation";
@@ -1328,6 +1329,38 @@
     }
   }
 
+  function hidePanel() {
+    if (!navPanelOpen || panelHidden) return;
+    panelHidden = true;
+    setTimeout(() => window.dispatchEvent(new Event("resize")), 320);
+  }
+
+  /** Width of the area the map shows in: the window, on a phone without the widget column at its side. */
+  function mapAreaWidth(): number {
+    const column = document.querySelector('.pwp')?.getBoundingClientRect();
+    const atSide = column != null && column.height > column.width && column.left > window.innerWidth / 2;
+    return window.innerWidth - (atSide ? column.width : 0);
+  }
+
+  // A panel action that goes on on the map hides a panel that covers too much of it (stores/panelYield.ts).
+  $effect(() => onMapAccessRequested(() => {
+    const panel = document.querySelector('.panels-host .ps')?.getBoundingClientRect();
+    if (panel && panel.width > mapAreaWidth() * PANEL_YIELD_MAP_FRACTION) hidePanel();
+  }));
+
+  /** After the collapse to the info card: where the card still lies over the replay player, the panel
+   *  goes out of the way as well. Measured once the variant transition has settled. */
+  function hideLogbookOverPlayer() {
+    setTimeout(() => {
+      if (!logbookMinimized || panelHidden || activeTab !== 'logbook') return;
+      const card = document.querySelector('.panels-host .ps')?.getBoundingClientRect();
+      const player = document.querySelector('.log-player')?.getBoundingClientRect();
+      if (!card || !player || player.width === 0) return;
+      const overlap = card.left < player.right && player.left < card.right && card.top < player.bottom && player.top < card.bottom;
+      if (overlap) hidePanel();
+    }, 300);
+  }
+
   // Collapse-anywhere (Dev-Docs active/REPLAY_PANEL_COMPACT.md): a click outside the logbook or a dialog
   // collapses the flight view to its info card. Capture phase, so surfaces that stop propagation count.
   // The handler reads state at event time (not tracked).
@@ -1337,6 +1370,8 @@
       const target = e.target as Element | null;
       if (target?.closest('.logbook-host, .dialog-backdrop')) return;
       minimizeLogbook();
+      // Only on this collapse: a card brought back by hand stays through the next tap on the map.
+      hideLogbookOverPlayer();
     };
     window.addEventListener('pointerdown', onDown, true);
     return () => window.removeEventListener('pointerdown', onDown, true);

@@ -14,6 +14,7 @@
   import L from 'leaflet';
   import { get } from 'svelte/store';
   import { wrapLng } from '$lib/utils/geo';
+  import { requestMapAccess } from '$lib/stores/panelYield';
   import { t } from 'svelte-i18n';
   import {
     arduMission, arduSelectedWpIndex, arduSelectedWpIndices, arduEditMode, arduVehicleClass,
@@ -670,6 +671,7 @@
     // A tap on empty map with an active selection clears it (instead of adding a WP) — mirrors INAV.
     if (currentSelSet.size > 0) { arduClearWpSelection(); return; }
     arduAddWp(newWaypointAt(e.latlng));
+    requestMapAccess();
   }
 
   // svelte-ignore state_referenced_locally

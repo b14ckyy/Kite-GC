@@ -29,6 +29,7 @@
     changeAlt, changeSpeed, setLoiterRadius, setHomeHere, abortLanding, setHeading, vtolTransition,
   } from '$lib/controllers/vehicleControl';
   import { frameMissionOnMap } from '$lib/stores/mapCamera';
+  import { requestMapAccess } from '$lib/stores/panelYield';
 
   const sys = $derived($autopilotSystem);
   const cls = $derived($arduVehicleClass);
@@ -272,7 +273,7 @@
 
         <!-- 5. Guided toggle -->
         <div class="cc-guided-btn">
-          <Button variant="mode" active={$guidedActive} full disabled={!guidedMode && !$guidedActive} onclick={() => setGuided(!$guidedActive)}
+          <Button variant="mode" active={$guidedActive} full disabled={!guidedMode && !$guidedActive} onclick={() => { const on = !$guidedActive; setGuided(on); if (on) requestMapAccess(); }}
                   title={guidedMode ? $t('control.guidedHint') : $t('control.guidedUnavailable')}>
             {$t('control.action.guided')}
           </Button>

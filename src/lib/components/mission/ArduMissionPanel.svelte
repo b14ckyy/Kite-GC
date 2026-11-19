@@ -31,6 +31,7 @@
   import { openFilters } from '$lib/helpers/fileFilters';
   import { exportFile } from '$lib/helpers/exportFile';
   import { contextMenu } from '$lib/actions/contextMenu';
+  import { requestMapAccess } from '$lib/stores/panelYield';
   import { arduWpDetailLines } from '$lib/helpers/missionWpDetails';
   import { frameMissionOnMap } from '$lib/stores/mapCamera';
   import { connection, linkIsArduPilot } from '$lib/stores/connection';
@@ -73,7 +74,7 @@
     if (showPatternPanel) {
       import('$lib/stores/surveyPattern.svelte').then(m => { m.exitPatternMode(); showPatternPanel = false; });
     } else {
-      import('$lib/stores/surveyPattern.svelte').then(m => { m.enterPatternMode('rectangle'); showPatternPanel = true; });
+      import('$lib/stores/surveyPattern.svelte').then(m => { m.enterPatternMode('rectangle'); showPatternPanel = true; requestMapAccess(); });
     }
   }
   // Leaving edit mode closes the pattern panel (mirror the INAV panel).
@@ -297,6 +298,8 @@
     } else {
       arduSelectWpSingle(i);
       selAnchor = i;
+      // The waypoint's editor opens at its marker.
+      if (currentEditing) requestMapAccess();
     }
   }
   function onBadgeClick(e: MouseEvent, i: number) {

@@ -27,6 +27,7 @@
   import { buildWaypointMenu } from '$lib/helpers/waypointMenu';
   import { convertAltCm, nextAltMode, hasTerrain } from '$lib/helpers/altConvert';
   import { wrapLng } from '$lib/utils/geo';
+  import { requestMapAccess } from '$lib/stores/panelYield';
   import { aglTerrainGapsActive } from '$lib/stores/missionTerrain';
   import { get } from 'svelte/store';
   import { settings } from '$lib/stores/settings';
@@ -865,6 +866,7 @@
     const lon = fromDeg(wrapLng(e.latlng.lng));
     const altitude = altFromM(get(settings).defaultWpAltitudeM);
     missionAddWp(WpAction.Waypoint, lat, lon, altitude);
+    requestMapAccess();
   }
 
   // FBH legs/ring use screen-space (pixel) geometry, so the latlng endpoints must be
