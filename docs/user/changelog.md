@@ -260,6 +260,10 @@ inside the box of the feature release they belong to, so the notes for one relea
       start a survey pattern, load a library mission, add or show a zone, a fence or a rally point,
       set a safehome, switch Guided on), and the Logbook parks itself where
       its info card would cover the replay player. A tap on the icon brings it back. [#327]
+    - **Alerts and windows are layered the right way round** — a traffic alert no longer lies
+      over an open panel's controls; where the panel hides it, the panel's title bar takes the
+      alert's colour. The raw-telemetry window and the HI-RES progress window now open in front
+      of the panels and dim them. [#327]
     - **Storage use is shown** — Settings → Data names the size of the flight database, and a
       flight's detail view shows what its data and its stored original log take. [#327]
     - **INAV Blackbox import without a helper program** — Kite decodes INAV Blackbox logs itself;
