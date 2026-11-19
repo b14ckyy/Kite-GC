@@ -86,11 +86,25 @@ Each waypoint carries an altitude against a **reference**:
 - **INAV** offers three modes: **REL** (relative to the home/launch point — the usual default), **AMSL**
   (absolute, above mean sea level) and **AGL** (above ground level / terrain-following). AGL is a
   **planning aid**: because INAV itself only stores REL/AMSL, Kite resolves each AGL point to an absolute
-  altitude (using terrain elevation) when the mission is uploaded or exported. Without terrain data for
-  an AGL point — no internet connection and the area not loaded before, or a location without elevation
-  data such as open sea — the upload or export is refused and names the waypoint; nothing is sent to
-  the aircraft. For the same reason the altitude mode of a waypoint cannot be switched while the
-  terrain data it needs is missing.
+  altitude (using terrain elevation) when the mission is uploaded or exported.
+
+    !!! warning "AGL needs terrain data"
+        Without terrain data for a waypoint — no internet connection and the area not loaded before,
+        or a location without elevation data such as open sea — an AGL altitude cannot be converted,
+        and sent as it is the aircraft would fly it as a height above home. Kite therefore does not
+        let that happen:
+
+        - The altitude-mode button of such a waypoint leaves **AGL** out, and a pattern with
+          altitudes above ground is not generated.
+        - A mission that already has such a waypoint (a library mission or a `.kmission` opened
+          offline) marks it with an **amber ring** on the map and an amber altitude in the list.
+          **FC Upload**, **EEPROM Save** and saving a `.mission` file are locked, and the panel
+          names the waypoint. **Save to library** stays available and keeps the AGL altitudes, so
+          nothing is lost until the terrain data is back.
+        - Switching a waypoint between altitude modes converts its altitude with the terrain, so
+          it stays at the same height. That conversion is a convenience: while the data for it is
+          missing the mode still changes and the **number is kept as it is** — set the right value
+          for the new mode yourself.
 - **ArduPilot / PX4** set a MAVLink **altitude frame** per item — **relative** (to home), **absolute**
   (AMSL) or **terrain** (terrain-following).
 

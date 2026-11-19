@@ -251,6 +251,10 @@ inside the box of the feature release they belong to, so the notes for one relea
       library already holds exactly the mission that came from the flight controller, it shows the
       **DB** badge next to **FC** and is linked to that entry. An INAV mission planned with AGL
       altitudes comes back with them, instead of the AMSL values the aircraft stores. [#327]
+    - **Missions: AGL waypoints without terrain data are marked and locked** — an amber ring on
+      the map, and FC upload and `.mission` export stay locked until the terrain data is there;
+      the altitude-mode button no longer offers AGL where it cannot be converted.
+      See [Missions](guides/missions.md). [#327]
     - **INAV Blackbox import without a helper program** — Kite decodes INAV Blackbox logs itself;
       imports are faster and no longer lose the frames after a flight-mode change. [#234]
     - **PX4 ULog import** — the logbook imports `.ulg` logs, split into flights like any other
