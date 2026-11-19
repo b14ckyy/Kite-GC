@@ -26,6 +26,7 @@
   import { openContextMenu } from '$lib/stores/contextMenu';
   import { buildWaypointMenu } from '$lib/helpers/waypointMenu';
   import { convertAltCm, nextAltMode, hasTerrain } from '$lib/helpers/altConvert';
+  import { wrapLng } from '$lib/utils/geo';
   import { aglTerrainGapsActive } from '$lib/stores/missionTerrain';
   import { get } from 'svelte/store';
   import { settings } from '$lib/stores/settings';
@@ -125,7 +126,7 @@
       launchMarker.bindTooltip('Launch / home reference', { direction: 'top', offset: [0, -20] });
       launchMarker.on('dragend', () => {
         const p = launchMarker!.getLatLng();
-        launchPoint.set({ lat: p.lat, lng: p.lng });
+        launchPoint.set({ lat: p.lat, lng: wrapLng(p.lng) });
       });
     } else {
       launchMarker.setLatLng([lp.lat, lp.lng]);
@@ -626,7 +627,7 @@
         if (editing && !patternActive) {
           marker.on('dragend', () => {
             const pos = marker.getLatLng();
-            missionUpdateWp(i, { ...wp, lat: fromDeg(pos.lat), lon: fromDeg(pos.lng) });
+            missionUpdateWp(i, { ...wp, lat: fromDeg(pos.lat), lon: fromDeg(wrapLng(pos.lng)) });
           });
         }
 
@@ -747,7 +748,7 @@
           if (d < bestDist) { bestDist = d; bestInsertIdx = fpIndices[s + 1]; }
         }
         if (getTotalWpCount() < MAX_WAYPOINTS) {
-          missionInsertWp(bestInsertIdx, WpAction.Waypoint, fromDeg(clickLatLng.lat), fromDeg(clickLatLng.lng), altFromM(get(settings).defaultWpAltitudeM));
+          missionInsertWp(bestInsertIdx, WpAction.Waypoint, fromDeg(clickLatLng.lat), fromDeg(wrapLng(clickLatLng.lng)), altFromM(get(settings).defaultWpAltitudeM));
         }
       };
 
@@ -861,7 +862,7 @@
     if (currentSelSet.size > 0) { clearWpSelection(); return; }
     if (getTotalWpCount() >= MAX_WAYPOINTS) return;
     const lat = fromDeg(e.latlng.lat);
-    const lon = fromDeg(e.latlng.lng);
+    const lon = fromDeg(wrapLng(e.latlng.lng));
     const altitude = altFromM(get(settings).defaultWpAltitudeM);
     missionAddWp(WpAction.Waypoint, lat, lon, altitude);
   }

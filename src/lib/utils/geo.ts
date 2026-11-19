@@ -7,6 +7,12 @@ const DEG2RAD = Math.PI / 180;
 const R_EARTH = 6371000; // Earth radius in meters
 
 /** Haversine distance between two GPS points (meters) */
+/** Longitude brought back into [-180, 180). Leaflet reports e.g. 190° for a point on the world copy
+ *  east of the antimeridian; as degrees × 1e7 that leaves the valid range, beyond 214.7° even an i32. */
+export function wrapLng(lng: number): number {
+  return ((((lng + 180) % 360) + 360) % 360) - 180;
+}
+
 export function haversineDistance(
   lat1: number, lon1: number,
   lat2: number, lon2: number,

@@ -13,6 +13,7 @@
   import { onDestroy } from 'svelte';
   import L from 'leaflet';
   import { get } from 'svelte/store';
+  import { wrapLng } from '$lib/utils/geo';
   import { t } from 'svelte-i18n';
   import {
     arduMission, arduSelectedWpIndex, arduSelectedWpIndices, arduEditMode, arduVehicleClass,
@@ -529,7 +530,7 @@
               return;
             }
             const cur = get(arduMission)[i];
-            if (cur) arduUpdateWp(i, { ...cur, lat: Math.round(pos.lat * 1e7), lon: Math.round(pos.lng * 1e7) });
+            if (cur) arduUpdateWp(i, { ...cur, lat: Math.round(pos.lat * 1e7), lon: Math.round(wrapLng(pos.lng) * 1e7) });
           });
         }
 
@@ -654,7 +655,7 @@
     return {
       command: MAV_CMD_NAV_WAYPOINT, frame: MAV_FRAME_GLOBAL_RELATIVE_ALT,
       param1: 0, param2: 0, param3: 0, param4: 0,
-      lat: Math.round(latlng.lat * 1e7), lon: Math.round(latlng.lng * 1e7),
+      lat: Math.round(latlng.lat * 1e7), lon: Math.round(wrapLng(latlng.lng) * 1e7),
       alt: get(settings).defaultWpAltitudeM, autocontinue: true,
     };
   }
