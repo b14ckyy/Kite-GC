@@ -86,7 +86,11 @@ Each waypoint carries an altitude against a **reference**:
 - **INAV** offers three modes: **REL** (relative to the home/launch point — the usual default), **AMSL**
   (absolute, above mean sea level) and **AGL** (above ground level / terrain-following). AGL is a
   **planning aid**: because INAV itself only stores REL/AMSL, Kite resolves each AGL point to an absolute
-  altitude (using terrain elevation) when the mission is uploaded or exported.
+  altitude (using terrain elevation) when the mission is uploaded or exported. Without terrain data for
+  an AGL point — no internet connection and the area not loaded before, or a location without elevation
+  data such as open sea — the upload or export is refused and names the waypoint; nothing is sent to
+  the aircraft. For the same reason the altitude mode of a waypoint cannot be switched while the
+  terrain data it needs is missing.
 - **ArduPilot / PX4** set a MAVLink **altitude frame** per item — **relative** (to home), **absolute**
   (AMSL) or **terrain** (terrain-following).
 

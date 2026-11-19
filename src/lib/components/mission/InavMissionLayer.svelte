@@ -381,6 +381,7 @@
       const cur = wp.alt_mode ?? ((wp.p3 & 1) ? 1 : 0);
       const next = (cur + 1) % 3;
       const newAlt = await convertAltCm(wp, cur, next);
+      if (newAlt == null) return; // no terrain data: the mode stays
       missionUpdateWp(idx, { ...wp, alt_mode: next, altitude: newAlt });
     });
 
@@ -447,6 +448,7 @@
         const cur = fwp.alt_mode ?? ((fwp.p3 & 1) ? 1 : 0);
         const next = (cur + 1) % 3;
         const newAlt = await convertAltCm(fwp, cur, next);
+        if (newAlt == null) return; // no terrain data: the mode stays
         missionUpdateWp(fi, { ...fwp, alt_mode: next, altitude: newAlt });
       });
       const fP1Input = el.querySelector('input[data-field="fbh-p1"]') as HTMLInputElement | null;
