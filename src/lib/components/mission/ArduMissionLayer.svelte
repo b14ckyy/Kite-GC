@@ -680,6 +680,8 @@
   $effect(() => {
     void activeSurveyPattern.isActive; // re-render (clear / restore) when entering or leaving pattern mode
     void currentSelSet; // re-render when the multi-selection changes (red icons follow set membership)
+    // Read here, not only inside `render`: a deferred run reads nothing, and the effect would lose them.
+    void currentWps; void currentSelIdx; void currentEditing; void currentHome; void currentVehicle; void connected;
     const render = () => renderMission(currentWps, currentSelIdx, currentEditing, currentHome, currentVehicle, currentActiveWp, connected);
     if (!deferWhileStepping(popupState, render)) render();
   });

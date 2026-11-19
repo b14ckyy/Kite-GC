@@ -11,7 +11,7 @@
     mission, geoWaypoints, selectedWpIndex, selectedWpIndices,
     selectWpSingle, toggleWpSelection, clearWpSelection, editMode, showMission, replayActive, launchPoint,
     missionAddWp, missionUpdateWp, missionRemoveWp, missionInsertWp,
-    missionReorderWp, beginUndoGroup, endUndoGroup,
+    missionSetWaypoints, normalizeSlot, pushUndo, beginUndoGroup, endUndoGroup,
     getTotalWpCount, MAX_WAYPOINTS_TOTAL,
     ALT_MODE_REL, ALT_MODE_AMSL, ALT_MODE_AGL,
     type Waypoint, type Mission, type LaunchPoint, WpAction, hasLocation, isModifier, toDeg, fromDeg, altFromM,
@@ -34,7 +34,7 @@
   import type { InterfaceSettings } from '$lib/stores/settings';
   import { convertAltitude, toAltitudeM, convertSpeed, toSpeedMs } from '$lib/utils/units';
   import { inavWpDetailLines } from '$lib/helpers/missionWpDetails';
-  import { numInputHtml as sharedNumInputHtml, newPopupState, renderEditorPopup, closeEditorPopup, deferWhileStepping } from '$lib/helpers/missionEditorPopup.svelte';
+  import { numInputHtml as sharedNumInputHtml, newPopupState, renderEditorPopup, closeEditorPopup, deferWhileStepping, REMOVE_ICON_HTML } from '$lib/helpers/missionEditorPopup.svelte';
   import { t } from 'svelte-i18n';
 
   const IFACE_FALLBACK: InterfaceSettings = {
@@ -201,6 +201,59 @@
     return mods;
   }
 
+  /** A waypoint with what belongs to it: its modifiers and its fly-by-home child. */
+  function wpGroups(waypoints: Waypoint[]): Waypoint[][] {
+    const groups: Waypoint[][] = [];
+    for (const w of waypoints) {
+      if ((isModifier(w.action) || isFlyByHome(w)) && groups.length > 0) groups[groups.length - 1].push(w);
+      else groups.push([w]);
+    }
+    return groups;
+  }
+
+  function groupIndexOf(groups: Waypoint[][], idx: number): number {
+    let start = 0;
+    for (let g = 0; g < groups.length; g++) {
+      if (idx < start + groups[g].length) return g;
+      start += groups[g].length;
+    }
+    return -1;
+  }
+
+  /** An RTH ends the mission. Its group trades places with none: a waypoint moved behind it is out of reach. */
+  function canMoveWp(waypoints: Waypoint[], idx: number, dir: -1 | 1): boolean {
+    const groups = wpGroups(waypoints);
+    const from = groupIndexOf(groups, idx);
+    const to = from + dir;
+    const endsMission = (g: Waypoint[]) => g.some((w) => w.action === WpAction.Rth);
+    return from >= 0 && to >= 0 && to < groups.length && !endsMission(groups[from]) && !endsMission(groups[to]);
+  }
+
+  /** Move a waypoint one place, together with its group: moved alone it would leave its modifiers behind,
+   *  and a modifier at the head of the list belongs to no waypoint. */
+  async function moveWpGroup(idx: number, dir: -1 | 1) {
+    const before = currentMission.waypoints;
+    if (!canMoveWp(before, idx, dir)) return;
+    const groups = wpGroups(before);
+    const from = groupIndexOf(groups, idx);
+    const to = from + dir;
+    const [moved] = groups.splice(from, 1);
+    groups.splice(to, 0, moved);
+    const order = groups.flat();
+    // A jump names its target by list position: it follows the waypoint it pointed at.
+    const after = order.map((w) => {
+      if (w.action !== WpAction.Jump) return w;
+      const target = before[w.p1 - 1];
+      const at = target ? order.indexOf(target) : -1;
+      return at >= 0 ? { ...w, p1: at + 1 } : w;
+    });
+    const newIdx = groups.slice(0, to).reduce((n, g) => n + g.length, 0);
+    pushUndo();
+    // `mission_set` takes the list as it is: numbers and the end flag are set here.
+    await missionSetWaypoints(normalizeSlot(after));
+    selectWpSingle(newIdx);
+  }
+
   function isFlightPathWp(action: WpAction): boolean {
     return hasLocation(action) && action !== WpAction.SetPoi;
   }
@@ -309,7 +362,7 @@
     for (const mod of modifiers) {
       const mi = mod.idx;
       html += `<div class="wpe-mod-section">`;
-      html += `<div class="wpe-mod-header">${$t(WP_ACTION_KEYS[mod.wp.action])}<button data-action="removeMod" data-mod-idx="${mi}" class="wpe-mod-remove" title="${$t('missionLayer.removeModifier')}">✕</button></div>`;
+      html += `<div class="wpe-mod-header">${$t(WP_ACTION_KEYS[mod.wp.action])}<button data-action="removeMod" data-mod-idx="${mi}" class="wpe-mod-remove" title="${$t('missionLayer.removeModifier')}">${REMOVE_ICON_HTML}</button></div>`;
       if (mod.wp.action === WpAction.Rth) {
         html += `<div class="wpe-row"><label>${$t('missionLayer.landField')}</label><button data-field="rthLand" data-mod-idx="${mi}" class="wpe-toggle">${mod.wp.p1 ? $t('missionLayer.yes') : $t('missionLayer.no')}</button></div>`;
       }
@@ -333,7 +386,7 @@
       const fbhTypes: WpAction[] = [WpAction.Waypoint, WpAction.PosholdTime, WpAction.Land];
       const fbhTypeOptions = fbhTypes.map(v => `<option value="${v}" ${v === f.action ? 'selected' : ''}>${$t(WP_ACTION_KEYS[v])}</option>`).join('');
       html += `<div class="wpe-mod-section wpe-fbh-section">`;
-      html += `<div class="wpe-mod-header">${$t('mission.flagFbh')} (${$t('missionLayer.wpHeader', { values: { number: fbhChild.num } })})<button data-action="removeFbh" class="wpe-mod-remove" title="${$t('missionLayer.removeWp')}">✕</button></div>`;
+      html += `<div class="wpe-mod-header">${$t('mission.flagFbh')} (${$t('missionLayer.wpHeader', { values: { number: fbhChild.num } })})<button data-action="removeFbh" class="wpe-mod-remove" title="${$t('missionLayer.removeWp')}">${REMOVE_ICON_HTML}</button></div>`;
       html += `<div class="wpe-row"><label>${$t('missionLayer.type')}</label><select data-field="fbh-action">${fbhTypeOptions}</select></div>`;
       html += `<div class="wpe-row"><label>${$t('missionLayer.alt')}</label>${numInputHtml('fbh-altitude', fAltVal, 1, undefined, undefined, undefined, fAltC.unit)}<button data-field="fbh-altToggle" class="wpe-toggle">${fAltType}</button></div>`;
       if (f.action === WpAction.Waypoint || f.action === WpAction.Land) {
@@ -368,9 +421,9 @@
     html += `</select></div>`;
 
     html += `<div class="wpe-actions">`;
-    html += `<button data-action="moveUp" ${idx <= 0 ? 'disabled' : ''} title="${$t('missionLayer.moveUp')}">▲</button>`;
-    html += `<button data-action="moveDown" ${idx >= total - 1 ? 'disabled' : ''} title="${$t('missionLayer.moveDown')}">▼</button>`;
-    html += `<button data-action="remove" class="wpe-remove" title="${$t('missionLayer.removeWp')}">✕</button>`;
+    html += `<button data-action="moveUp" ${canMoveWp(currentMission.waypoints, idx, -1) ? '' : 'disabled'} title="${$t('missionLayer.moveUp')}">▲</button>`;
+    html += `<button data-action="moveDown" ${canMoveWp(currentMission.waypoints, idx, 1) ? '' : 'disabled'} title="${$t('missionLayer.moveDown')}">▼</button>`;
+    html += `<button data-action="remove" class="wpe-remove" title="${$t('missionLayer.removeWp')}">${REMOVE_ICON_HTML}</button>`;
     html += `</div></div>`;
     return html;
   }
@@ -381,10 +434,14 @@
     const el = popup.getElement();
     if (!el) return;
 
+    // The handlers outlive the render that wired them — a stepper change does not rewrite the DOM — so
+    // they take the waypoint as it is now, not as it was then.
+    const live = (i: number, then: Waypoint): Waypoint => currentMission.waypoints[i] ?? then;
+
     const typeSelect = el.querySelector('select[data-field="action"]') as HTMLSelectElement | null;
     typeSelect?.addEventListener('change', () => {
       const newAction = Number(typeSelect.value) as WpAction;
-      const updated = { ...wp, action: newAction };
+      const updated = { ...live(idx, wp), action: newAction };
       if (newAction === WpAction.PosholdTime) { updated.p1 = get(settings).defaultPhTimeSec; updated.p2 = 0; }
       else { updated.p1 = 0; updated.p2 = 0; }
       missionUpdateWp(idx, updated);
@@ -393,18 +450,19 @@
     const altInput = el.querySelector('input[data-field="altitude"]') as HTMLInputElement | null;
     altInput?.addEventListener('change', () => {
       const m = toAltitudeM(Number(altInput.value), iface().altitudeUnit);
-      missionUpdateWp(idx, { ...wp, altitude: altFromM(m) });
+      missionUpdateWp(idx, { ...live(idx, wp), altitude: altFromM(m) });
     });
 
     const altToggle = el.querySelector('button[data-field="altToggle"]') as HTMLButtonElement | null;
     altToggle?.addEventListener('click', async () => {
       // Cycle REL → AMSL → AGL → REL, converting the altitude so the waypoint
       // stays at the same physical height (terrain + launch point as references).
-      const cur = wp.alt_mode ?? ((wp.p3 & 1) ? 1 : 0);
-      const next = await nextAltMode(wp, cur);
+      const w = live(idx, wp);
+      const cur = w.alt_mode ?? ((w.p3 & 1) ? 1 : 0);
+      const next = await nextAltMode(w, cur);
       // Without a ground reference the number is kept: the conversion is a convenience, the operator sets the value.
-      const newAlt = (await convertAltCm(wp, cur, next)) ?? wp.altitude;
-      missionUpdateWp(idx, { ...wp, alt_mode: next, altitude: newAlt });
+      const newAlt = (await convertAltCm(w, cur, next)) ?? w.altitude;
+      missionUpdateWp(idx, { ...live(idx, wp), alt_mode: next, altitude: newAlt });
     });
     flagAltToggle(altToggle, wp);
 
@@ -415,7 +473,7 @@
       const p1 = isSpeed
         ? Math.round(toSpeedMs(Number(p1Input.value), iface().speedUnit) * 100)
         : Number(p1Input.value);
-      missionUpdateWp(idx, { ...wp, p1 });
+      missionUpdateWp(idx, { ...live(idx, wp), p1 });
     });
 
     const latInput = el.querySelector('input[data-field="lat"]') as HTMLInputElement | null;
@@ -424,7 +482,7 @@
       const newLat = parseFloat(latInput?.value ?? '');
       const newLon = parseFloat(lonInput?.value ?? '');
       if (isNaN(newLat) || isNaN(newLon)) return;
-      missionUpdateWp(idx, { ...wp, lat: fromDeg(newLat), lon: fromDeg(newLon) });
+      missionUpdateWp(idx, { ...live(idx, wp), lat: fromDeg(newLat), lon: fromDeg(newLon) });
       map.panTo(L.latLng(newLat, newLon));
     }
     latInput?.addEventListener('change', applyCoordChange);
@@ -433,18 +491,18 @@
     el.querySelectorAll('button[data-field="ua"]').forEach(btn => {
       btn.addEventListener('click', () => {
         const bit = Number((btn as HTMLElement).dataset.uaBit);
-        missionUpdateWp(idx, { ...wp, p3: wp.p3 ^ (1 << bit) });
+        missionUpdateWp(idx, { ...live(idx, wp), p3: live(idx, wp).p3 ^ (1 << bit) });
       });
     });
 
     for (const mod of modifiers) {
       const mi = mod.idx;
       const rthBtn = el.querySelector(`button[data-field="rthLand"][data-mod-idx="${mi}"]`) as HTMLButtonElement | null;
-      rthBtn?.addEventListener('click', () => { missionUpdateWp(mi, { ...mod.wp, p1: mod.wp.p1 ? 0 : 1 }); });
+      rthBtn?.addEventListener('click', () => { missionUpdateWp(mi, { ...live(mi, mod.wp), p1: live(mi, mod.wp).p1 ? 0 : 1 }); });
       const modP1 = el.querySelector(`input[data-field="mod-p1"][data-mod-idx="${mi}"]`) as HTMLInputElement | null;
-      modP1?.addEventListener('change', () => { missionUpdateWp(mi, { ...mod.wp, p1: Number(modP1.value) }); });
+      modP1?.addEventListener('change', () => { missionUpdateWp(mi, { ...live(mi, mod.wp), p1: Number(modP1.value) }); });
       const modP2 = el.querySelector(`input[data-field="mod-p2"][data-mod-idx="${mi}"]`) as HTMLInputElement | null;
-      modP2?.addEventListener('change', () => { missionUpdateWp(mi, { ...mod.wp, p2: Number(modP2.value) }); });
+      modP2?.addEventListener('change', () => { missionUpdateWp(mi, { ...live(mi, mod.wp), p2: Number(modP2.value) }); });
       const rmBtn = el.querySelector(`button[data-action="removeMod"][data-mod-idx="${mi}"]`) as HTMLButtonElement | null;
       rmBtn?.addEventListener('click', () => { missionRemoveWp(mi); });
     }
@@ -456,7 +514,7 @@
       const fActionSel = el.querySelector('select[data-field="fbh-action"]') as HTMLSelectElement | null;
       fActionSel?.addEventListener('change', () => {
         const newAction = Number(fActionSel.value) as WpAction;
-        const updated = { ...fwp, action: newAction };
+        const updated = { ...live(fi, fwp), action: newAction };
         if (newAction === WpAction.PosholdTime) { updated.p1 = get(settings).defaultPhTimeSec; updated.p2 = 0; }
         else { updated.p1 = 0; updated.p2 = 0; }
         missionUpdateWp(fi, updated);
@@ -464,14 +522,15 @@
       const fAltInput = el.querySelector('input[data-field="fbh-altitude"]') as HTMLInputElement | null;
       fAltInput?.addEventListener('change', () => {
         const m = toAltitudeM(Number(fAltInput.value), iface().altitudeUnit);
-        missionUpdateWp(fi, { ...fwp, altitude: altFromM(m) });
+        missionUpdateWp(fi, { ...live(fi, fwp), altitude: altFromM(m) });
       });
       const fAltToggle = el.querySelector('button[data-field="fbh-altToggle"]') as HTMLButtonElement | null;
       fAltToggle?.addEventListener('click', async () => {
-        const cur = fwp.alt_mode ?? ((fwp.p3 & 1) ? 1 : 0);
-        const next = await nextAltMode(fwp, cur);
-        const newAlt = (await convertAltCm(fwp, cur, next)) ?? fwp.altitude;
-        missionUpdateWp(fi, { ...fwp, alt_mode: next, altitude: newAlt });
+        const w = live(fi, fwp);
+        const cur = w.alt_mode ?? ((w.p3 & 1) ? 1 : 0);
+        const next = await nextAltMode(w, cur);
+        const newAlt = (await convertAltCm(w, cur, next)) ?? w.altitude;
+        missionUpdateWp(fi, { ...live(fi, fwp), alt_mode: next, altitude: newAlt });
       });
       flagAltToggle(fAltToggle, fwp);
       const fP1Input = el.querySelector('input[data-field="fbh-p1"]') as HTMLInputElement | null;
@@ -480,12 +539,12 @@
         const p1 = isSpeed
           ? Math.round(toSpeedMs(Number(fP1Input.value), iface().speedUnit) * 100)
           : Number(fP1Input.value);
-        missionUpdateWp(fi, { ...fwp, p1 });
+        missionUpdateWp(fi, { ...live(fi, fwp), p1 });
       });
       el.querySelectorAll('button[data-field="fbh-ua"]').forEach(btn => {
         btn.addEventListener('click', () => {
           const bit = Number((btn as HTMLElement).dataset.uaBit);
-          missionUpdateWp(fi, { ...fwp, p3: fwp.p3 ^ (1 << bit) });
+          missionUpdateWp(fi, { ...live(fi, fwp), p3: live(fi, fwp).p3 ^ (1 << bit) });
         });
       });
       const fRemove = el.querySelector('button[data-action="removeFbh"]') as HTMLButtonElement | null;
@@ -522,12 +581,8 @@
       missionInsertWp(insertIdx, modAction, 0, 0, 0, p1, p2);
     });
 
-    el.querySelector('button[data-action="moveUp"]')?.addEventListener('click', () => {
-      if (idx > 0) { missionReorderWp(idx, idx - 1); selectWpSingle(idx - 1); }
-    });
-    el.querySelector('button[data-action="moveDown"]')?.addEventListener('click', () => {
-      if (idx < currentMission.waypoints.length - 1) { missionReorderWp(idx, idx + 1); selectWpSingle(idx + 1); }
-    });
+    el.querySelector('button[data-action="moveUp"]')?.addEventListener('click', () => { void moveWpGroup(idx, -1); });
+    el.querySelector('button[data-action="moveDown"]')?.addEventListener('click', () => { void moveWpGroup(idx, 1); });
     el.querySelector('button[data-action="remove"]')?.addEventListener('click', () => {
       // WP + its attached modifiers = a single undo step.
       beginUndoGroup();
@@ -884,6 +939,8 @@
 
   $effect(() => {
     void currentLaunch; void currentSelSet; void currentShowMission; void currentReplayActive; void activeSurveyPattern.isActive;
+    // Read here, not only inside `render`: a deferred run reads nothing, and the effect would lose them.
+    void currentMission; void currentSelIdx; void currentEditing;
     const render = () => { renderMission(currentMission, currentSelIdx, currentEditing); markNoTerrain(); };
     if (!deferWhileStepping(popupState, render)) render();
   });
@@ -942,6 +999,31 @@
   :global(.wp-editor-popup-container .leaflet-popup-content) { margin: 0; width: auto !important; }
   :global(.wp-editor-popup-container .leaflet-popup-tip) { background: rgba(30,30,30,0.82); backdrop-filter: var(--glass-blur, blur(6px)); -webkit-backdrop-filter: var(--glass-blur, blur(6px)); border: 1px solid rgba(55,168,219,0.35); }
   :global(.wp-editor-popup) { padding: 10px; font-size: 13px; min-width: 190px; }
+  /* Docked (helpers/missionEditorPopup.svelte.ts → placeEditor): off its marker, at the right edge of the free
+     map area. `!important` against the position Leaflet keeps writing inline. */
+  :global(.wp-editor-popup-container.wp-editor-docked) {
+    position: absolute !important;
+    top: var(--wpe-dock-top, 8px) !important;
+    right: var(--wpe-dock-right, 8px) !important;
+    left: auto !important;
+    bottom: auto !important;
+    transform: none !important;
+    margin: 0 !important;
+    z-index: 1000;
+    cursor: auto;
+  }
+  :global(.wp-editor-docked .leaflet-popup-tip-container) { display: none; }
+  /* The wrapper is drawn at the UI scale: it grows from the docked corner, and its height limit is a
+     screen value. */
+  :global(.wp-editor-docked .leaflet-popup-content-wrapper) {
+    transform-origin: top right;
+    max-height: calc(var(--wpe-dock-max-height, 80vh) / var(--ui-scale, 1));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  /* Negative margins cancel the 10px popup padding, so the sticky bars cover the scrolled fields edge to edge. */
+  :global(.wp-editor-docked .wpe-header) { position: sticky; top: 0; z-index: 1; margin: -10px -10px 6px; padding: 10px 10px 4px; background: rgb(30, 30, 30); }
+  :global(.wp-editor-docked .wpe-actions) { position: sticky; bottom: 0; margin: 6px -10px -10px; padding: 6px 10px 10px; background: rgb(30, 30, 30); }
   :global(.wpe-header) { display: flex; align-items: center; gap: 6px; font-weight: bold; font-size: 14px; color: #37a8db; margin-bottom: 6px; border-bottom: 1px solid #444; padding-bottom: 4px; }
   :global(.wpe-num) { flex-shrink: 0; }
   :global(.wpe-cmd-select) { flex: 1; background: #1e1e1e; color: #ccc; border: 1px solid #555; border-radius: 3px; padding: 2px 4px; font-size: 12px; font-weight: normal; cursor: pointer; color-scheme: dark; }
@@ -966,8 +1048,10 @@
   :global(.wpe-ua-btn:hover:not(.active)) { background: #3a3a3a; color: #ccc; }
   :global(.wpe-mod-section) { margin-top: 6px; padding-top: 5px; border-top: 1px dashed #555; }
   :global(.wpe-mod-header) { display: flex; align-items: center; justify-content: space-between; font-size: 12px; font-weight: 600; color: #e67e22; margin-bottom: 4px; }
-  :global(.wpe-mod-remove) { background: none; border: none; color: #c0392b; cursor: pointer; font-size: 12px; padding: 0 4px; line-height: 1; }
-  :global(.wpe-mod-remove:hover) { color: #e74c3c; }
+  /* The danger look of the panel buttons (panel/Button.svelte), in the size of this popup. */
+  :global(.wpe-mod-remove) { background: #2a2a2a; border: 1px solid #c0392b; border-radius: 3px; color: #e74c3c; cursor: pointer; font-size: 12px; padding: 2px 5px; line-height: 1; }
+  :global(.wpe-mod-remove:hover) { background: rgba(192, 57, 43, 0.18); border-color: #e74c3c; color: #ff6b5b; }
+  :global(.wpe-remove svg), :global(.wpe-mod-remove svg) { width: 1.2em; height: 1.2em; display: block; }
   :global(.wpe-add-mod) { margin-top: 4px; }
   :global(.wpe-add-mod select) { width: 100%; background: #2a2a2a; color: #888; border: 1px dashed #555; border-radius: 3px; padding: 3px 4px; font-size: 12px; cursor: pointer; }
   :global(.wpe-actions) { display: flex; gap: 4px; margin-top: 6px; padding-top: 4px; border-top: 1px solid #444; }
@@ -977,4 +1061,36 @@
   :global(.wpe-remove) { margin-left: auto; border-color: #c0392b !important; color: #e74c3c !important; }
   :global(.wpe-remove:hover) { background: #c0392b !important; color: #fff !important; }
   :global(.wp-editor-popup select) { color-scheme: dark; }
+
+  /* One control look for the whole editor — the height and colours of the steppers and of the panels'
+     form fields, so every control is a touch target. Placed last: it overrides the rules above. */
+  :global(.wp-editor-popup) { --wpe-h: 30px; }
+  :global(.wp-editor-popup select),
+  :global(.wp-editor-popup .wpe-toggle),
+  :global(.wp-editor-popup .wpe-actions button),
+  :global(.wp-editor-popup .wpe-adv-toggle),
+  :global(.wp-editor-popup .wpe-row input:not(.ns-input)) {
+    box-sizing: border-box;
+    height: var(--wpe-h);
+    background-color: #434343;
+    border: 1px solid #555;
+    border-radius: 4px;
+    color: #e0e0e0;
+    font-size: 12px;
+  }
+  :global(.wp-editor-popup select) { padding: 0 22px 0 8px; cursor: pointer; }
+  :global(.wp-editor-popup select:focus),
+  :global(.wp-editor-popup .wpe-row input:not(.ns-input):focus) { border-color: #37a8db; outline: none; }
+  :global(.wp-editor-popup .wpe-cmd-select) { flex: 1; min-width: 0; font-weight: normal; }
+  :global(.wp-editor-popup .wpe-add-mod select) { width: 100%; color: #b8b8b8; }
+  :global(.wp-editor-popup .wpe-row input:not(.ns-input)) { padding: 0 8px; }
+  :global(.wp-editor-popup .wpe-coord-input) { flex: 1; min-width: 0; width: auto !important; }
+  :global(.wp-editor-popup .wpe-toggle) { min-width: 52px; padding: 0 10px; cursor: pointer; }
+  :global(.wp-editor-popup .wpe-actions button) { min-width: 40px; padding: 0 10px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+  :global(.wp-editor-popup .wpe-toggle:hover),
+  :global(.wp-editor-popup .wpe-actions button:hover:not(:disabled)),
+  :global(.wp-editor-popup .wpe-adv-toggle:hover) { background-color: rgba(55, 168, 219, 0.18); border-color: rgba(55, 168, 219, 0.5); }
+  :global(.wp-editor-popup .wpe-adv-toggle) { display: block; width: 100%; margin-top: 6px; padding: 0 8px; text-align: left; color: #9fd4ee; cursor: pointer; }
+  :global(.wp-editor-popup .wpe-mod-remove) { box-sizing: border-box; width: var(--wpe-h); height: var(--wpe-h); display: inline-flex; align-items: center; justify-content: center; padding: 0; border-radius: 4px; }
+  :global(.wp-editor-popup .wpe-ua-btn) { min-width: 30px; height: 26px; border-radius: 4px; }
 </style>
