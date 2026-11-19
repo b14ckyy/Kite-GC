@@ -211,7 +211,11 @@ INAV column: Kite carries the MSP transfer inside the MAVLink stream, EEPROM sav
 included — see **[Connecting → INAV over MAVLink](connecting.md#inav-over-mavlink-mspmav)**.
 
 After a download the plan is tagged **FC** (see provenance below); the mission you see is exactly what
-the aircraft will fly.
+the aircraft will fly. If the library already holds exactly this mission, it is tagged **DB** as well
+and counts as that library entry — saving it again or linking it to a flight uses the entry instead of
+creating a second one. For INAV this also holds for a mission planned with **AGL** altitudes: the
+aircraft stores them converted to AMSL, Kite recognises the mission all the same and shows it as it is
+in the library, with its AGL altitudes. This needs the terrain data of the mission's area.
 
 ## Files & the mission library
 

@@ -247,6 +247,10 @@ inside the box of the feature release they belong to, so the notes for one relea
       on every flight and every group, so several flights can be exported into one `.kflight` or
       deleted in one go, by touch as well. An export now shows its progress instead of leaving
       the window unresponsive. See [Logbook](guides/logbook.md#selecting-several-flights). [#327]
+    - **Missions: a download from the aircraft is recognised as a library mission** — when the
+      library already holds exactly the mission that came from the flight controller, it shows the
+      **DB** badge next to **FC** and is linked to that entry. An INAV mission planned with AGL
+      altitudes comes back with them, instead of the AMSL values the aircraft stores. [#327]
     - **INAV Blackbox import without a helper program** — Kite decodes INAV Blackbox logs itself;
       imports are faster and no longer lose the frames after a flight-mode change. [#234]
     - **PX4 ULog import** — the logbook imports `.ulg` logs, split into flights like any other
