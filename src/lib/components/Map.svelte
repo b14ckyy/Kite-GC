@@ -322,21 +322,21 @@
   // ── Direction marker lines (heading + course-over-ground) ────────────
   // Two short lines from the UAV nose: HDG (solid blue) along the FC heading, COG (dashed amber) along
   // the ground track — the angle between them is the crab. Colours match the compass widget. Drawn from
-  // the SMOOTHED follow state (same filtering as the marker), geographic so they pan/zoom natively.
-  let dirLayer: L.LayerGroup | undefined;
-  let hdgLine: L.Polyline | undefined;
-  let cogLine: L.Polyline | undefined;
-  let hdgCasing: L.Polyline | undefined; // dark outline under each line for contrast on any terrain
-  let cogCasing: L.Polyline | undefined;
-  let turnLine: L.Polyline | undefined;  // predicted turn arc (thin white, drawn under the H/B lines)
-  let turnCasing: L.Polyline | undefined;
+  // the SMOOTHED follow state (same filtering as the marker).
+  // One marker at the aircraft holds them as elements: a follow frame moves and turns them (compositor
+  // only) and repaints nothing but a line whose length changed. A map-sized canvas or SVG that changes
+  // on every follow frame costs the GPU its whole area per frame.
+  let dirMarker: L.Marker | undefined;
+  let dirEls: { root: HTMLElement; hdg: HTMLElement[]; cog: HTMLElement[]; arc: SVGSVGElement; arcPaths: SVGPathElement[] } | undefined;
+  // What is written to the elements, so an unchanged value writes no style.
+  let dirDrawn = { shown: false, hdgLen: '', hdgRot: '', cogLen: '', cogRot: '', arcD: '', arcRot: '' };
   const DIR_LEAD_S = 15;     // line length = how far the UAV travels in this many seconds (velocity vector)
   const DIR_COG_MIN_SPEED = 1.5; // m/s — COG is noise below this → hide the amber line
   const TURN_SHOW_RATE = 3;  // deg/s — only START showing on a real turn (above fluctuation noise)
   const TURN_KEEP_RATE = 2;  // deg/s — once shown, keep while above this …
   const TURN_HOLD_MS = 2000; // … and for this long after it drops below (hysteresis vs. fluctuations)
   const TURN_MAX_SWEEP = 180; // cap the arc at a half-circle so it never spirals
-  const TURN_SEG_DEG = 5;    // arc polyline resolution (degrees of turn per segment)
+  const TURN_MIN_SWEEP = 5;  // deg — a shorter arc is not drawn
   // Turn rate (deg/s, signed): low-passed dCOG/dt of the EKF course — the TRUE ground-track turn (wind + skid
   // included), not g·tan(bank)/V. Sampled only on a fresh COG (setFollowTarget); the displayed rate is eased
   // per frame (followCurrent.turnRate).
@@ -1928,15 +1928,18 @@
   }
 
   /** Redraw the HDG/COG nose lines from the SMOOTHED follow state (so they track the UAV stably, the
-   *  same filtering as the marker). Geographic lines → they pan/zoom natively, no per-frame reprojection.
-   *  Hidden when there's no active marker; the COG line hides below walking pace (COG is noise there). */
+   *  same filtering as the marker). Hidden when there's no active marker; the COG line hides below walking
+   *  pace (COG is noise there). */
   function redrawDirLines() {
     if (!map) return;
     if (!$settings.directionLines || !activeFollowMarker || !followCurrent) {
-      for (const p of [turnCasing, turnLine, hdgCasing, hdgLine, cogCasing, cogLine]) p?.setLatLngs([]);
+      if (dirDrawn.shown && dirEls) {
+        dirEls.root.style.display = 'none';
+        dirDrawn.shown = false;
+      }
       return;
     }
-    if (!dirLayer) {
+    if (!dirMarker) {
       // Dedicated pane above the overlay pane (flight track, z=400) but below the marker pane (UAV
       // model, z=600), so the lines sit over the track yet under the aircraft.
       if (!map.getPane('dirLines')) {
@@ -1944,61 +1947,64 @@
         pane.style.zIndex = '450';
         pane.style.pointerEvents = 'none';
       }
-      dirLayer = L.layerGroup().addTo(map);
-      // Own canvas renderer, not the pane's default SVG: the lines move on EVERY follow frame, and a changed SVG
-      // path re-rasterises the compositor tiles under the map-sized layer (hundreds of raster tasks a second).
-      // A canvas is one texture, redrawn only in the changed region.
-      const dirRenderer = L.canvas({ pane: 'dirLines' });
-      // Add order = draw order: the turn arc first (bottom, under the H/B lines), then dark casings,
-      // then the coloured H/B lines on top. All in the dirLines pane → above the track, below the UAV.
-      const r = { pane: 'dirLines', renderer: dirRenderer, lineCap: 'round' as const, interactive: false };
-      turnCasing = L.polyline([], { ...r, color: '#000', weight: 3.5, opacity: 0.3 }).addTo(dirLayer);
-      turnLine = L.polyline([], { ...r, color: '#fff', weight: 1.5, opacity: 0.95 }).addTo(dirLayer);
-      hdgCasing = L.polyline([], { ...r, color: '#000', weight: 6, opacity: 0.3 }).addTo(dirLayer);
-      cogCasing = L.polyline([], { ...r, color: '#000', weight: 6, opacity: 0.3 }).addTo(dirLayer);
-      hdgLine = L.polyline([], { ...r, color: '#37a8db', weight: 3, opacity: 1 }).addTo(dirLayer);
-      cogLine = L.polyline([], { ...r, color: '#f5a623', weight: 3, opacity: 1, dashArray: '6 5' }).addTo(dirLayer);
+      // Element order = draw order: the turn arc at the bottom, then the dark casings, then the lines.
+      const icon = L.divIcon({
+        className: 'dir-lines-icon',
+        iconSize: [0, 0],
+        html: '<div class="dl"><svg class="dl-arc"><path class="dl-arc-casing"/><path class="dl-arc-line"/></svg>'
+          + '<div class="dl-line dl-casing"></div><div class="dl-line dl-casing"></div>'
+          + '<div class="dl-line dl-hdg"></div><div class="dl-line dl-cog"></div></div>',
+      });
+      dirMarker = L.marker([followCurrent.lat, followCurrent.lon], { icon, pane: 'dirLines', interactive: false, keyboard: false }).addTo(map);
+      const root = dirMarker.getElement()?.querySelector<HTMLElement>('.dl');
+      if (!root) return;
+      const lines = root.querySelectorAll<HTMLElement>('.dl-line');
+      const arc = root.querySelector<SVGSVGElement>('.dl-arc')!;
+      dirEls = { root, hdg: [lines[0], lines[2]], cog: [lines[1], lines[3]], arc, arcPaths: [...arc.querySelectorAll('path')] };
+      dirDrawn = { shown: true, hdgLen: '', hdgRot: '', cogLen: '', cogRot: '', arcD: '', arcRot: '' };
+    }
+    if (!dirEls) return;
+    if (!dirDrawn.shown) {
+      dirEls.root.style.display = '';
+      dirDrawn.shown = true;
     }
     const { lat, lon, heading, course, speed } = followCurrent;
-    const len = speed * DIR_LEAD_S; // 15 s of travel → the lines represent ground speed
-    const h = destinationPoint(lat, lon, heading, len);
-    const hll: L.LatLngExpression[] = [[lat, lon], [h.lat, h.lon]];
-    hdgCasing!.setLatLngs(hll);
-    hdgLine!.setLatLngs(hll);
-    if (speed > DIR_COG_MIN_SPEED) {
-      const c = destinationPoint(lat, lon, course, len);
-      const cll: L.LatLngExpression[] = [[lat, lon], [c.lat, c.lon]];
-      cogCasing!.setLatLngs(cll);
-      cogLine!.setLatLngs(cll);
-    } else {
-      cogCasing!.setLatLngs([]);
-      cogLine!.setLatLngs([]);
-    }
+    dirMarker.setLatLng([lat, lon]);
+    // Map pixels per metre here and now (Mercator stretches with the latitude).
+    const zoom = map.getZoom();
+    const ref = destinationPoint(lat, lon, 0, 100);
+    const pxPerM = map.project([lat, lon], zoom).distanceTo(map.project([ref.lat, ref.lon], zoom)) / 100;
+    const lenPx = speed * DIR_LEAD_S * pxPerM; // 15 s of travel → the lines represent ground speed
+    const px = (v: number) => `${Math.round(v * 2) / 2}px`;
+    const turn = (deg: number) => `rotate(${Math.round(deg * 10) / 10}deg)`;
+    const write = (els: HTMLElement[], key: 'hdg' | 'cog', len: string, rot: string) => {
+      if (dirDrawn[`${key}Len`] !== len) { for (const el of els) el.style.height = len; dirDrawn[`${key}Len`] = len; }
+      if (dirDrawn[`${key}Rot`] !== rot) { for (const el of els) el.style.transform = rot; dirDrawn[`${key}Rot`] = rot; }
+    };
+    write(dirEls.hdg, 'hdg', px(lenPx), turn(heading));
+    write(dirEls.cog, 'cog', speed > DIR_COG_MIN_SPEED ? px(lenPx) : '0px', turn(course));
 
-    // Turn-radius arc: predicted ground path starting at the nose along COG, curving at the filtered
+    // Turn-radius arc: predicted ground path starting at the aircraft along COG, curving at the filtered
     // turn rate. Arc length = 15 s of travel but capped at a 180° sweep (no spiral). Hidden when slow
     // or nearly straight (the COG line already shows that case).
     const rate = followCurrent.turnRate; // eased per-frame → smooth
     const sweep = Math.max(-TURN_MAX_SWEEP, Math.min(TURN_MAX_SWEEP, rate * DIR_LEAD_S)); // signed deg
-    if (turnArcShown && speed > DIR_COG_MIN_SPEED && Math.abs(rate) > 0.5 && Math.abs(sweep) > TURN_SEG_DEG) {
-      const rAbs = speed / (Math.abs(rate) * Math.PI / 180); // turn radius (m)
-      const n = Math.max(2, Math.ceil(Math.abs(sweep) / TURN_SEG_DEG));
-      const stepDeg = sweep / n;
-      const segDist = rAbs * Math.abs(stepDeg) * Math.PI / 180; // chord ≈ arc per small step
-      const pts: L.LatLngExpression[] = [[lat, lon]];
-      let cLat = lat, cLon = lon;
-      for (let i = 1; i <= n; i++) {
-        const b = course + stepDeg * (i - 0.5); // midpoint bearing per segment
-        const p = destinationPoint(cLat, cLon, b, segDist);
-        cLat = p.lat; cLon = p.lon;
-        pts.push([cLat, cLon]);
-      }
-      turnCasing!.setLatLngs(pts);
-      turnLine!.setLatLngs(pts);
-    } else {
-      turnCasing!.setLatLngs([]);
-      turnLine!.setLatLngs([]);
+    let d = '';
+    if (turnArcShown && speed > DIR_COG_MIN_SPEED && Math.abs(rate) > 0.5 && Math.abs(sweep) > TURN_MIN_SWEEP) {
+      // Drawn with the course pointing up; the element is turned to the course. Right turn = clockwise.
+      const r = Math.round((speed / (Math.abs(rate) * Math.PI / 180)) * pxPerM * 2) / 2; // turn radius (px)
+      const theta = (Math.round(Math.abs(sweep) * 2) / 2) * Math.PI / 180;
+      const side = sweep > 0 ? 1 : -1;
+      const x = Math.round(side * (r - r * Math.cos(theta)) * 2) / 2;
+      const y = Math.round(-r * Math.sin(theta) * 2) / 2;
+      d = `M0,0A${r},${r} 0 0 ${side > 0 ? 1 : 0} ${x},${y}`;
     }
+    if (dirDrawn.arcD !== d) {
+      for (const path of dirEls.arcPaths) path.setAttribute('d', d);
+      dirDrawn.arcD = d;
+    }
+    const arcRot = d ? turn(course) : dirDrawn.arcRot;
+    if (dirDrawn.arcRot !== arcRot) { dirEls.arc.style.transform = arcRot; dirDrawn.arcRot = arcRot; }
   }
 
   let followTitle = $derived.by(() => {
@@ -3067,7 +3073,7 @@
       if (preArmTrailLine) map.removeLayer(preArmTrailLine);
       if (playbackLayerGroup) map.removeLayer(playbackLayerGroup);
       if (playbackMarker) map.removeLayer(playbackMarker);
-      if (dirLayer) map.removeLayer(dirLayer);
+      if (dirMarker) map.removeLayer(dirMarker);
       if (homeMarker) map.removeLayer(homeMarker);
       if (safehomeLayer) map.removeLayer(safehomeLayer);
       if (geozoneLayer) map.removeLayer(geozoneLayer);
@@ -3297,6 +3303,53 @@
   :global(.map.heading-up .uav-model-icon) {
     --kite-upright: 0deg;
   }
+  /* The direction lines carry heading and course themselves, like the model. */
+  :global(.map.heading-up .dir-lines-icon) {
+    --kite-upright: 0deg;
+  }
+  :global(.dir-lines-icon .dl) {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 0;
+    height: 0;
+    pointer-events: none;
+  }
+  /* Each line grows upward from the aircraft and turns around it; its own layer, so a turn repaints nothing. */
+  :global(.dir-lines-icon .dl-line) {
+    position: absolute;
+    bottom: 0;
+    transform-origin: 50% 100%;
+    will-change: transform;
+    width: 3px;
+    left: -1.5px;
+    border-radius: 1.5px;
+  }
+  :global(.dir-lines-icon .dl-casing) {
+    width: 6px;
+    left: -3px;
+    border-radius: 3px;
+    background: rgba(0, 0, 0, 0.3);
+  }
+  :global(.dir-lines-icon .dl-hdg) { background: #37a8db; }
+  :global(.dir-lines-icon .dl-cog) {
+    background: repeating-linear-gradient(to top, #f5a623 0 7px, transparent 7px 11px);
+    border-radius: 0;
+  }
+  :global(.dir-lines-icon .dl-arc) {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 1px;
+    height: 1px;
+    overflow: visible;
+    transform-origin: 0 0;
+    will-change: transform;
+    fill: none;
+    stroke-linecap: round;
+  }
+  :global(.dir-lines-icon .dl-arc-casing) { stroke: rgba(0, 0, 0, 0.3); stroke-width: 3.5px; }
+  :global(.dir-lines-icon .dl-arc-line) { stroke: rgba(255, 255, 255, 0.95); stroke-width: 1.5px; }
   /* Its own layer: the heading turns the canvas per frame (turnModel), and without one that repaints. */
   :global(.uav-model-canvas) {
     will-change: transform;
