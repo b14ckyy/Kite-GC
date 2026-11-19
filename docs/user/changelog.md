@@ -504,6 +504,12 @@ inside the box of the feature release they belong to, so the notes for one relea
       panel off the map without losing its state; click once more to bring it back. [#102]
     - **The mouse wheel steps any + / − number field** that has the focus; a field without focus
       never reacts, so scrolling a panel stays safe. [#189] · [#191]
+    - **Less graphics load while an aircraft moves** — the heading and course lines on the 2D map no
+      longer redraw a map-sized layer for every frame. On a laptop-class graphics chip the map's share
+      of the load fell to a fraction in free pan and to about half while following. [#332]
+    - **Power Saving also slows the 2D map's motion to 20 frames per second**, like the 3D view; the
+      setting now reads Off / On / Auto. On a tablet this roughly halves the extra battery drain of a
+      moving aircraft. [#332]
     - **Power Saving also drops the glass blur** of panels and widgets. [#174]
     - **Live AGL: the projected flight line is smoother**, and the compass and horizon have the
       frosted-glass look of the other widgets. [#101]
