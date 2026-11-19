@@ -52,7 +52,10 @@ The detail panel shows everything about the selected flight:
 - **Mission** — the linked mission, openable in the Mission Manager.
 - **Weather**, **notes** and **pilot** — editable.
 - **Source & stored log** — where the flight came from (live recording or an import) and, when an
-  onboard log file was kept, an inline control to export or delete it.
+  onboard log file was kept, an inline control to export or delete it. Behind the source stands
+  what the flight takes in the database: **≈ size** is an estimate of its recorded data, and
+  **File size** is the stored original log on top of that. A linked pair shows the live recording
+  and the imported log each with its own size.
 
 ![The flight list and the selected flight's details](../assets/guides/logbook/logbook_detail.png)
 /// caption

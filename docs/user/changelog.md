@@ -255,6 +255,8 @@ inside the box of the feature release they belong to, so the notes for one relea
       the map, and FC upload and `.mission` export stay locked until the terrain data is there;
       the altitude-mode button no longer offers AGL where it cannot be converted.
       See [Missions](guides/missions.md). [#327]
+    - **Storage use is shown** — Settings → Data names the size of the flight database, and a
+      flight's detail view shows what its data and its stored original log take. [#327]
     - **INAV Blackbox import without a helper program** — Kite decodes INAV Blackbox logs itself;
       imports are faster and no longer lose the frames after a flight-mode change. [#234]
     - **PX4 ULog import** — the logbook imports `.ulg` logs, split into flights like any other
