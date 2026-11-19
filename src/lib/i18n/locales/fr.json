@@ -1370,7 +1370,7 @@
     "noResults": "Aucun vol ne correspond à votre recherche.",
     "exportKflight": ".kflight",
     "select": "Sélectionner",
-    "selectTip": "Cocher plusieurs vols pour les exporter ensemble",
+    "selectTip": "Cocher plusieurs vols pour les exporter ou les supprimer ensemble",
     "selectDone": "Terminé",
     "selectAll": "Tous",
     "selectNone": "Aucun",

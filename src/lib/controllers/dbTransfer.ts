@@ -108,13 +108,14 @@ export async function withExportProgress<T>(
 ): Promise<T> {
   const progress = (done: number, of: number) =>
     ui.notice({ title, message: ui.tr(`${K}.flightsBusyMsg`, { done: String(done), total: String(of) }) });
-  progress(0, total);
   // An event can arrive after the command's answer: it must not put the notice back up.
   let running = true;
-  const unlisten = await listen<{ exported: number; total: number }>('flightlog-export-progress', (e) => {
-    if (running) progress(e.payload.exported, e.payload.total);
-  });
+  let unlisten = () => {};
   try {
+    progress(0, total);
+    unlisten = await listen<{ exported: number; total: number }>('flightlog-export-progress', (e) => {
+      if (running) progress(e.payload.exported, e.payload.total);
+    });
     return await run();
   } finally {
     running = false;

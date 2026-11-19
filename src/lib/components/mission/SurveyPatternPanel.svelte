@@ -5,6 +5,7 @@
 
 <script lang="ts">
   import { t } from 'svelte-i18n';
+  import { wrapLng } from '$lib/utils/geo';
   import {
     activeSurveyPattern,
     exitPatternMode,
@@ -270,7 +271,7 @@
 
       const navWp = (pt: SurveyWaypoint): ArduWaypoint => ({
         command: MAV_CMD_NAV_WAYPOINT, frame, param1: 0, param2: 0, param3: 0, param4: 0,
-        lat: Math.round(pt.lat * 1e7), lon: Math.round(pt.lng * 1e7), alt: pt.alt, autocontinue: true,
+        lat: Math.round(pt.lat * 1e7), lon: Math.round(wrapLng(pt.lng) * 1e7), alt: pt.alt, autocontinue: true,
       });
       const doItem = (act: ArduAction): ArduWaypoint => ({
         command: act.command, frame: 0,
@@ -307,7 +308,7 @@
     // AGL waypoints need the ground elevation under each of them, or INAV cannot be given the mission.
     if (wps.some((w) => w.altMode === 'ground')) {
       const { invoke } = await import('@tauri-apps/api/core');
-      const elevations = await invoke<(number | null)[]>('terrain_elevations', { points: wps.map((w) => [w.lat, w.lng]) })
+      const elevations = await invoke<(number | null)[]>('terrain_elevations', { points: wps.map((w) => [w.lat, wrapLng(w.lng)]) })
         .catch(() => [null]);
       if (elevations.some((e) => e == null)) {
         await showDialog($t('survey.noTerrainTitle'), $t('survey.noTerrainMsg'), []);
@@ -353,7 +354,7 @@
           if (swp.userActionFlags) {
             p3 |= ((swp.userActionFlags & 0x0F) << 1);
           }
-          await missionAddWp(WpAction.Waypoint, fromDeg(swp.lat), fromDeg(swp.lng), altCm, speedCm, 0, p3, altModeNum);
+          await missionAddWp(WpAction.Waypoint, fromDeg(swp.lat), fromDeg(wrapLng(swp.lng)), altCm, speedCm, 0, p3, altModeNum);
         }
       } finally {
         endUndoGroup();

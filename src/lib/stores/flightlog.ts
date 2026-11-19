@@ -84,9 +84,10 @@ export async function missionDbList(dbPath: string): Promise<LibraryMission[]> {
   });
 }
 
-/** Replace a library mission's content hash; `false` = another entry holds that hash. */
-export async function missionDbSetHash(id: number, contentHash: string, dbPath: string): Promise<boolean> {
-  return invoke<boolean>('mission_db_set_hash', { id, contentHash, dbPath: dbPath || undefined });
+/** Replace a library mission's content hash while it still is `oldHash`; `false` = the entry changed
+ *  meanwhile, or another entry holds the new hash. */
+export async function missionDbSetHash(id: number, contentHash: string, oldHash: string, dbPath: string): Promise<boolean> {
+  return invoke<boolean>('mission_db_set_hash', { id, contentHash, oldHash, dbPath: dbPath || undefined });
 }
 
 /** Update a mission's name + notes (Manager rename / notes edit). */

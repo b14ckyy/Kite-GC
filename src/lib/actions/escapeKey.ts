@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Svelte action for a dialog that closes through its buttons only: Escape is the keyboard's cancel.
-//   <div class="dialog-backdrop" use:escapeKey={() => close(null)}>
-// Listens on the window, so it works wherever the focus is. Of several open dialogs only the one
-// opened last answers.
+// Escape as the keyboard's cancel for dialogs that close through their buttons only. Window listener in the
+// capture phase: works wherever the focus is and swallows the key; only the dialog opened last answers.
 
 const stack: { run: () => void }[] = [];
 

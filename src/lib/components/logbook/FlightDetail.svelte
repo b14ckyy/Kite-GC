@@ -94,12 +94,14 @@
 
   // What the flight's rows take in the database; a linked pair shows both parts.
   let dataSizes = $state<FlightDataSize[]>([]);
+  // By id: saving notes or weather hands in a new flight object for the same flight.
+  const flightId = $derived(flight.id);
   $effect(() => {
-    const id = flight.id;
+    const id = flightId;
     dataSizes = [];
     if (minimized) return;
     void flightDataSizes(id, dbPath)
-      .then((sizes) => { if (flight.id === id) dataSizes = sizes; })
+      .then((sizes) => { if (flightId === id) dataSizes = sizes; })
       .catch(() => {});
   });
 

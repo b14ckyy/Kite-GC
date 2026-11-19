@@ -656,7 +656,7 @@
       </div>
       <div class="ctrl-row">
         <Button variant="standard" icon="folder" full onclick={handleOpenFile}>{$t('mission.open')}</Button>
-        <Button variant="standard" icon="save" full disabled={terrainLocked} title={terrainLockText} onclick={handleSaveFile}>{$t('mission.save')}</Button>
+        <Button variant="standard" icon="save" full disabled={$aglTerrainGapsActive.size > 0} title={$aglTerrainGapsActive.size > 0 ? terrainLockText : ''} onclick={handleSaveFile}>{$t('mission.save')}</Button>
       </div>
       {#if terrainLocked}<div class="terrain-lock">{terrainLockText}</div>{/if}
     {/if}

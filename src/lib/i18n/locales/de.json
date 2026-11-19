@@ -1374,7 +1374,7 @@
     "noResults": "Keine Flüge gefunden.",
     "exportKflight": ".kflight",
     "select": "Auswählen",
-    "selectTip": "Mehrere Flüge markieren, um sie zusammen zu exportieren",
+    "selectTip": "Mehrere Flüge markieren, um sie zusammen zu exportieren oder zu löschen",
     "selectDone": "Fertig",
     "selectAll": "Alle",
     "selectNone": "Keine",

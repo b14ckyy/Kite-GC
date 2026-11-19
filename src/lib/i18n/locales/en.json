@@ -1374,7 +1374,7 @@
     "noResults": "No flights match your search.",
     "exportKflight": ".kflight",
     "select": "Select",
-    "selectTip": "Tick several flights to export them together",
+    "selectTip": "Tick several flights to export or delete them together",
     "selectDone": "Done",
     "selectAll": "All",
     "selectNone": "None",

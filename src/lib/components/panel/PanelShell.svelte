@@ -61,9 +61,12 @@
   $effect(() => {
     const el = root;
     if (!el) return;
-    const ro = new ResizeObserver(() => panelDockRight.set(el.getBoundingClientRect().right));
+    const publish = () => panelDockRight.set(el.getBoundingClientRect().right);
+    const ro = new ResizeObserver(publish);
     ro.observe(el);
-    return () => { ro.disconnect(); panelDockRight.set(0); };
+    // The observer's first call lands in the entry animation, which shifts the shell sideways.
+    el.addEventListener('animationend', publish);
+    return () => { ro.disconnect(); el.removeEventListener('animationend', publish); panelDockRight.set(0); };
   });
 </script>
 
@@ -148,9 +151,9 @@
     pointer-events: none;
   }
 
-  /* Bounding height for compact/advanced (cap for info): below the toolbar, above the bottom dock + status bar.
-     `--panel-bottom-reserve` shrinks to the rail's 6px gap on windows too short for the nav rail's full height
-     (the panel then overlays the dock, see +page). Fallback for hosts without the var (PanelPlayground). */
+  /* Bounding height for compact/advanced (cap for info): below the toolbar, above `--panel-bottom-reserve` and
+     the status bar. +page sets the reserve (docked video, dock tiles, or the rail's 6px gap); the fallback is
+     for hosts without the var (PanelPlayground). */
   .ps-info,
   .ps-compact,
   .ps-advanced {
@@ -308,9 +311,13 @@
   /* A traffic alert whose banner lies behind this panel: the title bar carries its colour. */
   .ps-alert-warning .ps-head,
   .ps-alert-caution .ps-head {
+    border-radius: 4px;
+  }
+  /* Only the column heads have room around them; the full-width heads bring their own padding. */
+  .ps-alert-warning .ps-col > .ps-head,
+  .ps-alert-caution .ps-col > .ps-head {
     margin: -4px -6px 4px;
     padding: 4px 6px;
-    border-radius: 4px;
   }
   .ps-alert-warning .ps-head { background: #d40000; }
   .ps-alert-caution .ps-head { background: #f4c020; }

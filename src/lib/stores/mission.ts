@@ -444,7 +444,6 @@ function slotWaypoints(i: number): Waypoint[] {
   return i === get(activeMissionIndex) ? get(mission).waypoints : (missionSlots.get(i) ?? []);
 }
 
-/** Every slot's waypoints, slot 1 first. */
 export function allMissionWaypoints(): Waypoint[][] {
   const out: Waypoint[][] = [];
   for (let i = 1; i <= get(missionCount); i++) out.push(slotWaypoints(i));
@@ -815,7 +814,9 @@ export async function missionDownload(fromEeprom = false): Promise<Mission> {
 
   // The library entry of what the FC holds, if there is one. Its own form replaces the download where
   // the two differ: the entry has the AGL waypoints the upload resolved to AMSL.
-  const entry = await libraryEntryOfDownload();
+  const downloaded = hashWaypoints(combinedMissionWaypoints());
+  let entry = await libraryEntryOfDownload();
+  if (hashWaypoints(combinedMissionWaypoints()) !== downloaded) entry = null; // edited during the lookup
   if (entry && !entry.sameForm) m = await loadSegments(splitMultiMission(entry.waypoints), activeIdx);
 
   applyMissionLaunchDefault(m, undefined, true); // FC has no embedded home → UAV HOME, else WP1

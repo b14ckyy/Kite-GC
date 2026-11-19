@@ -150,7 +150,7 @@
     onClearCache?: () => void;
     onChooseFlightLogPath?: () => void;
     onResetFlightLogPath?: () => void;
-    onCompactDb?: () => void;
+    onCompactDb?: () => void | Promise<void>;
     onExportDatabase?: () => void;
     onImportDatabase?: () => void;
     onExportAllFlights?: () => void;
@@ -360,6 +360,7 @@
     if (!originalLogs) return;
     await onRemoveOriginalLogs(originalLogs.count, originalLogs.size_bytes);
     await loadOriginalLogs();
+    void loadDbSize();
   }
 
   async function deleteDbBackup(): Promise<void> {
@@ -1016,7 +1017,7 @@
       {#if hasDbCompact}
         <div class="s-row">
           <span class="s-label" title={$t('settings.compactDbHint')}>{$t('settings.compactDb')}</span>
-          <Button variant="standard" size="sm" onclick={onCompactDb} title={$t('settings.compactDbHint')}>{$t('settings.compactDbBtn')}</Button>
+          <Button variant="standard" size="sm" onclick={async () => { await onCompactDb(); void loadDbSize(); }} title={$t('settings.compactDbHint')}>{$t('settings.compactDbBtn')}</Button>
         </div>
       {/if}
       {#if dbSizeBytes != null}

@@ -2517,11 +2517,12 @@ pub fn set_mission_extra(conn: &Connection, id: i64, extra_json: Option<&str>) -
     Ok(())
 }
 
-/// Replace a mission's content hash; `false` when another row already holds it (the hash is unique).
-pub fn set_mission_hash(conn: &Connection, id: i64, content_hash: &str) -> SqlResult<bool> {
+/// Replace a mission's content hash, as long as it still is `old_hash`: the new one was computed
+/// from the content behind that. `false` when the entry changed meanwhile or another row holds the hash.
+pub fn set_mission_hash(conn: &Connection, id: i64, content_hash: &str, old_hash: &str) -> SqlResult<bool> {
     let n = conn.execute(
-        "UPDATE OR IGNORE missions SET content_hash = ?1 WHERE id = ?2",
-        params![content_hash, id],
+        "UPDATE OR IGNORE missions SET content_hash = ?1 WHERE id = ?2 AND content_hash = ?3",
+        params![content_hash, id, old_hash],
     )?;
     Ok(n > 0)
 }
@@ -4012,7 +4013,7 @@ pub fn get_blackbox_file(
     Ok(None)
 }
 
-/// What a flight's own rows take in the database, by the source of the rows.
+/// A flight's share of the database, by the source of its rows.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct FlightDataSize {
     pub flight_id: i64,
@@ -4021,10 +4022,8 @@ pub struct FlightDataSize {
     pub bytes: u64,
 }
 
-/// Estimated size of the rows of `flight_id` and of its linked partner, each on its own. SQLite keeps
-/// no size per row: the record encoding is added up per column (integers by magnitude, reals 8 bytes,
-/// text and blobs by length) plus a header byte per column. Indexes and page slack are not counted,
-/// and the stored original log (`blackbox_files`) is reported separately by `blackbox_file_info`.
+/// Estimated row bytes of a flight and of its linked partner (SQLite record encoding per column).
+/// Indexes, page slack and `blackbox_files` are not counted.
 pub fn flight_data_sizes(conn: &Connection, flight_id: i64) -> SqlResult<Vec<FlightDataSize>> {
     let linked: Option<i64> = conn
         .query_row("SELECT linked_flight_id FROM flights WHERE id = ?1", params![flight_id], |r| r.get(0))
@@ -4036,17 +4035,17 @@ pub fn flight_data_sizes(conn: &Connection, flight_id: i64) -> SqlResult<Vec<Fli
         for name in stmt.query_map([], |r| r.get::<_, String>(0))? {
             let name = name?;
             if name != "blackbox_files" {
-                tables.push(name);
+                tables.push(name.replace('"', "\"\""));
             }
         }
     }
-    // Per table: the SQL sum of one row's bytes, for the tables that belong to a flight.
     let mut row_bytes: Vec<(String, String)> = Vec::new();
     for table in tables {
         let mut cols: Vec<String> = Vec::new();
         let mut stmt = conn.prepare(&format!("PRAGMA table_info(\"{table}\")"))?;
         for col in stmt.query_map([], |r| r.get::<_, String>(1))? {
-            cols.push(col?);
+            // Quoted below as an identifier.
+            cols.push(col?.replace('"', "\"\""));
         }
         if !cols.iter().any(|c| c == "flight_id") {
             continue;

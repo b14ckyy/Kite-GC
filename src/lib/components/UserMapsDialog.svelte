@@ -40,7 +40,7 @@
     }
     deleteArmed = null;
     deleteUserMap(id);
-    // The pressed button is gone with its row: focus the box again so Escape still closes the list.
+    // The pressed button is gone with its row: the box takes the focus.
     void tick().then(() => box?.focus());
   }
 
@@ -49,8 +49,7 @@
     box?.focus();
   });
 
-  /** Back to the list. The focused editor field is gone with the editor: focus the box again, or
-   *  Escape would no longer reach the backdrop's handler. */
+  /** Back to the list. The focused editor field is gone with the editor: the box takes the focus. */
   function closeEditor() {
     editing = null;
     void tick().then(() => box?.focus());

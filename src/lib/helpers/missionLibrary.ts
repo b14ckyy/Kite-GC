@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Mission-library helpers (frontend side): the `LibraryMissionInput` payload for the DB — a content
-// hash (identity, for dedup) plus computed geometry metadata. The hash uses the serialization of the
-// provenance system (hashWaypoints), taken over the mission as the FC gets it (AGL resolved to AMSL).
-// See docs/archive/MISSION_LIBRARY_AND_DB.md.
+// Library payload: content hash (hashWaypoints over the form the FC gets, AGL → AMSL) + metadata.
+// Dev-Docs archive/MISSION_LIBRARY_AND_DB.md.
 
 import { get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
@@ -35,10 +33,8 @@ export async function sha256Hex(s: string): Promise<string> {
 
 const hasAgl = (wps: Waypoint[]) => wps.some((w) => (w.alt_mode ?? 0) === ALT_MODE_AGL);
 
-/** Identity of a mission: SHA-256 over the form that goes to the FC, AGL waypoints resolved to AMSL —
- *  an FC download or a `.mission` file then finds its library entry. Without terrain data for an AGL
- *  waypoint the AGL form is hashed, so the mission can still be saved; `rehashAglMissions` moves such
- *  an entry to its real hash later. */
+/** SHA-256 over the FC form (AGL resolved). Without terrain the AGL form is hashed; `rehashAglMissions`
+ *  fixes it later. */
 export async function missionContentHash(wps: Waypoint[]): Promise<string> {
   let resolved = wps;
   if (hasAgl(wps)) {
@@ -68,7 +64,7 @@ export async function rehashAglMissions(dbPath: string): Promise<void> {
     if (m.content_hash !== (await sha256Hex(hashWaypoints(wps)))) continue;
     try {
       const hash = await missionContentHash(wps);
-      if (hash !== m.content_hash) await missionDbSetHash(m.id, hash, dbPath);
+      if (hash !== m.content_hash) await missionDbSetHash(m.id, hash, m.content_hash, dbPath);
     } catch (e) {
       console.warn(`[mission] library entry ${m.id} keeps its old hash`, e);
     }

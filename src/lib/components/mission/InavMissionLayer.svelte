@@ -103,7 +103,7 @@
       return;
     }
     const c = map.getCenter();
-    launchPoint.set({ lat: c.lat, lng: c.lng });
+    launchPoint.set({ lat: c.lat, lng: wrapLng(c.lng) });
   }
 
   /** Draggable orange "L" launch / home reference marker. Hidden when an authoritative FC home is
@@ -455,8 +455,7 @@
 
     const altToggle = el.querySelector('button[data-field="altToggle"]') as HTMLButtonElement | null;
     altToggle?.addEventListener('click', async () => {
-      // Cycle REL → AMSL → AGL → REL, converting the altitude so the waypoint
-      // stays at the same physical height (terrain + launch point as references).
+      // REL → AMSL → AGL (only with terrain) → REL, keeping the physical height.
       const w = live(idx, wp);
       const cur = w.alt_mode ?? ((w.p3 & 1) ? 1 : 0);
       const next = await nextAltMode(w, cur);
@@ -1038,7 +1037,6 @@
   :global(.wpe-row select) { background: #2a2a2a; color: #ccc; border: 1px solid #555; border-radius: 3px; padding: 3px 4px; font-size: 13px; flex: 1; }
   :global(.wpe-toggle) { background: #2a2a2a; color: #ccc; border: 1px solid #555; border-radius: 3px; padding: 3px 8px; font-size: 12px; cursor: pointer; }
   :global(.wpe-toggle:hover) { background: #3a3a3a; }
-  :global(.wpe-toggle.wpe-toggle-warn) { color: #f39c12; border-color: #f39c12; }
   /* A ring, not a fill: red and the accent already mean selected and active. */
   :global(.mission-wp-noterrain) { outline: 3px solid #f39c12; outline-offset: 2px; border-radius: 50%; }
   :global(.wpe-unit) { color: #888; font-size: 12px; white-space: nowrap; }
@@ -1086,6 +1084,7 @@
   :global(.wp-editor-popup .wpe-row input:not(.ns-input)) { padding: 0 8px; }
   :global(.wp-editor-popup .wpe-coord-input) { flex: 1; min-width: 0; width: auto !important; }
   :global(.wp-editor-popup .wpe-toggle) { min-width: 52px; padding: 0 10px; cursor: pointer; }
+  :global(.wp-editor-popup .wpe-toggle.wpe-toggle-warn) { color: #f39c12; border-color: #f39c12; }
   :global(.wp-editor-popup .wpe-actions button) { min-width: 40px; padding: 0 10px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
   :global(.wp-editor-popup .wpe-toggle:hover),
   :global(.wp-editor-popup .wpe-actions button:hover:not(:disabled)),

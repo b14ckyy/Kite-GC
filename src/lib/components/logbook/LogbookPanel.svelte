@@ -151,12 +151,11 @@
   let logbookTreeOpenSecond = $state<Set<string>>(new Set());
   let prevLogbookSortMode = $state<LogbookSortMode>(initialSortMode);
   let searchQuery = $state('');
-  // Select mode: a tap ticks a flight instead of opening it, and the detail column is hidden. The ticks
-  // survive a changed search, so a selection can be collected over several searches; ids of flights
-  // that are gone do not count.
+  // Ticks survive a changed search; ids of flights that are gone do not count.
   let selectMode = $state(false);
   let tickedIds = $state<Set<number>>(new Set());
   const multiSelectedIds = $derived.by<Set<number>>(() => {
+    if (fileMode) return new Set<number>();
     const known = new Set(flightSummaries.map((f) => f.id));
     return new Set([...tickedIds].filter((id) => known.has(id)));
   });
@@ -189,7 +188,6 @@
     }
   }
 
-  /** Long-press on a flight: start selecting with it. While selecting it is a plain tick. */
   function handleFlightLongPress(id: number) {
     if (fileMode) return;
     selectMode = true;
@@ -453,7 +451,6 @@
   </div>
 {/snippet}
 
-<!-- Tick box of select mode; on a group header it stands for all flights of the group. -->
 {#snippet tickBox(state: TickState)}
   <span class="lb-tick" class:on={state === 'all'} class:some={state === 'some'}>
     {#if state === 'all'}✓{:else if state === 'some'}–{/if}

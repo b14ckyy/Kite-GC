@@ -327,11 +327,9 @@
   const floatLeft = $derived(phoneUi ? dockLeft : floatFrame.left);
   const floatTop = $derived(phoneUi ? dockTop : floatFrame.top);
 
-  // Bottom reserve for the floating panels, in logical px (adapts to the UI scale). They stop above what lies
-  // under them — the video window docked bottom-left, the widget tiles of the bottom dock — unless that would
-  // make them shorter than the nav rail: then they give up the video first and overlay it, then the dock too
-  // (the 6px keeps the rail's gap above the status bar). A panel that ends left of the tiles has nothing of
-  // the dock under it and runs down to that gap. PanelShell's tablet block reads the reserve as well.
+  // Panel bottom reserve (logical px): above the docked video, else above the dock tiles; each is given up when the
+  // panel would get shorter than the nav rail. A panel left of the tiles runs down to the rail's 6px gap.
+  // PanelShell's tablet block reads it too.
   const PANEL_VIDEO_GAP_PX = 6;
   /** Left edge of the widget tiles in the bottom dock, in screen px like `panelDockRight`; Infinity while
    *  the dock shows none. */
@@ -1398,6 +1396,8 @@
 
   // A panel action that goes on on the map hides a panel that covers too much of it (stores/panelYield.ts).
   $effect(() => onMapAccessRequested(() => {
+    // The terrain strip spans the width by design and is watched while waypoints are placed.
+    if (terrainOpen) return;
     const panel = document.querySelector('.panels-host .ps')?.getBoundingClientRect();
     if (panel && panel.width > mapAreaWidth() * PANEL_YIELD_MAP_FRACTION) hidePanel();
   }));
@@ -2906,11 +2906,15 @@
   async function consolidateBatteryUsage(flightId: number) {
     const f = await getFlight(flightId, flightLogDbPath).catch(() => null);
     if (!f?.battery_serial) return;
-    const pack = await batteryDbFindBySerial(f.battery_serial, flightLogDbPath).catch(() => null);
-    if (!pack) return;
     const mah = f.battery_used_mah ?? 0;
-    const cycles = pack.capacity_mah ? mah / pack.capacity_mah : 0;
-    await batteryDbAddUsage(pack.id, f.duration_sec ?? 0, mah, cycles, 0, flightLogDbPath);
+    // A flight on several packs lists their serials comma-separated; each pack gets the whole flight,
+    // as the packs' own totals count it.
+    for (const serial of f.battery_serial.split(',').map((s) => s.trim()).filter(Boolean)) {
+      const pack = await batteryDbFindBySerial(serial, flightLogDbPath).catch(() => null);
+      if (!pack) continue;
+      const cycles = pack.capacity_mah ? mah / pack.capacity_mah : 0;
+      await batteryDbAddUsage(pack.id, f.duration_sec ?? 0, mah, cycles, 0, flightLogDbPath);
+    }
   }
 
   /** Delete exactly the ticked flights; a linked partner that is not ticked stays. */
@@ -2932,7 +2936,9 @@
       };
     };
     try {
-      if (selectedFlightId != null && ids.includes(selectedFlightId)) forgetSelectedFlight();
+      // The open flight goes when it is deleted — or its partner, whose track and link it still shows.
+      const partner = selectedFlight?.linked_flight_id ?? null;
+      if (selectedFlightId != null && (ids.includes(selectedFlightId) || (partner != null && ids.includes(partner)))) forgetSelectedFlight();
       for (const [i, id] of ids.entries()) {
         progress(i);
         if (consolidateBattery) await consolidateBatteryUsage(id);
@@ -5018,9 +5024,8 @@
   .layer-map.in-frame :global(.leaflet-control-attribution) {
     display: none;
   }
-  /* Toasts & alerts container — pinned to the app frame's top, above the map/video layers (z2/z0) so
-     banners are never tied to (or clipped by) a shrunken in-frame map. Zero-height (children are
-     absolutely positioned) so it never blocks clicks. */
+  /* Toasts & alerts container — pinned to the app frame's top, above the map/video layers (z2/z0) and under
+     the panels. Zero-height (children are absolutely positioned) so it never blocks clicks. */
   .app-toasts {
     position: absolute;
     top: 0;
