@@ -373,14 +373,46 @@ async fn resolve_agl(mission: &Mission, terrain: &TerrainProvider) -> Mission {
     for wp in out.waypoints.iter_mut() {
         if wp.alt_mode == ALT_MODE_AGL && wp.action.has_location() {
             if let Some(ground) = terrain.elevation(wp.lat_deg(), wp.lon_deg()).await {
-                let amsl_m = ground as f64 + wp.altitude as f64 / 100.0;
-                wp.altitude = (amsl_m * 100.0).round() as i32;
-                wp.p3 |= P3_ALT_TYPE as i16; // mark AMSL
-                wp.alt_mode = ALT_MODE_AMSL;
+                agl_to_amsl(wp, ground);
             }
         }
     }
     out
+}
+
+fn agl_to_amsl(wp: &mut Waypoint, ground_m: f32) {
+    let amsl_m = ground_m as f64 + wp.altitude as f64 / 100.0;
+    wp.altitude = (amsl_m * 100.0).round() as i32;
+    wp.p3 |= P3_ALT_TYPE as i16;
+    wp.alt_mode = ALT_MODE_AMSL;
+}
+
+/// Error marker of `mission_resolve_agl`, followed by the waypoint number.
+const NO_TERRAIN_ERROR: &str = "no-terrain:";
+
+/// The waypoints as they go to the FC — AGL resolved to AMSL — for the library's content hash. Fails
+/// where terrain data is missing: a hash over a half-resolved mission would name another mission.
+#[tauri::command]
+pub async fn mission_resolve_agl(
+    waypoints: Vec<Waypoint>,
+    terrain: State<'_, TerrainProvider>,
+) -> Result<Vec<Waypoint>, String> {
+    let mut out = waypoints;
+    for wp in out.iter_mut() {
+        if wp.alt_mode != ALT_MODE_AGL || !wp.action.has_location() {
+            continue;
+        }
+        // The closing fly-by-home of a combined set carries no position any more.
+        if wp.lat == 0 && wp.lon == 0 {
+            continue;
+        }
+        let ground = terrain
+            .elevation(wp.lat_deg(), wp.lon_deg())
+            .await
+            .ok_or_else(|| format!("{NO_TERRAIN_ERROR}{}", wp.number))?;
+        agl_to_amsl(wp, ground);
+    }
+    Ok(out)
 }
 
 /// Export mission as MW XML string (AGL waypoints resolved to AMSL).

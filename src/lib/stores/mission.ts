@@ -10,6 +10,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { connection } from './connection';
 import { homePosition } from './home';
+import { settings } from './settings';
 import { frameMissionOnMap } from './mapCamera';
 
 // ── Types (mirror Rust mission::types) ──────────────────────────────
@@ -803,14 +804,36 @@ export async function missionDownload(fromEeprom = false): Promise<Mission> {
   // (the backend returns 1 when the setting is absent).
   const activeIdx = await invoke<number>('mission_get_active_index');
   const full = await invoke<Mission>('mission_download', { fromEeprom });
-  const m = await loadSegments(splitMultiMission(full.waypoints), activeIdx);
+  let m = await loadSegments(splitMultiMission(full.waypoints), activeIdx);
+
+  // The library entry of what the FC holds, if there is one. Its own form replaces the download where
+  // the two differ: the entry has the AGL waypoints the upload resolved to AMSL.
+  const entry = await libraryEntryOfDownload();
+  if (entry && !entry.sameForm) m = await loadSegments(splitMultiMission(entry.waypoints), activeIdx);
 
   applyMissionLaunchDefault(m, undefined, true); // FC has no embedded home → UAV HOME, else WP1
   clearUndoHistory();
   markAllMissionsSynced('fc');
-  loadedMissionId.set(null);
+  loadedMissionId.set(entry?.id ?? null);
+  if (entry) markAllMissionsSynced('db');
   frameMissionOnMap(); // loaded from the FC → frame it (free pan only)
   return m;
+}
+
+/** Several missions are looked up as ONE set, like the library stores them. A failed lookup is no
+ *  reason to fail the download. */
+async function libraryEntryOfDownload(): Promise<{ id: number; waypoints: Waypoint[]; sameForm: boolean } | null> {
+  const filled = filledMissionCount();
+  const wps = filled > 1 ? combinedMissionWaypoints() : get(mission).waypoints;
+  if (wps.length === 0) return null;
+  try {
+    // Imported here: the helper imports this store.
+    const { findLibraryMission } = await import('$lib/helpers/missionLibrary');
+    return await findLibraryMission(wps, get(settings).flightLogDbPath);
+  } catch (e) {
+    console.warn('[mission] library lookup after the FC download failed', e);
+    return null;
+  }
 }
 
 /** Query the FC's mission info (wp_count) without downloading — for the connect prompt. */

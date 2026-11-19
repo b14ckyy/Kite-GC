@@ -420,6 +420,14 @@ pub fn mission_db_list(db_path: Option<String>) -> Result<Vec<Mission>, String> 
     db::list_missions(&conn).map_err(|e| format!("Query error: {}", e))
 }
 
+/// Replace a library mission's content hash (an entry hashed by an older rule); `false` = another
+/// entry holds that hash.
+#[tauri::command]
+pub fn mission_db_set_hash(id: i64, content_hash: String, db_path: Option<String>) -> Result<bool, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::set_mission_hash(&conn, id, &content_hash).map_err(|e| format!("Update error: {}", e))
+}
+
 /// Update a mission's name + notes (Manager rename / notes edit).
 #[tauri::command]
 pub fn mission_db_set_meta(

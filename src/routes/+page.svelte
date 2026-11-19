@@ -41,6 +41,7 @@
   import { runUpdateCheck, resolveUpdateKind } from "$lib/controllers/updateCheck";
   import { checkDbBackupPrompt, runPendingDbUpgrade, formatBackupSize, type DbSchemaState, type DbUpgradeOutcome } from "$lib/controllers/dbBackupPrompt";
   import { planDbFolderSwitch, askAboutPreviousDb, type DbFolderPlan } from "$lib/controllers/dbFolderSwitch";
+  import { rehashAglMissions } from "$lib/helpers/missionLibrary";
   import { exportDatabase, importDatabase, exportAllFlights, removeOriginalLogs, withExportProgress, type DbTransferUi } from "$lib/controllers/dbTransfer";
   import { importMissionFile } from "$lib/helpers/missionFile";
   import { exportFile, sharesExports, flightFileStem, clearExportCache, setExportErrorReporter } from "$lib/helpers/exportFile";
@@ -2025,6 +2026,7 @@
 
   async function performKflightImport(filePath: string) {
     const result = await logbookCtrl.importFromKflight(filePath, flightLogDbPath);
+    void rehashAglMissions(flightLogDbPath).catch(() => {});
     await loadLogbook();
     let msg = $t('logbook.importKflightResult', {
       values: { imported: result.imported, skipped: result.skipped },
@@ -3641,6 +3643,7 @@
     // reproducible) — wipe them in passing.
     void hiresCleanup(flightLogDbPath).catch(() => {});
     void scratchClear().catch(() => {});
+    void rehashAglMissions(flightLogDbPath).catch(() => {});
     // Android: closed raw logs still in app storage go to the chosen folder; the leftover `db-mirror` copy is deleted.
     if (isAndroid) void invoke('storage_flush_raw_logs', { rawPath: flightLogRawPath }).catch(() => {});
     // A database fetched for an import the app was closed on: a full copy nobody will confirm.

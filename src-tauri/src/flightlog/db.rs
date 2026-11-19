@@ -2517,6 +2517,15 @@ pub fn set_mission_extra(conn: &Connection, id: i64, extra_json: Option<&str>) -
     Ok(())
 }
 
+/// Replace a mission's content hash; `false` when another row already holds it (the hash is unique).
+pub fn set_mission_hash(conn: &Connection, id: i64, content_hash: &str) -> SqlResult<bool> {
+    let n = conn.execute(
+        "UPDATE OR IGNORE missions SET content_hash = ?1 WHERE id = ?2",
+        params![content_hash, id],
+    )?;
+    Ok(n > 0)
+}
+
 /// Update only a mission's name + notes (rename / notes edit in the Manager; content unchanged).
 pub fn update_mission_meta(
     conn: &Connection,

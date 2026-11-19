@@ -1638,6 +1638,7 @@
     "saveLibUpdated": "Library mission updated",
     "saveLibSaved": "Saved to library",
     "saveLibFailed": "Save failed: {error}",
+    "noTerrainWp": "No terrain data for waypoint {number}: its AGL altitude cannot be resolved.",
     "saveLibScopeMsg": "This setup holds {count} missions. Save all of them as one library entry, or only mission {index}?",
     "saveLibScopeOne": "Only mission {index}",
     "saveLibScopeAll": "All {count} missions",

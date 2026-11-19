@@ -496,10 +496,27 @@ export async function downloadArduMissionFromFc(): Promise<number> {
   const wps = await invoke<ArduWaypoint[]>('ardu_mission_download', { vehicleId: get(activeVehicleId) });
   arduMission.set(wps);
   arduClearWpSelection();
-  arduLoadedMissionId.set(null); // from the FC → not a library mission
+  arduLoadedMissionId.set(null);
   arduClearUndoHistory();        // downloaded mission = fresh undo baseline
   markArduMissionSynced('fc', wps);
+  await linkDownloadToLibrary(wps);
   return wps.length;
+}
+
+/** What the FC returned may be a mission the library already holds: same content hash → linked and
+ *  DB-synced. */
+async function linkDownloadToLibrary(wps: ArduWaypoint[]): Promise<void> {
+  if (wps.length === 0) return;
+  try {
+    // Imported here: the helper imports this store.
+    const { findArduLibraryMissionId } = await import('$lib/helpers/missionLibraryArdu');
+    const id = await findArduLibraryMissionId(wps, get(settings).flightLogDbPath);
+    if (id == null || get(arduMission) !== wps) return;
+    arduLoadedMissionId.set(id);
+    markArduMissionSynced('db', wps);
+  } catch (e) {
+    console.warn('[mission] library lookup after the FC download failed', e);
+  }
 }
 
 // ── Upload framing ────────────────────────────────────────────────────

@@ -1634,6 +1634,7 @@
     "saveLibUpdated": "库任务已更新",
     "saveLibSaved": "已保存到库",
     "saveLibFailed": "保存失败：{error}",
+    "noTerrainWp": "航点 {number} 没有地形数据：无法换算其 AGL 高度。",
     "saveLibScopeMsg": "此配置包含 {count} 个任务。将全部任务保存为一个库条目，还是只保存任务 {index}？",
     "saveLibScopeOne": "仅任务 {index}",
     "saveLibScopeAll": "全部 {count} 个任务",

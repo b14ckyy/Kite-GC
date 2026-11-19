@@ -1634,6 +1634,7 @@
     "saveLibUpdated": "Misia v knižnici bola aktualizovaná",
     "saveLibSaved": "Uložené do knižnice",
     "saveLibFailed": "Uloženie zlyhalo: {error}",
+    "noTerrainWp": "Pre bod {number} nie sú dostupné údaje o teréne: jeho výšku AGL nemožno prepočítať.",
     "saveLibScopeMsg": "Počet misií v tejto zostave: {count}. Uložiť všetky ako jednu položku knižnice, alebo iba misiu {index}?",
     "saveLibScopeOne": "Iba misiu {index}",
     "saveLibScopeAll": "Všetky misie ({count})",

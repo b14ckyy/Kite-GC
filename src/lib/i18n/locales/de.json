@@ -1638,6 +1638,7 @@
     "saveLibUpdated": "Bibliotheks-Mission aktualisiert",
     "saveLibSaved": "In Bibliothek gespeichert",
     "saveLibFailed": "Speichern fehlgeschlagen: {error}",
+    "noTerrainWp": "Keine Geländedaten für Wegpunkt {number}: Seine AGL-Höhe kann nicht umgerechnet werden.",
     "saveLibScopeMsg": "Dieses Setup enthält {count} Missionen. Alle zusammen als einen Bibliothekseintrag speichern oder nur Mission {index}?",
     "saveLibScopeOne": "Nur Mission {index}",
     "saveLibScopeAll": "Alle {count} Missionen",

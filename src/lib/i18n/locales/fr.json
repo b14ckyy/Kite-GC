@@ -1634,6 +1634,7 @@
     "saveLibUpdated": "Mission de la bibliothèque mise à jour",
     "saveLibSaved": "Enregistrée dans la bibliothèque",
     "saveLibFailed": "Échec de l'enregistrement : {error}",
+    "noTerrainWp": "Pas de données de terrain pour le waypoint {number} : son altitude AGL ne peut pas être convertie.",
     "saveLibScopeMsg": "Cette configuration contient {count} missions. Les enregistrer toutes dans une seule entrée de la bibliothèque, ou seulement la mission {index} ?",
     "saveLibScopeOne": "Seulement la mission {index}",
     "saveLibScopeAll": "Les {count} missions",
