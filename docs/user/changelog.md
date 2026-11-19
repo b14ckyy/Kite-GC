@@ -255,6 +255,10 @@ inside the box of the feature release they belong to, so the notes for one relea
       the map, and FC upload and `.mission` export stay locked until the terrain data is there;
       the altitude-mode button no longer offers AGL where it cannot be converted.
       See [Missions](guides/missions.md). [#327]
+    - **Panels and the docked video share the left edge** — with the video window docked bottom-left
+      a panel ends above it and follows its size, instead of lying over the picture; a panel
+      narrower than the gap to the widget tiles runs down to the status bar. Where the window is
+      too low for that, the panel overlays the video as before. [#327]
     - **Panels get out of the way on small screens** — a panel that covers a large part of the map
       parks itself when you start an action that goes on on the map (place or edit a waypoint,
       start a survey pattern, load a library mission, add or show a zone, a fence or a rally point,
