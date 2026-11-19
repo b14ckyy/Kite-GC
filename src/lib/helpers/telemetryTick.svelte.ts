@@ -10,18 +10,15 @@ import { untrack } from 'svelte';
  */
 export function tickSnapshot<T>(source: () => T, ms: number): () => T {
   let shown = $state.raw(untrack(source));
-  let dirty = false;
+  // Armed by a change only: a quiet source (no link) must not wake the page ten times a second.
+  let timer: ReturnType<typeof setTimeout> | undefined;
   $effect(() => {
     source();
-    dirty = true;
-  });
-  $effect(() => {
-    const id = setInterval(() => {
-      if (!dirty) return;
-      dirty = false;
+    timer ??= setTimeout(() => {
+      timer = undefined;
       shown = untrack(source);
     }, ms);
-    return () => clearInterval(id);
   });
+  $effect(() => () => clearTimeout(timer));
   return () => shown;
 }
