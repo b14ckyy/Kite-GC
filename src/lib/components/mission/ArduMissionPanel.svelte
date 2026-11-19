@@ -33,7 +33,7 @@
   import { contextMenu } from '$lib/actions/contextMenu';
   import { requestMapAccess } from '$lib/stores/panelYield';
   import { arduWpDetailLines } from '$lib/helpers/missionWpDetails';
-  import { frameMissionOnMap } from '$lib/stores/mapCamera';
+  import { frameMissionOnMap, focusWaypointOnMap } from '$lib/stores/mapCamera';
   import { connection, linkIsArduPilot } from '$lib/stores/connection';
   import { settings } from '$lib/stores/settings';
   import { activeVehicleId } from '$lib/stores/vehicles';
@@ -298,15 +298,22 @@
     } else {
       arduSelectWpSingle(i);
       selAnchor = i;
-      // The waypoint's editor opens at its marker.
+      // The waypoint's editor opens at its marker and brings it into view itself.
       if (currentEditing) requestMapAccess();
+      else focusRowOnMap(i);
     }
+  }
+  /** A row without a position of its own (modifier) stands for the waypoint of its group. */
+  function focusRowOnMap(i: number) {
+    const located = (w: ArduWaypoint | null | undefined) => !!w && cmdHasLocation(w.command) && (w.lat !== 0 || w.lon !== 0);
+    const wp = located(currentMission[i]) ? currentMission[i] : groups.find((g) => g.modifiers.some((m) => m.idx === i))?.anchor;
+    if (located(wp)) focusWaypointOnMap(wp!.lat / 1e7, wp!.lon / 1e7, 'list');
   }
   function onBadgeClick(e: MouseEvent, i: number) {
     e.stopPropagation();
     if (currentEditing) arduToggleWpSelection(i);
     else if (currentSelIdx === i) arduClearWpSelection();
-    else arduSelectWpSingle(i);
+    else { arduSelectWpSingle(i); focusRowOnMap(i); }
     selAnchor = i;
   }
   function removeSelected() { if (currentSel.size > 0) arduRemoveSelectedWps(); }

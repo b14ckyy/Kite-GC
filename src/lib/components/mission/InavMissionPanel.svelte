@@ -21,7 +21,7 @@
     canUndo, canRedo, undo, redo,
     MAX_MISSIONS, MAX_WAYPOINTS_TOTAL,
     type Waypoint, type Mission, WpAction, WP_ACTION_KEYS,
-    hasLocation, isModifier, missionFlags, missionModified,
+    hasLocation, isModifier, missionFlags, missionModified, toDeg,
     loadedMissionId, markMissionSynced, markAllMissionsSynced,
     filledMissionCount, combinedMissionWaypoints, missionSetSize,
     onMissionDownloadProgress, onMissionUploadProgress,
@@ -40,7 +40,8 @@
   import { buildMissionInput, missionContentHash, computeMissionStats } from '$lib/helpers/missionLibrary';
   import { missionDbSave, missionDbUpdate, missionDbGet, missionDbFindByHash, missionDbGeocode } from '$lib/stores/flightlog';
   import { locale } from 'svelte-i18n';
-  import { isFlyByHome } from '$lib/helpers/missionGeometry';
+  import { isFlyByHome, findPreviousGeoWp } from '$lib/helpers/missionGeometry';
+  import { focusWaypointOnMap } from '$lib/stores/mapCamera';
   import { anyCase } from '$lib/helpers/fileFilters';
   import { exportFile } from '$lib/helpers/exportFile';
   import { contextMenu } from '$lib/actions/contextMenu';
@@ -412,15 +413,22 @@
     } else {
       selectWpSingle(i);
       selAnchor = i;
-      // The waypoint's editor opens at its marker.
+      // The waypoint's editor opens at its marker and brings it into view itself.
       if (currentEditing) requestMapAccess();
+      else focusRowOnMap(i);
     }
+  }
+  /** A row without a position of its own (modifier) stands for the waypoint it belongs to. */
+  function focusRowOnMap(i: number) {
+    const wps = currentMission.waypoints;
+    const wp = wps[i] && hasLocation(wps[i].action) ? wps[i] : findPreviousGeoWp(wps, i);
+    if (wp && (wp.lat !== 0 || wp.lon !== 0)) focusWaypointOnMap(toDeg(wp.lat), toDeg(wp.lon), 'list');
   }
   function onBadgeClick(e: MouseEvent, i: number) {
     e.stopPropagation();
     if (currentEditing) toggleWpSelection(i);
     else if (currentSelIdx === i) clearWpSelection();
-    else selectWpSingle(i);
+    else { selectWpSingle(i); focusRowOnMap(i); }
     selAnchor = i;
   }
   function wpMenuFor(i: number) {

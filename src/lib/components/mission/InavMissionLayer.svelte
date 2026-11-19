@@ -28,13 +28,14 @@
   import { convertAltCm, nextAltMode, hasTerrain } from '$lib/helpers/altConvert';
   import { wrapLng } from '$lib/utils/geo';
   import { requestMapAccess } from '$lib/stores/panelYield';
+  import { focusWaypointOnMap } from '$lib/stores/mapCamera';
   import { aglTerrainGapsActive } from '$lib/stores/missionTerrain';
   import { get } from 'svelte/store';
   import { settings } from '$lib/stores/settings';
   import type { InterfaceSettings } from '$lib/stores/settings';
   import { convertAltitude, toAltitudeM, convertSpeed, toSpeedMs } from '$lib/utils/units';
   import { inavWpDetailLines } from '$lib/helpers/missionWpDetails';
-  import { numInputHtml as sharedNumInputHtml, newPopupState, renderEditorPopup, closeEditorPopup, deferWhileStepping, REMOVE_ICON_HTML } from '$lib/helpers/missionEditorPopup.svelte';
+  import { numInputHtml as sharedNumInputHtml, newPopupState, renderEditorPopup, closeEditorPopup, deferWhileStepping, REMOVE_ICON_HTML, editorMarkerTarget } from '$lib/helpers/missionEditorPopup.svelte';
   import { t } from 'svelte-i18n';
 
   const IFACE_FALLBACK: InterfaceSettings = {
@@ -670,7 +671,7 @@
         marker.on('click', () => {
           if (editing) toggleWpSelection(i);
           else if (currentSelIdx === i) clearWpSelection(); // tap the selected WP again to deselect
-          else selectWpSingle(i);
+          else { selectWpSingle(i); focusWaypointOnMap(latLng.lat, latLng.lng, 'marker'); }
         });
         marker.on('contextmenu', (e: L.LeafletMouseEvent) => {
           if (activeSurveyPattern.isActive) return; // non-interactive while the pattern generator is open
@@ -710,13 +711,8 @@
               // ignoring the panels/widgets overlapping the edges — which dumps the WP at the
               // edge (worse at higher UI scale). We pan it into the visible area ourselves.
               popupOptions: { autoPan: false },
-              // Centre the selected WP in the visible area: biased right (clears the mission panel) and below centre (the
-              // popup opens upward). The map is unzoomed, so this pixel math is independent of the UI scale.
               onCreate: (_popup, ll) => {
-                const size = map.getSize();
-                const wpPt = map.latLngToContainerPoint(ll);
-                const targetPt = L.point(size.x * 0.55, size.y * 0.6);
-                map.panBy(wpPt.subtract(targetPt), { animate: true });
+                map.panBy(map.latLngToContainerPoint(ll).subtract(editorMarkerTarget(map)), { animate: true });
               },
             },
           );

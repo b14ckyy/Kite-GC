@@ -222,7 +222,7 @@ function slideFrom(el: HTMLElement, before: DOMRect): void {
 }
 
 /** What the UI's bars and widget docks cover of the map, in px from the map container's edges. */
-function coveredEdges(mapRect: DOMRect): { top: number; right: number; bottom: number } {
+export function coveredEdges(mapRect: DOMRect): { top: number; right: number; bottom: number } {
   const edge = (selector: string) => {
     const el = document.querySelector<HTMLElement>(selector);
     const r = el?.getBoundingClientRect();
@@ -238,6 +238,13 @@ function coveredEdges(mapRect: DOMRect): { top: number; right: number; bottom: n
     right: sideIsColumn ? Math.max(0, mapRect.right - side.left) : 0,
     bottom: bottom ? Math.max(0, mapRect.bottom - bottom.top) : 0,
   };
+}
+
+/** Container point the waypoint moves to when its editor opens: right of a left panel and below the middle
+ *  (the editor opens upward); in heading-up the container centre, the visual centre and zoom anchor. */
+export function editorMarkerTarget(map: L.Map): L.Point {
+  const size = map.getSize();
+  return map.getContainer().classList.contains('heading-up') ? size.divideBy(2) : L.point(size.x * 0.55, size.y * 0.6);
 }
 
 function queuePlacement(map: L.Map, state: PopupState): void {

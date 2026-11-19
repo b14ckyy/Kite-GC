@@ -94,7 +94,7 @@
   import { cmdHasLocation, cmdStandaloneCoordinate, cmdIsTakeoff } from "$lib/helpers/arduCommandCatalog";
   import { arduWpIconSpec } from "$lib/helpers/missionIconsArdupilot";
   import { autopilotSystem, type AutopilotSystem } from "$lib/stores/autopilotContext";
-  import { frameMissionSignal, frameFleetSignal } from "$lib/stores/mapCamera";
+  import { frameMissionSignal, frameFleetSignal, onWaypointFocus, type WaypointFocus } from "$lib/stores/mapCamera";
   import { activeWpNumber } from "$lib/stores/navStatus";
   import {
     buildDisplayNumbers, isFlightPathWp, findMissionEndIndex, findPreviousGeoWp,
@@ -292,6 +292,7 @@
   let unsubSettingsWatch: (() => void) | undefined;
   let unsubProviderWatch: (() => void) | undefined;
   let unsubCustomFocus3d: (() => void) | undefined;
+  let unsubWpFocus3d: (() => void) | undefined;
   let unsubMissionStore: (() => void) | undefined;
   let unsubShowMissionStore: (() => void) | undefined;
   let unsubReplayStore: (() => void) | undefined;
@@ -744,12 +745,9 @@
     requestAnimationFrame(() => tryFly(0));
   }
 
-  /** Frame the whole loaded mission once (free look only, not over a replay). BoundingSphere from the
-   *  active mission's location WPs + home/launch; range 0 lets Cesium fit the sphere to the viewport. */
-  function frameMission3d() {
-    if (!viewer || !isFreeLook() || get(replayActive)) return;
-    // Read the stores FRESH (not the cached cur* mirrors) so a clear-and-switch can't frame against a
-    // stale system/mission/home — this must behave identically to the 2D Map.collectMissionLatLngs.
+  /** The mission's positions for a camera fit. Reads the stores fresh (not the cached cur* mirrors): a
+   *  clear-and-switch must not frame a stale system / mission / home. Same set as the 2D map's. */
+  function missionCarts(): Cesium.Cartesian3[] {
     const carts: Cesium.Cartesian3[] = [];
     if (get(autopilotSystem) === 'inav') {
       for (const wp of get(mission).waypoints) {
@@ -767,6 +765,14 @@
     // (handled above for INAV) and would drag a stale INAV-planning launch into an ArduPilot fit.
     const hp = get(homePosition);
     if (hp.set && hp.source === 'fc') carts.push(Cesium.Cartesian3.fromDegrees(hp.lon, hp.lat));
+    return carts;
+  }
+
+  /** Frame the whole loaded mission (free look only; a load never over a replay, which frames its own
+   *  track). Range 0 lets Cesium fit the sphere to the viewport. */
+  function frameMission3d(overReplay = false) {
+    if (!viewer || !isFreeLook() || (get(replayActive) && !overReplay)) return;
+    const carts = missionCarts();
     if (carts.length === 0) return;
     pendingUavJump3d = false; // a mission load is the latest positioning intent
     const sphere = Cesium.BoundingSphere.fromPoints(carts);
@@ -1541,6 +1547,7 @@
 
     // Frame the mission on a real load event (signal increments; ignore the initial emission).
     let frameSigInit3d = true;
+    unsubWpFocus3d = onWaypointFocus(focusWaypoint3d);
     unsubFrameMission3d = frameMissionSignal.subscribe(() => {
       if (frameSigInit3d) { frameSigInit3d = false; return; }
       frameMission3d();
@@ -1584,6 +1591,7 @@
     unsubSettingsWatch?.();
     unsubProviderWatch?.();
     unsubCustomFocus3d?.();
+    unsubWpFocus3d?.();
     clearSearchPin3d();
     unsubMissionStore?.();
     unsubShowMissionStore?.();
@@ -3317,6 +3325,33 @@
   // (preRender — only user camera motion renders then) wakes it.
   let smHidden = false;
   const CRAFT_CULL_RADIUS_M = 60; // generous bound around the model + label
+  const WP_FOCUS_RANGE_MIN_M = 150;
+  const WP_FOCUS_RANGE_MAX_M = 20000;
+
+  /** A waypoint picked in the mission list — free camera only; the locked cameras keep their aircraft. */
+  function focusWaypoint3d(f: WaypointFocus) {
+    if (!viewer || !active || f.source !== 'list' || !isFreeLook()) return;
+    const cam = viewer.camera;
+    const cv = cam.frustum.computeCullingVolume(cam.position, cam.direction, cam.up);
+    const seen = (c: Cesium.Cartesian3) => cv.computeVisibility(new Cesium.BoundingSphere(c, 1)) !== Cesium.Intersect.OUTSIDE;
+    const drawn = drawnWps.map((w) => w.cart);
+    if (!(drawn.length > 0 ? drawn : missionCarts()).some(seen)) { frameMission3d(true); return; }
+    pendingUavJump3d = false;
+    // The marker flies at the waypoint's altitude; a target on the ground would push it out of the top.
+    const WP_MATCH_DEG = 1e-6;
+    const marker = drawnWps.find((w) => Math.abs(w.lat - f.lat) < WP_MATCH_DEG && Math.abs(w.lon - f.lon) < WP_MATCH_DEG);
+    const target = marker?.cart ?? Cesium.Cartesian3.fromDegrees(f.lon, f.lat);
+    // Same heading, pitch and camera height as now: the range follows from the height above the
+    // target, so a row of clicks neither climbs nor sinks.
+    const pitch = Math.min(cam.pitch, Cesium.Math.toRadians(-10));
+    const above = cam.positionCartographic.height - Cesium.Cartographic.fromCartesian(target).height;
+    const range = above > 0 ? above / Math.sin(-pitch) : WP_FOCUS_RANGE_MIN_M;
+    cam.flyToBoundingSphere(new Cesium.BoundingSphere(target, 0), {
+      duration: 1.6,
+      offset: new Cesium.HeadingPitchRange(cam.heading, pitch, Math.min(WP_FOCUS_RANGE_MAX_M, Math.max(WP_FOCUS_RANGE_MIN_M, range))),
+    });
+  }
+
   function craftInView(pos: Cesium.Cartesian3): boolean {
     if (!viewer) return true;
     const cam = viewer.camera;
@@ -4228,6 +4263,9 @@
     geoidRef: { lat: number; lon: number } | null; // reference point for the geoid offset
   }
 
+  /** The markers as drawn, at their flight altitude — what a camera move to a waypoint aims at. */
+  let drawnWps: { lat: number; lon: number; cart: Cesium.Cartesian3 }[] = [];
+
   /** Draw a resolved mission model. Pure + synchronous: the geoid offset is applied here (the model is
    *  MSL), so the build stays protocol-neutral and terrain/geoid handling lives in one place. */
   function drawMission3DModel(model: Mission3DModel) {
@@ -4248,8 +4286,10 @@
 
     // Waypoints — drop-line to the ground, active-WP glow (behind), then the marker billboard.
     let anyActiveWp = false;
+    drawnWps = [];
     for (const wp of model.wps) {
       const top = toCart(wp);
+      drawnWps.push({ lat: wp.lat, lon: wp.lon, cart: top });
       if (wp.ground != null) {
         const bottom = toCart({ lat: wp.lat, lon: wp.lon, altMsl: wp.ground });
         missionLine([top, bottom], '#000000', 0.85, 3.5, true);  // outline
@@ -4303,7 +4343,7 @@
     missionEntities = [];
     for (const p of missionPrimitives) viewer.scene.primitives.remove(p);
     missionPrimitives = [];
-    if (!model) { wpPulseActive = false; syncContinuousRender(); viewer.scene.requestRender(); return; }
+    if (!model) { drawnWps = []; wpPulseActive = false; syncContinuousRender(); viewer.scene.requestRender(); return; }
     drawMission3DModel(model);
   }
 
