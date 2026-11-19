@@ -28,8 +28,7 @@ export async function convertAltCm(wp: Waypoint, fromMode: number, toMode: numbe
   const wpGround = needWpGround ? await terrainElev(toDeg(wp.lat), toDeg(wp.lon)) : 0;
   const launchGround = needLaunch ? (lp ? await terrainElev(lp.lat, lp.lng) : null) : 0;
   if ((needWpGround && wpGround == null) || (needLaunch && launchGround == null)) {
-    // No ground reference: the number must not be carried into another mode (30 m AGL is not 30 m REL).
-    return null;
+    return null; // no ground reference
   }
   // to absolute MSL
   let absM: number;
