@@ -280,6 +280,12 @@ inside the box of the feature release they belong to, so the notes for one relea
       See [Vehicle control](guides/vehicle-control.md#takeoff-return-and-landing). [#330]
     - **Dialogs close through their buttons** — a click beside a dialog that asks for a decision
       or holds input no longer dismisses it (and with it what you typed); Escape still cancels. [#330]
+    - **Replay shows the guided target** (ArduPilot, PX4) — a flight recorded by Kite, or imported from
+      a `.tlog`, keeps the target the flight controller reported; in replay the Fly Here marker is back
+      wherever the aircraft flew in its guided mode.
+      See [Vehicle control](guides/vehicle-control.md#guided-flight-fly-here). [#331]
+    - **`.kflight` from a newer Kite version** — the import takes over what this version knows and
+      says that not all data could be imported, instead of leaving it out silently. [#331]
     - **Storage use is shown** — Settings → Data names the size of the flight database, and a
       flight's detail view shows what its data and its stored original log take. [#330]
     - **INAV Blackbox import without a helper program** — Kite decodes INAV Blackbox logs itself;
