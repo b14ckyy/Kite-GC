@@ -303,12 +303,6 @@
   // Fully populated nav rail in logical px: hamburger 44 + 4 top margin + 9 tabs ×40 + 8 gaps ×2
   // (DEV excluded). A fixed reference on purpose — the live rail height varies with connection state.
   const NAV_RAIL_FULL_HEIGHT = 424;
-  // Bottom reserve for the floating panels: they stop above the widget dock unless that would make them
-  // shorter than the nav rail, then they overlay the dock. Logical px (adapts to the UI scale); the 6px keeps
-  // the rail's gap above the status bar. PanelShell's tablet block reads the reserve too.
-  const panelBottomReserve = $derived(
-    winH / uiScale - toolbarH - bottomDockH - 24 - 12 < NAV_RAIL_FULL_HEIGHT ? '6px' : gridBottomHeight
-  );
 
   // Floating-window rect: ONE computation (`floatFrameRect`) for the window, the map swapped into its frame
   // and the dock reserve. In the zoomed layer's logical px; the unzoomed map's rect is that × uiScale,
@@ -332,6 +326,31 @@
   const floatW = $derived(phoneUi ? dockW : floatFrame.width);
   const floatLeft = $derived(phoneUi ? dockLeft : floatFrame.left);
   const floatTop = $derived(phoneUi ? dockTop : floatFrame.top);
+
+  // Bottom reserve for the floating panels, in logical px (adapts to the UI scale). They stop above what lies
+  // under them — the video window docked bottom-left, the widget tiles of the bottom dock — unless that would
+  // make them shorter than the nav rail: then they give up the video first and overlay it, then the dock too
+  // (the 6px keeps the rail's gap above the status bar). A panel that ends left of the tiles has nothing of
+  // the dock under it and runs down to that gap. PanelShell's tablet block reads the reserve as well.
+  const PANEL_VIDEO_GAP_PX = 6;
+  /** Left edge of the widget tiles in the bottom dock, in screen px like `panelDockRight`; Infinity while
+   *  the dock shows none. */
+  let bottomTilesLeft = $state(Infinity);
+  const videoDockedUnderPanels = $derived(
+    !phoneUi && $videoState.enabled && !$videoState.undocked && $videoState.floating && $videoState.floatSnapped,
+  );
+  const panelLeftOfDockTiles = $derived(
+    $panelDockRight > 0 && $panelDockRight + PANEL_VIDEO_GAP_PX * uiScale <= bottomTilesLeft,
+  );
+  const panelBottomReserve = $derived.by(() => {
+    const panelRoom = (reservePx: number) => logicalH - toolbarH - reservePx - 24 - 12;
+    // The panel's bottom edge is the reserve plus the status bar (24px) above the frame's bottom.
+    const videoPx = videoDockedUnderPanels ? logicalH - floatTop - 24 + PANEL_VIDEO_GAP_PX : 0;
+    const dockPx = panelLeftOfDockTiles ? 6 : bottomDockH;
+    if (videoPx > dockPx && panelRoom(videoPx) >= NAV_RAIL_FULL_HEIGHT) return `${Math.round(videoPx)}px`;
+    if (panelLeftOfDockTiles) return '6px';
+    return panelRoom(bottomDockH) < NAV_RAIL_FULL_HEIGHT ? '6px' : gridBottomHeight;
+  });
   // The phone's docked frame is chromeless (its body fills the frame); the desktop frame's bezel
   // insets the picture — and the swapped-in map — by this much.
   const floatBezel = $derived(phoneUi ? 0 : FLOAT_BEZEL_PX);
@@ -353,6 +372,23 @@
     bottomDockLeft = bottomDockEl?.offsetLeft ?? 0;
   });
   const videoReserveDock = $derived(Math.max(0, videoReserve - bottomDockLeft));
+  // The tile strip is centred: it moves with the dock's width and the video's reserve.
+  $effect(() => {
+    const dock = bottomDockEl;
+    void winW; void bottomDockW; void videoReserveDock; void uiScale;
+    const shown = $layout.bottomDock.visible;
+    if (!dock) return;
+    const measure = () => {
+      const r = dock.querySelector<HTMLElement>('.widget-panel')?.getBoundingClientRect();
+      bottomTilesLeft = shown && r && r.width > 0 ? r.left : Infinity;
+    };
+    const strip = dock.querySelector<HTMLElement>('.widget-panel');
+    const ro = new ResizeObserver(measure);
+    ro.observe(dock);
+    if (strip) ro.observe(strip);
+    const frame = requestAnimationFrame(measure);
+    return () => { ro.disconnect(); cancelAnimationFrame(frame); };
+  });
   // The phone's widget column overlays the map: no native surface may show through it (the docked
   // frame parks behind it) — the surface router clips at its edge.
   $effect(() => {
