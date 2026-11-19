@@ -29,6 +29,7 @@
 
 <script lang="ts">
   import { t } from 'svelte-i18n';
+  import { escapeKey } from '$lib/actions/escapeKey';
   import { get } from 'svelte/store';
   import Button from '$lib/components/panel/Button.svelte';
   import HoldToConfirm from '$lib/components/panel/HoldToConfirm.svelte';
@@ -125,16 +126,12 @@
     included = inc;
   }
 
-  function handleKeydown(e: KeyboardEvent) {
-    if (e.key === 'Escape') close(null);
-  }
-
   const dangerKinds: GroupCommandKind[] = ['arm', 'disarm', 'takeoff', 'land'];
 </script>
 
 {#if open}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="gc-backdrop" onclick={() => close(null)} onkeydown={handleKeydown}>
+  <div class="gc-backdrop" use:escapeKey={() => close(null)}>
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="gc-box" role="dialog" aria-modal="true" tabindex="-1" onclick={(e) => e.stopPropagation()}>

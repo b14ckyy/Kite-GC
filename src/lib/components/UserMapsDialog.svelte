@@ -8,6 +8,7 @@
   // of one (UserMapEditor) — a modal, so settings keeps one row. Rows show the host only: path and query may
   // hold an API key.
   import { tick } from 'svelte';
+  import { escapeKey } from '$lib/actions/escapeKey';
   import { t } from 'svelte-i18n';
   import { settings } from '$lib/stores/settings';
   import { saveUserMap, deleteUserMap } from '$lib/stores/userMaps';
@@ -25,8 +26,7 @@
 
   let editorRef = $state<{ isDirty: () => boolean } | null>(null);
 
-  function onKeydown(e: KeyboardEvent) {
-    if (e.key !== 'Escape') return;
+  function onEscape() {
     // Unsaved input in the editor: Escape does nothing (Cancel discards it on purpose).
     if (editing && editorRef?.isDirty()) return;
     if (editing) closeEditor();
@@ -58,8 +58,7 @@
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
-<!-- A stray tap outside must not throw away a half-typed map: the backdrop closes the list only. -->
-<div class="dialog-backdrop" onclick={() => { if (!editing) onClose(); }} onkeydown={onKeydown}>
+<div class="dialog-backdrop" use:escapeKey={onEscape}>
   <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
   <div class="dialog-box" role="dialog" aria-modal="true" aria-labelledby="user-maps-title" tabindex="-1" bind:this={box} onclick={(e) => e.stopPropagation()}>
     <div class="dialog-title" id="user-maps-title">
