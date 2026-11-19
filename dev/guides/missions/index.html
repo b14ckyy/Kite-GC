@@ -2325,12 +2325,40 @@ take-off is anchored on it). On PX4 there's no reserved home item at all.</p>
 <h2 id="altitudes">Altitudes<a class="headerlink" href="#altitudes" title="Permanent link">&para;</a></h2>
 <p>Each waypoint carries an altitude against a <strong>reference</strong>:</p>
 <ul>
-<li><strong>INAV</strong> offers three modes: <strong>REL</strong> (relative to the home/launch point — the usual default), <strong>AMSL</strong>
+<li>
+<p><strong>INAV</strong> offers three modes: <strong>REL</strong> (relative to the home/launch point — the usual default), <strong>AMSL</strong>
   (absolute, above mean sea level) and <strong>AGL</strong> (above ground level / terrain-following). AGL is a
   <strong>planning aid</strong>: because INAV itself only stores REL/AMSL, Kite resolves each AGL point to an absolute
-  altitude (using terrain elevation) when the mission is uploaded or exported.</li>
+  altitude (using terrain elevation) when the mission is uploaded or exported.</p>
+<div class="admonition warning">
+<p class="admonition-title">AGL needs terrain data</p>
+<p>Without terrain data for a waypoint — no internet connection and the area not loaded before,
+or a location without elevation data such as open sea — an AGL altitude cannot be converted,
+and sent as it is the aircraft would fly it as a height above home. Kite therefore does not
+let that happen:</p>
+<ul>
+<li>The altitude-mode button of such a waypoint leaves <strong>AGL</strong> out, and a pattern with
+  altitudes above ground is not generated.</li>
+<li>A mission that already has such a waypoint (a library mission or a <code>.kmission</code> opened
+  offline) marks it with an <strong>amber ring</strong> on the map and an amber altitude in the list.
+  <strong>FC Upload</strong>, <strong>EEPROM Save</strong> and saving a <code>.mission</code> file are locked, and the panel
+  names the waypoint. <strong>Save to library</strong> stays available and keeps the AGL altitudes, so
+  nothing is lost until the terrain data is back. Saving a <code>.mission</code> file is locked only
+  for the mission that has such a waypoint; an upload sends all missions and is locked by
+  any of them.</li>
+<li>Kite asks for the terrain of an area once per session. If it was offline at that moment,
+  <strong>restart Kite</strong> once the connection is back; the lock then clears.</li>
+<li>Switching a waypoint between altitude modes converts its altitude with the terrain, so
+  it stays at the same height. That conversion is a convenience: while the data for it is
+  missing the mode still changes and the <strong>number is kept as it is</strong> — set the right value
+  for the new mode yourself.</li>
+</ul>
+</div>
+<ul>
 <li><strong>ArduPilot / PX4</strong> set a MAVLink <strong>altitude frame</strong> per item — <strong>relative</strong> (to home), <strong>absolute</strong>
   (AMSL) or <strong>terrain</strong> (terrain-following).</li>
+</ul>
+</li>
 </ul>
 <div class="admonition tip">
 <p class="admonition-title">Check your clearance</p>
@@ -2341,7 +2369,17 @@ clearance before you fly. See it alongside the mission.</p>
 <ul>
 <li><strong>Add</strong> points by clicking on the map; <strong>drag</strong> a marker to move it; <strong>reorder</strong> in the list.</li>
 <li><strong>Edit</strong> a point (type, altitude, parameters) from its popup or the list. The popup's number fields
-  are the same <strong>+ / −</strong> fields as everywhere in Kite: click into one and the mouse wheel steps it.</li>
+  are the same <strong>+ / −</strong> fields as everywhere in Kite: click into one and the mouse wheel steps it.
+  The <strong>trash can</strong> buttons remove the waypoint or one of its modifiers; a tap on the map closes the
+  popup. A popup too tall for the map — several modifiers, a small screen — leaves its marker and
+  <strong>docks at the right edge</strong> of the map, beside the widgets, where it scrolls; the map moves so the
+  waypoint stays visible next to it.</li>
+<li><strong>Click a waypoint in the list</strong> (outside edit mode) to find it on the map: the map centres on it,
+  or — when no part of the mission is in view — shows the whole mission. The 3D map does the same
+  with its free camera.</li>
+<li><strong>A selected waypoint holds a follow camera.</strong> While the 2D map follows the aircraft, selecting a
+  waypoint — in the list, on the map, or by opening its editor — keeps the map on that waypoint
+  instead, and a heading-up map stops turning. Deselect it (tap the map) or press the follow button, and the map is back on the aircraft.</li>
 <li><strong>Multi-select</strong> (while <strong>editing</strong>) to act on several waypoints at once:<ul>
 <li>In the <strong>list</strong>: <strong>Ctrl/⌘-click</strong> rows to toggle them, <strong>Shift-click</strong> for an inclusive range, or
   tap a number <strong>badge</strong> to toggle a single one.</li>
@@ -2505,7 +2543,12 @@ the whole pattern. On INAV the 120-waypoint limit is checked, with the option to
 INAV column: Kite carries the MSP transfer inside the MAVLink stream, EEPROM save and multi-mission
 included — see <strong><a href="../connecting/#inav-over-mavlink-mspmav">Connecting → INAV over MAVLink</a></strong>.</p>
 <p>After a download the plan is tagged <strong>FC</strong> (see provenance below); the mission you see is exactly what
-the aircraft will fly.</p>
+the aircraft will fly. If the library already holds exactly this mission, it is tagged <strong>DB</strong> as well
+and counts as that library entry — saving it again or linking it to a flight uses the entry instead of
+creating a second one. For INAV this also holds for a mission planned with <strong>AGL</strong> altitudes: the
+aircraft stores them converted to AMSL, Kite recognises the mission all the same and shows it as it is
+in the library, with its AGL altitudes. The same holds for a <code>.mission</code> file you open. This needs the
+terrain data of the mission's area.</p>
 <h2 id="files-the-mission-library">Files &amp; the mission library<a class="headerlink" href="#files-the-mission-library" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Save / load files</strong> — INAV uses <code>.mission</code> (MultiWii XML); ArduPilot and PX4 use <code>.waypoints</code>

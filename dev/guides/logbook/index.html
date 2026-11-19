@@ -884,6 +884,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#selecting-several-flights" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Selecting several flights
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#exporting" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1975,6 +1986,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#selecting-several-flights" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Selecting several flights
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#exporting" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2118,7 +2140,10 @@ details.</p>
 <li><strong>Mission</strong> — the linked mission, openable in the Mission Manager.</li>
 <li><strong>Weather</strong>, <strong>notes</strong> and <strong>pilot</strong> — editable.</li>
 <li><strong>Source &amp; stored log</strong> — where the flight came from (live recording or an import) and, when an
-  onboard log file was kept, an inline control to export or delete it.</li>
+  onboard log file was kept, an inline control to export or delete it. Behind the source stands
+  what the flight takes in the database: <strong>≈ size</strong> is an estimate of its recorded data, and
+  <strong>File size</strong> is the stored original log on top of that. A linked pair shows the live recording
+  and the imported log each with its own size.</li>
 </ul>
 <figure>
 <p><img alt="The flight list and the selected flight's details" src="../../assets/guides/logbook/logbook_detail.png" /></p>
@@ -2144,7 +2169,9 @@ into the area the full player occupies (or tap it on a touch screen) and it unfo
 (or tap anywhere else) and it folds again. While playback is <strong>paused</strong> the full player always stays
 open, so changing the speed, the track colouring or scrubbing never fights a folding panel. A map
 drag that ends in that area doesn't unfold it — only releasing the button there does. Clicking or
-tapping anywhere outside the Logbook panel collapses it to its info card, giving the map the room.</p>
+tapping anywhere outside the Logbook panel collapses it to its info card, giving the map the room.
+On a small screen, where even the info card would lie over the replay player, the panel parks itself
+completely at that moment; its icon brings the info card back, and it then stays until you park it.</p>
 <h3 id="high-resolution-replay">High-resolution replay<a class="headerlink" href="#high-resolution-replay" title="Permanent link">&para;</a></h3>
 <p>Flights are stored at 10 samples per second — plenty for the map, but an onboard log usually
 contains far more. When a flight has its <strong>original log stored</strong> (INAV Blackbox, ArduPilot
@@ -2226,9 +2253,24 @@ INAV Blackbox, ArduPilot Dataflash, PX4 ULog — are imported on a desktop insta
 flight, its track and its records, but not the stored original), so <strong>HI-RES</strong> replay and the
 original-log export are desktop features, and so is the <strong>Open</strong> button.</p>
 </div>
+<h2 id="selecting-several-flights">Selecting several flights<a class="headerlink" href="#selecting-several-flights" title="Permanent link">&para;</a></h2>
+<p>Press <strong>Select</strong> next to the search field. The panel shows only the list, and every flight and every
+group in it gets a tick box: a tap on a flight ticks it instead of opening it, the box of a group
+ticks all its flights. <strong>All</strong> ticks everything the search currently shows, <strong>None</strong> clears the
+ticks. They stay when you change the search, so you can collect flights over several searches.
+<strong>Done</strong> leaves the mode and drops the ticks. A long press on a flight (touch) or <strong>Ctrl/⌘-click</strong>
+(desktop) starts the same mode with that flight ticked.</p>
+<ul>
+<li><strong>.kflight</strong> exports the ticked flights into one file. A linked partner flight goes with its
+  flight, ticked or not.</li>
+<li><strong>Delete</strong> removes the ticked flights after a confirmation — exactly those: a linked partner
+  that is not ticked stays. The confirmation offers to add the battery usage of the deleted
+  flights to the lifetime totals of their batteries first.</li>
+</ul>
 <h2 id="exporting">Exporting<a class="headerlink" href="#exporting" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong><code>.kflight</code></strong> — export selected flights (multi-select supported) as Kite's portable flight file, to
+<li><strong><code>.kflight</code></strong> — export the open flight, or several at once (see
+  <a href="#selecting-several-flights">Selecting several flights</a>), as Kite's portable flight file, to
   move them to another install. The file carries the mission a flight is linked to and the weather
   recorded with it; on import the mission is added to the Mission Manager's library, or the flight
   is linked to the entry that is already there.</li>

@@ -1940,6 +1940,45 @@ stays <em>Stable releases</em>. <a href="https://github.com/b14ckyy/Kite-GC/pull
   disconnect; it is replaced by <strong>Export database</strong>. A database copy already in your folder
   stays there. Raw logs now arrive in the chosen folder — they are moved there at disconnect,
   and at the first start every raw log recorded so far. [#325]</li>
+<li><strong>Logbook: select several flights</strong> — <strong>Select</strong> next to the search field puts a tick box
+  on every flight and every group, so several flights can be exported into one <code>.kflight</code> or
+  deleted in one go, by touch as well. An export now shows its progress instead of leaving
+  the window unresponsive. See <a href="../guides/logbook/#selecting-several-flights">Logbook</a>. [#330]</li>
+<li><strong>Missions: a download from the aircraft is recognised as a library mission</strong> — when the
+  library already holds exactly the mission that came from the flight controller, it shows the
+  <strong>DB</strong> badge next to <strong>FC</strong> and is linked to that entry. An INAV mission planned with AGL
+  altitudes comes back with them, instead of the AMSL values the aircraft stores. [#330]</li>
+<li><strong>Missions: AGL waypoints without terrain data are marked and locked</strong> — an amber ring on
+  the map, and FC upload and <code>.mission</code> export stay locked until the terrain data is there;
+  the altitude-mode button no longer offers AGL where it cannot be converted.
+  See <a href="../guides/missions/">Missions</a>. [#330]</li>
+<li><strong>Panels and the docked video share the left edge</strong> — with the video window docked bottom-left
+  a panel ends above it and follows its size, instead of lying over the picture; a panel
+  narrower than the gap to the widget tiles runs down to the status bar. Where the window is
+  too low for that, the panel overlays the video as before. [#330]</li>
+<li><strong>Panels get out of the way on small screens</strong> — a panel that covers a large part of the map
+  parks itself when you start an action that goes on on the map (place or edit a waypoint,
+  start a survey pattern, load a library mission, add or show a zone, a fence or a rally point,
+  set a safehome, switch Guided on), and the Logbook parks itself where
+  its info card would cover the replay player. A tap on the icon brings it back. [#330]</li>
+<li><strong>Alerts and windows are layered the right way round</strong> — a traffic alert no longer lies
+  over an open panel's controls; where the panel hides it, the panel's title bar takes the
+  alert's colour. The raw-telemetry window and the HI-RES progress window now open in front
+  of the panels and dim them. [#330]</li>
+<li><strong>Waypoint editor</strong> — its remove buttons show a trash can instead of an X, and an editor too
+  tall for the map docks at the right edge and scrolls instead of growing out of the screen. [#330]</li>
+<li><strong>Missions: a click in the waypoint list shows the waypoint on the map</strong> — the map centres on
+  it, or shows the whole mission when none of it is in view. A selected waypoint also holds a
+  follow camera, so the map stays on it until you deselect it.
+  See <a href="../guides/missions/#building-a-mission">Missions</a>. [#330]</li>
+<li><strong>Control panel: Takeoff and AUTO swap places</strong> (ArduPilot, PX4) — once the vehicle flies, or
+  when the mission begins with a takeoff waypoint, the mission mode sits under the mode readout
+  and the takeoff moves to the other modes. From the ground it is a <strong>Hold to AUTO</strong>.
+  See <a href="../guides/vehicle-control/#takeoff-return-and-landing">Vehicle control</a>. [#330]</li>
+<li><strong>Dialogs close through their buttons</strong> — a click beside a dialog that asks for a decision
+  or holds input no longer dismisses it (and with it what you typed); Escape still cancels. [#330]</li>
+<li><strong>Storage use is shown</strong> — Settings → Data names the size of the flight database, and a
+  flight's detail view shows what its data and its stored original log take. [#330]</li>
 <li><strong>INAV Blackbox import without a helper program</strong> — Kite decodes INAV Blackbox logs itself;
   imports are faster and no longer lose the frames after a flight-mode change. <a href="https://github.com/b14ckyy/Kite-GC/pull/234">#234</a></li>
 <li><strong>PX4 ULog import</strong> — the logbook imports <code>.ulg</code> logs, split into flights like any other
@@ -2169,6 +2208,15 @@ stays <em>Stable releases</em>. <a href="https://github.com/b14ckyy/Kite-GC/pull
 <li><strong>Replay: the altitude reference of a flight is handled more robustly.</strong> [#320]</li>
 <li><strong>Map: waypoint markers could blink out for a moment</strong> when the aircraft moved on to the next
   waypoint — seen on a tablet under load. The active waypoint is now marked in place. [#326]</li>
+<li><strong>Missions: waypoints could not be set on a repeated copy of the world map</strong> — with the view
+  east of the date line, or panned once around the world, a new waypoint was refused and a
+  dragged one jumped back. [#330]</li>
+<li><strong>Missions: the waypoint editor was pulled away by a follow camera</strong> — with the map following
+  the aircraft, opening a waypoint's editor moved the map to the waypoint and the next position
+  update took it back to the aircraft. The map now stays on the waypoint while it is selected. [#330]</li>
+<li><strong>Missions (INAV): Move up / down left the modifiers behind</strong> — a waypoint moved in the
+  editor without its Jump, RTH or Set Heading; a single waypoint with an RTH ended up behind
+  the end of its own mission. A waypoint now moves together with what belongs to it. [#329]</li>
 <li><strong>Replay of imported ArduPilot and PX4 logs showed the wrong GPS fix type</strong> — a plain 3D fix
   read as "3D DGPS". Logs imported from now on are right; re-import an older one to correct
   it. [#322]</li>
