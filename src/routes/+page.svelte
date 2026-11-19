@@ -1187,13 +1187,24 @@
     const c = get(settings).map.center;
     return { lat: c[0], lon: c[1], radiusKm: cfgKm };
   }
-  /** Distance/bearing reference for ALL tracked vehicles: the connected UAV (valid fix), else the
-   *  GCS marker location (null when the GCS marker is OFF). (MSP is implicitly the UAV; others inherit.) */
+  let radarRefHeld: { lat: number; lon: number } | null = null;
+  /** Distance/bearing reference for all tracked vehicles: the connected UAV (valid fix), else the GCS
+   *  marker (null when OFF). In ~11 m steps and the SAME object in between: every map consumer rebuilds
+   *  its contact markers when the reference changes. */
   const radarReference = $derived.by<{ lat: number; lon: number } | null>(() => {
     const t = $telemetry;
     if (connStatus === 'connected' && isValidGpsCoordinate(t.lat, t.lon) && t.fixType >= 2) {
-      return { lat: t.lat, lon: t.lon };
+      const lat = Math.round(t.lat * 1e4) / 1e4;
+      const lon = Math.round(t.lon * 1e4) / 1e4;
+      if (!radarRefHeld || radarRefHeld.lat !== lat || radarRefHeld.lon !== lon) radarRefHeld = { lat, lon };
+      return radarRefHeld;
     }
+    return $gcsLocation;
+  });
+  /** The same reference unstepped, for the contact list: a formation peer at 30 m needs the exact point. */
+  const radarReferenceExact = $derived.by<{ lat: number; lon: number } | null>(() => {
+    const t = $telemetry;
+    if (connStatus === 'connected' && isValidGpsCoordinate(t.lat, t.lon) && t.fixType >= 2) return { lat: t.lat, lon: t.lon };
     return $gcsLocation;
   });
   /** GCS ground level (m MSL) from terrain data at the GCS location — used as the colour-scale
@@ -1208,12 +1219,12 @@
       .catch(() => { if (!cancelled) gcsGroundAltM = null; });
     return () => { cancelled = true; };
   });
-  /** Reference altitude (m MSL) for the relative-altitude colour scale: the UAV's GPS MSL altitude when
-   *  connected with a fix, else the GCS terrain ground level (else null → absolute colour fallback). */
+  /** Reference altitude (m MSL, in 5 m steps) for the relative-altitude colour scale: the UAV's GPS MSL
+   *  altitude when connected with a fix, else the GCS ground level (null → absolute colours). */
   const radarRefAltM = $derived.by<number | null>(() => {
     const t = $telemetry;
     if (connStatus === 'connected' && isValidGpsCoordinate(t.lat, t.lon) && t.fixType >= 2) {
-      return t.altMsl;
+      return Math.round(t.altMsl / 5) * 5;
     }
     return gcsGroundAltM;
   });
@@ -4684,7 +4695,7 @@
             <RcControlPanel />
           {/if}
         {:else if activeTab === 'radar'}
-          <RadarPanel radar={radarSettings} {interfaceSettings} referencePoint={radarReference} mspSupported={mspAdsbSupported} mainSerialPort={$connection.status === 'connected' && $connection.transportType === 'serial' ? selectedPort || null : null} mainUdpPort={selectedTransport === 'udp' ? tcpPort : null} onPatch={applySettingsPatch} />
+          <RadarPanel radar={radarSettings} {interfaceSettings} referencePoint={radarReferenceExact} mspSupported={mspAdsbSupported} mainSerialPort={$connection.status === 'connected' && $connection.transportType === 'serial' ? selectedPort || null : null} mainUdpPort={selectedTransport === 'udp' ? tcpPort : null} onPatch={applySettingsPatch} />
         {:else if activeTab === 'airspace'}
           <!-- Re-init the panel on connect/disconnect + when the FC's geozone/fence capability resolves
                (loaded async after connect) so an already-open panel reflects the new FC without a tab switch. -->

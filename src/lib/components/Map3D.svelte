@@ -76,6 +76,9 @@
     type TrackSegment,
   } from "$lib/helpers/trackColors";
   import { modeColor, guidedTargetOf } from "$lib/helpers/flightModeRegistry";
+  import { requestFrame, cancelFrame } from "$lib/helpers/frameLimiter";
+  import { isMobile } from "$lib/platform";
+  import { holdRepeat } from "$lib/helpers/holdRepeat";
   import type { TelemetryRecord } from "$lib/stores/flightlog";
   import { toTelemetryData } from "$lib/adapters/telemetryAdapter";
   import type { PlatformType, UavModelOverride } from "$lib/helpers/uavIcons";
@@ -386,7 +389,10 @@
   let chaseTarget = { lat: 0, lon: 0, alt: 0, heading: 0 };
   let chaseCurrent = { lat: 0, lon: 0, alt: 0, heading: 0 };
   let chaseInited = false;
-  const CHASE_SMOOTHING = 0.07; // 0..1 — lower = smoother (exponential lerp factor per frame)
+  // Lerp factor PER FRAME on purpose, the camera loops run at the display's rate (not the frame limiter):
+  // a time-based factor makes the aircraft jitter fore / aft against the camera. Price: the lag (230 ms
+  // at 60 Hz) shrinks on a faster display.
+  const CHASE_SMOOTHING = 0.07; // 0..1 — lower = smoother
   /** Whether an exponential camera lerp has effectively reached its target (≈cm / centi-degree —
    *  far below anything visible), so its rAF loop may go to sleep instead of rendering forever. */
   function cameraLerpSettled(
@@ -807,8 +813,7 @@
         viewer.camera.setView({ destination: snap.position, orientation: { heading: snap.heading, pitch: snap.pitch, roll: snap.roll } });
       } else {
         // Re-target the new 2D centre, keeping 3D's own zoom/angle.
-        viewer.camera.lookAt(Cesium.Cartesian3.fromDegrees(lon, lat, 0), new Cesium.HeadingPitchRange(snap.heading, snap.pitch, snap.range));
-        viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
+        lookAtGround(lat, lon, new Cesium.HeadingPitchRange(snap.heading, snap.pitch, snap.range));
       }
       recenterSuppressUntil = performance.now() + 1500;
       viewer.scene.requestRender();
@@ -825,10 +830,36 @@
     let fovy = Cesium.Math.toRadians(45);
     try { const f = (viewer.camera.frustum as Cesium.PerspectiveFrustum).fovy; if (f && isFinite(f)) fovy = f; } catch { /* aspectRatio not ready yet */ }
     const range = Math.max(50, (mpp * hPx) / (2 * Math.tan(fovy / 2)));
-    viewer.camera.lookAt(Cesium.Cartesian3.fromDegrees(lon, lat, 0), new Cesium.HeadingPitchRange(0, SYNC_PITCH, range));
-    viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY); // release the frame so manual controls work
+    lookAtGround(lat, lon, new Cesium.HeadingPitchRange(0, SYNC_PITCH, range));
     recenterSuppressUntil = performance.now() + 1500;
     viewer.scene.requestRender();
+  }
+
+  /** Free camera onto a map point, `hpr` away from the GROUND there. The range is measured from the
+   *  target: aimed at the ellipsoid, a close view of high terrain starts inside the mountain. The ground
+   *  height arrives late — on a cold start the terrain provider itself is not there yet — so the view is
+   *  placed at once and corrected unless the pilot moved it meanwhile. */
+  function lookAtGround(lat: number, lon: number, hpr: Cesium.HeadingPitchRange) {
+    if (!viewer) return;
+    const cam = viewer.camera;
+    const place = (ground: number) => {
+      cam.lookAt(Cesium.Cartesian3.fromDegrees(lon, lat, ground), hpr);
+      cam.lookAtTransform(Cesium.Matrix4.IDENTITY); // release the frame so manual controls work
+    };
+    const loaded = viewer.scene.globe.getHeight(Cesium.Cartographic.fromDegrees(lon, lat));
+    place(loaded !== undefined && Number.isFinite(loaded) ? loaded : 0);
+    const placed = { lon: cam.positionCartographic.longitude, lat: cam.positionCartographic.latitude, height: cam.positionCartographic.height, heading: cam.heading };
+    void waitForTerrain(viewer).then(() => groundHeightAt(lat, lon)).then((ground) => {
+      if (!viewer || viewer.isDestroyed() || !active || !isFreeLook()) return;
+      const c = viewer.camera;
+      // Terrain collision may have lifted the camera; a pan, a turn or a zoom in is the pilot's.
+      const untouched = Math.abs(c.positionCartographic.longitude - placed.lon) < 1e-7
+        && Math.abs(c.positionCartographic.latitude - placed.lat) < 1e-7 && Math.abs(c.heading - placed.heading) < 1e-3
+        && c.positionCartographic.height >= placed.height - 1;
+      if (!untouched) return;
+      place(ground);
+      viewer.scene.requestRender();
+    });
   }
 
   /** Re-anchor a locked (follow/orbit) camera onto the UAV after a 2D→3D switch. */
@@ -1012,6 +1043,7 @@
       if (on) {
         v.useDefaultRenderLoop = true;
         v.resize();
+        resumeSmoothing();
         // Restore the remembered camera mode for this 3D session.
         if (cameraMode === 'fpv') enterFpv();
         else if (cameraMode !== 'free' && pHas) reanchorLockCamera();
@@ -1176,8 +1208,10 @@
     viewer.scene.fog.enabled = true;
     viewer.scene.fog.density = 2.5e-4;       // default 2e-4, slightly denser
     viewer.scene.fog.minimumBrightness = 0.1;
-    // Limit tile cache to reduce RAM usage
-    viewer.scene.globe.tileCacheSize = 100;   // default 100 tiles
+    // Tiles kept after they leave the view. A low, flat look holds ~550 on its own and a full turn ~1800:
+    // below that every look back reloads terrain and imagery. About 0.6 MB of GPU memory per tile, hence
+    // the smaller pool on mobile.
+    viewer.scene.globe.tileCacheSize = isMobile ? 500 : 2000;
     // FXAA instead of MSAA (see msaaSamples: 0) — much cheaper anti-aliasing for the same look.
     viewer.scene.postProcessStages.fxaa.enabled = true;
 
@@ -1309,9 +1343,10 @@
       if (armed && !wasArmed && telem.fixType >= 2 && telem.lat !== 0) {
         resetPreArmTrail3D();
       }
+      // What changed above asked for its own frame (entity writes, the smoother); an event that changed
+      // nothing must not render the globe.
+      if (armed !== wasArmed) viewer.scene.requestRender();
       wasArmed = armed;
-
-      viewer.scene.requestRender();
     });
 
     // Live 3D trail from the liveTrack store. Waits for the geoid offset (ensureGeoid triggers the first rebuild)
@@ -1562,7 +1597,8 @@
     onDestroy(() => {
     chaseLerpActive = false;
     orbitLerpActive = false;
-    if (smRaf) cancelAnimationFrame(smRaf);
+    if (smRaf) cancelFrame(smRaf);
+    if (zoomRaf) cancelFrame(zoomRaf);
     if (radar3dCreateRaf) cancelAnimationFrame(radar3dCreateRaf);
     if (nightTimer3D) clearInterval(nightTimer3D);
     if (batteryPollId) clearInterval(batteryPollId);
@@ -1774,6 +1810,10 @@
     home?: Cesium.Entity;
     target?: Cesium.Entity;
     line?: Cesium.Entity;
+    /** The line's ends, read by its position callback. */
+    linePts?: Cesium.Cartesian3[];
+    /** The line starts at the main (smoothed) aircraft model instead of the last raw sample. */
+    lineFromModel?: boolean;
     /** CSS colour the line's material was built with. */
     lineCss?: string;
     /** Group-selection ring under the craft (stores/fleetSelection). */
@@ -1906,6 +1946,13 @@
       if (e instanceof Cesium.Entity) { viewer?.entities.remove(e); (rec as unknown as Record<string, unknown>)[k] = undefined; }
     }
   }
+  function fleet3dDraws(): boolean {
+    for (const r of fleet3d.values()) {
+      if (r.model || r.trail || r.home || r.target || r.line || r.ring || r.mission?.length) return true;
+    }
+    return false;
+  }
+
   function updateFleet3D() {
     if (!viewer) return;
     // GATE(fleet): without the `--fleet` launch flag only the ACTIVE vehicle's sent Guided target is
@@ -1918,6 +1965,7 @@
       fleet3dDrawnOn = fleet3dOn;
     }
     const vw = viewer; // narrowed copy for the closures below
+    const drewBefore = fleet3dDraws();
     const ordered = [...fleet3dKnown.values()].sort((a, b) => a.linkId - b.linkId || a.sysid - b.sysid);
     // The active vehicle's name on the main model, in its fleet colour (index = the colour slot below).
     const activeIdx = fleet3dOn && fleet3dActive ? ordered.findIndex((v) => v.vehicleId === fleet3dActive) : -1;
@@ -2082,13 +2130,24 @@
           (rec.target.position as Cesium.ConstantPositionProperty).setValue(tgtGround);
           if (rec.target.point && rec.lineCss !== lineCss) rec.target.point.color = new Cesium.ConstantProperty(lineColor);
         }
+        rec.linePts = [position, tp];
+        rec.lineFromModel = isActiveVehicle;
         if (!rec.line) {
+          // A callback, not a constant: a replaced constant rebuilds the line's geometry in a worker and
+          // the line is gone until that lands — with on-demand rendering that showed as flicker.
           rec.line = vw.entities.add({
-            polyline: { positions: [position, tp], width: 2, material: new Cesium.PolylineDashMaterialProperty({ color: lineColor, dashLength: 16 }) },
+            polyline: {
+              positions: new Cesium.CallbackProperty((time) => {
+                const pts = rec.linePts ?? [];
+                const model = rec.lineFromModel ? uavEntity?.position?.getValue(time) : undefined;
+                return model && pts.length === 2 ? [model, pts[1]] : pts;
+              }, false),
+              width: 2,
+              material: new Cesium.PolylineDashMaterialProperty({ color: lineColor, dashLength: 16 }),
+            },
           });
           rec.lineCss = lineCss;
         } else if (rec.line.polyline) {
-          rec.line.polyline.positions = new Cesium.ConstantProperty([position, tp]);
           // A new material only when the colour changed — this runs on every telemetry tick.
           if (rec.lineCss !== lineCss) {
             rec.line.polyline.material = new Cesium.PolylineDashMaterialProperty({ color: lineColor, dashLength: 16 });
@@ -2112,12 +2171,14 @@
         if (id !== fleet3dActive || !fleet3dKnown.has(id)) { fleet3dRemove(rec, ['model', 'trail', 'home', 'target', 'line', 'ring']); for (const e of rec.mission ?? []) vw.entities.remove(e); fleet3d.delete(id); }
       }
     }
-    vw.scene.requestRender();
+    // Nothing drawn before and nothing now: no frame for a registry or telemetry update.
+    if (drewBefore || fleet3dDraws()) vw.scene.requestRender();
   }
   /** A new session after a disconnect-all: the previous fleet's picture goes. */
   function clearFleet3D() {
     for (const rec of fleet3d.values()) { fleet3dRemove(rec, ['model', 'trail', 'home', 'target', 'line', 'ring']); for (const e of rec.mission ?? []) viewer?.entities.remove(e); }
     fleet3d.clear();
+    viewer?.scene.requestRender();
   }
   const unsubFleet3d: (() => void)[] = [
     fleetEnabled.subscribe((on) => {
@@ -3319,11 +3380,17 @@
     return Math.min(SM_MAX, Math.max(SM_MIN, median(buf) * SM_LEAD));
   };
   const cart = (lat: number, lon: number, alt: number) => Cesium.Cartesian3.fromDegrees(lon, lat, alt);
+  // A small AND slow change (under 0.5 m / 0.25 m/s, 0.5° / 1°/s) after a long gap is estimator drift on a
+  // standing aircraft: it gets a short glide and stays out of the interval history, so the view does not
+  // render for seconds per centimetre. A vehicle creeping below those rates on a slow link steps the same way.
+  const SM_JITTER_M = 0.5, SM_JITTER_MPS = 0.25, SM_JITTER_RAD = 0.5 * Math.PI / 180, SM_JITTER_RADPS = Math.PI / 180, SM_JITTER_GLIDE = 0.25;
+  const isJitter = (change: number, maxChange: number, maxRate: number, gap: number, interval: number) =>
+    change < maxChange && gap > 2 * interval && change / gap < maxRate;
 
-  // ── Off-screen gate ── In the FREE camera an off-frustum craft still forced display-rate renders (every
-  // entity write marks the scene dirty, visible or not). Off screen the loop parks; `wakeSmoothingIfVisible`
-  // (preRender — only user camera motion renders then) wakes it.
+  // ── Off-screen gate ── free camera, craft off the frustum: the loop parks (no entity write, no frame);
+  // `wakeSmoothingIfVisible` (preRender — only camera motion renders then) wakes it.
   let smHidden = false;
+  let smParked = false; // the 3D view is not shown
   const CRAFT_CULL_RADIUS_M = 60; // generous bound around the model + label
   const WP_FOCUS_RANGE_MIN_M = 150;
   const WP_FOCUS_RANGE_MAX_M = 20000;
@@ -3366,11 +3433,21 @@
     // across the scene.
     pFromLat = pToLat; pFromLon = pToLon; pFromAlt = pToAlt;
     if (aTo) { aFrom = aTo; aFromHead = aToHead; }
-    if (!smRaf) smRaf = requestAnimationFrame(smTick);
+    if (!smRaf) smRaf = requestFrame(smTick);
+  }
+
+  /** Back in the 3D view: show the newest sample at once instead of gliding in from where the view was left. */
+  function resumeSmoothing() {
+    if (!smParked) return;
+    smParked = false;
+    if (!smEntity || !pHas || !aTo) return;
+    pFromLat = pToLat; pFromLon = pToLon; pFromAlt = pToAlt;
+    aFrom = aTo; aFromHead = aToHead;
+    applySmoothed(cart(pToLat, pToLon, pToAlt), aTo, pToLat, pToLon, pToAlt, aToHead);
   }
 
   function resetUavSmoothing() {
-    if (smRaf) cancelAnimationFrame(smRaf);
+    if (smRaf) cancelFrame(smRaf);
     smRaf = 0; smEntity = undefined; pHas = false; aFrom = aTo = null;
     pInt = 0.2; aInt = 0.1; pBuf.length = 0; aBuf.length = 0;
   }
@@ -3380,34 +3457,50 @@
     const farJump = pHas && Cesium.Cartesian3.distance(cart(pToLat, pToLon, pToAlt), cart(lat, lon, alt)) > SM_SNAP_M;
     if (smEntity !== entity || !pHas || !aTo || farJump) {
       // Snap: first sample, source/entity switch, or a teleport (scrub).
-      if (smRaf) { cancelAnimationFrame(smRaf); smRaf = 0; }
+      if (smRaf) { cancelFrame(smRaf); smRaf = 0; }
       smEntity = entity;
       pFromLat = pToLat = lat; pFromLon = pToLon = lon; pFromAlt = pToAlt = alt; pT0 = now; pHas = true; pBuf.length = 0;
       aFrom = quat; aTo = quat; aFromHead = aToHead = heading; aT0 = now; aBuf.length = 0;
       applySmoothed(cart(lat, lon, alt), quat, lat, lon, alt, heading);
+      viewer?.scene.requestRender();
       return;
     }
+    let moved = false;
     // Position: re-base only on a real move, continuing from the current displayed point.
-    if (Cesium.Cartesian3.distance(cart(pToLat, pToLon, pToAlt), cart(lat, lon, alt)) > SM_POS_EPS) {
-      const pf = Math.min(1, ((now - pT0) / 1000) / pInt);
+    const pDist = Cesium.Cartesian3.distance(cart(pToLat, pToLon, pToAlt), cart(lat, lon, alt));
+    if (pDist > SM_POS_EPS) {
+      moved = true;
+      const gap = (now - pT0) / 1000;
+      const pf = Math.min(1, gap / pInt);
       pFromLat = lerpN(pFromLat, pToLat, pf); pFromLon = lerpN(pFromLon, pToLon, pf); pFromAlt = lerpN(pFromAlt, pToAlt, pf);
       pToLat = lat; pToLon = lon; pToAlt = alt;
-      pInt = pushInterval(pBuf, (now - pT0) / 1000); pT0 = now;
+      pInt = isJitter(pDist, SM_JITTER_M, SM_JITTER_MPS, gap, pInt) ? Math.min(pInt, SM_JITTER_GLIDE) : pushInterval(pBuf, gap);
+      pT0 = now;
     }
     // Attitude: re-base only on a real change, from the current displayed orientation.
     if (!Cesium.Quaternion.equalsEpsilon(aTo!, quat, 1e-5)) {
-      const af = Math.min(1, ((now - aT0) / 1000) / aInt);
+      moved = true;
+      const gap = (now - aT0) / 1000;
+      const turned = 2 * Math.acos(Math.min(1, Math.abs(Cesium.Quaternion.dot(aTo!, quat))));
+      const af = Math.min(1, gap / aInt);
       aFrom = Cesium.Quaternion.slerp(aFrom!, aTo!, af, new Cesium.Quaternion());
       aFromHead = lerpAngle(aFromHead, aToHead, af);
       aTo = quat; aToHead = heading;
-      aInt = pushInterval(aBuf, (now - aT0) / 1000); aT0 = now;
+      aInt = isJitter(turned, SM_JITTER_RAD, SM_JITTER_RADPS, gap, aInt) ? Math.min(aInt, SM_JITTER_GLIDE) : pushInterval(aBuf, gap);
+      aT0 = now;
     }
-    if (!smRaf) smRaf = requestAnimationFrame(smTick);
+    // A sample that moved nothing draws nothing: a standing aircraft with a live link must not render
+    // at the telemetry rate. A parked loop (craft out of view) still gets its one try per sample, and
+    // FPV re-checks its eye height against terrain that may have refined since.
+    if ((moved || smHidden || cameraMode === 'fpv') && !smRaf) smRaf = requestFrame(smTick);
   }
 
   function smTick() {
     smRaf = 0;
     if (!viewer || !smEntity || !pHas || !aFrom || !aTo) return;
+    // Not the shown view: nothing of this is drawn. Samples keep the targets current; `resumeSmoothing`
+    // snaps to them when the view comes back.
+    if (!active) { smParked = true; return; }
     // Free camera + craft off-screen: park (no entity write, no render, no re-queue). Every feed
     // tick still tries once, and the preRender hook wakes the loop when visibility can change.
     if (cameraMode === 'free' && !craftInView(cart(pToLat, pToLon, pToAlt))) {
@@ -3423,7 +3516,7 @@
     const heading = lerpAngle(aFromHead, aToHead, af);
     applySmoothed(cart(lat, lon, alt), quat, lat, lon, alt, heading);
     viewer.scene.requestRender();
-    if (pf < 1 || af < 1) smRaf = requestAnimationFrame(smTick);
+    if (pf < 1 || af < 1) smRaf = requestFrame(smTick);
   }
 
   function applySmoothed(pos: Cesium.Cartesian3, quat: Cesium.Quaternion, lat: number, lon: number, alt: number, heading: number) {
@@ -3437,6 +3530,7 @@
     else if (cameraMode === 'orbit') updateOrbitCamera(lat, lon, alt);
   }
 
+  let uavModelColor = '';
   function updateUavPosition3D(lat: number, lon: number, alt: number, heading: number, navState = 0, armed = false, roll = 0, pitch = 0) {
     if (!viewer) return;
 
@@ -3456,9 +3550,13 @@
       });
       uavLabelSig = '';
       applyUavLabel(); // fleet mode: the active vehicle's name instead of "UAV"
-    } else if (uavEntity.model) {
+      viewer.scene.requestRender();
+    } else if (uavEntity.model && color !== uavModelColor) {
+      // Only on a change (this runs per telemetry event); an entity write requests no frame by itself.
       uavEntity.model.color = new Cesium.ConstantProperty(cesiumColor);
+      viewer.scene.requestRender();
     }
+    uavModelColor = color;
     // Position + attitude go through the adaptive smoother (also drives the camera).
     pushUavSample(uavEntity, lat, lon, alt, heading, orientation);
     // Live trail is built from the liveTrack store (see the liveTrack subscription), not here.
@@ -3689,6 +3787,7 @@
           clampToGround: true,
         },
       });
+      viewer.scene.requestRender();
     }
   }
 
@@ -3697,6 +3796,7 @@
     preArmPositions3D = [];
     lastPreArmLat = 0;
     lastPreArmLon = 0;
+    viewer?.scene.requestRender();
   }
 
   /** Reset the live trail (called when re-arming or clearing). */
@@ -4637,7 +4737,7 @@
 
   // The recorded guided target of the replayed sample: point on the ground + line from the aircraft, as
   // the live view draws them.
-  let replayTarget: { point: Cesium.Entity; line: Cesium.Entity } | undefined;
+  let replayTarget: { point: Cesium.Entity; line: Cesium.Entity; end: Cesium.Cartesian3 } | undefined;
   const REPLAY_TARGET_COLOR = Cesium.Color.fromCssColorString('#59aa29');
 
   function updateReplayTarget3D(point: TelemetryRecord | null, aircraft?: Cesium.Cartesian3, altitude = 0) {
@@ -4652,20 +4752,29 @@
       return;
     }
     const ground = Cesium.Cartesian3.fromDegrees(tgt.lon, tgt.lat);
-    const ends = [aircraft, Cesium.Cartesian3.fromDegrees(tgt.lon, tgt.lat, altitude)]; // at the aircraft's altitude
+    const end = Cesium.Cartesian3.fromDegrees(tgt.lon, tgt.lat, altitude); // at the aircraft's altitude
     if (!replayTarget) {
       replayTarget = {
+        end,
         point: viewer.entities.add({
           position: ground,
           point: { pixelSize: 12, color: REPLAY_TARGET_COLOR, outlineColor: Cesium.Color.WHITE, outlineWidth: 2, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY },
         }),
+        // Callback positions: from the smoothed model, and no geometry rebuild (flicker) per replay tick.
         line: viewer.entities.add({
-          polyline: { positions: ends, width: 2, material: new Cesium.PolylineDashMaterialProperty({ color: REPLAY_TARGET_COLOR, dashLength: 16 }) },
+          polyline: {
+            positions: new Cesium.CallbackProperty((time) => {
+              const from = playbackMarkerEntity?.position?.getValue(time);
+              return from && replayTarget ? [from, replayTarget.end] : [];
+            }, false),
+            width: 2,
+            material: new Cesium.PolylineDashMaterialProperty({ color: REPLAY_TARGET_COLOR, dashLength: 16 }),
+          },
         }),
       };
     } else {
       (replayTarget.point.position as Cesium.ConstantPositionProperty).setValue(ground);
-      if (replayTarget.line.polyline) replayTarget.line.polyline.positions = new Cesium.ConstantProperty(ends);
+      replayTarget.end = end;
     }
   }
 
@@ -4757,7 +4866,8 @@
           pitchDragLastY = e.endPosition.y;
           // Drag down → look further down (more negative); up → toward horizon. 0 … −90°.
           followPitch = Math.max(-Math.PI / 2, Math.min(0, followPitch - dy * FOLLOW_PITCH_SENS));
-          viewer?.scene.requestRender();
+          // Only the chase loop applies the pitch, and it rests while the aircraft stands.
+          if (!chaseLerpActive) { chaseLerpActive = true; requestAnimationFrame(chaseAnimationLoop); }
         }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
         camDragHandler.setInputAction(() => { pitchDragActive = false; }, Cesium.ScreenSpaceEventType.LEFT_UP);
       }
@@ -4779,6 +4889,8 @@
   /** Chase/follow camera animation loop — yaw-locked behind UAV, pitch user-adjustable. */
   function chaseAnimationLoop() {
     if (!chaseLerpActive || !viewer) return;
+    // Not the shown view: the camera is re-anchored when 3D comes back.
+    if (!active) { chaseLerpActive = false; return; }
 
     // Smooth-lerp position and heading toward the live UAV target
     chaseCurrent.lat     = lerp(chaseCurrent.lat,     chaseTarget.lat,     CHASE_SMOOTHING);
@@ -4857,6 +4969,7 @@
   /** Orbit camera animation loop — same CHASE_SMOOTHING as follow cam, free heading/pitch. */
   function orbitAnimationLoop() {
     if (!orbitLerpActive || !viewer) return;
+    if (!active) { orbitLerpActive = false; return; }
 
     orbitCurrentPos.lat = lerp(orbitCurrentPos.lat, orbitTargetPos.lat, CHASE_SMOOTHING);
     orbitCurrentPos.lon = lerp(orbitCurrentPos.lon, orbitTargetPos.lon, CHASE_SMOOTHING);
@@ -5149,22 +5262,54 @@
   // Zoom limits for follow / orbit modes
   const LOCK_ZOOM_MIN = 20;
   const LOCK_ZOOM_MAX = 1500; // max zoom-out distance to the UAV (m)
+  // A held zoom button: a fifth of a step every 50 ms = one step per 250 ms, without visible steps.
+  const ZOOM_HOLD_MS = 50, ZOOM_HOLD_PART = 0.2;
 
-  function zoom3D(dir: 1 | -1) {
+  // Steps still to apply (+ in, − out): a press glides instead of jumping, and presses add up.
+  let zoomPending = 0;
+  let zoomRaf = 0;
+  let zoomLastT = 0;
+  const ZOOM_EASE_MS = 90;
+
+  /** One zoom step, about a mouse wheel click; `strength` < 1 = a part of it (held button). */
+  function zoom3D(dir: 1 | -1, strength = 1) {
+    zoomPending += dir * strength;
+    if (!zoomRaf) { zoomLastT = 0; zoomRaf = requestFrame(zoomTick); }
+  }
+
+  function zoomTick(t: number) {
+    zoomRaf = 0;
+    const dt = zoomLastT ? Math.min(100, t - zoomLastT) : 1000 / 60;
+    zoomLastT = t;
+    const part = Math.abs(zoomPending) < 0.02 ? zoomPending : zoomPending * (1 - Math.exp(-dt / ZOOM_EASE_MS));
+    zoomPending -= part;
+    applyZoom3D(part > 0 ? 1 : -1, Math.abs(part));
+    if (zoomPending !== 0) zoomRaf = requestFrame(zoomTick);
+  }
+
+  function applyZoom3D(dir: 1 | -1, strength: number) {
     if (!viewer) return;
     if (cameraMode === 'fpv') {
       // FPV "zoom" = the lens FOV (narrower = zoom in), 30°…120°.
-      fpvFov = Math.max(FPV_FOV_MIN, Math.min(FPV_FOV_MAX, fpvFov + (dir > 0 ? -10 : 10)));
+      fpvFov = Math.max(FPV_FOV_MIN, Math.min(FPV_FOV_MAX, fpvFov + (dir > 0 ? -10 : 10) * strength));
       applyFpvFov();
       return;
     }
+    const factor = (dir > 0 ? 0.75 : 1.35) ** strength;
     if (cameraMode === 'free') {
-      if (dir > 0) viewer.camera.zoomIn(80);
-      else viewer.camera.zoomOut(80);
+      // Relative to what the view centre looks at; the height above ground when it looks past the horizon.
+      const cam = viewer.camera;
+      const ray = cam.getPickRay(new Cesium.Cartesian2(viewer.canvas.clientWidth / 2, viewer.canvas.clientHeight / 2));
+      const hit = ray && viewer.scene.globe.pick(ray, viewer.scene);
+      const carto = cam.positionCartographic;
+      const range = hit ? Cesium.Cartesian3.distance(hit, cam.positionWC) : carto.height - (viewer.scene.globe.getHeight(carto) ?? 0);
+      const max = viewer.scene.screenSpaceCameraController.maximumZoomDistance;
+      if (dir > 0 && range > LOCK_ZOOM_MIN) cam.zoomIn(range * (1 - factor));
+      else if (dir < 0 && carto.height < max) cam.zoomOut(Math.max(range, LOCK_ZOOM_MIN) * (factor - 1));
       viewer.scene.requestRender();
       return;
     }
-    lockRange = Math.max(LOCK_ZOOM_MIN, Math.min(LOCK_ZOOM_MAX, lockRange * (dir > 0 ? 0.75 : 1.35)));
+    lockRange = Math.max(LOCK_ZOOM_MIN, Math.min(LOCK_ZOOM_MAX, lockRange * factor));
     // Apply directly so zoom works even when no telemetry is driving the animation loops.
     const center = cameraMode === 'orbit'
       ? orbitCenter
@@ -5568,8 +5713,8 @@
       {/if}
     </button>
 
-    <button class="map-control-btn map-zoom-btn" onclick={() => zoom3D(1)}  title="Zoom in"  aria-label="Zoom in">+</button>
-    <button class="map-control-btn map-zoom-btn" onclick={() => zoom3D(-1)} title="Zoom out" aria-label="Zoom out">-</button>
+    <button class="map-control-btn map-zoom-btn" use:holdRepeat={{ step: () => zoom3D(1), hold: () => zoom3D(1, ZOOM_HOLD_PART), everyMs: ZOOM_HOLD_MS }} title="Zoom in" aria-label="Zoom in">+</button>
+    <button class="map-control-btn map-zoom-btn" use:holdRepeat={{ step: () => zoom3D(-1), hold: () => zoom3D(-1, ZOOM_HOLD_PART), everyMs: ZOOM_HOLD_MS }} title="Zoom out" aria-label="Zoom out">-</button>
   </div>
 
 </div>
