@@ -8,7 +8,6 @@
 
 import { get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
-import { t } from 'svelte-i18n';
 import { hashWaypoints, hasLocation, toDeg, altToM, WpAction, WP_FLAG_LAST, ALT_MODE_AGL, launchPoint, type Waypoint } from '$lib/stores/mission';
 import type { LibraryMissionInput } from '$lib/stores/flightlogTypes';
 import { missionDbFindByHash, missionDbList, missionDbSetHash } from '$lib/stores/flightlog';
@@ -37,18 +36,18 @@ export async function sha256Hex(s: string): Promise<string> {
 const hasAgl = (wps: Waypoint[]) => wps.some((w) => (w.alt_mode ?? 0) === ALT_MODE_AGL);
 
 /** Identity of a mission: SHA-256 over the form that goes to the FC, AGL waypoints resolved to AMSL —
- *  an FC download or a `.mission` file then finds its library entry. Rejects, with a message for the
- *  user, when terrain data for an AGL waypoint is missing. */
+ *  an FC download or a `.mission` file then finds its library entry. Without terrain data for an AGL
+ *  waypoint the AGL form is hashed, so the mission can still be saved; `rehashAglMissions` moves such
+ *  an entry to its real hash later. */
 export async function missionContentHash(wps: Waypoint[]): Promise<string> {
-  if (!hasAgl(wps)) return sha256Hex(hashWaypoints(wps));
-  let resolved: Waypoint[];
-  try {
-    resolved = await invoke<Waypoint[]>('mission_resolve_agl', { waypoints: wps });
-  } catch (e) {
-    // `no-terrain:<wp number>` — NO_TERRAIN_ERROR (commands/mission.rs).
-    const wp = /^no-terrain:(\d+)$/.exec(String(e));
-    // A string, like a backend error: the callers show `String(e)`.
-    throw wp ? get(t)('mission.noTerrainWp', { values: { number: wp[1] } }) : e;
+  let resolved = wps;
+  if (hasAgl(wps)) {
+    try {
+      resolved = await invoke<Waypoint[]>('mission_resolve_agl', { waypoints: wps });
+    } catch (e) {
+      // `no-terrain:<wp number>` — NO_TERRAIN_ERROR (commands/mission.rs).
+      if (!String(e).startsWith('no-terrain:')) throw e;
+    }
   }
   return sha256Hex(hashWaypoints(resolved));
 }

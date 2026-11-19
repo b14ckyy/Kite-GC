@@ -25,7 +25,8 @@
   import { activeWpNumber } from '$lib/stores/navStatus';
   import { openContextMenu } from '$lib/stores/contextMenu';
   import { buildWaypointMenu } from '$lib/helpers/waypointMenu';
-  import { convertAltCm } from '$lib/helpers/altConvert';
+  import { convertAltCm, nextAltMode, hasTerrain } from '$lib/helpers/altConvert';
+  import { aglTerrainGapsActive } from '$lib/stores/missionTerrain';
   import { get } from 'svelte/store';
   import { settings } from '$lib/stores/settings';
   import type { InterfaceSettings } from '$lib/stores/settings';
@@ -149,6 +150,25 @@
     }
   }
   const unsubActiveWp = activeWpNumber.subscribe(v => { currentActiveWp = v; markActiveWp(); });
+
+  // AGL waypoints without terrain data get a ring, toggled in place like the active waypoint.
+  let noTerrainWps = get(aglTerrainGapsActive);
+  function markNoTerrain() {
+    for (const [number, markers] of markersByWpNumber) {
+      for (const marker of markers) marker.getElement()?.classList.toggle('mission-wp-noterrain', noTerrainWps.has(number));
+    }
+  }
+  const unsubNoTerrain = aglTerrainGapsActive.subscribe(v => { noTerrainWps = v; markNoTerrain(); });
+
+  /** The toggle says why AGL is missing from its cycle, and shows an AGL altitude that cannot be converted. */
+  function flagAltToggle(btn: HTMLButtonElement | null, w: Waypoint) {
+    if (!btn) return;
+    void hasTerrain(w).then((ok) => {
+      if (ok) return;
+      btn.title = $t('missionLayer.aglNoTerrain');
+      if ((w.alt_mode ?? 0) === ALT_MODE_AGL) btn.classList.add('wpe-toggle-warn');
+    });
+  }
 
   // svelte-ignore state_referenced_locally
   const missionGroup = L.layerGroup().addTo(map);
@@ -379,11 +399,12 @@
       // Cycle REL → AMSL → AGL → REL, converting the altitude so the waypoint
       // stays at the same physical height (terrain + launch point as references).
       const cur = wp.alt_mode ?? ((wp.p3 & 1) ? 1 : 0);
-      const next = (cur + 1) % 3;
-      const newAlt = await convertAltCm(wp, cur, next);
-      if (newAlt == null) return; // no terrain data: the mode stays
+      const next = await nextAltMode(wp, cur);
+      // Without a ground reference the number is kept: the conversion is a convenience, the operator sets the value.
+      const newAlt = (await convertAltCm(wp, cur, next)) ?? wp.altitude;
       missionUpdateWp(idx, { ...wp, alt_mode: next, altitude: newAlt });
     });
+    flagAltToggle(altToggle, wp);
 
     const p1Input = el.querySelector('input[data-field="p1"]') as HTMLInputElement | null;
     p1Input?.addEventListener('change', () => {
@@ -446,11 +467,11 @@
       const fAltToggle = el.querySelector('button[data-field="fbh-altToggle"]') as HTMLButtonElement | null;
       fAltToggle?.addEventListener('click', async () => {
         const cur = fwp.alt_mode ?? ((fwp.p3 & 1) ? 1 : 0);
-        const next = (cur + 1) % 3;
-        const newAlt = await convertAltCm(fwp, cur, next);
-        if (newAlt == null) return; // no terrain data: the mode stays
+        const next = await nextAltMode(fwp, cur);
+        const newAlt = (await convertAltCm(fwp, cur, next)) ?? fwp.altitude;
         missionUpdateWp(fi, { ...fwp, alt_mode: next, altitude: newAlt });
       });
+      flagAltToggle(fAltToggle, fwp);
       const fP1Input = el.querySelector('input[data-field="fbh-p1"]') as HTMLInputElement | null;
       fP1Input?.addEventListener('change', () => {
         const isSpeed = fwp.action === WpAction.Waypoint || fwp.action === WpAction.Land;
@@ -860,12 +881,12 @@
 
   $effect(() => {
     void currentLaunch; void currentSelSet; void currentShowMission; void currentReplayActive; void activeSurveyPattern.isActive;
-    const render = () => renderMission(currentMission, currentSelIdx, currentEditing);
+    const render = () => { renderMission(currentMission, currentSelIdx, currentEditing); markNoTerrain(); };
     if (!deferWhileStepping(popupState, render)) render();
   });
 
   onDestroy(() => {
-    unsubMission(); unsubSelIdx(); unsubSelSet(); unsubEditMode(); unsubShowMission(); unsubReplayActive(); unsubLaunch(); unsubHomeLocked(); unsubActiveWp();
+    unsubMission(); unsubSelIdx(); unsubSelSet(); unsubEditMode(); unsubShowMission(); unsubReplayActive(); unsubLaunch(); unsubHomeLocked(); unsubActiveWp(); unsubNoTerrain();
     if (launchMarker) { try { map.removeLayer(launchMarker); } catch {} launchMarker = undefined; }
     map.off('click', onMapClick);
     map.off('zoomend', onMapZoomRerender);
@@ -932,6 +953,9 @@
   :global(.wpe-row select) { background: #2a2a2a; color: #ccc; border: 1px solid #555; border-radius: 3px; padding: 3px 4px; font-size: 13px; flex: 1; }
   :global(.wpe-toggle) { background: #2a2a2a; color: #ccc; border: 1px solid #555; border-radius: 3px; padding: 3px 8px; font-size: 12px; cursor: pointer; }
   :global(.wpe-toggle:hover) { background: #3a3a3a; }
+  :global(.wpe-toggle.wpe-toggle-warn) { color: #f39c12; border-color: #f39c12; }
+  /* A ring, not a fill: red and the accent already mean selected and active. */
+  :global(.mission-wp-noterrain) { outline: 3px solid #f39c12; outline-offset: 2px; border-radius: 50%; }
   :global(.wpe-unit) { color: #888; font-size: 12px; white-space: nowrap; }
   :global(.wpe-ua-row) { gap: 4px; }
   :global(.wpe-ua-btn) { padding: 2px 5px; border: 1px solid #555; border-radius: 3px; background: #2a2a2a; color: #777; cursor: pointer; font-size: 10px; font-weight: 600; transition: all 0.15s; }

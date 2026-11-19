@@ -19,6 +19,19 @@ async function terrainElev(lat: number, lon: number): Promise<number | null> {
   }
 }
 
+/** Whether the ground elevation under the waypoint is known — the condition for an AGL altitude. */
+export async function hasTerrain(wp: Waypoint): Promise<boolean> {
+  return (await terrainElev(toDeg(wp.lat), toDeg(wp.lon))) != null;
+}
+
+/** The mode after `cur` in the REL → AMSL → AGL cycle. AGL is left out for a waypoint without terrain
+ *  data: it could not be converted for the FC. */
+export async function nextAltMode(wp: Waypoint, cur: number): Promise<number> {
+  const next = (cur + 1) % 3;
+  if (next !== ALT_MODE_AGL) return next;
+  return (await hasTerrain(wp)) ? next : ALT_MODE_REL;
+}
+
 export async function convertAltCm(wp: Waypoint, fromMode: number, toMode: number): Promise<number | null> {
   if (fromMode === toMode) return wp.altitude;
   const valM = wp.altitude / 100;
@@ -28,8 +41,7 @@ export async function convertAltCm(wp: Waypoint, fromMode: number, toMode: numbe
   const wpGround = needWpGround ? await terrainElev(toDeg(wp.lat), toDeg(wp.lon)) : 0;
   const launchGround = needLaunch ? (lp ? await terrainElev(lp.lat, lp.lng) : null) : 0;
   if ((needWpGround && wpGround == null) || (needLaunch && launchGround == null)) {
-    // No ground reference: the number must not be carried into another mode (30 m AGL is not 30 m REL).
-    return null;
+    return null; // no ground reference
   }
   // to absolute MSL
   let absM: number;

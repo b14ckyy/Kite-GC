@@ -36,6 +36,7 @@
   import Button from '$lib/components/panel/Button.svelte';
   import AutopilotSelect from '$lib/components/mission/AutopilotSelect.svelte';
   import { missionManagerOpen } from '$lib/stores/missionManager';
+  import { aglTerrainGaps, aglTerrainGapsActive } from '$lib/stores/missionTerrain';
   import { buildMissionInput, missionContentHash, computeMissionStats } from '$lib/helpers/missionLibrary';
   import { missionDbSave, missionDbUpdate, missionDbGet, missionDbFindByHash, missionDbGeocode } from '$lib/stores/flightlog';
   import { locale } from 'svelte-i18n';
@@ -109,6 +110,15 @@
 
   let downloadLoading = $state(false);
   let uploadLoading = $state(false);
+
+  // An AGL waypoint without terrain data cannot be converted for the FC or a `.mission` file.
+  const terrainLocked = $derived($aglTerrainGaps.length > 0);
+  const terrainLockText = $derived.by(() => {
+    const g = $aglTerrainGaps[0];
+    if (!g) return '';
+    const where = $missionCount > 1 ? `${$t('mission.missionN', { values: { index: String(g.mission) } })}: ` : '';
+    return `${where}${$t('mission.noTerrainWp', { values: { number: String(g.shown) } })}\n${$t('mission.noTerrainLock')}`;
+  });
   let eepromSaveLoading = $state(false);
   let eepromLoadLoading = $state(false);
   let statusMessage = $state('');
@@ -588,7 +598,7 @@
                 <!-- svelte-ignore a11y_no_static_element_interactions -->
                 <td class="col-num"><span class="wp-num-badge fbh-num" onclick={(e) => onBadgeClick(e, i)}>{displayNums.get(i) ?? ''}</span></td>
                 <td class="col-type mod-indent">↳ {$t('mission.flagFbh')}</td>
-                <td class="col-alt">{formatAltShort(wp)}</td>
+                <td class="col-alt" class:no-terrain={$aglTerrainGapsActive.has(i + 1)}>{formatAltShort(wp)}</td>
                 <td class="col-param">→ {$t('mission.home')}</td>
               </tr>
             {:else if isModifier(wp.action)}
@@ -604,7 +614,7 @@
                 <!-- svelte-ignore a11y_no_static_element_interactions -->
                 <td class="col-num"><span class="wp-num-badge" onclick={(e) => onBadgeClick(e, i)}>{displayNums.get(i) ?? ''}</span></td>
                 <td class="col-type">{shortType(wp.action)}</td>
-                <td class="col-alt">{hasLocation(wp.action) ? formatAltShort(wp) : '—'}</td>
+                <td class="col-alt" class:no-terrain={$aglTerrainGapsActive.has(i + 1)}>{hasLocation(wp.action) ? formatAltShort(wp) : '—'}</td>
                 <td class="col-param">{formatParam(wp)}</td>
               </tr>
             {/if}
@@ -632,19 +642,20 @@
     {#if !showPatternPanel}
       <div class="ctrl-row">
         <Button variant="data" icon="download" full disabled={downloadLoading} onclick={handleDownload}>{$t('mission.fcDownload')}</Button>
-        <Button variant="data" icon="upload" full disabled={uploadLoading} onclick={handleUpload}>{$t('mission.fcUpload')}</Button>
+        <Button variant="data" icon="upload" full disabled={uploadLoading || terrainLocked} title={terrainLockText} onclick={handleUpload}>{$t('mission.fcUpload')}</Button>
       </div>
       <div class="ctrl-row">
         <Button variant="warning" icon="download" full disabled={eepromLoadLoading} onclick={handleEepromLoad}>{$t('mission.eepromLoad')}</Button>
-        <Button variant="warning" icon="save" full disabled={eepromSaveLoading || isArmed()} title={isArmed() ? $t('mission.eepromSaveArmed') : $t('mission.eepromSaveTooltip')} onclick={handleEepromSave}>{$t('mission.eepromSave')}</Button>
+        <Button variant="warning" icon="save" full disabled={eepromSaveLoading || isArmed() || terrainLocked} title={terrainLocked ? terrainLockText : isArmed() ? $t('mission.eepromSaveArmed') : $t('mission.eepromSaveTooltip')} onclick={handleEepromSave}>{$t('mission.eepromSave')}</Button>
       </div>
       <div class="ctrl-row">
         <Button variant="data" icon="library" full disabled={$totalWpCount === 0} onclick={handleSaveToLibrary}>{$t('mission.saveToLibrary')}</Button>
       </div>
       <div class="ctrl-row">
         <Button variant="standard" icon="folder" full onclick={handleOpenFile}>{$t('mission.open')}</Button>
-        <Button variant="standard" icon="save" full onclick={handleSaveFile}>{$t('mission.save')}</Button>
+        <Button variant="standard" icon="save" full disabled={terrainLocked} title={terrainLockText} onclick={handleSaveFile}>{$t('mission.save')}</Button>
       </div>
+      {#if terrainLocked}<div class="terrain-lock">{terrainLockText}</div>{/if}
     {/if}
 
     {#if statusMessage}<div class="mission-status">{statusMessage}</div>{/if}
@@ -744,6 +755,8 @@
   .detail-hint { color: #37a8db; font-size: 11px; text-align: center; margin-top: 4px; font-style: italic; }
   .ctrl-row { display: flex; gap: 4px; }
   .mission-status { padding: 3px 6px; font-size: 11px; color: #f39c12; text-align: center; }
+  .terrain-lock { padding: 3px 6px; font-size: 11px; color: #f39c12; text-align: center; white-space: pre-line; }
+  .col-alt.no-terrain { color: #f39c12; font-weight: 600; }
   .mission-summary { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 3px; font-size: 12px; color: #888; flex-wrap: wrap; }
   .mission-stats { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 4px 3px 0; font-size: 12px; color: #9ad0e8; flex-wrap: wrap; font-variant-numeric: tabular-nums; }
   .mission-stats .stat { white-space: nowrap; cursor: default; }

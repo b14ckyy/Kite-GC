@@ -444,6 +444,13 @@ function slotWaypoints(i: number): Waypoint[] {
   return i === get(activeMissionIndex) ? get(mission).waypoints : (missionSlots.get(i) ?? []);
 }
 
+/** Every slot's waypoints, slot 1 first. */
+export function allMissionWaypoints(): Waypoint[][] {
+  const out: Waypoint[][] = [];
+  for (let i = 1; i <= get(missionCount); i++) out.push(slotWaypoints(i));
+  return out;
+}
+
 export function filledMissionCount(): number {
   let n = 0;
   for (let i = 1; i <= get(missionCount); i++) if (slotWaypoints(i).length > 0) n++;

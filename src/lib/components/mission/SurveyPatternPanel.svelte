@@ -304,6 +304,17 @@
       return;
     }
 
+    // AGL waypoints need the ground elevation under each of them, or INAV cannot be given the mission.
+    if (wps.some((w) => w.altMode === 'ground')) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      const elevations = await invoke<(number | null)[]>('terrain_elevations', { points: wps.map((w) => [w.lat, w.lng]) })
+        .catch(() => [null]);
+      if (elevations.some((e) => e == null)) {
+        await showDialog($t('survey.noTerrainTitle'), $t('survey.noTerrainMsg'), []);
+        return;
+      }
+    }
+
     // Check 120 WP limit
     const { getTotalWpCount, MAX_WAYPOINTS_TOTAL } = await import('$lib/stores/mission');
     const currentCount = getTotalWpCount();
