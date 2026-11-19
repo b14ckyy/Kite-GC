@@ -1432,6 +1432,7 @@
     "exportSuccess": "{count} 次飞行导出成功。",
     "importKflightTitle": "导入完成",
     "importKflightResult": "已导入：{imported}，跳过（重复）：{skipped}",
+    "importKflightNewer": "此文件由较新版本的 Kite 写入，并非所有数据都能导入——请更新 Kite 以获取全部内容。",
     "deleteTitle": "删除飞行",
     "deleteWarning": "此操作无法撤销。要删除哪些数据？",
     "deleteConsolidateBattery": "将此飞行的电池使用量合并到电池寿命总计中",

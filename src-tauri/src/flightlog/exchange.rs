@@ -12,7 +12,8 @@ use rusqlite::{params, Connection};
 use super::db;
 use super::types::{BatteryRecord, Flight, FlightSummary, Mission, MissionInput, TelemetryRecord};
 
-/// Stays 2 while changes are additive: Kite 1.0 reads named columns and never checks it.
+/// Stays 2 while changes are additive: Kite 1.0 reads named columns and never checks it. Raise it when a
+/// file carries data an older importer drops — that importer then tells the user (`ImportResult::newer_format`).
 const KFLIGHT_SCHEMA_VERSION: u32 = 2;
 
 /// Application identifier stored in the export header
@@ -677,6 +678,8 @@ pub struct ImportResult {
     pub imported: usize,
     pub skipped: usize,
     pub errors: Vec<String>,
+    /// The file was written by a newer Kite: what this version knows was imported, the rest was left out.
+    pub newer_format: bool,
 }
 
 /// Import flights from a .kflight file; duplicates (same craft_name + start_time ±10s) are skipped.
@@ -696,10 +699,18 @@ fn import_from(
     src: &Connection,
     kflight_path: &Path,
 ) -> Result<ImportResult, String> {
-    let _has_meta: bool = src
-        .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='_kflight_meta'")
-        .and_then(|mut s| s.exists([]))
-        .unwrap_or(false);
+    // No meta table, no version row, or one that does not parse: an old or foreign file, not a newer one.
+    let file_version: u32 = src
+        .query_row("SELECT value FROM _kflight_meta WHERE key = 'schema_version'", [], |r| r.get::<_, String>(0))
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    let newer_format = file_version > KFLIGHT_SCHEMA_VERSION;
+    if newer_format {
+        log::warn!(
+            ".kflight: format version {file_version}, this Kite reads up to {KFLIGHT_SCHEMA_VERSION} — importing what it knows"
+        );
+    }
 
     let has_flights: bool = src
         .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='flights'")
@@ -727,6 +738,7 @@ fn import_from(
         imported: 0,
         skipped: 0,
         errors: Vec::new(),
+        newer_format,
     };
 
     for summary in &src_flights {
@@ -1273,7 +1285,20 @@ mod tests {
 
         let dst = db::open_database(&dir.join("dst").join("flights.db")).unwrap();
         let r = import_flights(&dst, &file).unwrap();
-        assert_eq!((r.imported, r.errors.len()), (2, 0));
+        assert_eq!((r.imported, r.errors.len(), r.newer_format), (2, 0, false));
+
+        // The same file stamped by a newer Kite: imported as far as known, and said so.
+        {
+            let k = Connection::open(&file).unwrap();
+            k.execute(
+                "UPDATE _kflight_meta SET value = ?1 WHERE key = 'schema_version'",
+                params![(KFLIGHT_SCHEMA_VERSION + 1).to_string()],
+            )
+            .unwrap();
+        }
+        let again = db::open_database(&dir.join("dst-newer").join("flights.db")).unwrap();
+        let r = import_flights(&again, &file).unwrap();
+        assert_eq!((r.imported, r.newer_format), (2, true));
         let flights = db::list_flights(&dst).unwrap();
         let a = flights.iter().min_by_key(|f| f.start_time).unwrap().id;
         let b = flights.iter().max_by_key(|f| f.start_time).unwrap().id;

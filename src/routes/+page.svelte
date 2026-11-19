@@ -2120,6 +2120,7 @@
     let msg = $t('logbook.importKflightResult', {
       values: { imported: result.imported, skipped: result.skipped },
     });
+    if (result.newer_format) msg += '\n\n' + $t('logbook.importKflightNewer');
     if (result.errors.length > 0) msg += '\n' + result.errors.join('\n');
     await showInfo($t('logbook.importKflightTitle'), msg);
   }

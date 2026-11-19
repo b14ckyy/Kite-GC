@@ -1432,6 +1432,7 @@
     "exportSuccess": "Úspešne exportované lety: {count}",
     "importKflightTitle": "Import dokončený",
     "importKflightResult": "Importované: {imported}, preskočené (duplikáty): {skipped}",
+    "importKflightNewer": "Tento súbor bol zapísaný novšou verziou Kite. Nie všetky údaje sa podarilo importovať — aktualizujte Kite, aby ste získali všetko.",
     "deleteTitle": "Odstrániť let",
     "deleteWarning": "Túto akciu nemožno vrátiť späť. Ktoré údaje chcete odstrániť?",
     "deleteConsolidateBattery": "Pripočítať spotrebu batérie z tohto letu k celkovým hodnotám batérie",

@@ -1432,6 +1432,7 @@
     "exportSuccess": "{count, plural, one {# vuelo exportado correctamente.} other {# vuelos exportados correctamente.}}",
     "importKflightTitle": "Importación completada",
     "importKflightResult": "Importados: {imported}, omitidos (duplicados): {skipped}",
+    "importKflightNewer": "Este archivo fue escrito por una versión más reciente de Kite. No se pudieron importar todos sus datos: actualiza Kite para obtenerlos todos.",
     "deleteTitle": "Eliminar vuelo",
     "deleteWarning": "Esta acción no se puede deshacer. ¿Qué datos quieres eliminar?",
     "deleteConsolidateBattery": "Consolidar el consumo de batería de este vuelo en los totales acumulados de la batería",
