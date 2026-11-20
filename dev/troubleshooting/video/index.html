@@ -1407,6 +1407,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#macos-an-h264-stream-freezes-and-reconnects-every-few-seconds" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        macOS: an H.264 stream freezes and reconnects every few seconds
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#the-picture-stutters-or-shows-frames-out-of-order" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1922,6 +1933,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#macos-an-h264-stream-freezes-and-reconnects-every-few-seconds" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        macOS: an H.264 stream freezes and reconnects every few seconds
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#the-picture-stutters-or-shows-frames-out-of-order" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2108,6 +2130,18 @@ you press Stop</strong>. If it never comes back: the source is down or unreachab
 the transport doesn't match the server (see above), or a firewall started blocking the media packets. A
 few reconnect cycles in a row are normal when a source restarts or the network path changes (e.g.
 switching between Wi-Fi and a cellular link).</p>
+<h2 id="macos-an-h264-stream-freezes-and-reconnects-every-few-seconds">macOS: an H.264 stream freezes and reconnects every few seconds<a class="headerlink" href="#macos-an-h264-stream-freezes-and-reconnects-every-few-seconds" title="Permanent link">&para;</a></h2>
+<p>Seen on the classic path (<strong>Native RTSP client</strong> switched off) with H.264 from <strong>OBS using a hardware
+encoder</strong> — NVENC and Quick Sync in our tests: the picture stops right after it starts, and Kite
+reconnects every few seconds, over and over. The same stream plays with the <strong>Native RTSP client</strong> on,
+and the same source plays on the classic path once OBS encodes in software (x264).</p>
+<ul>
+<li><strong>Turn the Native RTSP client on</strong> (Video panel → RTSP section; it is the default). That is the fix.</li>
+<li>If you need the classic path, switch the source to a software H.264 encoder.</li>
+</ul>
+<p>The cause is in the stream itself: the macOS browser engine's decoder refuses it, and the classic path
+hands the stream on unchanged. Other hardware encoders may behave the same; we have not seen it with
+a camera so far.</p>
 <h2 id="the-picture-stutters-or-shows-frames-out-of-order">The picture stutters or shows "frames out of order"<a class="headerlink" href="#the-picture-stutters-or-shows-frames-out-of-order" title="Permanent link">&para;</a></h2>
 <p>This is almost always the <strong>source encoder</strong>, not Kite. The classic direct path (Native RTSP client
 off) uses WebRTC, which tolerates <strong>B-frames</strong> poorly:</p>
