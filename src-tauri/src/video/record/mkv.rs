@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-//! Matroska writer for ONE H.264 / H.265 video track, written as the stream arrives.
-//! - A file that is never finished (crash, power loss) plays up to the last cluster: segment and open
-//!   cluster carry the "unknown size" marker until they are closed.
-//! - `finish` adds what a player needs to seek fast: the cue index, the seek head and the duration.
-//! - Blocks carry presentation times only, which is all RTP delivers; Matroska needs no decode times.
+//! Matroska writer for one H.264 / H.265 track, written as the stream arrives. Segment and open cluster
+//! keep the unknown-size marker until closed, so an unfinished file plays up to its last cluster.
+//! Blocks carry presentation times only (all RTP delivers); `finish` adds cues, seek head and duration.
 
 use std::io::{self, Seek, SeekFrom, Write};
 
@@ -229,7 +227,6 @@ impl<W: Write + Seek> MkvWriter<W> {
         self.out
     }
 
-    /// Close the file: cue index, seek head, duration, segment size.
     pub fn finish(mut self) -> io::Result<W> {
         self.close_cluster()?;
         let cues_at = self.pos;

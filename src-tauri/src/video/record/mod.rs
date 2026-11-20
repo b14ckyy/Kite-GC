@@ -90,6 +90,8 @@ struct Active {
     thread: JoinHandle<()>,
     /// Frames were dropped: nothing more goes out until the next keyframe.
     wait_keyframe: bool,
+    /// The stream restarted and the writer does not know yet: no picture of the new stream before it.
+    cut_pending: bool,
 }
 
 #[derive(Default)]
@@ -144,7 +146,7 @@ impl VideoRecorder {
         g.preroll_bytes = 0;
         if let Some(a) = g.active.as_mut() {
             a.wait_keyframe = true;
-            let _ = a.tx.try_send(Msg::Cut);
+            a.cut_pending = a.tx.try_send(Msg::Cut).is_err();
         }
     }
 
@@ -157,10 +159,13 @@ impl VideoRecorder {
         let keyframe = is_keyframe(codec, &split_nals(annexb));
         let au = || Au { codec, data: annexb.to_vec(), ts, arrived_ms: unix_ms(), keyframe };
         if g.enabled {
-            if keyframe || g.preroll_bytes + annexb.len() > PREROLL_MAX_BYTES {
+            if g.preroll_bytes + annexb.len() > PREROLL_MAX_BYTES {
                 g.preroll.clear();
-                g.preroll_bytes = 0;
+            } else if keyframe {
+                // Earlier pieces of this same picture (they share its RTP time) stay.
+                g.preroll.retain(|a| a.ts == ts);
             }
+            g.preroll_bytes = g.preroll.iter().map(|a| a.data.len()).sum();
             // Without a keyframe at its head the buffer is useless: wait for the next one.
             if keyframe || !g.preroll.is_empty() {
                 g.preroll_bytes += annexb.len();
@@ -169,7 +174,10 @@ impl VideoRecorder {
         }
         let mut dropped = false;
         if let Some(a) = g.active.as_mut() {
-            if a.wait_keyframe && !keyframe {
+            if a.cut_pending {
+                a.cut_pending = a.tx.try_send(Msg::Cut).is_err();
+            }
+            if a.cut_pending || (a.wait_keyframe && !keyframe) {
                 dropped = true;
             } else {
                 match a.tx.try_send(Msg::Au(au())) {
@@ -215,7 +223,7 @@ impl VideoRecorder {
             .map_err(|e| format!("cannot start the recording thread: {e}"))?;
         // An empty pre-roll means the stream is mid-group: the file starts at the next keyframe.
         let wait_keyframe = g.preroll.is_empty();
-        g.active = Some(Active { tx, thread, wait_keyframe });
+        g.active = Some(Active { tx, thread, wait_keyframe, cut_pending: false });
         Ok(())
     }
 
@@ -253,32 +261,48 @@ struct OpenFile {
     end_unix_ms: i64,
 }
 
-fn close(file: OpenFile, shared: &Mutex<Shared>) {
+/// `finish` = write the index; without it (after a write error) the file stays as it is on disk, playable
+/// up to its last cluster. Either way it is the flight's recording.
+fn close(file: OpenFile, shared: &Mutex<Shared>, finish: bool) {
     let (frames, duration_ms) = (file.writer.frames(), file.writer.duration_ms());
     let path = file.path.to_string_lossy().to_string();
-    match file.writer.finish().and_then(|w| w.into_inner().map_err(|e| e.into_error())).and_then(|f| f.sync_all().map(|_| f)) {
-        Ok(f) => {
-            let size = f.metadata().map(|m| m.len()).unwrap_or(0);
-            log::info!("[video] recording closed: {path}, {frames} frames, {} s, {size} bytes", duration_ms / 1000);
-            shared.lock().unwrap().finished.push(RecordedVideo {
-                path,
-                uid: file.uid.iter().map(|b| format!("{b:02x}")).collect(),
-                start_unix_ms: file.start_unix_ms,
-                end_unix_ms: file.end_unix_ms,
-                duration_ms,
-                codec: match file.codec {
-                    VideoCodec::H265 => "hevc".into(),
-                    _ => "h264".into(),
-                },
-                width: file.config.width,
-                height: file.config.height,
-                frames,
-                size,
-            });
-        }
-        Err(e) => {
+    if finish {
+        let done = file.writer.finish().and_then(|w| w.into_inner().map_err(|e| e.into_error())).and_then(|f| f.sync_all());
+        if let Err(e) = done {
             log::warn!("[video] recording {path} could not be closed cleanly: {e}");
             shared.lock().unwrap().error.get_or_insert(format!("{path}: {e}"));
+        }
+    }
+    let size = std::fs::metadata(&file.path).map(|m| m.len()).unwrap_or(0);
+    log::info!("[video] recording closed: {path}, {frames} frames, {} s, {size} bytes", duration_ms / 1000);
+    shared.lock().unwrap().finished.push(RecordedVideo {
+        path,
+        uid: file.uid.iter().map(|b| format!("{b:02x}")).collect(),
+        start_unix_ms: file.start_unix_ms,
+        end_unix_ms: file.end_unix_ms,
+        duration_ms,
+        codec: match file.codec {
+            VideoCodec::H265 => "hevc".into(),
+            _ => "h264".into(),
+        },
+        width: file.config.width,
+        height: file.config.height,
+        frames,
+        size,
+    });
+}
+
+/// A new file under `stem`, never over an existing one: a second recording within the same second gets
+/// a counter.
+fn create_unique(dir: &Path, stem: &str) -> std::io::Result<(File, PathBuf)> {
+    let mut n = 1u32;
+    loop {
+        let name = if n == 1 { format!("{stem}.mkv") } else { format!("{stem}_{n}.mkv") };
+        let path = dir.join(name);
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(f) => return Ok((f, path)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && n < 100 => n += 1,
+            Err(e) => return Err(e),
         }
     }
 }
@@ -294,7 +318,7 @@ struct FileWriter {
 impl FileWriter {
     fn cut(&mut self) {
         if let Some(f) = self.open.take() {
-            close(f, &self.shared);
+            close(f, &self.shared, true);
         }
     }
 
@@ -313,13 +337,13 @@ impl FileWriter {
                 // A keyframe without parameter sets cannot head a file; the next one may carry them.
                 let Some(config) = config else { return true };
                 self.part += 1;
-                let file_name = if self.part == 1 { format!("{}.mkv", self.name) } else { format!("{}_part{}.mkv", self.name, self.part) };
-                let path = self.dir.join(file_name);
+                let stem = if self.part == 1 { self.name.clone() } else { format!("{}_part{}", self.name, self.part) };
                 let uid = new_segment_uid();
-                let created = File::create(&path)
-                    .and_then(|f| MkvWriter::create(BufWriter::with_capacity(1 << 20, f), au.codec, &config, au.arrived_ms, uid));
+                let created = create_unique(&self.dir, &stem).and_then(|(f, path)| {
+                    MkvWriter::create(BufWriter::with_capacity(1 << 20, f), au.codec, &config, au.arrived_ms, uid).map(|w| (w, path))
+                });
                 match created {
-                    Ok(writer) => {
+                    Ok((writer, path)) => {
                         log::info!("[video] recording to {}", path.display());
                         self.shared.lock().unwrap().file = Some(path.to_string_lossy().to_string());
                         self.open = Some(OpenFile {
@@ -334,8 +358,8 @@ impl FileWriter {
                         });
                     }
                     Err(e) => {
-                        log::warn!("[video] recording: cannot create {}: {e}", path.display());
-                        self.shared.lock().unwrap().error = Some(format!("{}: {e}", path.display()));
+                        log::warn!("[video] recording: cannot create {stem}.mkv in {}: {e}", self.dir.display());
+                        self.shared.lock().unwrap().error = Some(format!("{}: {e}", self.dir.join(stem).display()));
                         return false;
                     }
                 }
@@ -346,8 +370,10 @@ impl FileWriter {
         if let Err(e) = f.writer.write_frame(ms, au.keyframe, &nals) {
             log::warn!("[video] recording: write to {} failed: {e}", f.path.display());
             self.shared.lock().unwrap().error = Some(format!("{}: {e}", f.path.display()));
-            // What is on disk stays playable; closing would only fail the same way.
-            self.open = None;
+            // Finishing would only fail the same way.
+            if let Some(f) = self.open.take() {
+                close(f, &self.shared, false);
+            }
             return false;
         }
         f.end_unix_ms = au.arrived_ms;

@@ -9,6 +9,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { connection } from '$lib/stores/connection';
 import { settings } from '$lib/stores/settings';
 import { videoState } from '$lib/stores/video';
+import { vehicleDbFindByCraftName, vehicleDbFindByFcUid } from '$lib/stores/flightlog';
 import { isArmed } from '$lib/controllers/vehicleControl';
 import { hasVideoRecording } from '$lib/platform';
 
@@ -48,10 +49,31 @@ async function refreshStatus(): Promise<void> {
   }
 }
 
+/** The library vehicle's name (found like a flight finds its vehicle: FC id, then craft name), else the
+ *  craft name; null leaves the backend's generic name. */
+async function fileNameVehicle(): Promise<string | null> {
+  const info = get(connection).fcInfo;
+  const dbPath = get(settings).flightLogDbPath;
+  const craft = info?.craft_name?.trim() || null;
+  try {
+    const v =
+      (info?.fc_uid ? await vehicleDbFindByFcUid(info.fc_uid, dbPath) : null) ??
+      (craft ? await vehicleDbFindByCraftName(craft, dbPath) : null);
+    if (v?.name.trim()) return v.name.trim();
+  } catch (e) {
+    console.warn('[video] vehicle library lookup failed', e);
+  }
+  return craft;
+}
+
 async function startRecording(): Promise<void> {
   try {
-    const vehicle = get(connection).fcInfo?.craft_name || null;
-    await invoke('video_record_start', { dir: get(videoState).recordDir || null, vehicle });
+    const vehicle = await fileNameVehicle();
+    await invoke('video_record_start', {
+      dir: get(videoState).recordDir || null,
+      vehicle,
+      dbPath: get(settings).flightLogDbPath || null,
+    });
     statusTimer ??= setInterval(() => void refreshStatus(), STATUS_MS);
     await refreshStatus();
   } catch (e) {

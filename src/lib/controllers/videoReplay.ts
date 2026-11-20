@@ -8,7 +8,14 @@
 import { get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
 import { flightVideos } from '$lib/stores/flightlog';
-import { enterVideoReplay, leaveVideoReplay, setVideoReplayGap, stopVideo, videoState } from '$lib/stores/video';
+import {
+  enterVideoReplay,
+  leaveVideoReplay,
+  reportVideoReplayFailure,
+  setVideoReplayGap,
+  stopVideoForReplay,
+  videoState,
+} from '$lib/stores/video';
 import { hasVideoRecording } from '$lib/platform';
 
 export interface VideoReplayPosition {
@@ -33,12 +40,16 @@ let lastKey = '';
 let queue: Promise<void> = Promise.resolve();
 
 async function open(flightId: number, dbPath: string): Promise<void> {
+  let stoppedLive = false;
   try {
     const videoDir = get(videoState).recordDir;
     const videos = await flightVideos(flightId, dbPath, videoDir);
     if (wanted !== flightId || !videos.some((v) => v.exists)) return;
     // The recording takes the decode sink: the live stream ends, and stays off.
-    if (get(videoState).enabled) stopVideo();
+    if (get(videoState).enabled) {
+      stopVideoForReplay();
+      stoppedLive = true;
+    }
     const info = await invoke<{ codec: string; width: number; height: number }>('video_replay_open', {
       flightId,
       dbPath: dbPath || null,
@@ -51,12 +62,14 @@ async function open(flightId: number, dbPath: string): Promise<void> {
     if (last) send(last);
   } catch (e) {
     console.warn('[video] replay of the recording failed', e);
+    if (stoppedLive) reportVideoReplayFailure(String(e));
   }
 }
 
 async function close(): Promise<void> {
   if (openFlight == null) return;
   openFlight = null;
+  clearTimeout(readyTimer);
   // Stopped by hand meanwhile (Stop video): the store has left replay already.
   if (!get(videoState).replay) return;
   leaveVideoReplay();

@@ -14,7 +14,7 @@ use crate::flightlog::types::{
 };
 
 /// Whether the app runs in portable mode (`.portable` marker next to the executable).
-fn portable_mode() -> bool {
+pub(crate) fn portable_mode() -> bool {
     std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|p| p.join(".portable").exists()))

@@ -279,10 +279,8 @@ fn run_sink(
                 DispatchMessageW(&msg);
             }
         }
-        // Geometry / visibility FIRST and off the frame channel: the newest values win, so a
-        // drag's 60 rect updates a second cost one SetWindowPos per pass instead of queueing
-        // behind the frames (see `Shared::ctrl`). The layer then lands within a pass of the
-        // DOM hole, and show/hide is immediate.
+        // Geometry / visibility first and off the frame channel: the newest values win, so a drag costs
+        // one SetWindowPos per pass instead of queueing behind frames (`Shared::ctrl`).
         if let Some(c) = shared.take_ctrl() {
             if let Some(surfaces) = c.surfaces {
                 // A surface that just appeared would stay an empty hole until the next picture —
@@ -662,10 +660,6 @@ impl SinkState {
         }
     }
 
-    /// Feed one access unit and render every frame it yields. H264 goes in as the Annex-B
-    /// bytes the depacketizer produced; HEVC is converted to the MP4-style diet the
-    /// HEVCVideoExtension MFT expects (see `create_decoder`), and dropped until the
-    /// stream has delivered its parameter sets and an IRAP to start on.
     fn hide(&mut self, ts_90k: u64) {
         // A picture the decoder never hands out must not stay here for good.
         if self.hidden.len() > 2048 {
@@ -674,6 +668,8 @@ impl SinkState {
         self.hidden.insert((ts_90k as i64) * 10_000_000 / 90_000);
     }
 
+    /// Feed one access unit and render what it yields. HEVC is dropped until the stream has shown its
+    /// parameter sets and an IRAP (see `create_decoder`).
     unsafe fn feed(&mut self, au: &[u8], ts_90k: u64, shared: &Shared) -> Result<(), String> {
         if self.codec == SinkCodec::H265 && !unsafe { self.prepare_hevc(au)? } {
             return Ok(()); // pre-IRAP warm-up — nothing to decode yet
@@ -857,6 +853,8 @@ impl SinkState {
             // Stream-change etiquette: clear the stale output type FIRST — several MFTs
             // (the HEVC one included) enumerate nothing while one is still set.
             let _ = self.decoder.SetOutputType(0, None, 0);
+            // A picture of the old format must not be drawn again with the new picture size.
+            self.last_shown = None;
             let mut i = 0u32;
             loop {
                 let mt: IMFMediaType = match self.decoder.GetOutputAvailableType(0, i) {

@@ -85,7 +85,8 @@ impl Clock {
 
 pub struct Replay {
     stop: Arc<AtomicBool>,
-    /// The picture for the reported position is on screen. Cleared by a move, set by the thread.
+    /// The picture for the reported position was handed to the sink. Cleared by a move and in a gap, set
+    /// by the thread.
     ready: Arc<AtomicBool>,
     /// Show the current picture again from this moment on (see `refresh`).
     redo: Arc<Mutex<Option<Instant>>>,
@@ -113,7 +114,7 @@ impl Replay {
     }
 
     /// The replay's position. Returns whether a recording covers it (`false` = gap) and whether its
-    /// picture is on screen already.
+    /// picture was handed to the sink already.
     pub fn sync(&self, flight_ms: f64, playing: bool, rate: f64) -> (bool, bool) {
         let mut c = self.clock.lock().unwrap();
         if (c.now() - flight_ms).abs() > CLOCK_TOLERANCE_MS * rate.max(1.0) {
@@ -124,7 +125,11 @@ impl Replay {
             let just_paused = !playing && (c.playing || (c.just_paused && (c.flight_ms - flight_ms).abs() < 1.0));
             *c = Clock { flight_ms, at: Instant::now(), playing, rate, just_paused };
         }
-        (part_at(&self.parts, flight_ms).is_some(), self.ready.load(Ordering::SeqCst))
+        let covered = part_at(&self.parts, flight_ms).is_some();
+        if !covered {
+            self.ready.store(false, Ordering::SeqCst);
+        }
+        (covered, self.ready.load(Ordering::SeqCst))
     }
 }
 
@@ -236,7 +241,11 @@ fn run(
         };
         let jump = match o.shown_ms {
             None => true,
-            Some(shown) => target < shown - back_ok || target - shown > SKIP_AHEAD_MS,
+            // Forward only when that lands on a later keyframe: inside a long GOP the way to the target
+            // leads through the pictures after `shown`, and a seek would start it over.
+            Some(shown) => {
+                target < shown - back_ok || (target - shown > SKIP_AHEAD_MS && o.file.keyframe_before(target) > shown)
+            }
         };
         if jump {
             if !forced && last_seek.elapsed() < SEEK_MIN_GAP {

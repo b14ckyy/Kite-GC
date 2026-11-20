@@ -610,8 +610,6 @@ pub struct DetachedChrome {
     pub chrome: Vec<[f64; 4]>,
 }
 
-// ── Recording of the native RTSP stream (video/record) ──
-
 /// `<Videos>/KiteGC` — where recordings go unless the user chose a folder.
 fn default_record_dir() -> std::path::PathBuf {
     dirs::video_dir().or_else(dirs::home_dir).unwrap_or_default().join("KiteGC")
@@ -637,11 +635,26 @@ pub fn video_record_enable(on: bool, native_rtsp: State<'_, crate::video::rtsp_n
     native_rtsp.recorder().set_enabled(on);
 }
 
-/// A vehicle name as the head of a file name: letters and digits kept, everything else an underscore.
 fn file_name_part(vehicle: &str) -> String {
     let cleaned: String = vehicle.trim().chars().map(|c| if c.is_alphanumeric() || c == '-' { c } else { '_' }).collect();
     let cleaned = cleaned.trim_matches('_');
     if cleaned.is_empty() { "Video".to_string() } else { cleaned.chars().take(40).collect() }
+}
+
+/// The flight database of the running recording: an app exit while armed has no frontend to name it.
+static RECORD_DB: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mutex::new(None);
+
+fn flight_db_file(db_path: Option<String>) -> std::path::PathBuf {
+    crate::flightlog::db::resolve_db_path(&db_path.unwrap_or_default(), crate::commands::flightlog::portable_mode())
+}
+
+/// App exit: close a running recording and leave it waiting, so the flight resumed at the next start
+/// still gets it.
+pub fn finish_recording_at_exit(native_rtsp: &crate::video::rtsp_native::NativeRtsp) {
+    let files = native_rtsp.recorder().stop();
+    if let Some(db_file) = RECORD_DB.lock().unwrap_or_else(|e| e.into_inner()).take() {
+        crate::flightlog::video_link::add_waiting(&db_file, &files);
+    }
 }
 
 /// Start recording into `dir` (empty = the default folder). The file is named `<vehicle>_<local time>`.
@@ -649,8 +662,10 @@ fn file_name_part(vehicle: &str) -> String {
 pub fn video_record_start(
     dir: Option<String>,
     vehicle: Option<String>,
+    db_path: Option<String>,
     native_rtsp: State<'_, crate::video::rtsp_native::NativeRtsp>,
 ) -> Result<(), String> {
+    *RECORD_DB.lock().unwrap_or_else(|e| e.into_inner()) = Some(flight_db_file(db_path));
     let dir = record_dir(dir.as_deref());
     let name = format!(
         "{}_{}",
@@ -667,8 +682,8 @@ pub fn video_record_stop(
     native_rtsp: State<'_, crate::video::rtsp_native::NativeRtsp>,
 ) -> Vec<crate::video::record::RecordedVideo> {
     let files = native_rtsp.recorder().stop();
-    let portable = std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.join(".portable").exists())).unwrap_or(false);
-    let db_file = crate::flightlog::db::resolve_db_path(&db_path.unwrap_or_default(), portable);
+    RECORD_DB.lock().unwrap_or_else(|e| e.into_inner()).take();
+    let db_file = flight_db_file(db_path);
     crate::flightlog::video_link::add_waiting(&db_file, &files);
     match crate::flightlog::db::open_database(&db_file) {
         Ok(conn) => crate::flightlog::video_link::attach_to_saved_flights(&conn, &db_file),
@@ -682,8 +697,6 @@ pub fn video_record_status(native_rtsp: State<'_, crate::video::rtsp_native::Nat
     native_rtsp.recorder().status()
 }
 
-// ── Replay of a flight's recordings in step with the log replay (video/record/replay) ──
-
 /// Open the recordings of `flight_id` on the decode sink; a live stream ends. Fails when the flight has
 /// no recording below the video folder.
 #[tauri::command(async)]
@@ -696,8 +709,7 @@ pub fn video_replay_open(
 ) -> Result<serde_json::Value, String> {
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     {
-        let portable = std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.join(".portable").exists())).unwrap_or(false);
-        let db_file = crate::flightlog::db::resolve_db_path(&db_path.unwrap_or_default(), portable);
+        let db_file = flight_db_file(db_path);
         let conn = crate::flightlog::db::open_database(&db_file).map_err(|e| format!("Database error: {e}"))?;
         let parts = crate::flightlog::video_link::replay_parts(&conn, flight_id, &record_dir(video_dir.as_deref()))
             .map_err(|e| format!("Database error: {e}"))?;
@@ -725,7 +737,7 @@ pub fn video_replay_open(
 }
 
 /// The replay's position: flight time (ms from the flight's start), running or not, speed. Returns whether
-/// a recording covers that time and whether its picture is on screen; `null` while no recording is open.
+/// a recording covers it and whether its picture was handed to the sink; `null` while none is open.
 #[tauri::command]
 pub fn video_replay_sync(
     flight_ms: f64,

@@ -1,13 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-//! Recorded videos find their flight by time. A recording ends at disarm, the flight row may come much
-//! later (End Flight dialog, a pending session resumed after a restart) or never (discarded), so finished
-//! recordings wait in a small file next to the database until a flight that overlaps them is committed.
-//!
-//! A flight knows its video by the Matroska segment UID (`fingerprint`) and a path relative to the video
-//! folder (`rel_path`) — never by an absolute path, so a logbook export carries nothing of this machine.
-//! The file may be renamed or sorted into subfolders: `resolve` finds it by its UID and corrects the row.
+//! Finished recordings wait in a file next to the database until the flight they fall into is committed.
+//! A flight knows its video by the segment UID and a path relative to the video folder, never an absolute
+//! one (an export carries nothing of this machine); `resolve` finds a renamed or moved file by its UID.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -21,6 +17,9 @@ use crate::video::record::RecordedVideo;
 const WAITING_FILE: &str = "video_recordings.json";
 /// A recording nobody claimed is forgotten after this long; its file stays where it is.
 const WAITING_MAX_MS: i64 = 30 * 24 * 3600 * 1000;
+
+/// The list is read, changed and written back from the command pool and from the telemetry thread.
+static WAITING_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn waiting_path(db_file: &Path) -> PathBuf {
     db_file.parent().unwrap_or(Path::new(".")).join(WAITING_FILE)
@@ -48,19 +47,21 @@ fn write_waiting(db_file: &Path, list: &[RecordedVideo]) {
     }
 }
 
-/// Finished recordings wait for the flight they belong to.
 pub fn add_waiting(db_file: &Path, videos: &[RecordedVideo]) {
     if videos.is_empty() {
         return;
     }
+    let _lock = WAITING_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut list = read_waiting(db_file);
     list.extend(videos.iter().cloned());
     write_waiting(db_file, &list);
 }
 
-/// Attach every waiting recording that overlaps the flight in time. The two sync anchors are the
-/// recording's first and last picture on the flight's clock (ms from `start_time`).
+/// Attach every waiting recording whose middle lies in the flight: the pre-roll of a quick re-arm reaches
+/// back into the flight before, which must not take it. The two sync anchors are the recording's first
+/// and last picture on the flight's clock (ms from `start_time`).
 pub fn attach_waiting(conn: &Connection, db_file: &Path, flight_id: i64, flight: &Flight) {
+    let _lock = WAITING_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let list = read_waiting(db_file);
     if list.is_empty() {
         return;
@@ -70,7 +71,8 @@ pub fn attach_waiting(conn: &Connection, db_file: &Path, flight_id: i64, flight:
     let now = chrono::Utc::now().timestamp_millis();
     let mut keep = Vec::new();
     for v in list {
-        if v.start_unix_ms > end || v.end_unix_ms < start {
+        let middle = v.start_unix_ms + (v.end_unix_ms - v.start_unix_ms) / 2;
+        if middle > end || middle < start {
             if now - v.end_unix_ms < WAITING_MAX_MS {
                 keep.push(v);
             }
@@ -111,9 +113,6 @@ pub fn attach_waiting(conn: &Connection, db_file: &Path, flight_id: i64, flight:
 /// The flight may already be in the database when its recording ends (auto-save at disarm): offer the
 /// waiting recordings to the newest flights.
 pub fn attach_to_saved_flights(conn: &Connection, db_file: &Path) {
-    if read_waiting(db_file).is_empty() {
-        return;
-    }
     let ids: Vec<i64> = conn
         .prepare("SELECT id FROM flights ORDER BY id DESC LIMIT 10")
         .and_then(|mut s| s.query_map([], |r| r.get(0))?.collect())
@@ -125,8 +124,11 @@ pub fn attach_to_saved_flights(conn: &Connection, db_file: &Path) {
     }
 }
 
-/// How deep below the video folder a recording is looked for.
 const SEARCH_DEPTH: usize = 6;
+/// A recording that was not found is not searched again for this long: the details and the replay ask
+/// one after the other, and the search reads the head of every file below the folder.
+const MISSING_TTL: std::time::Duration = std::time::Duration::from_secs(20);
+static MISSING: std::sync::Mutex<Vec<(PathBuf, String, std::time::Instant)>> = std::sync::Mutex::new(Vec::new());
 
 /// The `.mkv` files below `dir` whose segment UID is one of `wanted`, by UID. Stops when all are found.
 fn find_by_uid(dir: &Path, wanted: &mut HashSet<String>, depth: usize, found: &mut HashMap<String, PathBuf>) {
@@ -180,9 +182,19 @@ fn resolve(conn: &Connection, root: &Path, rows: &[Row]) -> HashMap<i64, PathBuf
     if missing.is_empty() {
         return at;
     }
-    let mut wanted: HashSet<String> = missing.iter().filter_map(|r| r.uid.clone()).collect();
+    let mut known = MISSING.lock().unwrap_or_else(|e| e.into_inner());
+    known.retain(|(_, _, at)| at.elapsed() < MISSING_TTL);
+    let mut wanted: HashSet<String> = missing
+        .iter()
+        .filter_map(|r| r.uid.clone())
+        .filter(|u| !known.iter().any(|(dir, uid, _)| dir == root && uid == u))
+        .collect();
     let mut found = HashMap::new();
-    find_by_uid(root, &mut wanted, SEARCH_DEPTH, &mut found);
+    if !wanted.is_empty() {
+        find_by_uid(root, &mut wanted, SEARCH_DEPTH, &mut found);
+        known.extend(wanted.into_iter().map(|u| (root.to_path_buf(), u, std::time::Instant::now())));
+    }
+    drop(known);
     for row in missing {
         let Some(path) = row.uid.as_ref().and_then(|u| found.get(u)) else { continue };
         let rel = path.strip_prefix(root).unwrap_or(path).to_string_lossy().replace('\\', "/");
@@ -226,7 +238,6 @@ pub fn replay_parts(conn: &Connection, flight_id: i64, root: &Path) -> rusqlite:
         .collect())
 }
 
-/// A flight's video as the logbook shows it.
 #[derive(Debug, Serialize)]
 pub struct FlightVideo {
     pub id: i64,

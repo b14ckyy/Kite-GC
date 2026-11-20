@@ -112,7 +112,7 @@
   });
 
   function videoInfo(v: FlightVideo): string {
-    const parts = [];
+    const parts: string[] = [];
     if (v.duration_ms != null) parts.push(formatDurationSec(Math.round(v.duration_ms / 1000)));
     if (v.width && v.height) parts.push(`${v.width}×${v.height}`);
     if (v.codec) parts.push(v.codec === 'hevc' ? 'H.265' : v.codec === 'h264' ? 'H.264' : v.codec);

@@ -295,7 +295,7 @@ function savePrefs(): void {
       STORAGE_KEY,
       JSON.stringify({
         kind: s.kind,
-        enabled: s.enabled,
+        enabled: s.enabled && !s.replay,
         deviceId: s.deviceId,
         resolution: s.resolution,
         cameraFps: s.cameraFps,
@@ -881,11 +881,11 @@ async function startMjpegPath(url: string, requireCopy = false): Promise<boolean
 
 /** Stop the in-process native RTSP client (idempotent, fire-and-forget) and undo the
  *  decode-sink surface state (hole clips, router, monitor) if that route was active. */
-function stopKiteRtsp(): void {
+function stopKiteRtsp(keepClient = false): void {
   stopKiteStatsMonitor();
   stopNativeSurfaceRouter();
   if (get(videoState).nativeSink) patch({ nativeSink: false, nativeSinkCodec: null });
-  void invoke('video_rtsp_native_stop').catch(() => {});
+  if (!keepClient) void invoke('video_rtsp_native_stop').catch(() => {});
 }
 
 /** Presented-fps readout of the native decode sink (updated by the 1 Hz monitor below);
@@ -1353,7 +1353,7 @@ function startRtspStallMonitor(pc: RTCPeerConnection): void {
  *  after a short backoff. Guarded so an explicit stop (kind changed / disabled) ends it. */
 function scheduleRtspReconnect(): void {
   const st = get(videoState);
-  if (st.kind !== 'rtsp' || !st.enabled) return; // user stopped → do not reconnect
+  if (st.kind !== 'rtsp' || !st.enabled || st.replay) return; // user stopped → do not reconnect
   // The loop is unbounded by design, so logging every attempt would fill the file on a source that
   // never comes back. Log the first few, then every tenth — enough to see it is still going.
   const attempt = st.reconnectAttempt + 1;
@@ -1410,6 +1410,11 @@ function normalizeRtspUrl(raw: string): string {
  *  frames return or the user stops). `reconnect` distinguishes a loop retry from a fresh start. */
 export async function startRtsp(opts?: { reconnect?: boolean }): Promise<void> {
   const reconnect = opts?.reconnect ?? false;
+  // A recording plays: a retry of the old stream has no say, a deliberate start takes over from it.
+  if (get(videoState).replay) {
+    if (reconnect) return;
+    leaveVideoReplay();
+  }
   clearRtspTimers();
   stopTracks(); // release the camera / previous peer connection
   const st = get(videoState);
@@ -1621,20 +1626,31 @@ export function startActive(): Promise<void> {
 
 /** Stop the source and release the camera / streaming engine. */
 export function stopVideo(): void {
-  const wasBackend = get(videoState).kind === 'rtsp' || get(videoState).kind === 'native';
+  stopSource(false);
+}
+
+/** Stop the live source for a recording that is about to open. The native client stays untouched: the
+ *  open ends it itself, and a stop sent now could arrive after it and end the recording. */
+export function stopVideoForReplay(): void {
+  stopSource(true);
+}
+
+function stopSource(keepNativeClient: boolean): void {
+  const s = get(videoState);
+  const wasBackend = s.kind === 'rtsp' || s.kind === 'native' || s.replay;
   clearRtspTimers(); // end the RTSP reconnect loop on an explicit stop
   stopTracks();
   if (wasBackend) {
     void invoke('video_webrtc_stop').catch(() => {});
     void stopNativeMjpeg();
-    stopKiteRtsp();
+    stopKiteRtsp(keepNativeClient);
   }
   patch({ enabled: false, status: 'off', error: null, rtspEngine: null, mjpegUrl: null, activeTranscode: null, reconnecting: false, reconnectAttempt: 0, replay: false, replayGap: false });
   savePrefs();
 }
 
-/** The backend opened a flight's recording on the decode sink: show it like a live sink feed. Nothing is
- *  persisted — after the replay the source is off, as `stopVideo` left it. */
+/** The backend opened a flight's recording on the decode sink: show it like a live sink feed.
+ *  Runtime-only: `savePrefs` never stores `enabled` while `replay` is set. */
 export function enterVideoReplay(codec: string | null, width: number, height: number): void {
   patch({
     enabled: true,
@@ -1661,6 +1677,11 @@ export function leaveVideoReplay(): void {
   if (!get(videoState).replay) return;
   stopNativeSurfaceRouter();
   patch({ enabled: false, status: 'off', nativeSink: false, nativeSinkCodec: null, activeTranscode: null, replay: false, replayGap: false });
+}
+
+/** The recording could not be opened, with the live source already stopped for it. */
+export function reportVideoReplayFailure(reason: string): void {
+  patch({ status: 'error', error: get(t)('video.replayFailed', { values: { reason } }) });
 }
 
 export function setVideoReplayGap(gap: boolean): void {
@@ -1707,7 +1728,7 @@ export async function setRtspTransport(transport: RtspTransport): Promise<void> 
   patch({ rtspTransport: transport });
   savePrefs();
   const st = get(videoState);
-  if (st.enabled && st.kind === 'rtsp') await startRtsp();
+  if (st.enabled && st.kind === 'rtsp' && !st.replay) await startRtsp();
 }
 
 /** Toggle the in-process RTSP client (no MediaMTX/ffmpeg); restarts a live RTSP feed so the choice
@@ -1718,7 +1739,7 @@ export async function setRtspNativeClient(on: boolean): Promise<void> {
   patch({ rtspNativeClient: on, undocked: on ? get(videoState).undocked : false });
   savePrefs();
   const st = get(videoState);
-  if (st.enabled && st.kind === 'rtsp') await startRtsp();
+  if (st.enabled && st.kind === 'rtsp' && !st.replay) await startRtsp();
 }
 
 export function setRecordEnabled(on: boolean): void {

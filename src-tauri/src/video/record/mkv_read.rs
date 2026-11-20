@@ -68,7 +68,7 @@ impl MkvFile {
         let file = File::open(path)?;
         let len = file.metadata()?.len();
         let mut f = Self {
-            r: BufReader::with_capacity(1 << 20, file),
+            r: BufReader::with_capacity(1 << 14, file),
             len,
             codec: VideoCodec::H264,
             width: 0,

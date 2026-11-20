@@ -222,7 +222,7 @@ fn add_emulation(data: &[u8]) -> Vec<u8> {
 
 pub(crate) struct BitReader<'a> {
     data: &'a [u8],
-    pub(crate) pos: usize,
+    pos: usize,
 }
 
 impl<'a> BitReader<'a> {
