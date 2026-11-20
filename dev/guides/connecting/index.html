@@ -2126,12 +2126,18 @@ automatically:</p>
 <ol>
 <li>Connect with the <strong>MAVLink</strong> protocol as you would for ArduPilot.</li>
 <li>Kite recognises an INAV flight controller during the handshake and checks for the MSP tunnel (this
-   takes up to two seconds). If it answers, the connection status shows <strong>MSP/MAV</strong> and UAV Info lists
-   the real INAV version, board and craft name plus the feature badge <strong>MSP over MAVLink</strong>.</li>
+   takes up to two seconds, on a slow link up to ten). If it answers, the connection status shows
+   <strong>MSP/MAV</strong> and UAV Info lists the real INAV version, board and craft name plus the feature badge
+   <strong>MSP over MAVLink</strong>.</li>
 <li>From there the INAV features work as over a direct MSP link: mission upload and download (including
    EEPROM and multi-mission), safe homes, geozones, craft name, flight statistics. Telemetry itself
    still comes over MAVLink — nothing is polled through the tunnel.</li>
 </ol>
+<p>On a <strong>slow link</strong> — a radio with a small uplink, such as ELRS in MAVLink mode — Kite measures how long
+the flight controller takes to answer and gives the tunnel that much more time, when it looks for it
+and for the requests that follow. Connecting then takes noticeably longer, and so do mission and safe
+home transfers. After saving geozones on such a link Kite does not watch the flight controller
+restart; it reports the restart as done when the flight controller acknowledged the request.</p>
 <p>What you need on the INAV side: firmware <strong>10.0 or newer</strong>, a serial port with the <strong>MAVLink telemetry</strong>
 function, <code>mavlink_version</code> left at 2 (the default) and a board with more than 512 KB of flash (F722 and
 F411 boards have no MAVLink). Nothing needs to be enabled in the CLI.</p>

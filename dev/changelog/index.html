@@ -1800,6 +1800,8 @@ stays MAVLink; nothing is polled through the tunnel.</p>
 receiver are not available on this path. INAV versions before 10.0 connect over MAVLink on a
 best-effort basis and are not officially supported. Setup and limits:
 <a href="../guides/connecting/#inav-over-mavlink-mspmav">Connecting → INAV over MAVLink</a>. <a href="https://github.com/b14ckyy/Kite-GC/pull/202">#202</a></p>
+<p>On a slow link Kite measures the round trip and gives the tunnel more time, so it is found
+there too instead of falling back to plain MAVLink. [#337]</p>
 </details>
 <details class="info">
 <summary>Your own maps — online with your own key, offline from a folder</summary>
