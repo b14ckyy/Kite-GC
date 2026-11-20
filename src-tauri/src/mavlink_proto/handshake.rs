@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// MAVLink Handshake
-// Waits for the first HEARTBEAT from the FC, extracts system info,
-// sends a GCS HEARTBEAT back, and returns FcInfo.
+// MAVLink handshake: lock onto the autopilot HEARTBEAT, answer it, read AUTOPILOT_VERSION.
 
 use std::time::{Duration, Instant};
 
@@ -22,10 +20,20 @@ use super::parser::MavParser;
 /// Timeout waiting for the first FC HEARTBEAT
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// MAVLink handshake: wait for an autopilot HEARTBEAT, send ours back; returns (FcInfo, sysid, compid,
-/// uid2_valid). `uid2_valid` only for a non-zero AUTOPILOT_VERSION uid2 (ArduPilot / PX4) — INAV sends
-/// zeros, which (or no AUTOPILOT_VERSION) makes the connect path probe for the MSP tunnel.
-pub fn perform_handshake(transport: &mut dyn ByteTransport) -> Result<(FcInfo, u8, u8, bool), String> {
+/// What the MAVLink handshake found.
+pub struct Handshake {
+    pub fc_info: FcInfo,
+    pub sysid: u8,
+    pub compid: u8,
+    /// Only for a non-zero AUTOPILOT_VERSION uid2 (ArduPilot / PX4) — INAV sends zeros, which (or no
+    /// AUTOPILOT_VERSION) makes the connect path probe for the MSP tunnel.
+    pub uid2_valid: bool,
+    /// Request → AUTOPILOT_VERSION round trip, `None` without an answer — sizes the tunnel probe window.
+    pub version_rtt: Option<Duration>,
+}
+
+/// MAVLink handshake: wait for an autopilot HEARTBEAT, send ours back, ask for AUTOPILOT_VERSION.
+pub fn perform_handshake(transport: &mut dyn ByteTransport) -> Result<Handshake, String> {
     let mut parser = MavParser::new();
     let mut buf = [0u8; 512];
     let deadline = Instant::now() + HANDSHAKE_TIMEOUT;
@@ -185,13 +193,27 @@ pub fn perform_handshake(transport: &mut dyn ByteTransport) -> Result<(FcInfo, u
         log::info!("MAVLink handshake: requested AUTOPILOT_VERSION");
     }
 
-    // Wait up to 3s for AUTOPILOT_VERSION response
-    let version_deadline = Instant::now() + Duration::from_secs(3);
+    // A single request can get lost around the handshake: ask again after 1 s and 2 s, give up at 4 s.
+    // The round trip counts from the FIRST request — on a slow link its answer comes after a repeat.
+    const VERSION_REPEATS: [Duration; 2] = [Duration::from_secs(1), Duration::from_secs(2)];
+    const VERSION_WAIT: Duration = Duration::from_secs(4);
+    let version_asked = Instant::now();
+    let mut version_rtt = None;
+    let mut repeats_sent = 0;
     'version: loop {
-        if Instant::now() > version_deadline {
-            log::warn!("AUTOPILOT_VERSION not received within 3s — continuing with unknown version");
+        let waited = version_asked.elapsed();
+        if waited > VERSION_WAIT {
+            log::warn!("AUTOPILOT_VERSION not received within 4 s (3 requests) — continuing with unknown version");
             fc_info.fc_version = "unknown".into();
             break 'version;
+        }
+        if repeats_sent < VERSION_REPEATS.len() && waited >= VERSION_REPEATS[repeats_sent] {
+            repeats_sent += 1;
+            let frame = codec::serialize_v2(&header, &version_request, &mut seq);
+            match transport.write_bytes(&frame) {
+                Ok(_) => log::info!("MAVLink handshake: requested AUTOPILOT_VERSION again ({}/3)", repeats_sent + 1),
+                Err(e) => log::warn!("Failed to request AUTOPILOT_VERSION: {}", e),
+            }
         }
 
         match transport.read_bytes(&mut buf) {
@@ -208,6 +230,7 @@ pub fn perform_handshake(transport: &mut dyn ByteTransport) -> Result<(FcInfo, u
                             fc_info.hardware_revision = rev;
                         }
                         uid2_valid = v.uid2_valid;
+                        version_rtt = Some(version_asked.elapsed());
                         fc_info.fc_uid = v.fc_uid;
                         log::info!(
                             "AUTOPILOT_VERSION: {} v{} (sw=0x{:08X}, board={})",
@@ -225,7 +248,7 @@ pub fn perform_handshake(transport: &mut dyn ByteTransport) -> Result<(FcInfo, u
         }
     }
 
-    Ok((fc_info, fc_sysid, fc_compid, uid2_valid))
+    Ok(Handshake { fc_info, sysid: fc_sysid, compid: fc_compid, uid2_valid, version_rtt })
 }
 
 /// `MAV_CMD_REQUEST_MESSAGE` for `AUTOPILOT_VERSION` (148), addressed to `sysid` / `compid` — the
