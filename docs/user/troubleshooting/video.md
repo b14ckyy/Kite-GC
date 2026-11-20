@@ -69,6 +69,20 @@ the transport doesn't match the server (see above), or a firewall started blocki
 few reconnect cycles in a row are normal when a source restarts or the network path changes (e.g.
 switching between Wi-Fi and a cellular link).
 
+## macOS: an H.264 stream freezes and reconnects every few seconds
+
+Seen on the classic path (**Native RTSP client** switched off) with H.264 from **OBS using a hardware
+encoder** — NVENC and Quick Sync in our tests: the picture stops right after it starts, and Kite
+reconnects every few seconds, over and over. The same stream plays with the **Native RTSP client** on,
+and the same source plays on the classic path once OBS encodes in software (x264).
+
+- **Turn the Native RTSP client on** (Video panel → RTSP section; it is the default). That is the fix.
+- If you need the classic path, switch the source to a software H.264 encoder.
+
+The cause is in the stream itself: the macOS browser engine's decoder refuses it, and the classic path
+hands the stream on unchanged. Other hardware encoders may behave the same; we have not seen it with
+a camera so far.
+
 ## The picture stutters or shows "frames out of order"
 
 This is almost always the **source encoder**, not Kite. The classic direct path (Native RTSP client
