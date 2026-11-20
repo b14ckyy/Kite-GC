@@ -23,8 +23,8 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol, ProtocolObject};
 use objc2::{define_class, msg_send, AllocAnyThread, DefinedClass};
 use objc2_core_bluetooth::{
-    CBCentralManager, CBCentralManagerDelegate, CBCharacteristic, CBCharacteristicWriteType,
-    CBManagerState, CBPeripheral, CBPeripheralDelegate, CBService, CBUUID,
+    CBCentralManager, CBCentralManagerDelegate, CBCharacteristic, CBCharacteristicProperties,
+    CBCharacteristicWriteType, CBManagerState, CBPeripheral, CBPeripheralDelegate, CBService, CBUUID,
 };
 use objc2_foundation::{NSArray, NSData, NSDictionary, NSNumber, NSString, NSUUID};
 
@@ -338,13 +338,13 @@ pub async fn run_scan_session(
 /// Connect to a peripheral by its identifier UUID, discover a known serial profile, subscribe to the
 /// read characteristic and return a byte transport.
 pub async fn connect_ble(device_id: &str) -> Result<BleTransport, String> {
-    BleTransport::open(device_id).await
+    BleTransport::open(device_id, false).await
 }
 
-/// Passive-listen connect. iOS: same path as connect_ble (the profile handshake already subscribes to
-/// the read characteristic). Kept for interface parity with the desktop module.
+/// Listen-only connect, no profile needed: a radio's telemetry sits on a vendor service (FrSky:
+/// 0xFFF0), so every notifying characteristic outside the standard services is subscribed.
 pub async fn connect_ble_listen(device_id: &str, _app: tauri::AppHandle) -> Result<BleTransport, String> {
-    BleTransport::open(device_id).await
+    BleTransport::open(device_id, true).await
 }
 
 // ── Transport ───────────────────────────────────────────────────────────────────────────────────
@@ -355,13 +355,14 @@ pub struct BleTransport {
     _delegate: SendPtr<BleDelegate>,
     central: SendPtr<CBCentralManager>,
     peripheral: SendPtr<CBPeripheral>,
-    write_char: SendPtr<CBCharacteristic>,
+    /// `None` on a listen-only link.
+    write_char: Option<SendPtr<CBCharacteristic>>,
     profile_name: String,
     read_timeout: Duration,
 }
 
 impl BleTransport {
-    async fn open(device_id: &str) -> Result<Self, String> {
+    async fn open(device_id: &str, listen: bool) -> Result<Self, String> {
         let shared = Shared::new();
         let delegate = BleDelegate::new(shared.clone());
         let central: Retained<CBCentralManager> = unsafe {
@@ -400,6 +401,57 @@ impl BleTransport {
         }
 
         let services = unsafe { peripheral.services() }.ok_or_else(|| "no services".to_string())?;
+
+        if listen {
+            // Generic Access, Generic Attribute, Device Information never carry telemetry.
+            const STANDARD: [&str; 3] = ["1800", "1801", "180A"];
+            let mut vendor: Vec<Retained<CBService>> = Vec::new();
+            for i in 0..services.count() {
+                let svc = services.objectAtIndex(i);
+                let su = unsafe { svc.UUID() };
+                if STANDARD.iter().any(|s| uuid_eq(&su, s)) {
+                    continue;
+                }
+                unsafe { peripheral.discoverCharacteristics_forService(None, &svc) };
+                vendor.push(svc);
+            }
+            let wanted = vendor.len();
+            if !wait_until(&shared, Duration::from_secs(10), |s| s.chars_done >= wanted) {
+                return Err("characteristic discovery timed out".into());
+            }
+            let mut subscribed = 0usize;
+            for svc in &vendor {
+                let Some(chars) = (unsafe { svc.characteristics() }) else { continue };
+                for i in 0..chars.count() {
+                    let c = chars.objectAtIndex(i);
+                    let notifies = unsafe { c.properties() }
+                        .intersects(CBCharacteristicProperties::Notify | CBCharacteristicProperties::Indicate);
+                    log::info!(
+                        "[ble] listen: service {} characteristic {} notifies={notifies}",
+                        unsafe { svc.UUID().UUIDString() },
+                        unsafe { c.UUID().UUIDString() },
+                    );
+                    if notifies {
+                        unsafe { peripheral.setNotifyValue_forCharacteristic(true, &c) };
+                        subscribed += 1;
+                    }
+                }
+            }
+            if subscribed == 0 {
+                unsafe { central.cancelPeripheralConnection(&peripheral) };
+                return Err("nothing on this device notifies".into());
+            }
+            return Ok(Self {
+                shared,
+                _delegate: SendPtr(delegate),
+                central: SendPtr(central),
+                peripheral: SendPtr(peripheral),
+                write_char: None,
+                profile_name: "listen-only".to_string(),
+                read_timeout: Duration::from_millis(200),
+            });
+        }
+
         // Find the first known profile whose service is present.
         let mut chosen: Option<(&BleProfile, Retained<CBService>)> = None;
         for i in 0..services.count() {
@@ -441,7 +493,7 @@ impl BleTransport {
             _delegate: SendPtr(delegate),
             central: SendPtr(central),
             peripheral: SendPtr(peripheral),
-            write_char: SendPtr(write_char),
+            write_char: Some(SendPtr(write_char)),
             profile_name: profile.name.to_string(),
             read_timeout: Duration::from_millis(200),
         })
@@ -466,11 +518,14 @@ impl ByteTransport for BleTransport {
     }
 
     fn write_bytes(&mut self, data: &[u8]) -> Result<(), TransportError> {
+        let Some(write_char) = &self.write_char else {
+            return Err(TransportError::Io("listen-only BLE link has no write characteristic".into()));
+        };
         let nsdata = NSData::with_bytes(data);
         unsafe {
             self.peripheral.0.writeValue_forCharacteristic_type(
                 &nsdata,
-                &self.write_char.0,
+                &write_char.0,
                 CBCharacteristicWriteType::WithoutResponse,
             );
         }
