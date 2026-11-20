@@ -123,7 +123,7 @@ pub struct AdsbConfig {
 }
 
 /// One online ADS-B provider. `url` is a template with `{lat}` / `{lon}` / `{dist}` placeholders
-/// (`dist` is filled in NM); this covers both the `/v2/point/{lat}/{lon}/{dist}` (adsb.lol/.one) and
+/// (`dist` is filled in NM); this covers both the `/v2/point/{lat}/{lon}/{dist}` and
 /// the `/api/v2/lat/{lat}/lon/{lon}/dist/{dist}` (adsb.fi) shapes without special-casing.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
