@@ -2192,13 +2192,27 @@ for every flight: the recording starts when the connected vehicle is armed and e
   longer below it is shown struck through in the flight details.</li>
 <li><strong>Do not convert or re-save the file</strong> with another program if it should stay linked to its flight:
   tools that rewrite a Matroska file usually give it a new id.</li>
+<li><strong>Taking recordings to another Kite:</strong> export the flights as <code>.kflight</code> and let Kite copy their
+  recordings next to the file; the import on the other side offers to copy them into the recording
+  folder there. See <a href="../logbook/#exporting">Logbook → Exporting</a>.</li>
+<li><strong>Clean up unlinked recordings…</strong> (below the recording folder, shown while recording is switched
+  on) lists Kite's recordings in the folder that no flight in your logbook is linked to, with their
+  names and total size, and removes them when you confirm (recycle bin / trash where there is one).
+  The typical case is the recording of a flight you deleted while keeping the file. Left alone are
+  a recording that is still being written, including the earlier parts of it, a recording that
+  waits for its flight to be saved — also one a crash cut off; Kite keeps waiting for 30 days, even
+  after you discarded the flight — and every Matroska file Kite did not write. If you use
+  several flight databases with one recording folder, the recordings of the other databases count
+  as unlinked.</li>
 <li><strong>Dropouts:</strong> when the stream reconnects during a flight, the recording continues in a new file
   (<code>…_part2.mkv</code>). A new file also starts just below 4 GB, so a FAT32 drive works as a target.</li>
 <li><strong>If Kite is closed mid-flight,</strong> the recording is finished and joins the flight when that is saved
   after the next start.</li>
 <li><strong>After a crash or a power loss</strong> the file stays in the recording folder and plays up to the last
   keyframe that reached the disk; the last seconds can be missing. Such a file has no seek index, so
-  jumping around in it can be slow, and it is not listed in the flight's details.</li>
+  jumping around in it can be slow. It still joins its flight: when you start Kite again and the
+  interrupted flight is saved — continued after reconnecting or saved as it is — the recording from
+  before the crash is linked to it, next to the one made afterwards.</li>
 </ul>
 <p>Recording runs only while armed and connected; without a link nothing is recorded.</p>
 <h4 id="watching-the-recording-with-the-replay">Watching the recording with the replay<a class="headerlink" href="#watching-the-recording-with-the-replay" title="Permanent link">&para;</a></h4>

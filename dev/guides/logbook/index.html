@@ -2265,21 +2265,35 @@ ticks. They stay when you change the search, so you can collect flights over sev
   flight, ticked or not.</li>
 <li><strong>Delete</strong> removes the ticked flights after a confirmation — exactly those: a linked partner
   that is not ticked stays. The confirmation offers to add the battery usage of the deleted
-  flights to the lifetime totals of their batteries first.</li>
+  flights to the lifetime totals of their batteries first. When the flights have video recordings
+  that no other flight uses, Kite then asks whether to delete those files too (desktop); they go
+  to the recycle bin / trash where there is one, after the flights are deleted. The same question
+  follows the delete button of a single flight — except when only the live half of a linked pair
+  is deleted, because the flight stays.</li>
 </ul>
 <h2 id="exporting">Exporting<a class="headerlink" href="#exporting" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong><code>.kflight</code></strong> — export the open flight, or several at once (see
+<li>
+<p><strong><code>.kflight</code></strong> — export the open flight, or several at once (see
   <a href="#selecting-several-flights">Selecting several flights</a>), as Kite's portable flight file, to
   move them to another install. The file carries the mission a flight is linked to and the weather
   recorded with it; on import the mission is added to the Mission Manager's library, or the flight
   is linked to the entry that is already there. A file written by a <strong>newer</strong> Kite version is still
-  imported: Kite takes over what it knows and tells you that not all data could be imported.</li>
-<li><strong>Original log file</strong> — re-export the onboard log stored with the flight: an INAV Blackbox
+  imported: Kite takes over what it knows and tells you that not all data could be imported.</p>
+<p><strong>Video recordings</strong> are not inside the file. When an exported flight has recordings in the
+recording folder, Kite asks after the export whether to copy them as well; they go into a folder
+named after the file with <code>_video</code> added (<code>Flights_3.kflight</code> → <code>Flights_3_video</code>), next to it.
+Keep the two together. When you import such a file, Kite looks into that folder and asks whether
+to import the recordings of the flights in your logbook into your own recording folder; with
+them there the replay shows the video. A recording that is in your recording folder already is
+linked again by itself, and the import says so. Both questions can be declined, and both are
+desktop only.
+- <strong>Original log file</strong> — re-export the onboard log stored with the flight: an INAV Blackbox
   (<code>.bbl</code> / <code>.txt</code>), ArduPilot Dataflash (<code>.bin</code>) or PX4 ULog (<code>.ulg</code>). For a flight that came out of a multi-flight
   <code>.bbl</code>, this is that flight's own log, not the whole download. Imported <code>.tlog</code> / <code>.rawmsp</code> telemetry is parsed
-  straight in (not kept as a file), so there's nothing to re-export for those.</li>
-<li><strong>Track</strong> — export a flight's path as <strong>KMZ / KML</strong> (Google Earth), <strong>GPX</strong> or <strong>CSV</strong>.</li>
+  straight in (not kept as a file), so there's nothing to re-export for those.
+- <strong>Track</strong> — export a flight's path as <strong>KMZ / KML</strong> (Google Earth), <strong>GPX</strong> or <strong>CSV</strong>.</p>
+</li>
 </ul>
 <p>The proposed file name of a single flight is its vehicle name and location where known, followed by the
 flight's date and local time — <code>Flight_&lt;number&gt;</code> stands in when neither is known.</p>
@@ -2349,7 +2363,9 @@ dialog:</p>
 <li><strong>Export all flights</strong> writes every flight into one <code>.kflight</code> file, so you do not have to select
   them one by one to bring them into another Kite. Vehicles, batteries and missions that belong to no
   flight are not part of it. Kite shows the progress and, at the end, how many flights were written;
-  it refuses to start when less space is free than the database is large.</li>
+  it refuses to start when less space is free than the database is large. On the desktop it then asks
+  whether to copy the video recordings of those flights next to the file (see
+  <a href="#exporting">Exporting</a>).</li>
 </ul>
 <p><strong>Import database</strong> (Android and iOS) replaces the database in the app with a <code>.db</code> file exported
 this way: Kite names the flights in the file and in the app and asks before it replaces anything —
