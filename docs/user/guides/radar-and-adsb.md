@@ -37,10 +37,10 @@ ADS-B is the position broadcast that most manned aircraft transmit. Kite can col
 kinds of feed at once and merges them into **one ADS-B list** (de-duplicated by the aircraft's ICAO
 address, so the same plane seen by two feeds appears once):
 
-- **Online services** — public ADS-B aggregators over the internet. Two are **built-in** (adsb.lol and
-  adsb.fi — just toggle them on). You can **add more** as custom rows (name + URL template + optional API
-  key); **adsb.one** comes **pre-filled as an example** custom row (it's there for convenience but left
-  off by default, as that service has had server-side reliability issues). Set the **download radius**
+- **Online services** — public ADS-B aggregators over the internet. **adsb.fi** is **built-in** — just
+  toggle it on. You can **add more** as custom rows (name + URL template + optional API key) for any
+  service that answers in the same format, with the placeholders `{lat}`, `{lon}` and `{dist}` (nautical
+  miles) in the URL. Set the **download radius**
   (10–100 km) and the **poll interval** (2–30 s) under **Online service**. Online feeds are fetched
   **around the area you're looking at** — the 2D map centre or the 3D camera focus — so panning the map
   moves the query. No hardware needed.
@@ -64,9 +64,11 @@ Top to bottom, the ADS-B tab is organized into:
 
 Every source row has its own **on/off toggle** and a **status badge** — a green number is the live
 contact count from that feed, a red ✕ means it errored — so you can mute a feed without deleting it. A
-feed that fails (typically a provider's rate limit, HTTP 429) is **backed off automatically**: Kite doubles
-the spacing of that feed's requests after every failed attempt, up to one minute, and returns to your
-poll interval as soon as a request succeeds again. The other feeds keep their normal rate. An
+feed that fails is **backed off automatically**: Kite doubles the spacing of that feed's requests after
+every failed attempt, up to one minute, and returns to your poll interval as soon as a request succeeds
+again. When a provider answers that its **rate limit** is reached (HTTP 429) and says how long to wait,
+Kite sends that feed nothing until then — a daily quota can mean hours — and the ✕ reads *Rate limit
+reached* when you point at it. The other feeds keep their normal rate. An
 **enabled** row collapses to a single line (name · count · toggle); a **disabled** row expands to show
 its fields (URL / API key for online, the connection for a receiver) and a **delete** button. New rows
 start disabled so you can fill them in first.

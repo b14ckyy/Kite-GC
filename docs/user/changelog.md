@@ -560,6 +560,12 @@ inside the box of the feature release they belong to, so the notes for one relea
       vertical speed into the barometer-altitude frame. Kite showed no vertical speed on such a link
       and took the GPS altitude for a height above home, which left AGL and the 3D altitude without
       a reference. Kite now tells the two layouts apart by the frame itself, so both work. [#339]
+    - **Radar: adsb.lol is no longer a built-in source, a rate limit pauses a feed.** adsb.lol now
+      allows 500 requests a day per address, which Kite's polling uses up in well under an hour;
+      the feed then showed a source error for the rest of the day. **adsb.fi** is the built-in
+      source, and the example row for adsb.one, a service that no longer exists, is gone. A feed
+      whose provider reports its rate limit and a time to wait is left alone until then, and its
+      status says so. adsb.lol can still be added as a custom source. [#342]
     - **Telemetry mode: a lost link closes the connection.** When the source of a passive telemetry
       link went away — the radio's Bluetooth dropped, the TCP side closed — Kite kept showing
       "connected", and on Android the background notification and the screen hold stayed. The
