@@ -744,6 +744,7 @@
     "removeSource": "Odstrániť zdroj",
     "contacts": "Kontakty",
     "sourceError": "Chyba zdroja",
+    "sourceRateLimited": "Limit požiadaviek dosiahnutý, pozastavené do jeho obnovenia",
     "localSources": "Lokálne zdroje",
     "selectPort": "Vyberte port…",
     "portMissing": "nenájdený",

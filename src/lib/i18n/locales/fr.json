@@ -744,6 +744,7 @@
     "removeSource": "Supprimer la source",
     "contacts": "Contacts",
     "sourceError": "Erreur de source",
+    "sourceRateLimited": "Limite de requêtes atteinte, en pause jusqu'à sa réinitialisation",
     "localSources": "Sources locales",
     "selectPort": "Choisir un port…",
     "portMissing": "introuvable",

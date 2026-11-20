@@ -744,6 +744,7 @@
     "removeSource": "移除源",
     "contacts": "联系人",
     "sourceError": "源错误",
+    "sourceRateLimited": "已达到请求限制，暂停至限制重置",
     "localSources": "本地源",
     "selectPort": "选择端口…",
     "portMissing": "未找到",
