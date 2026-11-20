@@ -3,7 +3,7 @@
 # Run it from the Actions tab ("Release build" -> Run workflow) or with `gh workflow run release.yml`.
 # Every job uploads one artifact, named kite-gc-<platform>-<version>-<commit>; the files inside carry
 # the unified names of scripts/collect-release.*. Nothing is published: a release is put together by
-# hand from these and from the locally signed builds (macOS, Android).
+# hand from these and from the locally signed builds (macOS, Android — the APKs here are `_debug.apk`).
 #
 # Linux base: glibc is not bundled, so the build host's glibc is the floor for every user (24.04 =
 # 2.39). Never build on a newer base than the oldest system to support.
@@ -81,7 +81,6 @@ jobs:
           if-no-files-found: error
           path: release/*
 
-  # arm64 is a native build on GitHub's ARM runner, no cross-compile.
   linux:
     name: Build (Linux ${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
@@ -134,10 +133,8 @@ jobs:
           if-no-files-found: error
           path: release/*
 
-  # One APK per ABI (arm64, 32-bit ARM). Signed with the repository keystore when the four secrets exist
-  # (KEYSTORE_B64 = base64 of the .jks, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD); without them
-  # Gradle signs with a debug key the runner makes up, and such an APK never installs over a copy
-  # signed with another key — a test build, not a release.
+  # Without the four KEYSTORE_* secrets Gradle signs with a debug key the runner makes up: such an APK
+  # never installs over a copy signed with another key — a test build, not a release.
   android:
     name: Build (Android arm64 + armv7)
     runs-on: ubuntu-latest
@@ -208,6 +205,10 @@ jobs:
             echo "== $apk"
             "$APKSIGNER" verify --verbose "$apk"
           done
+      # Same file name as the release-key APK otherwise, and one overwrites the other in release/.
+      - name: Mark the APKs as debug-signed
+        if: ${{ env.KEYSTORE_B64 == '' }}
+        run: for f in release/*_installer.apk; do mv "$f" "${f%_installer.apk}_debug.apk"; done
       - name: Name the artifact
         id: build
         run: echo "id=$(node -p "require('./package.json').version")-${GITHUB_SHA::8}" >> "$GITHUB_OUTPUT"

@@ -68,5 +68,5 @@ npm run tauri build
 
 echo "[4/4] Build completed successfully!"
 
-# Gather the standalone binary + packages into <repo>/release/ (git-ignored).
+# Gather the packages + the portable ZIP into <repo>/release/ (git-ignored).
 bash "$(dirname "$0")/collect-release.sh"
