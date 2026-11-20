@@ -48,10 +48,8 @@ PLATFORMS=(
     "darwin-x86_64       KiteGC_macOS_universal_${VERSION}_update.tar.gz"
     "linux-x86_64-deb    KiteGC_Linux_x64_${VERSION}_installer.deb"
     "linux-x86_64-rpm    KiteGC_Linux_x64_${VERSION}_installer.rpm"
-    "linux-x86_64        KiteGC_Linux_x64_${VERSION}_standalone.AppImage"
     "linux-aarch64-deb   KiteGC_Linux_arm64_${VERSION}_installer.deb"
     "linux-aarch64-rpm   KiteGC_Linux_arm64_${VERSION}_installer.rpm"
-    "linux-aarch64       KiteGC_Linux_arm64_${VERSION}_standalone.AppImage"
 )
 
 # 0. CI builds an unsigned macOS archive under the same name. Installed by the updater it replaces a

@@ -1,7 +1,7 @@
 #!/bin/bash
 # ============================================================
 # Kite Ground Control — Linux Build Script
-# Builds standalone Linux packages (.deb, .AppImage, .rpm)
+# Builds the Linux packages (.deb, .rpm) and the portable ZIP
 #
 # Recommended: Use "just build-linux" or "just build" instead
 # ============================================================

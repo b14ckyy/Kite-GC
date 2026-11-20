@@ -67,7 +67,7 @@ if ($collected.Count -gt 0) {
 
 # Android: one release APK per ABI folder — newest per folder, raw output deleted afterwards.
 $apkRoot = Join-Path $root 'src-tauri\gen\android\app\build\outputs\apk'
-$abiNames = @{ 'arm64' = 'arm64'; 'armv7' = 'armv7'; 'x86_64' = 'x64'; 'x86' = 'x86'; 'universal' = 'universal' }
+$abiNames = @{ 'arm64' = 'arm64'; 'arm' = 'armv7'; 'armv7' = 'armv7'; 'x86_64' = 'x64'; 'x86' = 'x86'; 'universal' = 'universal' }
 Get-ChildItem $apkRoot -Directory -ErrorAction SilentlyContinue | ForEach-Object {
     $abiDir = $_
     $apk = Get-ChildItem (Join-Path $abiDir.FullName 'release\*.apk') -ErrorAction SilentlyContinue |

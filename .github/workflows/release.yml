@@ -1,27 +1,12 @@
 # Kite Ground Control — Release build (manual)
 #
-# Manually triggered only (Actions tab -> "Release build" -> Run workflow, or
-# `gh workflow run release.yml`). Builds the distributable artifacts on a pinned,
-# broadly-compatible base and uploads them as downloadable workflow artifacts —
-# download them from the run and attach them to a GitHub release by hand.
+# Run it from the Actions tab ("Release build" -> Run workflow) or with `gh workflow run release.yml`.
+# Every job uploads one artifact, named kite-gc-<platform>-<version>-<commit>; the files inside carry
+# the unified names of scripts/collect-release.*. Nothing is published: a release is put together by
+# hand from these and from the locally signed builds (macOS, Android).
 #
-# Deliberately NOT triggered on push/tags: releases are cut on demand, not per commit.
-#
-# Linux is built on ubuntu-24.04, and the base decides two things at once.
-#
-# 1. The AppImage bundles the BUILD HOST's WebKitGTK (linuxdeploy takes what is installed), so the
-#    base picks the browser engine every AppImage user gets. jammy (22.04) is stuck on WebKitGTK
-#    2.50.4, which has a fault that pins ~300 % CPU forever after an RTSP/MJPEG feed is stopped —
-#    measured on a Debian laptop and a Raspberry Pi 4, and absent both from the .deb (system engine)
-#    and from a locally built AppImage, each on 2.52.5. noble (24.04) carries the 2.52 series.
-# 2. glibc is NOT bundled, so it comes from the target system and only ever works upwards: the
-#    highest GLIBC_* symbol in the binary is the floor. 22.04 gave 2.34 (ran on Debian 12 and
-#    Raspberry Pi OS Bookworm); 24.04 gives 2.39, so those systems now need a newer distribution
-#    or a local build. Accepted deliberately — an engine that burns a core forever is worse than a
-#    version floor, and a second "legacy" artifact was not wanted.
-#
-# Do NOT build on a rolling/newer base than the oldest target: it over-bundles newer libs and breaks
-# on older systems (e.g. the libgcrypt/libgpg-error symbol mismatch).
+# Linux base: glibc is not bundled, so the build host's glibc is the floor for every user (24.04 =
+# 2.39). Never build on a newer base than the oldest system to support.
 
 name: Release build
 
@@ -33,7 +18,7 @@ env:
 
 jobs:
   windows:
-    name: Build (Windows)
+    name: Build (Windows x64)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
@@ -50,18 +35,20 @@ jobs:
         run: npm run tauri build
       - name: Collect + rename artifacts
         run: powershell -ExecutionPolicy Bypass -File scripts/collect-release.ps1
+      - name: Name the artifact
+        id: build
+        shell: bash
+        run: echo "id=$(node -p "require('./package.json').version")-${GITHUB_SHA::8}" >> "$GITHUB_OUTPUT"
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v5
         with:
-          name: kite-gc-windows
+          name: kite-gc-windows-x64-${{ steps.build.outputs.id }}
           if-no-files-found: error
           path: release/*
 
-  # Universal macOS build (arm64 + x86_64 in one .app/.dmg) so a single download runs on both Apple
-  # Silicon and Intel Macs. Built UNSIGNED on purpose: no Apple Developer credentials are placed on CI
-  # (they stay on the maintainer's machine — see `just notarize-macos` for the local sign+notarize
-  # step). An unsigned download is Gatekeeper-quarantined: first launch is right-click -> Open, or run
-  # `xattr -dr com.apple.quarantine "/Applications/Kite Ground Control.app"`.
+  # UNSIGNED: no Apple credentials on CI. The released macOS build is signed and notarized locally
+  # (`just notarize-macos`); an unsigned update archive must never reach a release (it replaces a
+  # signed copy and macOS drops its permissions) — make-update-manifest.sh refuses it.
   macos:
     name: Build (macOS universal · unsigned)
     runs-on: macos-latest
@@ -84,29 +71,30 @@ jobs:
         run: npm run tauri build -- --target universal-apple-darwin --bundles app dmg
       - name: Collect + rename artifacts
         run: bash scripts/collect-release.sh
+      - name: Name the artifact
+        id: build
+        run: echo "id=$(node -p "require('./package.json').version")-${GITHUB_SHA::8}" >> "$GITHUB_OUTPUT"
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v5
         with:
-          name: kite-gc-macos-universal
+          name: kite-gc-macos-universal-${{ steps.build.outputs.id }}
           if-no-files-found: error
           path: release/*
 
+  # arm64 is a native build on GitHub's ARM runner, no cross-compile.
   linux:
-    name: Build (Linux · ubuntu-24.04)
-    runs-on: ubuntu-24.04
-    env:
-      # Let appimagetool/linuxdeploy run without FUSE on the CI runner — they are AppImages
-      # themselves and would otherwise try to mount. This is also why no libfuse2 is installed:
-      # with this set it is genuinely unused (verified by building on a host that has neither the
-      # package nor the kernel module), and noble renamed it to libfuse2t64 anyway, so asking for
-      # the old name would fail the job outright.
-      APPIMAGE_EXTRACT_AND_RUN: 1
+    name: Build (Linux ${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x64, runner: ubuntu-24.04 }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
     steps:
       - uses: actions/checkout@v5
-      # Bounded on purpose: the ubuntu runners' Azure apt mirror sporadically hangs mid-fetch, and
-      # apt has no timeout of its own — jobs sat at "install dependencies" for hours (three times,
-      # 2026-08-18/19). With per-request timeouts + retries a dead mirror fails in minutes and the
-      # job can simply be re-run; timeout-minutes is the backstop.
+      # apt has no timeout of its own and the runners' mirror sometimes hangs mid-fetch: bounded, so
+      # a dead mirror fails in minutes and the job can be re-run.
       - name: Install system dependencies
         timeout-minutes: 10
         run: |
@@ -122,9 +110,6 @@ jobs:
             libgstreamer1.0-dev \
             libgstreamer-plugins-base1.0-dev \
             libudev-dev \
-            patchelf \
-            file \
-            xdg-utils \
             zip
       - uses: actions/setup-node@v5
         with:
@@ -139,68 +124,96 @@ jobs:
         run: npm run tauri build
       - name: Collect + rename artifacts
         run: bash scripts/collect-release.sh
+      - name: Name the artifact
+        id: build
+        run: echo "id=$(node -p "require('./package.json').version")-${GITHUB_SHA::8}" >> "$GITHUB_OUTPUT"
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v5
         with:
-          name: kite-gc-linux
+          name: kite-gc-linux-${{ matrix.arch }}-${{ steps.build.outputs.id }}
           if-no-files-found: error
           path: release/*
 
-  # Native aarch64 build on GitHub's ARM64 Linux runner (free for public repos) — no cross-compile, so
-  # the Pi 5 (and other arm64 Linux) gets a ready binary/.deb/.AppImage without a local build env. Same
-  # ubuntu-24.04 base as the x86 Linux job, for the same two reasons (see the header): it decides the
-  # AppImage's bundled WebKitGTK, and with it the glibc floor.
-  linux-arm64:
-    name: Build (Linux ARM64 · ubuntu-24.04-arm)
-    runs-on: ubuntu-24.04-arm
+  # One APK per ABI (arm64, 32-bit ARM). Signed with the repository keystore when the four secrets exist
+  # (KEYSTORE_B64 = base64 of the .jks, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD); without them
+  # Gradle signs with a debug key the runner makes up, and such an APK never installs over a copy
+  # signed with another key — a test build, not a release.
+  android:
+    name: Build (Android arm64 + armv7)
+    runs-on: ubuntu-latest
     env:
-      # Let appimagetool/linuxdeploy run without FUSE on the CI runner — they are AppImages
-      # themselves and would otherwise try to mount. This is also why no libfuse2 is installed:
-      # with this set it is genuinely unused (verified by building on a host that has neither the
-      # package nor the kernel module), and noble renamed it to libfuse2t64 anyway, so asking for
-      # the old name would fail the job outright.
-      APPIMAGE_EXTRACT_AND_RUN: 1
+      # A step's own `env:` is not visible to its `if:`, hence at job level.
+      KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+      # Pinned: an NDK bump should be a visible commit. Same pin as ci.yml.
+      NDK_VERSION: '27.2.12479018'
     steps:
       - uses: actions/checkout@v5
-      # Bounded on purpose: the ubuntu runners' Azure apt mirror sporadically hangs mid-fetch, and
-      # apt has no timeout of its own — jobs sat at "install dependencies" for hours (three times,
-      # 2026-08-18/19). With per-request timeouts + retries a dead mirror fails in minutes and the
-      # job can simply be re-run; timeout-minutes is the backstop.
-      - name: Install system dependencies
-        timeout-minutes: 10
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          # The action's default also asks for the legacy "tools" package, which Google's repository
+          # no longer lists — sdkmanager then fails the step.
+          packages: platform-tools
+      - name: Install NDK ${{ env.NDK_VERSION }}
         run: |
-          APT_OPTS='-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30'
-          sudo apt-get $APT_OPTS update
-          sudo apt-get $APT_OPTS install -y \
-            libwebkit2gtk-4.1-dev \
-            libgtk-3-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            libsoup-3.0-dev \
-            libjavascriptcoregtk-4.1-dev \
-            libgstreamer1.0-dev \
-            libgstreamer-plugins-base1.0-dev \
-            libudev-dev \
-            patchelf \
-            file \
-            xdg-utils \
-            zip
+          sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}" >> "$GITHUB_ENV"
+
+      - name: Configure signing key
+        if: ${{ env.KEYSTORE_B64 != '' }}
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          APP_DIR=src-tauri/gen/android/app
+          echo "$KEYSTORE_B64" | base64 -d > "$APP_DIR/release.jks"
+          # build.gradle.kts resolves storeFile relative to the module directory.
+          {
+            echo "storeFile=release.jks"
+            echo "storePassword=$KEYSTORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+          } > "$APP_DIR/key.properties"
+      - name: Note the signing key in use
+        if: ${{ env.KEYSTORE_B64 == '' }}
+        run: echo "::warning::No KEYSTORE_B64 secret — this APK is signed with a throwaway debug key and will NOT install over a released copy."
+
       - uses: actions/setup-node@v5
         with:
           node-version: '20'
           cache: 'npm'
       - run: npm ci
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-      - name: Build Tauri bundle
-        run: npm run tauri build
+          key: android
+
+      - name: Build APKs
+        run: npm run tauri android build -- --apk --split-per-abi --target aarch64 armv7
       - name: Collect + rename artifacts
-        run: bash scripts/collect-release.sh
-      - name: Upload Linux ARM64 artifacts
+        run: bash scripts/collect-release.sh --android-only
+      - name: Verify the APKs are signed
+        run: |
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)
+          test -x "$APKSIGNER" || { echo "::error::apksigner not found in the SDK"; exit 1; }
+          ls release/*.apk >/dev/null || { echo "::error::no APK was produced"; exit 1; }
+          for apk in release/*.apk; do
+            echo "== $apk"
+            "$APKSIGNER" verify --verbose "$apk"
+          done
+      - name: Name the artifact
+        id: build
+        run: echo "id=$(node -p "require('./package.json').version")-${GITHUB_SHA::8}" >> "$GITHUB_OUTPUT"
+      - name: Upload Android artifacts
         uses: actions/upload-artifact@v5
         with:
-          name: kite-gc-linux-arm64
+          name: kite-gc-android-${{ steps.build.outputs.id }}
           if-no-files-found: error
           path: release/*
