@@ -45,6 +45,7 @@
   import { planDbFolderSwitch, askAboutPreviousDb, type DbFolderPlan } from "$lib/controllers/dbFolderSwitch";
   import { rehashAglMissions } from "$lib/helpers/missionLibrary";
   import { exportDatabase, importDatabase, exportAllFlights, removeOriginalLogs, withExportProgress, type DbTransferUi } from "$lib/controllers/dbTransfer";
+  import { offerVideoExport, offerVideoImport, offerVideoDelete } from "$lib/controllers/flightVideoTransfer";
   import { importMissionFile } from "$lib/helpers/missionFile";
   import { exportFile, sharesExports, flightFileStem, clearExportCache, setExportErrorReporter } from "$lib/helpers/exportFile";
   import type { LibraryMission } from "$lib/stores/flightlogTypes";
@@ -2136,6 +2137,8 @@
     });
     if (result.newer_format) msg += '\n\n' + $t('logbook.importKflightNewer');
     if (result.errors.length > 0) msg += '\n' + result.errors.join('\n');
+    const videos = await offerVideoImport(dbTransferUi, filePath, result.imported_ids, flightLogDbPath);
+    if (videos) msg += '\n' + videos;
     await showInfo($t('logbook.importKflightTitle'), msg);
   }
 
@@ -2388,7 +2391,10 @@
       });
       if (!outputPath) return;
       // The share sheet is the confirmation on mobile; a dialog under it would only be in the way.
-      if (!sharesExports) await showInfo($t('logbook.exportTitle'), $t('logbook.exportSuccess', { values: { count } }));
+      if (sharesExports) return;
+      const videos = await offerVideoExport(dbTransferUi, exportIds, outputPath, flightLogDbPath);
+      const done = $t('logbook.exportSuccess', { values: { count } });
+      await showInfo($t('logbook.exportTitle'), videos ? `${done}\n${videos}` : done);
     } catch (e) {
       errorMsg = String(e);
     }
@@ -2908,10 +2914,13 @@
       idsToDelete.push(bbxId);
     }
 
+    // Not when only the live half of a pair goes: the flight stays, as its blackbox half.
+    const removeVideos = value === 'live' ? null : await offerVideoDelete(dbTransferUi, idsToDelete, flightLogDbPath);
     for (const id of idsToDelete) {
       if (consolidateBattery) await consolidateBatteryUsage(id);
       await logbookCtrl.removeFlight(id, flightLogDbPath);
     }
+    await removeVideos?.();
 
     forgetSelectedFlight();
     await loadLogbook();
@@ -2944,6 +2953,7 @@
     });
     if (value !== 'delete') return;
     const consolidateBattery = confirmDialog.checkboxResult();
+    const removeVideos = await offerVideoDelete(dbTransferUi, ids, flightLogDbPath);
     const progress = (done: number) => {
       dbTransferNotice = {
         title: $t('logbook.deleteManyBusyTitle'),
@@ -2965,6 +2975,7 @@
       dbTransferNotice = null;
       await loadLogbook();
     }
+    await removeVideos();
   }
 
   function forgetSelectedFlight() {
@@ -4722,7 +4733,7 @@
             <AirspaceManagerPanel reference={radarReference} distanceUnit={interfaceSettings.distanceUnit} />
           {/key}
         {:else if activeTab === 'video'}
-          <VideoPanel />
+          <VideoPanel dbPath={flightLogDbPath} transferUi={dbTransferUi} />
         {:else if DEV_MODE && activeTab === 'dev-playground'}
           <PanelPlayground initial="compact" label="DEV Playground" />
         {/if}

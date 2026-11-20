@@ -680,6 +680,8 @@ pub struct ImportResult {
     pub errors: Vec<String>,
     /// The file was written by a newer Kite: what this version knows was imported, the rest was left out.
     pub newer_format: bool,
+    /// The new flights' ids in this database.
+    pub imported_ids: Vec<i64>,
 }
 
 /// Import flights from a .kflight file; duplicates (same craft_name + start_time ±10s) are skipped.
@@ -739,6 +741,7 @@ fn import_from(
         skipped: 0,
         errors: Vec::new(),
         newer_format,
+        imported_ids: Vec::new(),
     };
 
     for summary in &src_flights {
@@ -804,6 +807,7 @@ fn import_from(
         "UPDATE flights SET {} WHERE id = ?1 AND linked_flight_id IS NULL AND source = 'both'",
         db::END_LINK_SET
     );
+    result.imported_ids = imported_ids.clone();
     for id in imported_ids {
         if let Err(e) = target_conn.execute(&end_link, params![id]) {
             log::warn!("Import: failed to unlink flight {} without a partner: {}", id, e);

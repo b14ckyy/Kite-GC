@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::video::rtsp::VideoCodec;
 use mkv::MkvWriter;
-pub use mkv_read::segment_uid;
+pub use mkv_read::{kite_segment_uid, segment_uid};
 use nal::{is_keyframe, split_nals, stream_config, StreamConfig};
 
 /// The pre-roll is the running group of pictures, so a recording starts at the keyframe before the
@@ -39,6 +39,27 @@ fn unix_ms() -> i64 {
 }
 
 /// 16 bytes no other recording has. `RandomState` is seeded from the OS per instance.
+/// Called with every part the moment its file exists.
+pub type OnOpen = Box<dyn Fn(&RecordedVideo) + Send>;
+
+/// What an unclosed part holds, read from the file (its last cluster tells the length). `None` when the
+/// file is gone, is another recording by now, or cannot be read.
+pub fn read_unfinished(part: &RecordedVideo) -> Option<RecordedVideo> {
+    let path = Path::new(&part.path);
+    if kite_segment_uid(path).as_deref() != Some(part.uid.as_str()) {
+        return None;
+    }
+    let file = mkv_read::MkvFile::open(path).ok()?;
+    Some(RecordedVideo {
+        end_unix_ms: part.start_unix_ms + file.duration_ms.max(1),
+        duration_ms: file.duration_ms,
+        width: file.width,
+        height: file.height,
+        size: std::fs::metadata(path).map(|m| m.len()).unwrap_or(0),
+        ..part.clone()
+    })
+}
+
 fn new_segment_uid() -> [u8; 16] {
     use std::hash::{BuildHasher, Hasher};
     let part = |salt: u64| {
@@ -53,7 +74,8 @@ fn new_segment_uid() -> [u8; 16] {
     uid
 }
 
-/// A finished recording file.
+/// A recording file. `end_unix_ms == 0` = announced when it was opened and not closed (yet): the file
+/// of a part still being written, or what a crash left behind.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RecordedVideo {
     pub path: String,
@@ -198,7 +220,7 @@ impl VideoRecorder {
 
     /// Start writing into `dir`, beginning with the buffered group of pictures. `name` is the file name
     /// without extension; parts after the first get a suffix.
-    pub fn start(&self, dir: &Path, name: &str) -> Result<(), String> {
+    pub fn start(&self, dir: &Path, name: &str, on_open: OnOpen) -> Result<(), String> {
         std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
         let mut g = self.inner.lock().unwrap();
         if g.active.is_some() {
@@ -219,7 +241,7 @@ impl VideoRecorder {
         let (dir, name, shared) = (dir.to_path_buf(), name.to_string(), self.shared.clone());
         let thread = std::thread::Builder::new()
             .name("video-record".into())
-            .spawn(move || writer_loop(rx, dir, name, shared))
+            .spawn(move || writer_loop(rx, dir, name, shared, on_open))
             .map_err(|e| format!("cannot start the recording thread: {e}"))?;
         // An empty pre-roll means the stream is mid-group: the file starts at the next keyframe.
         let wait_keyframe = g.preroll.is_empty();
@@ -237,6 +259,12 @@ impl VideoRecorder {
         std::mem::take(&mut self.shared.lock().unwrap().finished)
     }
 
+    /// Segment UIDs of the parts a running recording has closed already: they are in no list on disk
+    /// until `stop` hands them out.
+    pub fn pending_uids(&self) -> Vec<String> {
+        self.shared.lock().unwrap().finished.iter().map(|v| v.uid.clone()).collect()
+    }
+
     pub fn status(&self) -> RecordingStatus {
         let g = self.inner.lock().unwrap();
         let s = self.shared.lock().unwrap();
@@ -247,6 +275,13 @@ impl VideoRecorder {
             dropped: g.dropped,
             error: s.error.clone(),
         }
+    }
+}
+
+fn codec_name(codec: VideoCodec) -> &'static str {
+    match codec {
+        VideoCodec::H265 => "hevc",
+        _ => "h264",
     }
 }
 
@@ -281,10 +316,7 @@ fn close(file: OpenFile, shared: &Mutex<Shared>, finish: bool) {
         start_unix_ms: file.start_unix_ms,
         end_unix_ms: file.end_unix_ms,
         duration_ms,
-        codec: match file.codec {
-            VideoCodec::H265 => "hevc".into(),
-            _ => "h264".into(),
-        },
+        codec: codec_name(file.codec).into(),
         width: file.config.width,
         height: file.config.height,
         frames,
@@ -311,6 +343,7 @@ struct FileWriter {
     dir: PathBuf,
     name: String,
     shared: Arc<Mutex<Shared>>,
+    on_open: OnOpen,
     open: Option<OpenFile>,
     part: u32,
 }
@@ -346,6 +379,18 @@ impl FileWriter {
                     Ok((writer, path)) => {
                         log::info!("[video] recording to {}", path.display());
                         self.shared.lock().unwrap().file = Some(path.to_string_lossy().to_string());
+                        (self.on_open)(&RecordedVideo {
+                            path: path.to_string_lossy().to_string(),
+                            uid: uid.iter().map(|b| format!("{b:02x}")).collect(),
+                            start_unix_ms: au.arrived_ms,
+                            end_unix_ms: 0,
+                            duration_ms: 0,
+                            codec: codec_name(au.codec).into(),
+                            width: config.width,
+                            height: config.height,
+                            frames: 0,
+                            size: 0,
+                        });
                         self.open = Some(OpenFile {
                             writer,
                             path,
@@ -382,8 +427,8 @@ impl FileWriter {
     }
 }
 
-fn writer_loop(rx: Receiver<Msg>, dir: PathBuf, name: String, shared: Arc<Mutex<Shared>>) {
-    let mut w = FileWriter { dir, name, shared, open: None, part: 0 };
+fn writer_loop(rx: Receiver<Msg>, dir: PathBuf, name: String, shared: Arc<Mutex<Shared>>, on_open: OnOpen) {
+    let mut w = FileWriter { dir, name, shared, on_open, open: None, part: 0 };
     // The depacketizer may hand out one picture in pieces (parameter sets or slices of their own): pieces
     // share the RTP time, and a block must hold the whole picture.
     let mut picture: Option<Au> = None;
@@ -464,7 +509,7 @@ mod tests {
         // The first second is pre-roll, the recording starts in the middle of the second group.
         for (i, au) in aus.iter().enumerate() {
             if i == 45 {
-                rec.start(Path::new(&out), "record_file_test").unwrap();
+                rec.start(Path::new(&out), "record_file_test", Box::new(|_| {})).unwrap();
             }
             rec.feed(codec, au, i as u64 * 3000);
             std::thread::sleep(std::time::Duration::from_millis(1));
@@ -496,7 +541,9 @@ mod tests {
         rec.feed(VideoCodec::H264, &key, 12000); // a new group replaces the old one
         rec.feed(VideoCodec::H264, &delta, 15000);
         assert_eq!(rec.inner.lock().unwrap().preroll.len(), 2);
-        rec.start(&dir, "t").unwrap();
+        let announced = Arc::new(Mutex::new(Vec::new()));
+        let seen = announced.clone();
+        rec.start(&dir, "t", Box::new(move |part| seen.lock().unwrap().push(part.clone()))).unwrap();
         rec.feed(VideoCodec::H264, &delta, 18000);
         // A picture in two pieces (same RTP time) becomes one frame.
         rec.feed(VideoCodec::H264, &delta, 21000);
@@ -507,6 +554,16 @@ mod tests {
         assert_eq!(files[0].uid.len(), 32);
         assert!(files[0].size > 0 && Path::new(&files[0].path).exists());
         assert!(!rec.status().recording);
+        // The part was announced when it was opened, and the file tells what an unclosed one holds.
+        let announced = announced.lock().unwrap();
+        assert_eq!(announced.len(), 1);
+        assert_eq!((announced[0].uid.as_str(), announced[0].end_unix_ms), (files[0].uid.as_str(), 0));
+        let read = read_unfinished(&announced[0]).unwrap();
+        // The reader knows the time of the last picture, not how long it was shown.
+        assert!(read.duration_ms > 0 && read.duration_ms <= files[0].duration_ms);
+        assert_eq!((read.width, read.end_unix_ms), (1920, announced[0].start_unix_ms + read.duration_ms));
+        let other = RecordedVideo { uid: "00".repeat(16), ..announced[0].clone() };
+        assert!(read_unfinished(&other).is_none());
         let _ = std::fs::remove_dir_all(dir);
     }
 }

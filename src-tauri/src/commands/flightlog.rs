@@ -7,6 +7,7 @@ use tauri::Emitter;
 
 use crate::flightlog::db;
 use crate::flightlog::exchange;
+use crate::flightlog::video_files;
 use crate::flightlog::types::{
     BatteryAggregate, BatteryFile, BatteryPack, BatteryPackInput, BlackboxImportProgress,
     BlackboxImportStatus, Flight, FlightSummary, Mission, MissionInput, TelemetryRecord, Vehicle,
@@ -1464,6 +1465,166 @@ pub fn flightlog_import_kflight(
 ) -> Result<exchange::ImportResult, String> {
     let conn = open_db(&db_path.unwrap_or_default())?;
     crate::user_file::with_read_path(&file_path, |p| exchange::import_flights(&conn, p))
+}
+
+/// Progress of a recording copy: event `flightlog-video-copy-progress` in bytes, one per percent.
+fn video_copy_progress(app_handle: &tauri::AppHandle) -> impl FnMut(u64, u64) + '_ {
+    #[derive(serde::Serialize, Clone)]
+    struct Copied {
+        done: u64,
+        total: u64,
+    }
+    let mut last = u64::MAX;
+    move |done, total| {
+        let percent = done * 100 / total.max(1);
+        if percent != last || done == total {
+            last = percent;
+            let _ = app_handle.emit("flightlog-video-copy-progress", Copied { done, total });
+        }
+    }
+}
+
+/// `no-space:` when `dir` lacks room for `need` bytes (the marker of `EXPORT_NO_SPACE_ERROR`).
+fn need_space(dir: &std::path::Path, need: u64) -> Result<(), String> {
+    match crate::user_file::free_bytes(dir) {
+        Some(free) if free < need => Err(format!("{EXPORT_NO_SPACE_ERROR}{need}:{free}")),
+        _ => Ok(()),
+    }
+}
+
+/// The recordings an export of these flights (`None` = all) could take along.
+#[tauri::command(async)]
+pub fn flightlog_export_videos_info(
+    flight_ids: Option<Vec<i64>>,
+    db_path: Option<String>,
+    video_dir: Option<String>,
+) -> Result<video_files::VideoSet, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    let root = crate::commands::video::record_dir(video_dir.as_deref());
+    video_files::export_set(&conn, flight_ids.as_deref(), &root).map_err(|e| format!("Database error: {e}"))
+}
+
+/// Copy the flights' recordings into the folder `<name>_video` beside the `.kflight` at `output_path`.
+#[tauri::command(async)]
+pub fn flightlog_export_videos(
+    flight_ids: Option<Vec<i64>>,
+    output_path: String,
+    db_path: Option<String>,
+    video_dir: Option<String>,
+    app_handle: tauri::AppHandle,
+) -> Result<video_files::VideoSet, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    let root = crate::commands::video::record_dir(video_dir.as_deref());
+    let kflight = std::path::Path::new(&output_path);
+    let set = video_files::export_set(&conn, flight_ids.as_deref(), &root).map_err(|e| format!("Database error: {e}"))?;
+    need_space(kflight.parent().unwrap_or(kflight), set.bytes)?;
+    video_files::export_videos(&conn, flight_ids.as_deref(), &root, kflight, &mut video_copy_progress(&app_handle))
+        .inspect_err(|e| log::warn!("[flightlog] export of the recordings failed: {e}"))
+}
+
+/// The recordings beside the `.kflight` at `file_path` that flights of this database miss, and how many
+/// recordings of the just imported flights were in the video folder already.
+#[tauri::command(async)]
+pub fn flightlog_import_videos_info(
+    file_path: String,
+    imported_ids: Vec<i64>,
+    db_path: Option<String>,
+    video_dir: Option<String>,
+) -> Result<video_files::VideoSet, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    let root = crate::commands::video::record_dir(video_dir.as_deref());
+    video_files::import_set(&conn, std::path::Path::new(&file_path), &root, &imported_ids)
+        .map_err(|e| format!("Database error: {e}"))
+}
+
+/// Copy those recordings into the video folder and link their flights to them.
+#[tauri::command(async)]
+pub fn flightlog_import_videos(
+    file_path: String,
+    db_path: Option<String>,
+    video_dir: Option<String>,
+    app_handle: tauri::AppHandle,
+) -> Result<video_files::VideoSet, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    let root = crate::commands::video::record_dir(video_dir.as_deref());
+    let kflight = std::path::Path::new(&file_path);
+    let set = video_files::import_set(&conn, kflight, &root, &[]).map_err(|e| format!("Database error: {e}"))?;
+    // The folder may not exist yet: its nearest existing parent tells the volume.
+    let volume = root.ancestors().find(|p| p.exists()).unwrap_or(&root).to_path_buf();
+    need_space(&volume, set.bytes)?;
+    video_files::import_videos(&conn, kflight, &root, &mut video_copy_progress(&app_handle))
+        .inspect_err(|e| log::warn!("[flightlog] import of the recordings failed: {e}"))
+}
+
+/// Remove recording files (trash where there is one) and report what went.
+fn remove_recordings(files: &[std::path::PathBuf]) -> video_files::VideoSet {
+    let mut gone = Vec::new();
+    for file in files {
+        let size = std::fs::metadata(file).map(|m| m.len()).unwrap_or(0);
+        match trash_or_delete(file) {
+            Ok(()) => gone.push((file.clone(), size)),
+            Err(e) => log::warn!("[flightlog] recording not removed: {e}"),
+        }
+    }
+    video_files::VideoSet { count: gone.len(), bytes: gone.iter().map(|(_, s)| s).sum(), ..Default::default() }
+}
+
+/// The recordings that only these flights are linked to — what deleting the flights would leave behind.
+/// Once the flights are gone, `flightlog_orphan_videos_delete` removes them by the names given here.
+#[tauri::command(async)]
+pub fn flightlog_delete_videos_info(
+    flight_ids: Vec<i64>,
+    db_path: Option<String>,
+    video_dir: Option<String>,
+) -> Result<video_files::VideoSet, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    let root = crate::commands::video::record_dir(video_dir.as_deref());
+    let files = video_files::files_of_only(&conn, &flight_ids, &root).map_err(|e| format!("Database error: {e}"))?;
+    Ok(video_files::set_of(&root, &files))
+}
+
+fn orphan_recordings(
+    db_path: Option<String>,
+    video_dir: Option<String>,
+    only: Option<&[String]>,
+    native_rtsp: &crate::video::rtsp_native::NativeRtsp,
+) -> Result<(std::path::PathBuf, Vec<std::path::PathBuf>), String> {
+    let custom = db_path.unwrap_or_default();
+    let conn = open_db(&custom)?;
+    let root = crate::commands::video::record_dir(video_dir.as_deref());
+    let mut keep = crate::flightlog::video_link::waiting_uids(&db::resolve_db_path(&custom, portable_mode()))
+        .ok_or("The list of recordings that wait for their flight cannot be read — nothing is removed")?;
+    let recorder = native_rtsp.recorder();
+    keep.extend(recorder.pending_uids());
+    // The status keeps the last file's name after the recording has stopped.
+    let status = recorder.status();
+    let busy = status.file.filter(|_| status.recording).map(std::path::PathBuf::from);
+    let files = video_files::orphans(&conn, &root, &keep, busy.as_deref(), only).map_err(|e| format!("Database error: {e}"))?;
+    Ok((root, files))
+}
+
+/// Kite's recordings in the video folder that no flight of this database is linked to.
+#[tauri::command(async)]
+pub fn flightlog_orphan_videos_info(
+    db_path: Option<String>,
+    video_dir: Option<String>,
+    native_rtsp: tauri::State<'_, crate::video::rtsp_native::NativeRtsp>,
+) -> Result<video_files::VideoSet, String> {
+    let (root, files) = orphan_recordings(db_path, video_dir, None, &native_rtsp)?;
+    Ok(video_files::set_of(&root, &files))
+}
+
+/// Remove the recordings in `names` (as an info call listed them) that are unlinked NOW: one that found
+/// its flight since stays, and nothing the user was not shown goes.
+#[tauri::command(async)]
+pub fn flightlog_orphan_videos_delete(
+    names: Vec<String>,
+    db_path: Option<String>,
+    video_dir: Option<String>,
+    native_rtsp: tauri::State<'_, crate::video::rtsp_native::NativeRtsp>,
+) -> Result<video_files::VideoSet, String> {
+    let (_, files) = orphan_recordings(db_path, video_dir, Some(&names), &native_rtsp)?;
+    Ok(remove_recordings(&files))
 }
 
 #[tauri::command]

@@ -473,4 +473,6 @@ export interface KflightImportResult {
   errors: string[];
   /** Written by a newer Kite: what this version knows was imported, the rest was left out. */
   newer_format: boolean;
+  /** The new flights' ids in this database. */
+  imported_ids: number[];
 }

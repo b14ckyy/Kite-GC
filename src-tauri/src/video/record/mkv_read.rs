@@ -296,7 +296,19 @@ impl MkvFile {
 /// The Matroska segment UID of a file, as lower-case hex — what identifies a recording whatever it is
 /// called and wherever it lies. Only the head of the file is read. `None` for anything that has none.
 pub fn segment_uid(path: &Path) -> Option<String> {
+    read_segment_uid(path, false)
+}
+
+/// The same, but only for a file Kite's writer made: every muxer writes a segment UID, so the UID alone
+/// does not tell a recording from any other Matroska file in the folder.
+pub fn kite_segment_uid(path: &Path) -> Option<String> {
+    read_segment_uid(path, true)
+}
+
+fn read_segment_uid(path: &Path, kite_only: bool) -> Option<String> {
     const ID_SEGMENT_UID: u32 = 0x73A4;
+    const ID_WRITING_APP: u32 = 0x5741;
+    let mut by_kite = false;
     let mut head = Vec::with_capacity(4096);
     File::open(path).ok()?.take(4096).read_to_end(&mut head).ok()?;
     let mut at = 0usize;
@@ -318,8 +330,16 @@ pub fn segment_uid(path: &Path) -> Option<String> {
         at += size_len;
         match id {
             ID_SEGMENT | ID_INFO => {} // enter
+            // The writer puts WritingApp before the UID (`mkv.rs`).
+            ID_SEGMENT_UID if kite_only && !by_kite => return None,
             ID_SEGMENT_UID => return Some(head.get(at..at + 16)?.iter().map(|b| format!("{b:02x}")).collect()),
-            _ => at = at.checked_add(uint(&size_bytes) as usize)?,
+            _ => {
+                let size = uint(&size_bytes) as usize;
+                if id == ID_WRITING_APP {
+                    by_kite = head.get(at..at.checked_add(size)?)? == super::mkv::WRITING_APP;
+                }
+                at = at.checked_add(size)?;
+            }
         }
     }
 }
@@ -410,6 +430,7 @@ mod tests {
         }
         assert_eq!(n, 20);
         assert_eq!(segment_uid(path).as_deref(), Some("03030303030303030303030303030303"));
+        assert_eq!(kite_segment_uid(path), segment_uid(path));
         f.seek_before(1050).unwrap();
         assert_eq!(f.keyframe_before(1050), 800);
         let fr = f.next_frame().unwrap().unwrap();

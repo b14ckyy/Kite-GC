@@ -24,6 +24,8 @@ const UNKNOWN_SIZE: [u8; 8] = [0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
 const SEEK_HEAD_LEN: u64 = 4 + 1 + 3 * 21;
 /// A block's time is a signed 16-bit offset from its cluster's, in ms.
 const CLUSTER_MAX_MS: i64 = 30_000;
+/// MuxingApp / WritingApp of every recording — how `kite_segment_uid` knows Kite's own files.
+pub(super) const WRITING_APP: &[u8] = b"Kite GC";
 /// 2001-01-01T00:00:00Z, the epoch of Matroska's DateUTC, in Unix ms.
 const MKV_EPOCH_UNIX_MS: i64 = 978_307_200_000;
 
@@ -93,7 +95,7 @@ impl<W: Write + Seek> MkvWriter<W> {
             ]
             .concat(),
         );
-        let app = b"Kite GC";
+        let app = WRITING_APP;
         let date_ns = (start_unix_ms - MKV_EPOCH_UNIX_MS).saturating_mul(1_000_000);
         let info_head = [
             uint(&[0x2A, 0xD7, 0xB1], 1_000_000), // TimestampScale: 1 ms

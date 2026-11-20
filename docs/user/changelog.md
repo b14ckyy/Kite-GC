@@ -87,6 +87,11 @@ inside the box of the feature release they belong to, so the notes for one relea
         nothing was recorded, the window says so. Details:
         [Video → Recording the RTSP stream](guides/video.md#recording-the-rtsp-stream-desktop). [#333]
 
+        **Recordings travel with a `.kflight`.** After exporting flights Kite offers to copy their
+        recordings into a folder next to the file, and the import on another computer offers to copy
+        them into the recording folder there. Deleting a flight asks whether its recordings go as
+        well, and the Video panel can clean up recordings no flight is linked to. [#338]
+
     ??? info "INAV over ELRS, mLRS, SiK or Wi-Fi — the full planner on a MAVLink-only link"
         ELRS and mLRS in MAVLink mode, SiK radios and MAVLink Wi-Fi bridges carry no MSP, and MSP
         is what an INAV flight controller needs for missions, safe homes and geozones. **INAV 10.0**

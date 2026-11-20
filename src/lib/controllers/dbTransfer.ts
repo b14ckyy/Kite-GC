@@ -11,6 +11,7 @@ import type { DialogOptions } from '$lib/components/ConfirmDialog.svelte';
 import { isMobile } from '$lib/platform';
 import { formatBackupSize } from './dbBackupPrompt';
 import { dbFolderState, flightCount as count, type DbFolderState } from './dbFolderSwitch';
+import { offerVideoExport } from './flightVideoTransfer';
 
 export interface DbTransferUi {
   show: (opts: DialogOptions) => Promise<string | null>;
@@ -141,10 +142,9 @@ export async function exportAllFlights(dbPath: string, ui: DbTransferUi): Promis
   try {
     const result = await withExportProgress(ui, tr(`${K}.flightsBusyTitle`), state.flights ?? 0, () =>
       invoke<{ exported: number; total: number }>('flightlog_export_all', { outputPath, dbPath }));
-    await show({
-      title: tr(`${K}.exportFlights`),
-      message: tr(`${K}.flightsDone`, { exported: String(result.exported), total: String(result.total) }),
-    });
+    const videos = await offerVideoExport(ui, null, outputPath, dbPath);
+    const done = tr(`${K}.flightsDone`, { exported: String(result.exported), total: String(result.total) });
+    await show({ title: tr(`${K}.exportFlights`), message: videos ? `${done}\n${videos}` : done });
   } catch (e) {
     // `no-space:<needed>:<free>` — the marker of EXPORT_NO_SPACE_ERROR (commands/flightlog.rs).
     const space = /^no-space:(\d+):(\d+)$/.exec(String(e));
