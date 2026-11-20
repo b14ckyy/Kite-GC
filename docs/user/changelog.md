@@ -101,6 +101,9 @@ inside the box of the feature release they belong to, so the notes for one relea
         best-effort basis and are not officially supported. Setup and limits:
         [Connecting → INAV over MAVLink](guides/connecting.md#inav-over-mavlink-mspmav). [#202]
 
+        On a slow link Kite measures the round trip and gives the tunnel more time, so it is found
+        there too instead of falling back to plain MAVLink. [#337]
+
     ??? info "Your own maps — online with your own key, offline from a folder"
         **Custom online providers.** Add any online tile service by its URL template under
         Settings → Map → Providers; an API key goes into the URL. **Test** checks the service and
