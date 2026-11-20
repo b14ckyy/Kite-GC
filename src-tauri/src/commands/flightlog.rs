@@ -1566,6 +1566,7 @@ fn remove_recordings(files: &[std::path::PathBuf]) -> video_files::VideoSet {
             Err(e) => log::warn!("[flightlog] recording not removed: {e}"),
         }
     }
+    video_files::drop_empty_flight_dirs(&gone.iter().map(|(f, _)| f.clone()).collect::<Vec<_>>());
     video_files::VideoSet { count: gone.len(), bytes: gone.iter().map(|(_, s)| s).sum(), ..Default::default() }
 }
 

@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-//! Finished recordings wait in a file next to the database until the flight they fall into is committed.
+//! Finished recordings wait in a file next to the database until the flight they fall into is committed;
+//! then they move into `Flights/<flight>/` below the video folder, which leaves the folder itself to what
+//! is being written or still waits.
 //! A flight knows its video by the segment UID and a path relative to the video folder, never an absolute
 //! one (an export carries nothing of this machine); `resolve` finds a renamed or moved file by its UID.
 
@@ -15,6 +17,7 @@ use super::types::Flight;
 use crate::video::record::RecordedVideo;
 
 const WAITING_FILE: &str = "video_recordings.json";
+pub(super) const FLIGHTS_DIR: &str = "Flights";
 /// A recording nobody claimed is forgotten after this long; its file stays where it is.
 const WAITING_MAX_MS: i64 = 30 * 24 * 3600 * 1000;
 
@@ -86,6 +89,54 @@ fn complete_unclosed(list: Vec<RecordedVideo>, started_ms: i64, read: &dyn Fn(&R
         .collect()
 }
 
+/// A recording's name without the part number: `HITL_2026-11-20_22-39-43_part4.mkv` → `HITL_2026-11-20_22-39-43`.
+fn recording_stem(name: &str) -> String {
+    let stem = Path::new(name).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| name.to_string());
+    match stem.rfind("_part") {
+        Some(i) if stem.len() > i + 5 && stem[i + 5..].bytes().all(|b| b.is_ascii_digit()) => stem[..i].to_string(),
+        _ => stem,
+    }
+}
+
+/// The flight's folder below `Flights/`: the one its recordings name already, else its first recording's
+/// name, else `new_name`'s. A `rel_path` may come from an imported file, so it only ever gives a plain name.
+pub(super) fn flight_folder(conn: &Connection, flight_id: i64, new_name: &str) -> String {
+    let known: Vec<String> = conn
+        .prepare("SELECT rel_path FROM flight_videos WHERE flight_id = ?1 ORDER BY sync_a_flight_ms, id")
+        .and_then(|mut s| s.query_map(params![flight_id], |r| r.get(0))?.collect())
+        .unwrap_or_default();
+    let plain = |name: &str| !name.is_empty() && name != "." && name != ".." && !name.contains(':');
+    let in_folder = known.iter().find_map(|rel| {
+        let mut parts = rel.split(['/', '\\']);
+        (parts.next() == Some(FLIGHTS_DIR)).then(|| parts.next()).flatten().filter(|_| parts.next().is_some()).filter(|f| plain(f)).map(str::to_string)
+    });
+    in_folder.unwrap_or_else(|| recording_stem(known.first().map(String::as_str).unwrap_or(new_name)))
+}
+
+/// Move a recording into its flight's folder below the folder it lies in. `None` = it stays where it is
+/// (held open by a player, read-only medium); the path it has then is as good as before.
+fn move_to_flight(file: &Path, folder: &str) -> Option<(PathBuf, String)> {
+    let (base, name) = (file.parent()?, file.file_name()?);
+    if !file.is_file() {
+        return None;
+    }
+    let dir = base.join(FLIGHTS_DIR).join(folder);
+    let moved = std::fs::create_dir_all(&dir).and_then(|_| {
+        let dest = super::video_files::free_name(&dir, name);
+        std::fs::rename(file, &dest).map(|_| dest)
+    });
+    match moved {
+        Ok(dest) => {
+            let rel = format!("{FLIGHTS_DIR}/{folder}/{}", dest.file_name()?.to_string_lossy());
+            Some((dest, rel))
+        }
+        Err(e) => {
+            log::warn!("[video] recording {} not moved into {}: {e}", file.display(), dir.display());
+            None
+        }
+    }
+}
+
 /// Attach every waiting recording whose middle lies in the flight: the pre-roll of a quick re-arm reaches
 /// back into the flight before, which must not take it. The two sync anchors are the recording's first
 /// and last picture on the flight's clock (ms from `start_time`).
@@ -111,7 +162,8 @@ fn attach_waiting_with(
     let end = flight.end_time.map(|t| t.timestamp_millis()).unwrap_or(start + flight.duration_sec.unwrap_or(0) * 1000);
     let now = chrono::Utc::now().timestamp_millis();
     let mut keep = Vec::new();
-    for v in list {
+    let mut folder: Option<String> = None;
+    for mut v in list {
         // Still open: being written, or unreadable for now.
         if v.end_unix_ms == 0 {
             if now - v.start_unix_ms < WAITING_MAX_MS {
@@ -126,7 +178,12 @@ fn attach_waiting_with(
             }
             continue;
         }
-        let name = Path::new(&v.path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| v.path.clone());
+        let mut name = Path::new(&v.path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| v.path.clone());
+        let folder = folder.get_or_insert_with(|| flight_folder(conn, flight_id, &name));
+        if let Some((path, rel)) = move_to_flight(Path::new(&v.path), folder) {
+            v.path = path.to_string_lossy().to_string();
+            name = rel;
+        }
         let extra = serde_json::json!({ "source": "rtsp-recording" }).to_string();
         let inserted = conn.execute(
             "INSERT INTO flight_videos (flight_id, rel_path, duration_ms, codec, width, height, frame_count, file_size,
@@ -247,7 +304,8 @@ pub(super) fn resolve(conn: &Connection, root: &Path, rows: &[Row]) -> HashMap<i
     let mut at: HashMap<i64, PathBuf> = HashMap::new();
     let mut missing: Vec<&Row> = Vec::new();
     for row in rows {
-        let path = root.join(&row.rel_path);
+        // Piece by piece: a `rel_path` is written with `/`, and the path goes to the user as it is.
+        let path = row.rel_path.split('/').fold(root.to_path_buf(), |p, part| p.join(part));
         let same = match row.uid.as_deref() {
             Some(uid) => path.is_file() && crate::video::record::segment_uid(&path).as_deref() == Some(uid),
             // A row without a UID (not one of our recordings) can only be taken by its path.
@@ -553,6 +611,44 @@ mod tests {
         let got = list_for_flight(&conn, flight_id, &videos).unwrap();
         assert!(!got[0].exists && got[0].name == "first flight.mkv" && got[0].path.is_none());
         assert!(replay_parts(&conn, flight_id, &videos).unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn attached_recordings_move_into_the_folder_of_their_flight() {
+        let dir = std::env::temp_dir().join(format!("kite-vfold-{}", chrono::Utc::now().timestamp_nanos_opt().unwrap()));
+        let videos = dir.join("videos");
+        let db_file = dir.join("flights.db");
+        std::fs::create_dir_all(&videos).unwrap();
+        let conn = db::open_database(&db_file).unwrap();
+        let start = chrono::DateTime::from_timestamp_millis(chrono::Utc::now().timestamp_millis() - 600_000).unwrap();
+        let flight = flight(start);
+        let flight_id = db::insert_flight(&conn, &flight).unwrap();
+        let s = start.timestamp_millis();
+        let mut first = video(&videos, "Wing_2026-11-20_10-00-00_part2", s + 1_000, s + 50_000);
+        let mut other = video(&videos, "Wing_2026-11-20_10-05-00", s + 60_000, s + 90_000);
+        let waits = video(&videos, "Wing_2026-11-20_11-00-00", s + 900_000, s + 950_000);
+        (first.uid, other.uid) = ("11".repeat(16), "22".repeat(16));
+        write_mkv(Path::new(&first.path), 0x11);
+        write_mkv(Path::new(&other.path), 0x22);
+        write_mkv(Path::new(&waits.path), 0x33);
+        add_waiting(&db_file, &[first, waits.clone()]);
+        attach_waiting(&conn, &db_file, flight_id, &flight);
+        // A part that ends after the flight was saved joins the folder the flight has.
+        add_waiting(&db_file, &[other]);
+        attach_to_saved_flights(&conn, &db_file);
+
+        let folder = videos.join(FLIGHTS_DIR).join("Wing_2026-11-20_10-00-00");
+        assert!(folder.join("Wing_2026-11-20_10-00-00_part2.mkv").is_file() && folder.join("Wing_2026-11-20_10-05-00.mkv").is_file());
+        assert!(Path::new(&waits.path).is_file(), "a recording without a flight stays in the video folder");
+        let got = list_for_flight(&conn, flight_id, &videos).unwrap();
+        assert!(got.len() == 2 && got.iter().all(|v| v.exists));
+        let rel: String = conn.query_row("SELECT rel_path FROM flight_videos ORDER BY id LIMIT 1", [], |r| r.get(0)).unwrap();
+        assert_eq!(rel, "Flights/Wing_2026-11-20_10-00-00/Wing_2026-11-20_10-00-00_part2.mkv");
+
+        // A folder name out of an imported row is never a way out of `Flights/`.
+        conn.execute("UPDATE flight_videos SET rel_path = 'Flights/../x.mkv'", []).unwrap();
+        assert_eq!(flight_folder(&conn, flight_id, "new.mkv"), "x");
         let _ = std::fs::remove_dir_all(dir);
     }
 }

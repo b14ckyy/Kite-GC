@@ -23,6 +23,8 @@
   import { compassPointKey } from '$lib/helpers/compassPoint';
   import { get } from 'svelte/store';
   import { videoState } from '$lib/stores/video';
+  import { revealItemInDir, openPath } from '@tauri-apps/plugin-opener';
+  import { isMobile } from '$lib/platform';
   import { locale } from 'svelte-i18n';
   import WeatherEditor from './WeatherEditor.svelte';
   import Button from '$lib/components/panel/Button.svelte';
@@ -110,6 +112,19 @@
       .then((list) => { if (flightId === id) videos = list; })
       .catch(() => {});
   });
+
+  // The first recording that is on disk, shown in the file manager; a desktop without a reveal service
+  // gets its folder opened instead.
+  async function showVideoFolder() {
+    const path = videos.find((v) => v.exists && v.path)?.path;
+    if (!path) return;
+    try {
+      await revealItemInDir(path);
+    } catch (e) {
+      console.warn('[logbook] revealItemInDir failed', e);
+      await openPath(path.replace(/[\\/][^\\/]*$/, '')).catch((e2) => console.warn('[logbook] openPath failed', e2));
+    }
+  }
 
   function videoInfo(v: FlightVideo): string {
     const parts: string[] = [];
@@ -643,6 +658,9 @@
             {v.name}<span class="raw-size">{videoInfo(v)}</span>
           </span>
         {/each}
+        {#if !isMobile && videos.some((v) => v.exists && v.path)}
+          <span><Button variant="compact" icon="folder" onclick={showVideoFolder} title={$t('logbook.videoFolderTip')}>{$t('logbook.videoFolder')}</Button></span>
+        {/if}
       </span>
     {/if}
     <span class="fc-label">{$t('logbook.mission')}</span>
