@@ -2119,11 +2119,17 @@ pub fn flightlog_recover_continue(
     state.sessions.put_resume(temp_path, session)
 }
 
-/// The videos attached to a flight, for the flight details.
-#[tauri::command]
-pub fn flightlog_flight_videos(flight_id: i64, db_path: Option<String>) -> Result<Vec<crate::flightlog::video_link::FlightVideo>, String> {
+/// The videos attached to a flight, for the flight details. A file that was renamed or moved below the
+/// video folder is found by its id and linked again.
+#[tauri::command(async)]
+pub fn flightlog_flight_videos(
+    flight_id: i64,
+    db_path: Option<String>,
+    video_dir: Option<String>,
+) -> Result<Vec<crate::flightlog::video_link::FlightVideo>, String> {
     let conn = open_db(&db_path.unwrap_or_default())?;
-    crate::flightlog::video_link::list_for_flight(&conn, flight_id).map_err(|e| format!("Database error: {e}"))
+    let root = crate::commands::video::record_dir(video_dir.as_deref());
+    crate::flightlog::video_link::list_for_flight(&conn, flight_id, &root).map_err(|e| format!("Database error: {e}"))
 }
 
 #[cfg(test)]

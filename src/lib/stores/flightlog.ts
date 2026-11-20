@@ -830,7 +830,7 @@ export interface FlightVideo {
   id: number;
   name: string;
   path: string | null;
-  /** The file is still where it was written. */
+  /** The file is below the recording folder (under any name, in any subfolder). */
   exists: boolean;
   duration_ms: number | null;
   codec: string | null;
@@ -839,8 +839,13 @@ export interface FlightVideo {
   file_size: number | null;
 }
 
-export async function flightVideos(flightId: number, dbPath: string): Promise<FlightVideo[]> {
-  return invoke<FlightVideo[]>('flightlog_flight_videos', { flightId, dbPath: dbPath || undefined });
+/** `videoDir` = the recording folder ('' = the default): files are looked for below it, by their id. */
+export async function flightVideos(flightId: number, dbPath: string, videoDir: string): Promise<FlightVideo[]> {
+  return invoke<FlightVideo[]>('flightlog_flight_videos', {
+    flightId,
+    dbPath: dbPath || undefined,
+    videoDir: videoDir || undefined,
+  });
 }
 
 export async function flightDataSizes(flightId: number, dbPath: string): Promise<FlightDataSize[]> {

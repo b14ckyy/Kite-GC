@@ -34,13 +34,15 @@ let queue: Promise<void> = Promise.resolve();
 
 async function open(flightId: number, dbPath: string): Promise<void> {
   try {
-    const videos = await flightVideos(flightId, dbPath);
+    const videoDir = get(videoState).recordDir;
+    const videos = await flightVideos(flightId, dbPath, videoDir);
     if (wanted !== flightId || !videos.some((v) => v.exists)) return;
     // The recording takes the decode sink: the live stream ends, and stays off.
     if (get(videoState).enabled) stopVideo();
     const info = await invoke<{ codec: string; width: number; height: number }>('video_replay_open', {
       flightId,
       dbPath: dbPath || null,
+      videoDir: videoDir || null,
     });
     openFlight = flightId;
     inGap = false;

@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::video::rtsp::VideoCodec;
 use mkv::MkvWriter;
+pub use mkv_read::segment_uid;
 use nal::{is_keyframe, split_nals, stream_config, StreamConfig};
 
 /// The pre-roll is the running group of pictures, so a recording starts at the keyframe before the
@@ -38,7 +39,7 @@ fn unix_ms() -> i64 {
 }
 
 /// 16 bytes no other recording has. `RandomState` is seeded from the OS per instance.
-fn segment_uid() -> [u8; 16] {
+fn new_segment_uid() -> [u8; 16] {
     use std::hash::{BuildHasher, Hasher};
     let part = |salt: u64| {
         let mut h = std::collections::hash_map::RandomState::new().build_hasher();
@@ -314,7 +315,7 @@ impl FileWriter {
                 self.part += 1;
                 let file_name = if self.part == 1 { format!("{}.mkv", self.name) } else { format!("{}_part{}.mkv", self.name, self.part) };
                 let path = self.dir.join(file_name);
-                let uid = segment_uid();
+                let uid = new_segment_uid();
                 let created = File::create(&path)
                     .and_then(|f| MkvWriter::create(BufWriter::with_capacity(1 << 20, f), au.codec, &config, au.arrived_ms, uid));
                 match created {

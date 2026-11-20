@@ -22,6 +22,7 @@
   import { buildArduMissionInput } from '$lib/helpers/missionLibraryArdu';
   import { compassPointKey } from '$lib/helpers/compassPoint';
   import { get } from 'svelte/store';
+  import { videoState } from '$lib/stores/video';
   import { locale } from 'svelte-i18n';
   import WeatherEditor from './WeatherEditor.svelte';
   import Button from '$lib/components/panel/Button.svelte';
@@ -105,7 +106,7 @@
     void flightDataSizes(id, dbPath)
       .then((sizes) => { if (flightId === id) dataSizes = sizes; })
       .catch(() => {});
-    void flightVideos(id, dbPath)
+    void flightVideos(id, dbPath, get(videoState).recordDir)
       .then((list) => { if (flightId === id) videos = list; })
       .catch(() => {});
   });

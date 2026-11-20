@@ -622,6 +622,15 @@ pub fn video_record_default_dir() -> String {
     default_record_dir().to_string_lossy().to_string()
 }
 
+/// The video folder: the user's choice, else the default. Recordings are written into it and looked
+/// for below it.
+pub(crate) fn record_dir(chosen: Option<&str>) -> std::path::PathBuf {
+    match chosen.map(str::trim) {
+        Some(d) if !d.is_empty() => std::path::PathBuf::from(d),
+        _ => default_record_dir(),
+    }
+}
+
 /// Recording switched on in the settings: keep the pre-roll so a recording can start at a keyframe.
 #[tauri::command]
 pub fn video_record_enable(on: bool, native_rtsp: State<'_, crate::video::rtsp_native::NativeRtsp>) {
@@ -642,10 +651,7 @@ pub fn video_record_start(
     vehicle: Option<String>,
     native_rtsp: State<'_, crate::video::rtsp_native::NativeRtsp>,
 ) -> Result<(), String> {
-    let dir = match dir.as_deref().map(str::trim) {
-        Some(d) if !d.is_empty() => std::path::PathBuf::from(d),
-        _ => default_record_dir(),
-    };
+    let dir = record_dir(dir.as_deref());
     let name = format!(
         "{}_{}",
         file_name_part(vehicle.as_deref().unwrap_or_default()),
@@ -679,12 +685,13 @@ pub fn video_record_status(native_rtsp: State<'_, crate::video::rtsp_native::Nat
 // ── Replay of a flight's recordings in step with the log replay (video/record/replay) ──
 
 /// Open the recordings of `flight_id` on the decode sink; a live stream ends. Fails when the flight has
-/// no recording that is still on disk.
+/// no recording below the video folder.
 #[tauri::command(async)]
 pub fn video_replay_open(
     app: AppHandle,
     flight_id: i64,
     db_path: Option<String>,
+    video_dir: Option<String>,
     native_rtsp: State<'_, crate::video::rtsp_native::NativeRtsp>,
 ) -> Result<serde_json::Value, String> {
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
@@ -692,7 +699,8 @@ pub fn video_replay_open(
         let portable = std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.join(".portable").exists())).unwrap_or(false);
         let db_file = crate::flightlog::db::resolve_db_path(&db_path.unwrap_or_default(), portable);
         let conn = crate::flightlog::db::open_database(&db_file).map_err(|e| format!("Database error: {e}"))?;
-        let parts = crate::flightlog::video_link::replay_parts(&conn, flight_id).map_err(|e| format!("Database error: {e}"))?;
+        let parts = crate::flightlog::video_link::replay_parts(&conn, flight_id, &record_dir(video_dir.as_deref()))
+            .map_err(|e| format!("Database error: {e}"))?;
         if parts.is_empty() {
             return Err("the flight has no recording on disk".into());
         }
@@ -711,7 +719,7 @@ pub fn video_replay_open(
     }
     #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
     {
-        let _ = (&app, flight_id, &db_path, &native_rtsp);
+        let _ = (&app, flight_id, &db_path, &video_dir, &native_rtsp);
         Err("not available on this platform".into())
     }
 }

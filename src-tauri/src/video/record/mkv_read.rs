@@ -293,6 +293,37 @@ impl MkvFile {
     }
 }
 
+/// The Matroska segment UID of a file, as lower-case hex — what identifies a recording whatever it is
+/// called and wherever it lies. Only the head of the file is read. `None` for anything that has none.
+pub fn segment_uid(path: &Path) -> Option<String> {
+    const ID_SEGMENT_UID: u32 = 0x73A4;
+    let mut head = Vec::with_capacity(4096);
+    File::open(path).ok()?.take(4096).read_to_end(&mut head).ok()?;
+    let mut at = 0usize;
+    loop {
+        let b0 = *head.get(at)?;
+        let id_len = b0.leading_zeros() as usize + 1;
+        if id_len > 4 {
+            return None;
+        }
+        let id = uint(head.get(at..at + id_len)?) as u32;
+        at += id_len;
+        let s0 = *head.get(at)?;
+        let size_len = s0.leading_zeros() as usize + 1;
+        if size_len > 8 {
+            return None;
+        }
+        let mut size_bytes = head.get(at..at + size_len)?.to_vec();
+        size_bytes[0] &= (0xFFu16 >> size_len) as u8;
+        at += size_len;
+        match id {
+            ID_SEGMENT | ID_INFO => {} // enter
+            ID_SEGMENT_UID => return Some(head.get(at..at + 16)?.iter().map(|b| format!("{b:02x}")).collect()),
+            _ => at = at.checked_add(uint(&size_bytes) as usize)?,
+        }
+    }
+}
+
 fn uint(bytes: &[u8]) -> u64 {
     bytes.iter().fold(0u64, |v, b| (v << 8) | *b as u64)
 }
@@ -378,6 +409,7 @@ mod tests {
             n += 1;
         }
         assert_eq!(n, 20);
+        assert_eq!(segment_uid(path).as_deref(), Some("03030303030303030303030303030303"));
         f.seek_before(1050).unwrap();
         assert_eq!(f.keyframe_before(1050), 800);
         let fr = f.next_frame().unwrap().unwrap();
