@@ -143,6 +143,8 @@ pub struct NativeRtsp {
     live: Mutex<Option<Arc<LiveRtspStats>>>,
     /// Outlives a stream: a reconnect during a recording continues it in a new file.
     recorder: Arc<super::record::VideoRecorder>,
+    /// A flight's recordings playing through the decode sink in place of a live stream.
+    replay: Mutex<Option<super::record::replay::Replay>>,
     /// What each window's surface router last published, keyed by window label. The sink always
     /// gets the MERGED list, so one window's push can never drop another window's holes
     /// (VIDEO_MULTISINK_WINDOW.md §4.1).
@@ -179,6 +181,72 @@ impl NativeRtsp {
 
     pub fn recorder(&self) -> &super::record::VideoRecorder {
         &self.recorder
+    }
+
+    /// Play `parts` through the decode sink, following `replay_sync`. Ends a live stream. Returns the
+    /// codec name, the picture size and whether a recording covers flight time 0.
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+    pub fn replay_open(
+        &self,
+        parts: Vec<super::record::replay::ReplayPart>,
+        parent_hwnd: Option<isize>,
+    ) -> Result<(&'static str, u32, u32), String> {
+        use super::record::replay::{probe, Replay};
+        self.stop();
+        if let Some(h) = parent_hwnd {
+            self.parents.lock().unwrap().insert("main".to_string(), h);
+        }
+        let info = probe(&parts).ok_or("none of the flight's recordings can be read")?;
+        let codec_name = match info.codec {
+            VideoCodec::H265 => "H.265",
+            _ => "H.264",
+        };
+        #[cfg(target_os = "windows")]
+        let sink = {
+            if parent_hwnd.is_none() {
+                return Err("no window to show the video in".into());
+            }
+            WinVideoSink::start(match info.codec {
+                VideoCodec::H265 => SinkCodec::H265,
+                _ => SinkCodec::H264,
+            })
+        };
+        #[cfg(target_os = "linux")]
+        let sink = LinuxVideoSink::start(info.codec, super::rtsp::probe_au(&info.first_au));
+        #[cfg(target_os = "macos")]
+        let sink = AppleVideoSink::start(info.codec);
+        let sink = sink.map_err(|e| format!("native decode sink failed: {e}"))?;
+        *self.sink.lock().unwrap() = Some(sink);
+        *self.sink_codec.lock().unwrap() = Some(codec_name);
+        // No RTP behind it, but the Debug Monitor reads the sink through these counters.
+        *self.live.lock().unwrap() = Some(Arc::new(LiveRtspStats::default()));
+        self.push_surfaces();
+        let slot = self.sink.clone();
+        let replay = Replay::start(parts, move |au, ts, show| {
+            if let Some(s) = slot.lock().unwrap().as_ref() {
+                // Only the Windows sink can decode without showing so far; elsewhere the run-up to a
+                // seek target is visible.
+                #[cfg(target_os = "windows")]
+                if !show {
+                    s.push_hidden(au, ts);
+                    return;
+                }
+                #[cfg(not(target_os = "windows"))]
+                let _ = show;
+                s.push(au, ts);
+            }
+        });
+        // Surfaces published before the sink existed get their picture like one that appears later.
+        replay.refresh();
+        *self.replay.lock().unwrap() = Some(replay);
+        log::info!("[video] replay of a recording on the {codec_name} decode sink");
+        Ok((codec_name, info.width, info.height))
+    }
+
+    /// The replay's flight time (ms), run state and speed. `None` while no recording plays, else whether
+    /// a recording covers that time and whether its picture is on screen.
+    pub fn replay_sync(&self, flight_ms: f64, playing: bool, rate: f64) -> Option<(bool, bool)> {
+        self.replay.lock().unwrap().as_ref().map(|r| r.sync(flight_ms, playing, rate))
     }
 
     /// Start the native RTSP client on `url` (`transport`: udp | tcp | anything → auto).
@@ -458,6 +526,8 @@ impl NativeRtsp {
 
     /// Stop the client and the broadcast if running. Idempotent; never fires `on_ended`.
     pub fn stop(&self) {
+        // The replay thread pushes into the sink: it goes first, like the RTSP thread below.
+        drop(self.replay.lock().unwrap().take());
         let taken = self.inner.lock().unwrap().take();
         if let Some(r) = taken {
             teardown(r);
@@ -547,15 +617,23 @@ impl NativeRtsp {
     /// merged list. An empty list means that window shows nothing — visibility is implicit, so
     /// there is no second command that could arrive out of order.
     pub fn sink_surfaces(&self, window: &str, rects: Vec<SurfaceRect>) {
-        {
+        let appeared = {
             let mut all = self.surfaces.lock().unwrap();
+            let before: Vec<String> = all.get(window).map(|l| l.iter().map(|r| r.id.clone()).collect()).unwrap_or_default();
+            let appeared = rects.iter().any(|r| !before.contains(&r.id));
             if rects.is_empty() {
                 all.remove(window);
             } else {
                 all.insert(window.to_string(), rects);
             }
-        }
+            appeared
+        };
         self.push_surfaces();
+        if appeared {
+            if let Some(r) = self.replay.lock().unwrap().as_ref() {
+                r.refresh();
+            }
+        }
     }
 
     /// Resolve every published surface against its window and hand the list to the active sink.

@@ -675,3 +675,57 @@ pub fn video_record_stop(
 pub fn video_record_status(native_rtsp: State<'_, crate::video::rtsp_native::NativeRtsp>) -> crate::video::record::RecordingStatus {
     native_rtsp.recorder().status()
 }
+
+// ── Replay of a flight's recordings in step with the log replay (video/record/replay) ──
+
+/// Open the recordings of `flight_id` on the decode sink; a live stream ends. Fails when the flight has
+/// no recording that is still on disk.
+#[tauri::command(async)]
+pub fn video_replay_open(
+    app: AppHandle,
+    flight_id: i64,
+    db_path: Option<String>,
+    native_rtsp: State<'_, crate::video::rtsp_native::NativeRtsp>,
+) -> Result<serde_json::Value, String> {
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+    {
+        let portable = std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.join(".portable").exists())).unwrap_or(false);
+        let db_file = crate::flightlog::db::resolve_db_path(&db_path.unwrap_or_default(), portable);
+        let conn = crate::flightlog::db::open_database(&db_file).map_err(|e| format!("Database error: {e}"))?;
+        let parts = crate::flightlog::video_link::replay_parts(&conn, flight_id).map_err(|e| format!("Database error: {e}"))?;
+        if parts.is_empty() {
+            return Err("the flight has no recording on disk".into());
+        }
+        #[cfg(target_os = "windows")]
+        let parent = {
+            use tauri::Manager;
+            app.get_webview_window("main").and_then(|w| w.hwnd().ok()).map(|h| h.0 as isize)
+        };
+        #[cfg(not(target_os = "windows"))]
+        let parent: Option<isize> = {
+            let _ = &app;
+            None
+        };
+        let (codec, width, height) = native_rtsp.replay_open(parts, parent)?;
+        Ok(serde_json::json!({ "codec": codec, "width": width, "height": height }))
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+    {
+        let _ = (&app, flight_id, &db_path, &native_rtsp);
+        Err("not available on this platform".into())
+    }
+}
+
+/// The replay's position: flight time (ms from the flight's start), running or not, speed. Returns whether
+/// a recording covers that time and whether its picture is on screen; `null` while no recording is open.
+#[tauri::command]
+pub fn video_replay_sync(
+    flight_ms: f64,
+    playing: bool,
+    rate: f64,
+    native_rtsp: State<'_, crate::video::rtsp_native::NativeRtsp>,
+) -> Option<serde_json::Value> {
+    native_rtsp
+        .replay_sync(flight_ms, playing, rate)
+        .map(|(covered, ready)| serde_json::json!({ "covered": covered, "ready": ready }))
+}

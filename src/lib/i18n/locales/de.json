@@ -810,6 +810,7 @@
     }
   },
   "video": {
+    "replayGap": "Für diesen Teil des Flugs ist kein Video aufgezeichnet",
     "record": "Videostream aufzeichnen",
     "recordHint": "Schreibt den RTSP-Stream unverändert, ohne Neukodierung, vom Armen bis zum Disarmen in eine Matroska-Datei (.mkv). Die Datei wird im Logbuch dem Flug zugeordnet. Benötigt den nativen RTSP-Client und eine H.264- oder HEVC-Quelle.",
     "recordFolder": "Aufnahmeordner",

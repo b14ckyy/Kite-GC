@@ -120,6 +120,31 @@ pub fn attach_to_saved_flights(conn: &Connection, db_file: &Path) {
     }
 }
 
+/// The flight's recordings that are still on disk, with their sync anchors, in flight order.
+pub fn replay_parts(conn: &Connection, flight_id: i64) -> rusqlite::Result<Vec<crate::video::record::replay::ReplayPart>> {
+    let mut stmt = conn.prepare(
+        "SELECT extra_json, sync_a_video_ms, sync_a_flight_ms, sync_b_video_ms, sync_b_flight_ms
+         FROM flight_videos
+         WHERE flight_id = ?1 AND sync_a_flight_ms IS NOT NULL AND sync_b_flight_ms IS NOT NULL
+         ORDER BY sync_a_flight_ms, id",
+    )?;
+    let rows = stmt.query_map(params![flight_id], |r| {
+        let extra: Option<String> = r.get(0)?;
+        let path = extra
+            .and_then(|e| serde_json::from_str::<serde_json::Value>(&e).ok())
+            .and_then(|v| v.get("path").and_then(|p| p.as_str()).map(PathBuf::from));
+        Ok((path, r.get::<_, Option<i64>>(1)?.unwrap_or(0), r.get(2)?, r.get::<_, Option<i64>>(3)?.unwrap_or(0), r.get(4)?))
+    })?;
+    let mut parts = Vec::new();
+    for row in rows {
+        let (path, a_video_ms, a_flight_ms, b_video_ms, b_flight_ms) = row?;
+        if let Some(path) = path.filter(|p| p.is_file()) {
+            parts.push(crate::video::record::replay::ReplayPart { path, a_video_ms, a_flight_ms, b_video_ms, b_flight_ms });
+        }
+    }
+    Ok(parts)
+}
+
 /// A flight's video as the logbook shows it.
 #[derive(Debug, Serialize)]
 pub struct FlightVideo {

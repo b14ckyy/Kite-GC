@@ -6,7 +6,9 @@
 //! thread owns the file, so a slow disk costs recorded frames and never the live picture.
 
 mod mkv;
+mod mkv_read;
 mod nal;
+pub mod replay;
 
 use std::collections::VecDeque;
 use std::fs::File;

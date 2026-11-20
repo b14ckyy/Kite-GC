@@ -115,6 +115,7 @@ use commands::video::{
     video_linux_hole_spike,
     video_rtsp_native_sink_buffer, video_rtsp_native_sink_orient,
     video_record_default_dir, video_record_enable, video_record_start, video_record_stop, video_record_status,
+    video_replay_open, video_replay_sync,
     video_detached_open, video_detached_close, video_detached_pin_top, video_detached_chrome, video_detached_aspect, video_detached_nudge,
 };
 use video::{MediaMtx, MjpegServer};
@@ -830,6 +831,8 @@ pub fn run() {
             video_record_start,
             video_record_stop,
             video_record_status,
+            video_replay_open,
+            video_replay_sync,
             flightlog_flight_videos,
             video_native_mjpeg_stop,
             video_detached_open,

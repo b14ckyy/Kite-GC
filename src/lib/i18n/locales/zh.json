@@ -810,6 +810,7 @@
     }
   },
   "video": {
+    "replayGap": "No video recorded for this part of the flight",
     "record": "Record the video stream",
     "recordHint": "Writes the RTSP stream to a Matroska file (.mkv) as it arrives, without re-encoding, from arming to disarming. The file is attached to the flight in the logbook. Needs the native RTSP client and an H.264 or HEVC source.",
     "recordFolder": "Recording folder",

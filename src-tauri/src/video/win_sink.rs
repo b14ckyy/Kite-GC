@@ -21,7 +21,7 @@
 //! through the swapchain — never GDI — because the transparent Tauri window makes the DWM
 //! honour surface alpha.
 
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, Once};
@@ -86,8 +86,9 @@ pub enum SinkCodec {
 }
 
 enum Cmd {
-    /// One Annex-B access unit + its (unwrapped) RTP timestamp in 90 kHz ticks.
-    Frame(Vec<u8>, u64),
+    /// One Annex-B access unit + its (unwrapped) RTP timestamp in 90 kHz ticks. `false` = decode it,
+    /// never show it (a picture a later one depends on).
+    Frame(Vec<u8>, u64, bool),
     Stop,
 }
 
@@ -172,7 +173,13 @@ impl WinVideoSink {
     }
 
     pub fn push(&self, au: Vec<u8>, rtp_ts_90k: u64) {
-        let _ = self.tx.send(Cmd::Frame(au, rtp_ts_90k));
+        let _ = self.tx.send(Cmd::Frame(au, rtp_ts_90k, true));
+    }
+
+    /// Decode without showing: the pictures between a keyframe and the one that is wanted. Each needs a
+    /// timestamp of its own.
+    pub fn push_hidden(&self, au: Vec<u8>, rtp_ts_90k: u64) {
+        let _ = self.tx.send(Cmd::Frame(au, rtp_ts_90k, false));
     }
 
     /// The complete set of surfaces to present into (latest wins). An output is created for a key
@@ -278,7 +285,13 @@ fn run_sink(
         // DOM hole, and show/hide is immediate.
         if let Some(c) = shared.take_ctrl() {
             if let Some(surfaces) = c.surfaces {
-                unsafe { state.sync_surfaces(&surfaces) };
+                // A surface that just appeared would stay an empty hole until the next picture —
+                // which a paused replay never sends.
+                if unsafe { state.sync_surfaces(&surfaces) } {
+                    if let Some(last) = state.last_shown.clone() {
+                        let _ = unsafe { state.render(&last, &shared) };
+                    }
+                }
             }
             if let Some(frames) = c.buffer {
                 state.buffer_frames = frames as usize;
@@ -288,9 +301,12 @@ fn run_sink(
             }
         }
         match rx.recv_timeout(Duration::from_millis(5)) {
-            Ok(Cmd::Frame(au, ts)) => {
+            Ok(Cmd::Frame(au, ts, show)) => {
                 if shared.error.lock().unwrap().is_some() {
                     continue; // fatal — drain the queue without touching the decoder
+                }
+                if !show {
+                    state.hide(ts);
                 }
                 if let Err(e) = unsafe { state.feed(&au, ts, &shared) } {
                     log::warn!("[video] sink decode error: {e}");
@@ -393,6 +409,10 @@ struct SinkState {
     /// `buffer_frames` > 0 — the default path presents on decode. Held samples come out
     /// of the DXVA surface pool, which is why the depth is capped small.
     queue: VecDeque<(IMFSample, i64)>,
+    /// Sample times of pictures to decode but not show; the decoder hands the time through.
+    hidden: HashSet<i64>,
+    /// The picture on screen, kept for a surface that appears later. Holds one decoder surface.
+    last_shown: Option<IMFSample>,
     buffer_frames: usize,
     /// When + at which media time the last frame was presented — the pacing anchor.
     last_present: Option<(Instant, i64)>,
@@ -465,6 +485,8 @@ impl SinkState {
                 display: None,
                 sample_index: 0,
                 queue: VecDeque::new(),
+                hidden: HashSet::new(),
+                last_shown: None,
                 buffer_frames: 0,
                 last_present: None,
                 flip_h: false,
@@ -475,7 +497,9 @@ impl SinkState {
 
     /// Reconcile the outputs with the surfaces the routers publish: create what appeared, move
     /// what stayed, hide what went away (and drop it once the cache outgrows the router's reach).
-    unsafe fn sync_surfaces(&mut self, surfaces: &[SinkSurface]) {
+    /// Returns whether a surface came on screen that showed nothing before.
+    unsafe fn sync_surfaces(&mut self, surfaces: &[SinkSurface]) -> bool {
+        let mut appeared = false;
         for o in &mut self.outputs {
             o.live = false;
         }
@@ -515,6 +539,7 @@ impl SinkState {
                     }
                 }
             };
+            appeared |= !self.outputs[idx].shown;
             unsafe { self.place_output(idx, s) };
             self.outputs[idx].live = true;
         }
@@ -565,6 +590,7 @@ impl SinkState {
                 let _ = DestroyWindow(o.hwnd);
             }
         }
+        appeared
     }
 
     /// Child window + swapchain for a surface that just appeared. Returns its index.
@@ -640,6 +666,14 @@ impl SinkState {
     /// bytes the depacketizer produced; HEVC is converted to the MP4-style diet the
     /// HEVCVideoExtension MFT expects (see `create_decoder`), and dropped until the
     /// stream has delivered its parameter sets and an IRAP to start on.
+    fn hide(&mut self, ts_90k: u64) {
+        // A picture the decoder never hands out must not stay here for good.
+        if self.hidden.len() > 2048 {
+            self.hidden.clear();
+        }
+        self.hidden.insert((ts_90k as i64) * 10_000_000 / 90_000);
+    }
+
     unsafe fn feed(&mut self, au: &[u8], ts_90k: u64, shared: &Shared) -> Result<(), String> {
         if self.codec == SinkCodec::H265 && !unsafe { self.prepare_hevc(au)? } {
             return Ok(()); // pre-IRAP warm-up — nothing to decode yet
@@ -787,7 +821,9 @@ impl SinkState {
                 match result {
                     Ok(()) => {
                         if let Some(sample) = sample {
-                            if self.buffer_frames == 0 && self.queue.is_empty() {
+                            if !self.hidden.is_empty() && self.hidden.remove(&sample.GetSampleTime().unwrap_or(0)) {
+                                // Decoded for the pictures after it, not for the screen.
+                            } else if self.buffer_frames == 0 && self.queue.is_empty() {
                                 self.render(&sample, shared)?;
                             } else {
                                 let ts = sample.GetSampleTime().unwrap_or(0);
@@ -1037,6 +1073,7 @@ impl SinkState {
                 let _ = self.outputs[idx].swapchain.Present(0, DXGI_PRESENT(0));
             }
             shared.frames_presented.fetch_add(1, Ordering::Relaxed);
+            self.last_shown = Some(sample.clone());
             if shared.size.lock().unwrap().is_none() && self.picture.0 > 0 {
                 // Report the DISPLAY size — the aspect the surfaces size themselves to.
                 let size = self

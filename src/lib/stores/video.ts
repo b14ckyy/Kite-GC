@@ -106,6 +106,11 @@ export interface VideoState {
   /** Runtime-only: the codec the native decode sink plays ('H.264'/'H.265'), for the
    *  panel's info line. Null while the sink route isn't active. */
   nativeSinkCodec: string | null;
+  /** A replayed flight's recording plays through the decode sink in place of a live source
+   *  (controllers/videoReplay.ts). Runtime-only. */
+  replay: boolean;
+  /** No recording covers the replay's current time (before, after, between two files). */
+  replayGap: boolean;
   /** Runtime-only: true while the infinite RTSP auto-reconnect loop is running (link dropped/stalled). */
   reconnecting: boolean;
   /** Runtime-only: current reconnect attempt number, shown in the on-video overlay. */
@@ -359,6 +364,8 @@ const INITIAL: VideoState = {
   rtspEngine: null,
   nativeSink: false,
   nativeSinkCodec: null,
+  replay: false,
+  replayGap: false,
   reconnecting: false,
   reconnectAttempt: 0,
   mjpegUrl: null,
@@ -1622,8 +1629,43 @@ export function stopVideo(): void {
     void stopNativeMjpeg();
     stopKiteRtsp();
   }
-  patch({ enabled: false, status: 'off', error: null, rtspEngine: null, mjpegUrl: null, activeTranscode: null, reconnecting: false, reconnectAttempt: 0 });
+  patch({ enabled: false, status: 'off', error: null, rtspEngine: null, mjpegUrl: null, activeTranscode: null, reconnecting: false, reconnectAttempt: 0, replay: false, replayGap: false });
   savePrefs();
+}
+
+/** The backend opened a flight's recording on the decode sink: show it like a live sink feed. Nothing is
+ *  persisted — after the replay the source is off, as `stopVideo` left it. */
+export function enterVideoReplay(codec: string | null, width: number, height: number): void {
+  patch({
+    enabled: true,
+    status: 'live',
+    error: null,
+    mjpegUrl: null,
+    nativeSink: true,
+    nativeSinkCodec: codec,
+    activeTranscode: 'none',
+    rtspEngine: null,
+    reconnecting: false,
+    reconnectAttempt: 0,
+    replay: true,
+    replayGap: false,
+    floating: get(videoState).floating || !videoWidgetActive,
+  });
+  if (width > 0 && height > 0) reportVideoSize(width, height);
+  startNativeSurfaceRouter();
+  syncNativeSinkOrient();
+}
+
+/** The replay ended: back to "no source running". The caller stops the backend. */
+export function leaveVideoReplay(): void {
+  if (!get(videoState).replay) return;
+  stopNativeSurfaceRouter();
+  patch({ enabled: false, status: 'off', nativeSink: false, nativeSinkCodec: null, activeTranscode: null, replay: false, replayGap: false });
+}
+
+export function setVideoReplayGap(gap: boolean): void {
+  const s = get(videoState);
+  if (s.replay && s.replayGap !== gap) patch({ replayGap: gap });
 }
 
 /** Whether a Video widget sits in a dock (the phone grid included) — +page keeps this current.

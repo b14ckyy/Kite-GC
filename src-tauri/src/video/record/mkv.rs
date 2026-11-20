@@ -223,6 +223,12 @@ impl<W: Write + Seek> MkvWriter<W> {
         if self.frames > 1 { self.last_ms + span / (self.frames as i64 - 1) } else { self.last_ms }
     }
 
+    /// The stream as a crash would leave it.
+    #[cfg(test)]
+    pub fn into_unfinished(self) -> W {
+        self.out
+    }
+
     /// Close the file: cue index, seek head, duration, segment size.
     pub fn finish(mut self) -> io::Result<W> {
         self.close_cluster()?;
