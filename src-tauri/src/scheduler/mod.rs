@@ -79,7 +79,7 @@ pub enum SchedulerCommand {
         code: u16,
         payload: Vec<u8>,
         reply: mpsc::Sender<Result<Vec<u8>, String>>,
-        /// `None` = the normal one-shot (2 s, one whole-request retry in tunnel mode where allowed).
+        /// `None` = the normal one-shot (2 s direct; tunnel: the reply timeout, one whole-request retry where allowed).
         /// `Some(t)` = a liveness probe (`MspRequester::probe`): reply deadline `t`, never retried.
         timeout: Option<Duration>,
     },
@@ -90,12 +90,9 @@ pub enum SchedulerCommand {
 pub enum SchedulerMode {
     /// Direct MSP link: telemetry polling, events, stall watchdog, recorder, RC stream, radar.
     Telemetry,
-    /// MSP over the MAVLink TUNNEL (INAV 10.0+): on-demand one-shots only. No telemetry slots, no
-    /// `telemetry-*` / `telemetry-fc-link` / `connection-lost` / `link-stats` events (the MAVLink handler
-    /// owns all of those), no recorder, no RC stream or radar polling, strictly ONE request in flight
-    /// (the FC has one tunnel parser per port and replies carry no request id), and a one-shot that
-    /// times out is re-sent once as a whole before it fails. `reply_timeout` is the wait per attempt,
-    /// set by the connect probe from the link's round trip (2 s on a fast link).
+    /// MSP over the MAVLink TUNNEL (INAV 10.0+): on-demand one-shots, ONE in flight (one tunnel parser per FC
+    /// port, replies carry no request id), one whole-request retry; events stay with the MAVLink handler.
+    /// `reply_timeout` = wait per attempt, from the connect probe's round trip.
     Tunnel { reply_timeout: Duration },
 }
 
@@ -155,7 +152,7 @@ const BOXIDS_RETRY_INTERVAL: Duration = Duration::from_secs(3);
 /// Short transport read timeout so the pipelined drain/emit loop ticks ≈100 Hz (like Configurator's
 /// executor) instead of being quantized by the coarse idle read timeout.
 const SCHED_READ_TIMEOUT: Duration = Duration::from_millis(8);
-/// One-shot UI request timeout — matches the old blocking `MSP_RESPONSE_TIMEOUT_MS`.
+/// One-shot UI request timeout on a direct link.
 const MSP_ONESHOT_TIMEOUT_MS: u64 = 2000;
 /// How long `MspRequester::msp_request` waits for its reply on a direct MSP link.
 const OUTER_WAIT: Duration = Duration::from_secs(5);
@@ -164,9 +161,9 @@ const OUTER_WAIT: Duration = Duration::from_secs(5);
 fn tunnel_outer_wait(reply_timeout: Duration) -> Duration {
     reply_timeout * 5
 }
-/// Tunnel mode: after a retried / timed-out request of code C completed, a new request of C is held
-/// back by ~2×RTT (clamped to this range) so a late duplicate reply lands — and is dropped as stale —
-/// before the new request could take it for its own answer. The upper bound is the reply timeout.
+/// Tunnel mode: after a retried / timed-out request of code C completed, a new request of C is held back
+/// by ~2×RTT (at least this, at most the reply timeout) so a late duplicate reply lands — and is dropped as
+/// stale — before the new request could take it for its own answer.
 const STALE_MARGIN_MIN: Duration = Duration::from_millis(200);
 /// Tunnel mode: how long a code stays on the stale watch list (for counting late replies).
 const STALE_WATCH_KEEP: Duration = Duration::from_secs(10);
@@ -326,6 +323,11 @@ impl MspRequester {
         self.tunnel
     }
 
+    /// A tunnel whose reply timeout was raised above the 2 s of a fast link.
+    pub fn is_slow_tunnel(&self) -> bool {
+        self.stale_margin_max > Duration::from_secs(2)
+    }
+
     /// Serialise multi-request transactions (a mission transfer, a safehome batch, …) of this connection:
     /// they used to be serialised by holding `AppState::protocol` for the whole command. Not re-entrant —
     /// never nest two transactions on one thread.
@@ -401,7 +403,6 @@ fn scheduler_loop(
     rc_tx: rc_tx::RcTxHandle,
     mode: SchedulerMode,
 ) -> Option<Box<dyn Transport>> {
-    // One-shot reply wait: fixed on a direct link, from the connect probe in tunnel mode.
     let (tunnel, oneshot_timeout) = match mode {
         SchedulerMode::Tunnel { reply_timeout } => (true, reply_timeout),
         SchedulerMode::Telemetry => (false, Duration::from_millis(MSP_ONESHOT_TIMEOUT_MS)),
@@ -440,15 +441,8 @@ fn scheduler_loop(
     let mut rc_probe_timeout: u32 = 0;
     let mut rc_probe_lat = Duration::ZERO;
 
-    // Query MSP_BOXIDS at startup to get the index→permanent_id mapping.
-    // INAV's activeModes bitmask uses INDEX-based packing, not permanent box IDs.
-    // Without this mapping, we can't correctly decode which modes are active.
-    //
-    // This attempt is only the fast path — one 2 s request, no retry. Losing it on a lossy air link
-    // (mLRS/ELRS right at connect) used to cost the flight modes for the WHOLE session, silently:
-    // `parse_active_modes` deliberately reports nothing rather than guessing without the mapping, and
-    // `box_active` therefore never sees MSP RC OVERRIDE either. A miss here is no longer terminal —
-    // the loop keeps re-asking (see `BOXIDS_RETRY_INTERVAL`) until the FC answers.
+    // MSP_BOXIDS maps INAV's index-packed activeModes to permanent box ids — without it no mode decodes.
+    // One attempt here (one reply timeout); a direct link keeps re-asking from the loop (`BOXIDS_RETRY_INTERVAL`).
     let mut box_ids: Vec<u8> = match transport.msp_request(crate::msp::MSP_BOXIDS, &[]) {
         Ok(msg) => {
             log::info!("MSP_BOXIDS: received {} box IDs", msg.payload.len());
@@ -1284,7 +1278,7 @@ fn stale_margin(rtt_ewma: Option<f64>, max: Duration) -> Duration {
 /// Tunnel mode: requests that are never re-sent after a timeout. A lapsed attempt may have executed on
 /// the FC with only its reply chunk lost, so a re-send would repeat a non-idempotent effect:
 ///  • `MSP_SET_REBOOT` (68, INAV's `MSP_REBOOT`; the geozone "Save to FC" ends with it): the FC reboots
-///    once the reply has drained, so a re-send 2 s later can reach the freshly booted FC and reboot it
+///    once the reply has drained, so a re-send one reply timeout later can reach the booted FC and reboot it
 ///    a second time.
 /// `MSP_EEPROM_WRITE` (the safehome / geozone / craft-name persist step) is deliberately NOT listed —
 /// writing the same config twice is idempotent, so its retry is safe.

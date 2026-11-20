@@ -531,9 +531,7 @@ fn connect_mavlink(
         byte_transport.description(),
     );
 
-    // Stream shaping (ADR-043; the reset to the FC's own SRn_* rates with "Full MAVLink Telemetry") and
-    // the one-shot EKF / home / Q_ENABLE / logging-backend requests. Vehicles the handler discovers later
-    // on this link get the same shaping.
+    // Also handed to the handler: vehicles it discovers later on this link get the same shaping (ADR-043).
     let rates = mavlink_proto::handler::StreamRateConfig {
         full_telemetry: mavlink_full_telemetry.unwrap_or(false),
         attitude_hz: attitude_rate_hz.unwrap_or(5.0),
@@ -626,7 +624,10 @@ fn connect_mavlink(
                     }
                 }
             }
-            TunnelProbe::NoTunnel => {}
+            // An `Up` probe has sent them itself, ahead of the tunnel scheduler.
+            TunnelProbe::NoTunnel => {
+                let _ = handle.cmd_tx_clone().send(mavlink_proto::handler::MavlinkCommand::ConfigurePrimary);
+            }
             TunnelProbe::LinkLost => {
                 // The handler already emitted `connection-lost` for this unregistered link (the frontend ignores an
                 // unknown linkId) — tear down and fail the connect instead of storing a dead link.
@@ -637,7 +638,6 @@ fn connect_mavlink(
                 return Err("Link lost during MSP tunnel probe".into());
             }
         }
-        let _ = handle.cmd_tx_clone().send(mavlink_proto::handler::MavlinkCommand::ConfigurePrimary);
     }
     msp_tunnel::stats::emit_now(&app_handle);
 
@@ -650,14 +650,11 @@ fn connect_mavlink(
     Ok(Opened { protocol: ActiveProtocol::Mavlink(handle), protocol_name: "MAVLink", fc_info, sysid: fc_sysid, compid: fc_compid })
 }
 
-/// How long the connect probe waits for the tunnel: 2 s, or three AUTOPILOT_VERSION round trips on a
-/// slow link, at most 10 s.
 fn tunnel_probe_window(version_rtt: Option<std::time::Duration>) -> std::time::Duration {
     use std::time::Duration;
     version_rtt.map_or(Duration::from_secs(2), |r| (r * 3).clamp(Duration::from_secs(2), Duration::from_secs(10)))
 }
 
-/// Reply wait per MSP request on the tunnel: 2 s, or three probe round trips on a slow link, at most 10 s.
 fn tunnel_reply_timeout(probe_rtt: std::time::Duration) -> std::time::Duration {
     use std::time::Duration;
     (probe_rtt * 3).clamp(Duration::from_secs(2), Duration::from_secs(10))
@@ -688,7 +685,7 @@ fn probe_msp_tunnel(
 ) -> TunnelProbe {
     use std::time::{Duration, Instant};
 
-    // Three attempts, sent at 0, 1/4 and 1/2 of the window; the first reply ends the probe.
+    // Attempts go out at 0, 1/4 and 1/2 of the window.
     let window = tunnel_probe_window(version_rtt);
     let probe_waits = [window / 4, window / 4, window / 2];
     /// After the reply: swallow late duplicate replies of the earlier attempts before the handshake.
@@ -730,7 +727,11 @@ fn probe_msp_tunnel(
     }
     let Some((attempt, rtt)) = answered else {
         log::warn!("MSP tunnel probe: no reply after {} ms (3 attempts) — plain MAVLink", window.as_millis());
-        msp_tunnel::stats::set_probe("no_reply", None, format!("{} ms, 3 attempts", started.elapsed().as_millis()));
+        msp_tunnel::stats::set_probe(
+            "no_reply",
+            None,
+            format!("{} ms, 3 attempts (window {} ms)", started.elapsed().as_millis(), window.as_millis()),
+        );
         return TunnelProbe::NoTunnel;
     };
     let rtt_ms = rtt.as_millis() as u64;
@@ -801,8 +802,27 @@ fn probe_msp_tunnel(
     msp_tunnel::stats::set_probe(
         "ok",
         Some(rtt_ms),
-        format!("attempt {}/3 — INAV {}", attempt, fc_info.fc_version),
+        format!(
+            "attempt {}/3 — INAV {} — window {} ms, reply timeout {} ms",
+            attempt,
+            fc_info.fc_version,
+            window.as_millis(),
+            reply_timeout.as_millis()
+        ),
     );
+
+    // The connect requests go out now, and one request behind them returns once the uplink has drained:
+    // the scheduler's first reads would time out queued behind ~35 commands on a slow link.
+    const DRAIN_MAX_MS: u64 = 10_000;
+    let _ = handle.cmd_tx_clone().send(mavlink_proto::handler::MavlinkCommand::ConfigurePrimary);
+    let drain = Instant::now();
+    if let Err(e) = msp.msp_request_timeout(MSP_API_VERSION, &[], DRAIN_MAX_MS) {
+        if msp.is_connection_lost() {
+            log::warn!("MSP tunnel: MAVLink link lost after the INAV handshake ({})", e);
+            return TunnelProbe::LinkLost;
+        }
+    }
+    log::info!("MSP tunnel: connect requests sent, uplink clear after {} ms", drain.elapsed().as_millis());
 
     // Tunnel-mode scheduler: no polling, no recorder, no RC stream / radar, one request in flight.
     let sched = scheduler::start(
@@ -1072,7 +1092,7 @@ mod tests {
     #[test]
     fn tunnel_waits_follow_the_measured_round_trip() {
         let ms = Duration::from_millis;
-        // A fast link and a missing AUTOPILOT_VERSION keep the 2 s the tunnel was built with.
+        // A fast link and a missing AUTOPILOT_VERSION keep the 2 s floor.
         assert_eq!(tunnel_probe_window(None), ms(2000));
         assert_eq!(tunnel_probe_window(Some(ms(40))), ms(2000));
         assert_eq!(tunnel_reply_timeout(ms(15)), ms(2000));

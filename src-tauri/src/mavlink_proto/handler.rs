@@ -93,8 +93,7 @@ pub enum MavlinkCommand {
     /// the connect path once the MSP-tunnel probe has ruled out INAV, which reports an ArduPilot identity
     /// in its HEARTBEAT. Ignored for a non-ArduPilot vehicle.
     StartModeList,
-    /// Send the handshake vehicle's connect requests (`configure_primary`). The connect path defers them
-    /// behind the MSP-tunnel probe: on a slow uplink they would queue in front of it for seconds.
+    /// Send the handshake vehicle's connect requests (`configure_primary`) — a tunnel candidate's after the probe.
     ConfigurePrimary,
 }
 
@@ -443,8 +442,8 @@ fn handler_loop(
     let mut tunnel_released: Option<Instant> = None;
     let mut tunnel_late_warned = false;
 
-    // QuadPlane detection: it reports MAV_TYPE_FIXED_WING, so only Q_ENABLE tells. The pre-handler request
-    // can be lost on a noisy link — re-request a few times; bounded, so a plain plane stops soon.
+    // QuadPlane detection: it reports MAV_TYPE_FIXED_WING, so only Q_ENABLE tells. The connect request can be
+    // lost on a noisy link — re-request a few times; bounded, so a plain plane stops soon.
     let is_ardupilot = fc_variant.starts_with("Ardu");
     // PX4 takes RC over MANUAL_CONTROL (#69); everything else (ArduPilot) over RC_CHANNELS_OVERRIDE (#70).
     let is_px4 = fc_variant == "PX4";
@@ -763,9 +762,11 @@ fn handler_loop(
                                 if tx.send(tunnel.payload).is_err() {
                                     tunnel_fwd = None; // tunnel transport dropped
                                 }
-                            } else if let (Some(released), false) = (tunnel_released, tunnel_late_warned) {
-                                // Once per link at the default level: the usual case is a reply that
-                                // outlived the connect probe, which a tester's log must show.
+                            } else if let Some(released) = tunnel_released
+                                .filter(|r| !tunnel_late_warned && r.elapsed() >= Duration::from_secs(1))
+                            {
+                                // Once per link at the default level: a reply that outlived the connect
+                                // probe. Under 1 s it is the tail of a transaction cut by a disconnect.
                                 tunnel_late_warned = true;
                                 log::warn!(
                                     "MAVLink TUNNEL (MSP) reply arrived {:.1} s after the tunnel was closed — dropped (the link answers slower than Kite waited)",
