@@ -79,7 +79,7 @@ struct ProtoHit {
 
 /// Altitude-reference signal (`telemetry-alt-ref`): tells the frontend whether this protocol's GPS
 /// altitude is true MSL (`msl: true`) or only relative-to-arming (`msl: false`). Relative-only protocols
-/// (LTM, CRSF) carry no MSL, so the frontend must anchor them to a ground reference for correct AGL/3D.
+/// (LTM, older CRSF layouts) carry no MSL, so the frontend must anchor them to a ground reference.
 #[derive(Clone, Serialize)]
 struct AltRef {
     msl: bool,
@@ -173,6 +173,7 @@ fn handler_loop(
     let mut last_probe = Instant::now() - MSP_PROBE_INTERVAL;
     // Refine the recorder's protocol label once the sub-protocol is locked (set only once).
     let mut protocol_labeled = false;
+    let mut crsf_msl_told = false;
     // Last protocol info pushed to the status box (re-emitted only on change, e.g. AP passthrough start).
     let mut last_proto: Option<ProtoInfo> = None;
     // Last FC-link-alive state pushed to the status box (re-emitted only on change).
@@ -259,6 +260,15 @@ fn handler_loop(
                         CrsfDecoder::new(capture.as_ref().map(|c| c.sibling_path("crsf.txt")))
                     })
                     .push_bytes(chunk);
+                    // The stream itself tells when its GPS altitude is MSL after all.
+                    if !crsf_msl_told && crsf.as_ref().is_some_and(|d| d.gps_alt_is_msl()) {
+                        crsf_msl_told = true;
+                        if let Some(ref rec) = recorder {
+                            if let Ok(mut r) = rec.lock() { r.set_alt_relative(false); }
+                        }
+                        let _ = app_handle.emit("telemetry-alt-ref", AltRef { msl: true });
+                        log::info!("Passive telemetry: CRSF GPS altitude is MSL (3-byte barometer frame seen)");
+                    }
                 }
                 // Once LTM is locked, decode into unified events (+ dump for validation).
                 if detector.locked() == Some(Protocol::Ltm) {
@@ -281,10 +291,11 @@ fn handler_loop(
             Err(TransportError::Disconnected) => {
                 log::warn!("Passive telemetry transport disconnected");
                 if let Some(c) = capture.as_mut() { c.flush(); }
+                // As on MSP / MAVLink: `shutdown_lost` offers the recovery prompt, `connection-lost` closes the link.
                 if let Some(ref rec) = recorder {
-                    if let Ok(mut r) = rec.lock() { r.shutdown(); }
+                    if let Ok(mut r) = rec.lock() { r.shutdown_lost(); }
                 }
-                let _ = app_handle.emit("telemetry-disconnected", ());
+                let _ = app_handle.emit("connection-lost", ());
                 return Some(transport);
             }
             Err(e) => {

@@ -1,15 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-//! LTM (Lightweight TeleMetry) encoder — the inverse of `passive_telemetry::decoders::ltm`.
-//!
-//! Frame = `'$' 'T' <type> <payload little-endian> <crc>`, crc = XOR of the payload bytes only. We emit a
-//! frame whenever its source data updates (pass-through rate):
-//!   • Attitude update → A-frame      (pitch/roll/yaw i16, degrees)
-//!   • GPS update      → G-frame      (lat/lon i32 ×1e7, gs u8 m/s, alt i32 cm, sats<<2|fix u8)
-//!   • Analog/Status/Airspeed update → S-frame (vbat u16 mV, mAh u16, rssi u8, airspeed u8, statemode u8)
-//!
-//! Consumers: antenna trackers (U360GTS), GCS, monitoring apps. Source: INAV `telemetry/ltm.c` + `ltm.h`.
+//! LTM encoder — the inverse of `passive_telemetry::decoders::ltm`, frame layouts per INAV `telemetry/ltm.c`.
+//! Frame = `'$' 'T' <type> <payload LE> <crc>`, crc = XOR of the payload bytes only.
 
 use super::super::cache::TelemetryCache;
 use super::Encoder;
@@ -44,15 +37,14 @@ impl LtmEncoder {
 }
 
 impl Encoder for LtmEncoder {
-    /// One full LTM set per pacer tick: A (attitude) + G (GPS) + S (status), each emitted only once its
-    /// source data is present in the cache. No repeats within a tick (the S-frame is built once).
     fn frame_set(&mut self, cache: &TelemetryCache) -> Vec<u8> {
         let mut out = Vec::with_capacity(48);
         if let Some(a) = cache.attitude.as_ref() {
             out.extend_from_slice(&a_frame(a));
         }
         if let Some(g) = cache.gps.as_ref() {
-            out.extend_from_slice(&g_frame(g));
+            // A source without an altitude of its own (no baro) has only the GPS one to offer.
+            out.extend_from_slice(&g_frame(g, cache.altitude.as_ref().map_or(g.alt_msl, |a| a.altitude)));
         }
         let s = s_frame(cache);
         out.extend_from_slice(&s);
@@ -80,12 +72,14 @@ fn a_frame(a: &crate::scheduler::telemetry::AttitudeData) -> Vec<u8> {
     frame(b'A', &p)
 }
 
-fn g_frame(g: &crate::scheduler::telemetry::GpsData) -> Vec<u8> {
+/// `rel_alt_m` = altitude above home: INAV's G-frame carries its estimated altitude, not the GPS one,
+/// and every LTM consumer reads it that way.
+fn g_frame(g: &crate::scheduler::telemetry::GpsData, rel_alt_m: f64) -> Vec<u8> {
     let mut p = Vec::with_capacity(14);
     p.extend_from_slice(&((g.lat * 1e7).round() as i32).to_le_bytes());
     p.extend_from_slice(&((g.lon * 1e7).round() as i32).to_le_bytes());
     p.push(g.ground_speed.round().clamp(0.0, 255.0) as u8);
-    p.extend_from_slice(&((g.alt_msl * 100.0).round() as i32).to_le_bytes()); // m → cm
+    p.extend_from_slice(&((rel_alt_m * 100.0).round() as i32).to_le_bytes()); // m → cm
     // LTM fix: 1=no fix, 2=2D, 3=3D, from the unified scale (`scheduler::telemetry::FIX_*`; 3D and
     // DGPS/RTK both → 3); sats in the upper 6 bits.
     let ltm_fix: u8 = match g.fix_type { FIX_NONE => 1, FIX_2D => 2, _ => 3 };
@@ -192,15 +186,17 @@ mod tests {
 
     /// The unified fix scale (0 none / 1 2D / 2 3D / 3 DGPS-RTK) maps back to LTM's 1 / 2 / 3 / 3.
     #[test]
-    fn g_frame_maps_the_unified_fix_scale() {
+    fn g_frame_maps_the_fix_scale_and_carries_the_altitude_above_home() {
         for (fix_type, wire) in [(0u8, 1u8), (1, 2), (2, 3), (3, 3)] {
             let g = crate::scheduler::telemetry::GpsData {
                 fix_type, num_sat: 9, lat: 48.1, lon: 11.5, alt_msl: 500.0, ground_speed: 12.0, course: 90.0,
             };
-            let f = g_frame(&g);
+            let f = g_frame(&g, 42.5);
             let satfix = f[f.len() - 2]; // last payload byte, before the CRC
             assert_eq!(satfix & 0x03, wire, "fix_type={fix_type}");
             assert_eq!(satfix >> 2, 9);
+            // Payload starts after '$' 'T' 'G'; the altitude follows lat, lon and the speed byte.
+            assert_eq!(i32::from_le_bytes(f[12..16].try_into().unwrap()), 4250, "altitude above home, not MSL");
         }
     }
 }
