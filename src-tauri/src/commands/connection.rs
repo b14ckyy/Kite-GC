@@ -521,7 +521,8 @@ fn connect_mavlink(
     state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<Opened, String> {
-    let (mut fc_info, fc_sysid, fc_compid, uid2_valid) = mavlink_proto::perform_handshake(&mut *byte_transport)?;
+    let mavlink_proto::Handshake { mut fc_info, sysid: fc_sysid, compid: fc_compid, uid2_valid, version_rtt } =
+        mavlink_proto::perform_handshake(&mut *byte_transport)?;
 
     log::info!(
         "MAVLink connected: {} (sysid={}) via {}",
@@ -530,46 +531,20 @@ fn connect_mavlink(
         byte_transport.description(),
     );
 
-    // Stream rates (ADR-043), skipped with "Full MAVLink Telemetry" so the FC streams per its own SRn_*
-    // params; applied before the handler thread takes the transport. WIND on ArduPilot, WIND_COV on PX4.
-    let is_px4 = fc_info.fc_variant == "PX4";
-    if mavlink_full_telemetry.unwrap_or(false) {
-        // SET_MESSAGE_INTERVAL is sticky on the FC until reboot, so a prior reduced session would
-        // otherwise keep the link narrow. Reset our managed messages to the FC's SRn defaults.
-        mavlink_proto::streamrates::reset_stream_rates(&mut *byte_transport, fc_sysid, is_px4);
-    } else {
-        mavlink_proto::streamrates::apply_stream_rates(
-            &mut *byte_transport,
-            fc_sysid,
-            attitude_rate_hz.unwrap_or(5.0),
-            position_rate_hz.unwrap_or(2.0),
-            airspeed_enabled.unwrap_or(false),
-            wind_enabled.unwrap_or(false),
-            is_px4,
-        );
-    }
-
-    // Ask the FC which EKF core is active (AHRS_EKF_TYPE) for the header EKF indicator. One-shot,
-    // fire-and-forget — the PARAM_VALUE reply is decoded by the handler thread once it starts.
-    mavlink_proto::params::request_ekf_type(&mut *byte_transport, fc_sysid);
-
-    // One-shot HOME_POSITION request — the real FC home on a mid-flight connect; in Full-telemetry mode
-    // the ONLY source (no interval push).
-    mavlink_proto::params::request_home_position(&mut *byte_transport, fc_sysid);
-
-    // ArduPilot: read Q_ENABLE to detect a QuadPlane (which reports MAV_TYPE_FIXED_WING, so the mission
-    // vehicle class can't be told from the HEARTBEAT alone). Copter/Rover/Sub lack the param → no reply.
-    if fc_info.fc_variant.starts_with("Ardu") {
-        mavlink_proto::params::request_quadplane_flag(&mut *byte_transport, fc_sysid);
-    }
-
-    // Logging backend for the vehicle library's "blackbox available" flag: ArduPilot LOG_BACKEND_TYPE
-    // (bitmask, 0 = none), PX4 SDLOG_MODE (-1 = disabled). The reply lands in the handler, which
-    // updates the stored FC info and emits `telemetry-vehicle { blackbox }`.
-    if fc_info.fc_variant.starts_with("Ardu") {
-        mavlink_proto::params::request_param(&mut *byte_transport, fc_sysid, "LOG_BACKEND_TYPE");
-    } else if fc_info.fc_variant.contains("PX4") {
-        mavlink_proto::params::request_param(&mut *byte_transport, fc_sysid, "SDLOG_MODE");
+    // Stream shaping (ADR-043; the reset to the FC's own SRn_* rates with "Full MAVLink Telemetry") and
+    // the one-shot EKF / home / Q_ENABLE / logging-backend requests. Vehicles the handler discovers later
+    // on this link get the same shaping.
+    let rates = mavlink_proto::handler::StreamRateConfig {
+        full_telemetry: mavlink_full_telemetry.unwrap_or(false),
+        attitude_hz: attitude_rate_hz.unwrap_or(5.0),
+        position_hz: position_rate_hz.unwrap_or(2.0),
+        airspeed_enabled: airspeed_enabled.unwrap_or(false),
+        wind_enabled: wind_enabled.unwrap_or(false),
+    };
+    // A tunnel candidate gets them AFTER the probe: ~35 commands queue for seconds on a slow uplink
+    // (ELRS), and the probe behind them would time out.
+    if uid2_valid {
+        mavlink_proto::handler::configure_primary(&mut *byte_transport, fc_sysid, &fc_info.fc_variant, &rates);
     }
 
     let flight_log_settings = FlightLogSettings {
@@ -609,14 +584,6 @@ fn connect_mavlink(
         None
     };
 
-    // Vehicles the handler discovers later on this link get their own sysid and the same stream shaping.
-    let rates = mavlink_proto::handler::StreamRateConfig {
-        full_telemetry: mavlink_full_telemetry.unwrap_or(false),
-        attitude_hz: attitude_rate_hz.unwrap_or(5.0),
-        position_hz: position_rate_hz.unwrap_or(2.0),
-        airspeed_enabled: airspeed_enabled.unwrap_or(false),
-        wind_enabled: wind_enabled.unwrap_or(false),
-    };
     store_recorder(&state, emitter.key(), &recorder_handle);
     // Vehicles discovered later record unattended (DB only); with group recording off they get no
     // recorder — only the first vehicle's flights reach the logbook.
@@ -638,11 +605,11 @@ fn connect_mavlink(
     let mut handle = mavlink_proto::handler::start(byte_transport, fc_sysid, fc_compid, fc_info.fc_variant.clone(), (fc_info.platform_type, fc_info.mav_type), emitter.clone(), recorder_handle, state.rc_tx.clone(), rates, secondary_recording);
 
     // INAV MSP over MAVLink: INAV's AUTOPILOT_VERSION has an all-zero uid2 (and a fake ArduPilot 4.7.0),
-    // so only the tunnel tells it apart. All-zero / missing uid2 → probe the TUNNEL inline (≤ 2 s); a
-    // real uid2 → ArduPilot / PX4, no probe.
+    // so only the tunnel tells it apart. All-zero / missing uid2 → probe the TUNNEL inline (2 s, longer
+    // on a slow link); a real uid2 → ArduPilot / PX4, no probe.
     msp_tunnel::stats::reset();
     if !uid2_valid {
-        match probe_msp_tunnel(&handle, fc_sysid, fc_info.mav_type, &link_desc, &state, &emitter) {
+        match probe_msp_tunnel(&handle, fc_sysid, fc_info.mav_type, &link_desc, version_rtt, &state, &emitter) {
             TunnelProbe::Up(sched, inav_info) => {
                 handle.msp = Some(sched);
                 // INAV confirmed → the handler switches to INAV's MAVLink conventions (MISSION_CURRENT).
@@ -670,6 +637,7 @@ fn connect_mavlink(
                 return Err("Link lost during MSP tunnel probe".into());
             }
         }
+        let _ = handle.cmd_tx_clone().send(mavlink_proto::handler::MavlinkCommand::ConfigurePrimary);
     }
     msp_tunnel::stats::emit_now(&app_handle);
 
@@ -680,6 +648,19 @@ fn connect_mavlink(
     }
 
     Ok(Opened { protocol: ActiveProtocol::Mavlink(handle), protocol_name: "MAVLink", fc_info, sysid: fc_sysid, compid: fc_compid })
+}
+
+/// How long the connect probe waits for the tunnel: 2 s, or three AUTOPILOT_VERSION round trips on a
+/// slow link, at most 10 s.
+fn tunnel_probe_window(version_rtt: Option<std::time::Duration>) -> std::time::Duration {
+    use std::time::Duration;
+    version_rtt.map_or(Duration::from_secs(2), |r| (r * 3).clamp(Duration::from_secs(2), Duration::from_secs(10)))
+}
+
+/// Reply wait per MSP request on the tunnel: 2 s, or three probe round trips on a slow link, at most 10 s.
+fn tunnel_reply_timeout(probe_rtt: std::time::Duration) -> std::time::Duration {
+    use std::time::Duration;
+    (probe_rtt * 3).clamp(Duration::from_secs(2), Duration::from_secs(10))
 }
 
 /// Outcome of the connect-time MSP-over-MAVLink probe.
@@ -701,19 +682,23 @@ fn probe_msp_tunnel(
     fc_sysid: u8,
     mav_type: u8,
     link_desc: &str,
+    version_rtt: Option<std::time::Duration>,
     state: &State<'_, AppState>,
     app_handle: &VehicleEmitter,
 ) -> TunnelProbe {
     use std::time::{Duration, Instant};
 
-    /// Probe attempts: send at t = 0 / 500 / 1000 ms, wait for the first reply until t = 2 s.
-    const PROBE_WAITS_MS: [u64; 3] = [500, 500, 1000];
+    // Three attempts, sent at 0, 1/4 and 1/2 of the window; the first reply ends the probe.
+    let window = tunnel_probe_window(version_rtt);
+    let probe_waits = [window / 4, window / 4, window / 2];
     /// After the reply: swallow late duplicate replies of the earlier attempts before the handshake.
     const PROBE_DRAIN: Duration = Duration::from_millis(100);
 
     log::warn!(
-        "MSP tunnel probe: AUTOPILOT_VERSION uid2 is zero or missing — probing INAV MSP over MAVLink (FC sysid {}, up to 2 s)",
-        fc_sysid
+        "MSP tunnel probe: AUTOPILOT_VERSION uid2 is zero or missing — probing INAV MSP over MAVLink (FC sysid {}, up to {} ms; AUTOPILOT_VERSION {})",
+        fc_sysid,
+        window.as_millis(),
+        version_rtt.map_or("not answered".to_string(), |r| format!("answered in {} ms", r.as_millis()))
     );
     let tunnel = match TunnelTransport::open(handle.cmd_tx_clone(), fc_sysid, link_desc) {
         Ok(t) => t,
@@ -728,12 +713,12 @@ fn probe_msp_tunnel(
     let mut msp = MspTransport::new(Box::new(tunnel), raw_sink);
 
     let started = Instant::now();
+    // Round trip counted from the FIRST attempt: on a slow link the reply to it lands in a later wait.
     let mut answered: Option<(usize, Duration)> = None;
-    for (i, wait_ms) in PROBE_WAITS_MS.iter().enumerate() {
-        let sent = Instant::now();
-        match msp.msp_request_timeout(MSP_API_VERSION, &[], *wait_ms) {
+    for (i, wait) in probe_waits.iter().enumerate() {
+        match msp.msp_request_timeout(MSP_API_VERSION, &[], wait.as_millis() as u64) {
             Ok(_) => {
-                answered = Some((i + 1, sent.elapsed()));
+                answered = Some((i + 1, started.elapsed()));
                 break;
             }
             Err(e) if msp.is_connection_lost() => {
@@ -744,16 +729,18 @@ fn probe_msp_tunnel(
         }
     }
     let Some((attempt, rtt)) = answered else {
-        log::warn!("MSP tunnel probe: no reply after 2 s (3 attempts) — plain MAVLink");
+        log::warn!("MSP tunnel probe: no reply after {} ms (3 attempts) — plain MAVLink", window.as_millis());
         msp_tunnel::stats::set_probe("no_reply", None, format!("{} ms, 3 attempts", started.elapsed().as_millis()));
         return TunnelProbe::NoTunnel;
     };
     let rtt_ms = rtt.as_millis() as u64;
+    let reply_timeout = tunnel_reply_timeout(rtt);
+    msp.set_response_timeout(reply_timeout);
     log::warn!(
-        "MSP tunnel probe: MSP_API_VERSION answered in {} ms (attempt {}/3, {} ms since probe start)",
+        "MSP tunnel probe: MSP_API_VERSION answered {} ms after the first attempt (during attempt {}/3) — reply timeout {} ms",
         rtt_ms,
         attempt,
-        started.elapsed().as_millis()
+        reply_timeout.as_millis()
     );
 
     // Late duplicates (a slow reply to an earlier attempt) are unsolicited to the handshake — drain them.
@@ -826,7 +813,7 @@ fn probe_msp_tunnel(
         state.radar_ingest.clone(),
         state.radar_msp_enabled.clone(),
         state.rc_tx.clone(),
-        SchedulerMode::Tunnel,
+        SchedulerMode::Tunnel { reply_timeout },
     );
     log::warn!("MSP tunnel: MSP scheduler started in tunnel mode (on-demand only, 1 request in flight)");
     TunnelProbe::Up(sched, fc_info)
@@ -1079,7 +1066,22 @@ pub fn set_platform_type(platform_type: u8, state: State<'_, AppState>) -> Resul
 
 #[cfg(test)]
 mod tests {
-    use super::parse_hex_payload;
+    use super::{parse_hex_payload, tunnel_probe_window, tunnel_reply_timeout};
+    use std::time::Duration;
+
+    #[test]
+    fn tunnel_waits_follow_the_measured_round_trip() {
+        let ms = Duration::from_millis;
+        // A fast link and a missing AUTOPILOT_VERSION keep the 2 s the tunnel was built with.
+        assert_eq!(tunnel_probe_window(None), ms(2000));
+        assert_eq!(tunnel_probe_window(Some(ms(40))), ms(2000));
+        assert_eq!(tunnel_reply_timeout(ms(15)), ms(2000));
+        // A slow radio link: 2.4 s for AUTOPILOT_VERSION.
+        assert_eq!(tunnel_probe_window(Some(ms(2400))), ms(7200));
+        assert_eq!(tunnel_reply_timeout(ms(2500)), ms(7500));
+        assert_eq!(tunnel_probe_window(Some(ms(2900))), ms(8700));
+        assert_eq!(tunnel_reply_timeout(ms(9000)), ms(10000));
+    }
 
     #[test]
     fn hex_payload_parses_with_separators() {

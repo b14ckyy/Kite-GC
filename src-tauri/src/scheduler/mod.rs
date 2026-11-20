@@ -94,8 +94,9 @@ pub enum SchedulerMode {
     /// `telemetry-*` / `telemetry-fc-link` / `connection-lost` / `link-stats` events (the MAVLink handler
     /// owns all of those), no recorder, no RC stream or radar polling, strictly ONE request in flight
     /// (the FC has one tunnel parser per port and replies carry no request id), and a one-shot that
-    /// times out is re-sent once as a whole before it fails.
-    Tunnel,
+    /// times out is re-sent once as a whole before it fails. `reply_timeout` is the wait per attempt,
+    /// set by the connect probe from the link's round trip (2 s on a fast link).
+    Tunnel { reply_timeout: Duration },
 }
 
 /// A single MSP request in flight in the pipelined scheduler (see docs active/MSP_PIPELINE.md). Incoming
@@ -158,13 +159,15 @@ const SCHED_READ_TIMEOUT: Duration = Duration::from_millis(8);
 const MSP_ONESHOT_TIMEOUT_MS: u64 = 2000;
 /// How long `MspRequester::msp_request` waits for its reply on a direct MSP link.
 const OUTER_WAIT: Duration = Duration::from_secs(5);
-/// Tunnel mode: 2 s + 2 s retry, plus queueing behind other one-shots and the 2 s BOXIDS read at start.
-const OUTER_WAIT_TUNNEL: Duration = Duration::from_secs(10);
+/// Tunnel mode, how long `MspRequester::msp_request` waits: attempt + retry, plus queueing behind other
+/// one-shots and the BOXIDS read at start — five reply timeouts (10 s on a fast link).
+fn tunnel_outer_wait(reply_timeout: Duration) -> Duration {
+    reply_timeout * 5
+}
 /// Tunnel mode: after a retried / timed-out request of code C completed, a new request of C is held
 /// back by ~2×RTT (clamped to this range) so a late duplicate reply lands — and is dropped as stale —
-/// before the new request could take it for its own answer.
+/// before the new request could take it for its own answer. The upper bound is the reply timeout.
 const STALE_MARGIN_MIN: Duration = Duration::from_millis(200);
-const STALE_MARGIN_MAX: Duration = Duration::from_secs(2);
 /// Tunnel mode: how long a code stays on the stale watch list (for counting late replies).
 const STALE_WATCH_KEEP: Duration = Duration::from_secs(10);
 /// Lower bound for the adaptive scale — even a badly congested link keeps polling at the slot floors.
@@ -260,8 +263,10 @@ impl SchedulerHandle {
 #[derive(Clone)]
 pub struct MspRequester {
     cmd_tx: mpsc::Sender<SchedulerCommand>,
-    /// Reply wait of `msp_request` — longer in tunnel mode (see `OUTER_WAIT_TUNNEL`).
+    /// Reply wait of `msp_request` — longer in tunnel mode (see `tunnel_outer_wait`).
     outer_wait: Duration,
+    /// Longest stale-reply hold-off before a request is sent (zero on a direct link).
+    stale_margin_max: Duration,
     /// One multi-request transaction at a time per connection (see `begin_transaction`).
     txn: Arc<Mutex<()>>,
     /// The scheduler runs in tunnel mode (MSP over MAVLink).
@@ -309,7 +314,7 @@ impl MspRequester {
             return ProbeOutcome::SchedulerGone;
         }
         // Allow for the tunnel's stale-reply hold-off before the probe is even sent.
-        match reply_rx.recv_timeout(timeout + STALE_MARGIN_MAX + Duration::from_millis(500)) {
+        match reply_rx.recv_timeout(timeout + self.stale_margin_max + Duration::from_millis(500)) {
             Ok(Ok(_)) => ProbeOutcome::Answered,
             Ok(Err(_)) | Err(mpsc::RecvTimeoutError::Timeout) => ProbeOutcome::Silent,
             Err(mpsc::RecvTimeoutError::Disconnected) => ProbeOutcome::SchedulerGone,
@@ -358,8 +363,12 @@ pub fn start(
     mode: SchedulerMode,
 ) -> SchedulerHandle {
     let (cmd_tx, cmd_rx) = mpsc::channel::<SchedulerCommand>();
-    if mode == SchedulerMode::Tunnel {
-        // Active from creation — the BOXIDS pre-loop read inside the thread can take up to 2 s.
+    let tunnel_timeout = match mode {
+        SchedulerMode::Tunnel { reply_timeout } => Some(reply_timeout),
+        SchedulerMode::Telemetry => None,
+    };
+    if tunnel_timeout.is_some() {
+        // Active from creation — the BOXIDS pre-loop read inside the thread can take a reply timeout.
         crate::transport::tunnel::stats::set_active(true);
     }
 
@@ -370,9 +379,10 @@ pub fn start(
     SchedulerHandle {
         requester: MspRequester {
             cmd_tx,
-            outer_wait: if mode == SchedulerMode::Tunnel { OUTER_WAIT_TUNNEL } else { OUTER_WAIT },
+            outer_wait: tunnel_timeout.map_or(OUTER_WAIT, tunnel_outer_wait),
+            stale_margin_max: tunnel_timeout.unwrap_or(Duration::ZERO),
             txn: Arc::new(Mutex::new(())),
-            tunnel: mode == SchedulerMode::Tunnel,
+            tunnel: tunnel_timeout.is_some(),
         },
         thread: Some(thread),
     }
@@ -391,7 +401,12 @@ fn scheduler_loop(
     rc_tx: rc_tx::RcTxHandle,
     mode: SchedulerMode,
 ) -> Option<Box<dyn Transport>> {
-    let tunnel = mode == SchedulerMode::Tunnel;
+    // One-shot reply wait: fixed on a direct link, from the connect probe in tunnel mode.
+    let (tunnel, oneshot_timeout) = match mode {
+        SchedulerMode::Tunnel { reply_timeout } => (true, reply_timeout),
+        SchedulerMode::Telemetry => (false, Duration::from_millis(MSP_ONESHOT_TIMEOUT_MS)),
+    };
+    let outer_wait_tunnel = tunnel_outer_wait(oneshot_timeout);
     // Tunnel mode polls nothing — MAVLink streams carry the telemetry.
     let mut slots = if tunnel { Vec::new() } else { build_slots(&config) };
     let max_in_flight = if tunnel { 1 } else { MAX_IN_FLIGHT };
@@ -577,7 +592,7 @@ fn scheduler_loop(
                         writes_this_tick += 1;
                         in_flight.entry(code).or_default().push_back(Pending {
                             sent_at: now,
-                            deadline: now + timeout.unwrap_or(Duration::from_millis(MSP_ONESHOT_TIMEOUT_MS)),
+                            deadline: now + timeout.unwrap_or(oneshot_timeout),
                             kind: PendingKind::OneShot { reply, retry: None, queued_at: now, retried: false },
                         });
                     }
@@ -597,7 +612,7 @@ fn scheduler_loop(
         //     for one whole-request retry on timeout (a lost TUNNEL chunk = no reply at all).
         if tunnel && in_flight.values().all(|q| q.is_empty()) && writes_this_tick < MAX_WRITES_PER_TICK {
             // The caller's outer wait has run out → it is gone; sending now would only occupy the slot.
-            while oneshot_queue.front().is_some_and(|q| q.3.elapsed() >= OUTER_WAIT_TUNNEL) {
+            while oneshot_queue.front().is_some_and(|q| q.3.elapsed() >= outer_wait_tunnel) {
                 if let Some((code, _, reply, _, _)) = oneshot_queue.pop_front() {
                     log::debug!("MSP tunnel: 0x{:04X} expired in the queue — dropped unsent", code);
                     crate::transport::tunnel::stats::on_expired();
@@ -605,7 +620,7 @@ fn scheduler_loop(
                 }
             }
             stale_watch.retain(|_, t| t.elapsed() < STALE_WATCH_KEEP);
-            let margin = stale_margin(rtt_ewma);
+            let margin = stale_margin(rtt_ewma, oneshot_timeout);
             let held = oneshot_queue
                 .front()
                 .and_then(|q| stale_watch.get(&q.0))
@@ -621,8 +636,8 @@ fn scheduler_loop(
                         writes_this_tick += 1;
                         in_flight.entry(code).or_default().push_back(Pending {
                             sent_at: now,
-                            deadline: now + timeout.unwrap_or(Duration::from_millis(MSP_ONESHOT_TIMEOUT_MS)),
-                            // No retry for reboot-class codes (the single 2 s wait, then Err) nor for a
+                            deadline: now + timeout.unwrap_or(oneshot_timeout),
+                            // No retry for reboot-class codes (one wait, then Err) nor for a
                             // probe (its caller polls again itself).
                             kind: PendingKind::OneShot {
                                 reply,
@@ -1007,7 +1022,7 @@ fn scheduler_loop(
                         }
                         match retry {
                             // Retry only while the caller is still waiting for it.
-                            Some(payload) if queued_at.elapsed() < OUTER_WAIT_TUNNEL => {
+                            Some(payload) if queued_at.elapsed() < outer_wait_tunnel => {
                                 retries.push((code, payload, reply, queued_at, None))
                             }
                             _ => {
@@ -1052,7 +1067,7 @@ fn scheduler_loop(
                 Ok(()) => {
                     in_flight.entry(code).or_default().push_back(Pending {
                         sent_at: sent,
-                        deadline: sent + Duration::from_millis(MSP_ONESHOT_TIMEOUT_MS),
+                        deadline: sent + oneshot_timeout,
                         kind: PendingKind::OneShot { reply, retry: None, queued_at, retried: true },
                     });
                 }
@@ -1260,10 +1275,10 @@ fn reply_deadline(now: Instant, rtt_ewma: Option<f64>) -> Instant {
 }
 
 /// Tunnel mode: how long a new request of a code is held back after a retried / lapsed request of the
-/// same code completed — ~2× the measured round trip, clamped to [200 ms, 2 s].
-fn stale_margin(rtt_ewma: Option<f64>) -> Duration {
+/// same code completed — ~2× the measured round trip, clamped to [200 ms, reply timeout].
+fn stale_margin(rtt_ewma: Option<f64>, max: Duration) -> Duration {
     let rtt = Duration::from_secs_f64(rtt_ewma.unwrap_or(0.0).max(0.0));
-    (rtt * 2).clamp(STALE_MARGIN_MIN, STALE_MARGIN_MAX)
+    (rtt * 2).clamp(STALE_MARGIN_MIN, max.max(STALE_MARGIN_MIN))
 }
 
 /// Tunnel mode: requests that are never re-sent after a timeout. A lapsed attempt may have executed on
@@ -1371,10 +1386,12 @@ mod tests {
 
     #[test]
     fn stale_margin_is_twice_rtt_clamped() {
-        assert_eq!(stale_margin(None), STALE_MARGIN_MIN);
-        assert_eq!(stale_margin(Some(0.011)), STALE_MARGIN_MIN); // 11 ms link → 200 ms floor
-        assert_eq!(stale_margin(Some(0.3)), Duration::from_millis(600));
-        assert_eq!(stale_margin(Some(5.0)), STALE_MARGIN_MAX);
+        let max = Duration::from_secs(2);
+        assert_eq!(stale_margin(None, max), STALE_MARGIN_MIN);
+        assert_eq!(stale_margin(Some(0.011), max), STALE_MARGIN_MIN); // 11 ms link → 200 ms floor
+        assert_eq!(stale_margin(Some(0.3), max), Duration::from_millis(600));
+        assert_eq!(stale_margin(Some(5.0), max), max);
+        assert_eq!(stale_margin(Some(5.0), Duration::from_secs(8)), Duration::from_secs(8)); // slow tunnel
     }
 
     #[test]

@@ -31,6 +31,8 @@ pub struct MspTransport {
     /// Shared raw-serial log sink (ADR-049). Every outgoing frame ('o') and incoming read-chunk ('i')
     /// is captured here in mwptools' v2 format while the recorder has a logger open; otherwise a no-op.
     raw_sink: MspRawSink,
+    /// Reply wait of `msp_request` — raised for a slow MSP-over-MAVLink tunnel.
+    response_timeout_ms: u64,
 }
 
 impl MspTransport {
@@ -43,7 +45,12 @@ impl MspTransport {
             connection_lost: false,
             lost_reason: None,
             raw_sink,
+            response_timeout_ms: MSP_RESPONSE_TIMEOUT_MS,
         }
+    }
+
+    pub fn set_response_timeout(&mut self, timeout: Duration) {
+        self.response_timeout_ms = timeout.as_millis() as u64;
     }
 
     /// Flag the transport as fatally lost and keep the first cause seen (later errors are follow-ups of
@@ -88,7 +95,7 @@ impl MspTransport {
 
 impl Transport for MspTransport {
     fn msp_request(&mut self, code: u16, payload: &[u8]) -> Result<MspMessage, String> {
-        self.msp_request_timeout(code, payload, MSP_RESPONSE_TIMEOUT_MS)
+        self.msp_request_timeout(code, payload, self.response_timeout_ms)
     }
 
     fn msp_request_timeout(&mut self, code: u16, payload: &[u8], timeout_ms: u64) -> Result<MspMessage, String> {

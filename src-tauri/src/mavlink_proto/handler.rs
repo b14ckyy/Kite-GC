@@ -93,6 +93,9 @@ pub enum MavlinkCommand {
     /// the connect path once the MSP-tunnel probe has ruled out INAV, which reports an ArduPilot identity
     /// in its HEARTBEAT. Ignored for a non-ArduPilot vehicle.
     StartModeList,
+    /// Send the handshake vehicle's connect requests (`configure_primary`). The connect path defers them
+    /// behind the MSP-tunnel probe: on a slow uplink they would queue in front of it for seconds.
+    ConfigurePrimary,
 }
 
 /// Handle for interacting with the running MAVLink handler
@@ -340,6 +343,17 @@ fn configure_new_vehicle(transport: &mut dyn ByteTransport, sysid: u8, fc_varian
     }
 }
 
+/// The handshake vehicle's connect requests: `configure_new_vehicle` plus the logging-backend parameter
+/// behind the vehicle library's "blackbox available" flag (ArduPilot LOG_BACKEND_TYPE, PX4 SDLOG_MODE).
+pub fn configure_primary(transport: &mut dyn ByteTransport, sysid: u8, fc_variant: &str, rates: &StreamRateConfig) {
+    configure_new_vehicle(transport, sysid, fc_variant, rates);
+    if fc_variant.starts_with("Ardu") {
+        super::params::request_param(transport, sysid, "LOG_BACKEND_TYPE");
+    } else if fc_variant.contains("PX4") {
+        super::params::request_param(transport, sysid, "SDLOG_MODE");
+    }
+}
+
 /// Start the MAVLink handler on a dedicated thread
 pub fn start(
     transport: Box<dyn ByteTransport>,
@@ -425,6 +439,9 @@ fn handler_loop(
     let mut param_fwd: Option<(u8, mpsc::Sender<MavMessage>)> = None;
     // MSP-over-MAVLink tunnel receiver (INAV 10.0+): payloads of TUNNEL frames addressed to Kite.
     let mut tunnel_fwd: Option<mpsc::Sender<Vec<u8>>> = None;
+    // When the receiver was released — a reply after that came too late for whoever asked.
+    let mut tunnel_released: Option<Instant> = None;
+    let mut tunnel_late_warned = false;
 
     // QuadPlane detection: it reports MAV_TYPE_FIXED_WING, so only Q_ENABLE tells. The pre-handler request
     // can be lost on a noisy link — re-request a few times; bounded, so a plain plane stops soon.
@@ -544,11 +561,19 @@ fn handler_loop(
             Ok(MavlinkCommand::RegisterTunnelReceiver(tx)) => {
                 log::debug!("MAVLink tunnel receiver registered");
                 tunnel_fwd = Some(tx);
+                tunnel_released = None;
                 continue;
             }
             Ok(MavlinkCommand::UnregisterTunnelReceiver) => {
                 log::debug!("MAVLink tunnel receiver unregistered");
                 tunnel_fwd = None;
+                tunnel_released = Some(Instant::now());
+                continue;
+            }
+            Ok(MavlinkCommand::ConfigurePrimary) => {
+                if let Some(ctx) = vehicles.get(&fc_sysid) {
+                    configure_primary(&mut *transport, fc_sysid, &ctx.fc_variant, &rates);
+                }
                 continue;
             }
             Err(mpsc::TryRecvError::Empty) => {}
@@ -738,6 +763,14 @@ fn handler_loop(
                                 if tx.send(tunnel.payload).is_err() {
                                     tunnel_fwd = None; // tunnel transport dropped
                                 }
+                            } else if let (Some(released), false) = (tunnel_released, tunnel_late_warned) {
+                                // Once per link at the default level: the usual case is a reply that
+                                // outlived the connect probe, which a tester's log must show.
+                                tunnel_late_warned = true;
+                                log::warn!(
+                                    "MAVLink TUNNEL (MSP) reply arrived {:.1} s after the tunnel was closed — dropped (the link answers slower than Kite waited)",
+                                    released.elapsed().as_secs_f64()
+                                );
                             } else {
                                 log::debug!("MAVLink TUNNEL (MSP) with no tunnel receiver — dropped");
                             }
