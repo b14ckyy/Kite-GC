@@ -136,6 +136,15 @@ for every flight: the recording starts when the connected vehicle is armed and e
   longer below it is shown struck through in the flight details.
 - **Do not convert or re-save the file** with another program if it should stay linked to its flight:
   tools that rewrite a Matroska file usually give it a new id.
+- **Taking recordings to another Kite:** export the flights as `.kflight` and let Kite copy their
+  recordings next to the file; the import on the other side offers to copy them into the recording
+  folder there. See [Logbook → Exporting](logbook.md#exporting).
+- **Clean up unlinked recordings…** (below the recording folder) lists Kite's recordings in the
+  folder that no flight in your logbook is linked to — left by a crash, or by a flight you deleted
+  or never saved — with their names and total size, and removes them when you confirm (recycle bin /
+  trash where there is one). A recording that is still being written or waits for its flight to be
+  saved is left alone, and so is every file Kite did not record. If you use several flight
+  databases with one recording folder, the recordings of the other databases count as unlinked.
 - **Dropouts:** when the stream reconnects during a flight, the recording continues in a new file
   (`…_part2.mkv`). A new file also starts just below 4 GB, so a FAT32 drive works as a target.
 - **If Kite is closed mid-flight,** the recording is finished and joins the flight when that is saved

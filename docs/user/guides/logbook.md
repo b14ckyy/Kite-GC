@@ -163,7 +163,10 @@ ticks. They stay when you change the search, so you can collect flights over sev
   flight, ticked or not.
 - **Delete** removes the ticked flights after a confirmation — exactly those: a linked partner
   that is not ticked stays. The confirmation offers to add the battery usage of the deleted
-  flights to the lifetime totals of their batteries first.
+  flights to the lifetime totals of their batteries first. When the flights have video recordings
+  that no other flight uses, Kite then asks whether to delete those files too (desktop); they go
+  to the recycle bin / trash where there is one. The same question follows the delete button of a
+  single flight.
 
 ## Exporting
 
@@ -173,6 +176,15 @@ ticks. They stay when you change the search, so you can collect flights over sev
   recorded with it; on import the mission is added to the Mission Manager's library, or the flight
   is linked to the entry that is already there. A file written by a **newer** Kite version is still
   imported: Kite takes over what it knows and tells you that not all data could be imported.
+
+    **Video recordings** are not inside the file. When an exported flight has recordings in the
+    recording folder, Kite asks after the export whether to copy them as well; they go into a folder
+    named after the file with `_video` added (`Flights_3.kflight` → `Flights_3_video`), next to it.
+    Keep the two together. When you import such a file, Kite looks into that folder and asks whether
+    to import the recordings of the flights in your logbook into your own recording folder; with
+    them there the replay shows the video. A recording that is in your recording folder already is
+    linked again by itself, and the import says so. Both questions can be declined, and both are
+    desktop only.
 - **Original log file** — re-export the onboard log stored with the flight: an INAV Blackbox
   (`.bbl` / `.txt`), ArduPilot Dataflash (`.bin`) or PX4 ULog (`.ulg`). For a flight that came out of a multi-flight
   `.bbl`, this is that flight's own log, not the whole download. Imported `.tlog` / `.rawmsp` telemetry is parsed
@@ -258,7 +270,9 @@ dialog:
 - **Export all flights** writes every flight into one `.kflight` file, so you do not have to select
   them one by one to bring them into another Kite. Vehicles, batteries and missions that belong to no
   flight are not part of it. Kite shows the progress and, at the end, how many flights were written;
-  it refuses to start when less space is free than the database is large.
+  it refuses to start when less space is free than the database is large. On the desktop it then asks
+  whether to copy the video recordings of those flights next to the file (see
+  [Exporting](#exporting)).
 
 **Import database** (Android and iOS) replaces the database in the app with a `.db` file exported
 this way: Kite names the flights in the file and in the app and asks before it replaces anything —
