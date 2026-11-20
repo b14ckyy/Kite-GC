@@ -44,34 +44,35 @@ notarize-macos:
 update-manifest tag="":
     @bash scripts/make-update-manifest.sh {{tag}}
 
-# Needs ANDROID_HOME + NDK_HOME (see the Build Guide); the "Android" GitHub Actions workflow needs nothing
-# installed locally. The APK lands in release/ as KiteGC_Android_<abi>_<version>_installer.apk.
+# Needs ANDROID_HOME + NDK_HOME (see the Build Guide). One APK per ABI lands in release/ as
+# KiteGC_Android_<arm64|armv7>_<version>_installer.apk.
 # `-AndroidOnly` / `--android-only` collects ONLY the Android files: a stale desktop binary still in
 # target/release would otherwise be republished under the current version number.
-# Android APK, arm64 (EXPERIMENTAL)
+# Android APKs, arm64 and 32-bit ARM
 [windows]
 build-android:
-    npm run tauri android build -- --apk --target aarch64
+    npm run tauri android build -- --apk --split-per-abi --target aarch64 armv7
     @powershell -ExecutionPolicy Bypass -File scripts/collect-release.ps1 -AndroidOnly
 
 [unix]
 build-android:
-    npm run tauri android build -- --apk --target aarch64
+    npm run tauri android build -- --apk --split-per-abi --target aarch64 armv7
     @bash scripts/collect-release.sh --android-only
 
 # Local only: needs the release key (`src-tauri/gen/android/app/key.properties`, see the Build Guide), else
-# the bundle is debug-signed and Play refuses it. Lands in release/ as KiteGC_Android_<abi>_<version>_playstore.aab.
+# the bundle is debug-signed and Play refuses it. ONE bundle with both ABIs (Play splits it per device), in
+# release/ as KiteGC_Android_universal_<version>_playstore.aab.
 # versionCode = `playVersionCode` in app/build.gradle.kts; KITE_ANDROID_BUILD=1..9 re-uploads the same version.
 # The bundle is for the Play Console only: take it out of release/ before `gh release create … release/*`.
-# Android App Bundle for Google Play, arm64 (maintainer)
+# Android App Bundle for Google Play, arm64 + 32-bit ARM (maintainer)
 [windows]
 build-android-aab:
-    npm run tauri android build -- --aab --target aarch64
+    npm run tauri android build -- --aab --target aarch64 armv7
     @powershell -ExecutionPolicy Bypass -File scripts/collect-release.ps1 -AndroidOnly
 
 [unix]
 build-android-aab:
-    npm run tauri android build -- --aab --target aarch64
+    npm run tauri android build -- --aab --target aarch64 armv7
     @bash scripts/collect-release.sh --android-only
 
 # Android dev build on a connected device / emulator, with hot reload

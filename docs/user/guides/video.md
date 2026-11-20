@@ -326,12 +326,6 @@ route; the notes below say what each of them costs.
     after any lost packet until the next keyframe arrives — a short pause instead of a frozen decoder.
     A **short keyframe interval** at the encoder (1 s) keeps that pause short.
 
-!!! warning "AppImage: video does not work there"
-    The AppImage build cannot play video on either path — the AppImage's launcher environment hides
-    the system's GStreamer plugins from every process inside it. Use the **.deb**, **.rpm** or the
-    **portable build** instead; the AppImage is provided for a quick look at everything else and is
-    planned to be retired.
-
 **With the Native RTSP client off, video support is provided as-is.** Kite then runs video through
 WebKitGTK, which hands playback to GStreamer — and which plugins your distribution installs is
 entirely up to your distribution. There are hundreds of combinations of distro, desktop, graphics

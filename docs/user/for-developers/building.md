@@ -51,17 +51,10 @@ sudo apt install -y \
     via their official methods.
 
 !!! warning "Build on the oldest system you want to support"
-    Two things follow from the build host, and both reach the user.
-
-    **glibc is never bundled** — not even in the AppImage — so the highest `GLIBC_*` symbol in the
-    binary becomes a hard minimum for everyone running it. Building on Debian 13 produces something
-    that will not start on Ubuntu 22.04.
-
-    **The AppImage bundles the build host's WebKitGTK** (linuxdeploy takes what is installed), so the
-    build machine decides the browser engine every AppImage user gets. Avoid the **2.50 series**:
-    stopping a video stream can leave it spinning on a full CPU core until the app exits. 2.52 is
-    clean. That is why the release workflow builds on Ubuntu 24.04 rather than an older base — the
-    `.deb` and `.rpm` use the *system* engine and are unaffected either way, but they share the job.
+    **glibc is never bundled**, so the highest `GLIBC_*` symbol in the binary becomes a hard minimum
+    for everyone running it. Building on Debian 13 produces something that will not start on Ubuntu
+    22.04. The release workflow builds on Ubuntu 24.04 (glibc 2.39). WebKitGTK and GStreamer are
+    not bundled either: every package uses the ones of the system it runs on.
 
 ### macOS
 
@@ -124,9 +117,11 @@ backend, so a new adapter family is a one-line Rust change. The first scan raise
 
 #### Getting an APK without building one
 
-The **Android** workflow in GitHub Actions builds the APK and uploads it as a run artifact — Actions →
-Android → *Run workflow*. That is the recommended route: the runner already has the SDK, the JDK and
-`sdkmanager`, so nothing has to be installed locally.
+The **Release build** workflow in GitHub Actions builds the APK beside the desktop packages and uploads
+it as a run artifact — Actions → Release build → *Run workflow*. The runner already has the SDK, the
+JDK and `sdkmanager`, so nothing has to be installed locally. It builds one APK per ABI: `arm64` and
+`armv7` (32-bit ARM, `armeabi-v7a`). Without the signing secrets described below they are debug-signed
+and named `..._debug.apk`.
 
 #### Signing
 
@@ -191,11 +186,11 @@ to upload the same version again. Build the APK of that release **locally with t
 (`just build-android`) — Android refuses to install a lower code over a higher one, and the GitHub
 workflow always builds with 0. The file names in `release/` do not carry the digit.
 
-The **App Bundle** that Google Play takes is built locally only — the GitHub workflow keeps building the
-APK:
+The **App Bundle** that Google Play takes is built locally only, one bundle with both ABIs — the GitHub
+workflow builds APKs:
 
 ```bash
-just build-android-aab    # release/KiteGC_Android_<abi>_<version>_playstore.aab
+just build-android-aab    # release/KiteGC_Android_universal_<version>_playstore.aab
 ```
 
 Without `key.properties` the bundle is debug-signed, and Play refuses it. The bundle is for the Play
@@ -206,14 +201,15 @@ Console only; it does not belong on the GitHub release.
 1. **JDK 17** — `sudo apt install openjdk-17-jdk` (or Temurin on Windows/macOS).
 2. **Android SDK** — Android Studio, or just the command-line tools. Set `ANDROID_HOME`.
 3. **NDK r27** — `sdkmanager --install "ndk;27.2.12479018"`, then point `NDK_HOME` at it.
-4. **Rust targets** — `rustup target add aarch64-linux-android` (add `armv7-linux-androideabi`,
-   `i686-linux-android`, `x86_64-linux-android` only if you need those ABIs; arm64 covers every
-   Android phone and tablet made in the last decade).
+4. **Rust targets** — `rustup target add aarch64-linux-android armv7-linux-androideabi`, the two ABIs
+   Kite is built for (`i686-linux-android` / `x86_64-linux-android` only for an x86 emulator).
 
 ```bash
 npm ci
-npm run tauri android build -- --apk --target aarch64   # APK in src-tauri/gen/android/app/build/outputs/apk
-npm run tauri android dev                               # on-device dev build with hot reload
+# APKs in src-tauri/gen/android/app/build/outputs/apk
+npm run tauri android build -- --apk --split-per-abi --target aarch64 armv7
+# on-device dev build with hot reload
+npm run tauri android dev
 ```
 
 A debug build is signed with your local debug key, so Android refuses to install it over a copy that
@@ -299,7 +295,7 @@ KiteGC_<OS>_<arch>_<version>_<type>.<ext>
 ```
 
 - **Type** = `installer` (`.exe` / `.deb` / `.rpm` / `.dmg`, and the Android `.apk`), `standalone`
-  (`.AppImage`, or the macOS `.app` zipped), `portable` (the bare executable zipped **with an empty
+  (macOS only: the `.app` zipped), `portable` (the bare executable zipped **with an empty
   `.portable` marker**), or `update` (macOS only: the `.app` as `.tar.gz`, what the in-app updater
   downloads).
 - **In-app updates** (*Update and Restart* in the update notice) need a `.sig` beside each installer
@@ -309,9 +305,10 @@ KiteGC_<OS>_<arch>_<version>_<type>.<ext>
   offered as an update.
 - The naming logic lives in `scripts/collect-release.*` and is shared by local builds and the GitHub
   release workflow (`.github/workflows/release.yml`), so filenames match everywhere.
-- `just build-android` drops its APK into the same folder as `KiteGC_Android_<abi>_<version>_installer.apk`
-  (one file per ABI folder Gradle produced, e.g. `arm64` or `universal`). It collects **only** the APK and
-  leaves the desktop outputs already in `release/` alone — an earlier desktop build's binaries still sit in
+- `just build-android` drops its APKs into the same folder as `KiteGC_Android_<abi>_<version>_installer.apk`
+  (one file per ABI: `arm64` and `armv7`; the Play bundle holds both and is named `universal`). It collects
+  **only** the Android files and leaves the desktop outputs already in `release/` alone — an earlier desktop
+  build's binaries still sit in
   `target/release/`, and collecting those here would republish a stale one under the current version number.
   A desktop build, in turn, also picks up any Android release APK still lying in the Gradle outputs.
 
@@ -362,11 +359,8 @@ These are things to know when **running** the packaged Linux app (not build erro
   WEBKIT_DISABLE_DMABUF_RENDERER=1 ./kite-gc      # most common fix
   WEBKIT_DISABLE_COMPOSITING_MODE=1 ./kite-gc     # if compositing misbehaves
   ```
-- **Which package to test:** `tauri build` produces `.deb`, `.AppImage` and `.rpm` in
-  `src-tauri/target/release/bundle/`. The `.deb` (or the raw binary in `…/release/`) is usually the most
-  reliable first smoke test; AppImage adds its own FUSE/sandbox layer — and **video does not work
-  inside the AppImage at all** (its launcher environment hides the system GStreamer plugins; see the
-  user guide's platform notes).
+- **Which package to test:** `tauri build` produces `.deb` and `.rpm` in
+  `src-tauri/target/release/bundle/`; the raw binary sits in `…/release/`.
 - **Data locations:** installed mode stores the flight DB + terrain cache under `~/.local/share/kite-gc/`.
   A **portable** build (a `.portable` marker file next to the binary) keeps everything in a `data/` folder
   beside the binary.

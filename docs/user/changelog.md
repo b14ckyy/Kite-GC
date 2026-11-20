@@ -185,6 +185,9 @@ inside the box of the feature release they belong to, so the notes for one relea
       follows later). [#79]
     - **iPhone & iPad support** — native iOS/iPadOS build with phone and tablet layouts, Bluetooth
       LE and Wi-Fi MAVLink (App Store only, follows later). Contributed by Sebastian Kumor. [#16]
+    - **Android on 32-bit ARM** — beside the arm64 APK there is one for 32-bit ARM devices
+      (`armv7`), and the Play Store version carries both. It has not run on such a device yet.
+      [#340]
     - **RadioMaster AX12** — on this Android transmitter Kite connects through the built-in ELRS
       module: the serial port list offers the internal UART and presets its baud rate, and the
       phone layout is used whatever the display density is set to. [#317]
@@ -623,6 +626,8 @@ inside the box of the feature release they belong to, so the notes for one relea
       only existed on Windows. The detached video window replaces it. [#129]
     - **Raw Telemetry widget** — replaced by the **≡ Raw** view. [#101]
     - **`blackbox_decode` download** — no longer needed for INAV Blackbox imports. [#234]
+    - **Linux AppImage** — Linux comes as `.deb`, `.rpm` and the portable ZIP, each for x64 and
+      arm64. The AppImage could not play video and showed an empty window on Ubuntu 26.04. [#340]
 
 ??? note "1.0 — Initial release · Live"
 

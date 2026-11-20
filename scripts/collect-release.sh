@@ -8,7 +8,7 @@
 #     KiteGC_Android_<abi>_<Version>_playstore.aab      (`just build-android-aab`, for Google Play)
 #
 #   Type = installer   (.deb / .rpm / .dmg; the Android .apk)
-#        | standalone  (.AppImage / .app-as-zip — self-contained runnable app)
+#        | standalone  (macOS only: the .app as zip)
 #        | portable     (the bare CLI binary, zipped with an empty `.portable` marker so the
 #                        download keeps its data in a data/ folder next to the executable)
 #        | update       (macOS only: the .app as .tar.gz — what the in-app updater downloads)
@@ -107,7 +107,6 @@ else
     BUNDLE="$REL/bundle"
     grab_file "$BUNDLE/deb/*.deb" installer deb
     grab_file "$BUNDLE/rpm/*.rpm" installer rpm
-    grab_file "$BUNDLE/appimage/*.AppImage" standalone AppImage
     zip_portable "$REL/kite-gc" kite-gc
 fi
 
@@ -117,7 +116,7 @@ if [ ${#collected[@]} -gt 0 ] && [ "$ANDROID_ONLY" != 1 ]; then
     if [ "$OS" = "macOS" ]; then
         rm -rf "$BUNDLE/dmg" "$BUNDLE/macos"
     else
-        rm -rf "$BUNDLE/deb" "$BUNDLE/rpm" "$BUNDLE/appimage"
+        rm -rf "$BUNDLE/deb" "$BUNDLE/rpm"
     fi
 fi
 
@@ -128,7 +127,7 @@ for abi_dir in "$APK_ROOT"/*/; do
     apk="$(ls -1dt "$abi_dir"release/*.apk 2>/dev/null | head -n1)"
     [ -n "$apk" ] && [ -e "$apk" ] || continue
     abi="$(basename "$abi_dir")"
-    case "$abi" in x86_64) abi="x64" ;; esac
+    case "$abi" in x86_64) abi="x64" ;; arm) abi="armv7" ;; esac
     dest="${APP}_Android_${abi}_${VERSION}_installer.apk"
     cp -f "$apk" "$OUT/$dest"
     rm -rf "${abi_dir}release"
@@ -143,7 +142,7 @@ for abi_dir in "$AAB_ROOT"/*Release/; do
     aab="$(ls -1dt "$abi_dir"*.aab 2>/dev/null | head -n1)"
     [ -n "$aab" ] && [ -e "$aab" ] || continue
     abi="$(basename "$abi_dir")"; abi="${abi%Release}"
-    case "$abi" in x86_64) abi="x64" ;; esac
+    case "$abi" in x86_64) abi="x64" ;; arm) abi="armv7" ;; esac
     dest="${APP}_Android_${abi}_${VERSION}_playstore.aab"
     cp -f "$aab" "$OUT/$dest"
     rm -rf "$abi_dir"
