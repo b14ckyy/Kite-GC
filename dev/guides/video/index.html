@@ -935,6 +935,34 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#recording-the-rtsp-stream-desktop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recording the RTSP stream (desktop)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Recording the RTSP stream (desktop)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#watching-the-recording-with-the-replay" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Watching the recording with the replay
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1890,6 +1918,34 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#recording-the-rtsp-stream-desktop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recording the RTSP stream (desktop)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Recording the RTSP stream (desktop)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#watching-the-recording-with-the-replay" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Watching the recording with the replay
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2114,6 +2170,54 @@ until the feed returns or you stop it. While it retries, every video surface sho
 <strong>"Reconnecting… (n)"</strong> overlay with the attempt count and a <strong>Stop</strong> button. Brief dropouts on a live
 feed are given a few seconds to heal on their own before a full reconnect is forced, so momentary
 signal dips don't interrupt the stream unnecessarily.</p>
+<h3 id="recording-the-rtsp-stream-desktop">Recording the RTSP stream (desktop)<a class="headerlink" href="#recording-the-rtsp-stream-desktop" title="Permanent link">&para;</a></h3>
+<p>Switch on <strong>Record the video stream</strong> below the saved connections and Kite writes the video to a file
+for every flight: the recording starts when the connected vehicle is armed and ends when it is disarmed.</p>
+<ul>
+<li><strong>What is recorded:</strong> the stream exactly as it arrives — no re-encoding, so the quality is the
+  source's and the recording costs almost no CPU. The file is a Matroska file (<code>.mkv</code>) that the common
+  players open (VLC, mpv, the Windows media player).</li>
+<li><strong>Requirements:</strong> the <strong>Native RTSP client</strong> and an <strong>H.264 or HEVC</strong> source. An MJPEG stream is not
+  recorded. Windows, Linux and macOS; not on Android and iOS.</li>
+<li><strong>Where it goes:</strong> the <strong>Recording folder</strong> — by default a <code>KiteGC</code> folder in your videos folder. The
+  file is named after the vehicle and the local time, for example <code>Wing_2026-11-20_14-05-31.mkv</code>: the
+  name the vehicle has in your vehicle library, else its craft name, else <code>Video</code>.</li>
+<li><strong>A few seconds before arming are included:</strong> the recording starts at the last keyframe the source
+  sent before you armed.</li>
+<li><strong>In the logbook:</strong> once the flight is saved, its details show the recording under <strong>Video</strong>. The
+  file stays in the recording folder; the logbook only remembers it.</li>
+<li><strong>Rename and sort the files as you like:</strong> every recording carries an id of its own, and Kite finds
+  the file by it below the recording folder — under a new name, in subfolders of your own scheme (up
+  to six levels deep). Only the folder itself must stay the one set as <strong>Recording folder</strong>. A file that is no
+  longer below it is shown struck through in the flight details.</li>
+<li><strong>Do not convert or re-save the file</strong> with another program if it should stay linked to its flight:
+  tools that rewrite a Matroska file usually give it a new id.</li>
+<li><strong>Dropouts:</strong> when the stream reconnects during a flight, the recording continues in a new file
+  (<code>…_part2.mkv</code>). A new file also starts just below 4 GB, so a FAT32 drive works as a target.</li>
+<li><strong>If Kite is closed mid-flight,</strong> the recording is finished and joins the flight when that is saved
+  after the next start.</li>
+<li><strong>After a crash or a power loss</strong> the file stays in the recording folder and plays up to the last
+  keyframe that reached the disk; the last seconds can be missing. Such a file has no seek index, so
+  jumping around in it can be slow, and it is not listed in the flight's details.</li>
+</ul>
+<p>Recording runs only while armed and connected; without a link nothing is recorded.</p>
+<h4 id="watching-the-recording-with-the-replay">Watching the recording with the replay<a class="headerlink" href="#watching-the-recording-with-the-replay" title="Permanent link">&para;</a></h4>
+<p>Open a flight that has a recording in the logbook while no vehicle is connected, and the video plays in
+the video window (or the Video widget) <strong>in step with the replay</strong>: play, pause, the speed button and
+dragging the timeline all move the picture along with the aircraft on the map.</p>
+<ul>
+<li><strong>A running live stream is stopped</strong> when such a flight is loaded — the recording uses the same
+  video surface. Start the stream again from the Video panel when you are done; a flight without a
+  recording leaves the stream alone.</li>
+<li><strong>Where nothing was recorded</strong> — before arming, after disarming, in a dropout between two files, or
+  when the file is no longer in its folder — the window shows <em>No video recorded for this part of the
+  flight</em>.</li>
+<li><strong>At 4× and faster</strong> the video shows one picture per keyframe instead of every frame.</li>
+<li><strong>Jumping backwards</strong> restarts the picture at the keyframe before the new position; with a source
+  that sends keyframes rarely this takes a moment.</li>
+<li><strong>Stop video</strong> in the Video panel ends the playback; the replay itself goes on.</li>
+</ul>
+<p>With a vehicle connected the logbook does not put a flight on the map, so no recording plays then.</p>
 <div class="admonition note">
 <p class="admonition-title">Helpers download themselves</p>
 <p><strong>Camera (device)</strong> needs nothing extra, and <strong>RTSP with the Native RTSP client</strong> (the default)
