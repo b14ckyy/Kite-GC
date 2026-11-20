@@ -86,6 +86,10 @@
          drawing). The buttons keep their size. */
       :root { --map-btn-icon: 28.5px; }
       html.kite-low-power { --glass-blur: none; --panel-blur: none; }
+      /* While the native video router runs, the `data-nv-clip` layers are masked (controllers/nativeVideo.ts,
+         MASKED_CLASS). Glass in a masked layer samples only that layer and costs an offscreen render of all
+         of it per element, so the layers get the low-power look: same switches, scoped to them. */
+      html.kite-nv-masked [data-nv-clip] { --glass-blur: none; --panel-blur: none; }
     </style>
     <title>Tauri + SvelteKit + Typescript App</title>
     %sveltekit.head%
