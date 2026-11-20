@@ -14,7 +14,7 @@ grabbing:
 | **Windows** (x64) | `..._installer.exe` (NSIS — install for you or all users) | — | `..._portable.zip` |
 | **Linux** (x64 / arm64) | `..._installer.deb` (Debian/Ubuntu) or `..._installer.rpm` (Fedora/openSUSE) | — | `..._portable.zip` |
 | **macOS** (universal) | `..._installer.dmg` | `..._standalone.zip` (the `.app`) | — |
-| **Android** | `KiteGC_Android_arm64_<version>_installer.apk`, or `..._armv7_...` for a 32-bit ARM device | — | — |
+| **Android** | `KiteGC_Android_arm64_<version>_installer.apk`, or `..._armv7_...` if the arm64 one does not install (32-bit Android) | — | — |
 
 - **Installer** — integrates with your system (Start menu / app launcher, uninstaller).
 - **Standalone** — the macOS `.app`, zipped; runs without an install.
@@ -62,7 +62,8 @@ unzip KiteGC_Linux_*_portable.zip -d kite-gc
 ```
 
 There is no AppImage from Kite 2.0 on. The portable ZIP is the download that runs without an install;
-it uses your system's WebKitGTK 4.1 and GStreamer, which the `.deb` and `.rpm` bring in on their own.
+it uses your system's WebKitGTK 4.1 and GStreamer, which the `.deb` and `.rpm` ask your package
+manager for.
 
 !!! warning "Linux: your distribution needs to be reasonably current"
     The Linux downloads are compiled on Ubuntu 24.04 and need **glibc 2.39 or newer** — Ubuntu 24.04+,

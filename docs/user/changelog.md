@@ -627,8 +627,7 @@ inside the box of the feature release they belong to, so the notes for one relea
     - **Raw Telemetry widget** — replaced by the **≡ Raw** view. [#101]
     - **`blackbox_decode` download** — no longer needed for INAV Blackbox imports. [#234]
     - **Linux AppImage** — Linux comes as `.deb`, `.rpm` and the portable ZIP, each for x64 and
-      arm64. The AppImage could not play video and showed an empty window on a distribution newer
-      than the one it was built on. [#340]
+      arm64. The AppImage could not play video and showed an empty window on Ubuntu 26.04. [#340]
 
 ??? note "1.0 — Initial release · Live"
 

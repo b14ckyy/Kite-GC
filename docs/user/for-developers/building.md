@@ -120,7 +120,8 @@ backend, so a new adapter family is a one-line Rust change. The first scan raise
 The **Release build** workflow in GitHub Actions builds the APK beside the desktop packages and uploads
 it as a run artifact — Actions → Release build → *Run workflow*. The runner already has the SDK, the
 JDK and `sdkmanager`, so nothing has to be installed locally. It builds one APK per ABI: `arm64` and
-`armv7` (32-bit ARM, `armeabi-v7a`).
+`armv7` (32-bit ARM, `armeabi-v7a`). Without the signing secrets described below they are debug-signed
+and named `..._debug.apk`.
 
 #### Signing
 
@@ -185,11 +186,11 @@ to upload the same version again. Build the APK of that release **locally with t
 (`just build-android`) — Android refuses to install a lower code over a higher one, and the GitHub
 workflow always builds with 0. The file names in `release/` do not carry the digit.
 
-The **App Bundle** that Google Play takes is built locally only — the GitHub workflow keeps building the
-APK:
+The **App Bundle** that Google Play takes is built locally only, one bundle with both ABIs — the GitHub
+workflow builds APKs:
 
 ```bash
-just build-android-aab    # release/KiteGC_Android_<abi>_<version>_playstore.aab
+just build-android-aab    # release/KiteGC_Android_universal_<version>_playstore.aab
 ```
 
 Without `key.properties` the bundle is debug-signed, and Play refuses it. The bundle is for the Play
@@ -205,8 +206,10 @@ Console only; it does not belong on the GitHub release.
 
 ```bash
 npm ci
-npm run tauri android build -- --apk --split-per-abi --target aarch64 armv7   # APKs in src-tauri/gen/android/app/build/outputs/apk
-npm run tauri android dev                               # on-device dev build with hot reload
+# APKs in src-tauri/gen/android/app/build/outputs/apk
+npm run tauri android build -- --apk --split-per-abi --target aarch64 armv7
+# on-device dev build with hot reload
+npm run tauri android dev
 ```
 
 A debug build is signed with your local debug key, so Android refuses to install it over a copy that
@@ -302,10 +305,10 @@ KiteGC_<OS>_<arch>_<version>_<type>.<ext>
   offered as an update.
 - The naming logic lives in `scripts/collect-release.*` and is shared by local builds and the GitHub
   release workflow (`.github/workflows/release.yml`), so filenames match everywhere.
-- `just build-android` drops its APK into the same folder as `KiteGC_Android_<abi>_<version>_installer.apk`
-  (one file per ABI: `arm64` and `armv7`; the Play bundle holds both and is named `universal`). It
-  collects **only** the Android files and
-  leaves the desktop outputs already in `release/` alone — an earlier desktop build's binaries still sit in
+- `just build-android` drops its APKs into the same folder as `KiteGC_Android_<abi>_<version>_installer.apk`
+  (one file per ABI: `arm64` and `armv7`; the Play bundle holds both and is named `universal`). It collects
+  **only** the Android files and leaves the desktop outputs already in `release/` alone — an earlier desktop
+  build's binaries still sit in
   `target/release/`, and collecting those here would republish a stale one under the current version number.
   A desktop build, in turn, also picks up any Android release APK still lying in the Gradle outputs.
 
