@@ -47,30 +47,78 @@ fn write_waiting(db_file: &Path, list: &[RecordedVideo]) {
     }
 }
 
+/// One entry per recording: the closed file replaces what was announced when it was opened.
 pub fn add_waiting(db_file: &Path, videos: &[RecordedVideo]) {
     if videos.is_empty() {
         return;
     }
     let _lock = WAITING_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut list = read_waiting(db_file);
+    list.retain(|known| !videos.iter().any(|v| v.uid == known.uid));
     list.extend(videos.iter().cloned());
     write_waiting(db_file, &list);
+}
+
+/// When this process started (Unix ms): a part announced before it and never closed is what a crash
+/// left, one announced since is being written. Forced at start-up (`note_startup`).
+static STARTED_MS: std::sync::LazyLock<i64> = std::sync::LazyLock::new(|| chrono::Utc::now().timestamp_millis());
+
+pub fn note_startup() {
+    std::sync::LazyLock::force(&STARTED_MS);
+}
+
+/// Give the unclosed parts of an earlier run their real end (`read`), drop the ones whose file is gone.
+fn complete_unclosed(list: Vec<RecordedVideo>, started_ms: i64, read: &dyn Fn(&RecordedVideo) -> Option<RecordedVideo>) -> Vec<RecordedVideo> {
+    list.into_iter()
+        .filter_map(|v| {
+            if v.end_unix_ms != 0 || v.start_unix_ms >= started_ms {
+                return Some(v);
+            }
+            match read(&v) {
+                Some(done) => {
+                    log::warn!("[video] recording {} was never closed — {} s of it are on disk", v.path, done.duration_ms / 1000);
+                    Some(done)
+                }
+                None if Path::new(&v.path).is_file() => Some(v),
+                None => None,
+            }
+        })
+        .collect()
 }
 
 /// Attach every waiting recording whose middle lies in the flight: the pre-roll of a quick re-arm reaches
 /// back into the flight before, which must not take it. The two sync anchors are the recording's first
 /// and last picture on the flight's clock (ms from `start_time`).
 pub fn attach_waiting(conn: &Connection, db_file: &Path, flight_id: i64, flight: &Flight) {
+    attach_waiting_with(conn, db_file, flight_id, flight, *STARTED_MS, &crate::video::record::read_unfinished)
+}
+
+fn attach_waiting_with(
+    conn: &Connection,
+    db_file: &Path,
+    flight_id: i64,
+    flight: &Flight,
+    started_ms: i64,
+    read: &dyn Fn(&RecordedVideo) -> Option<RecordedVideo>,
+) {
     let _lock = WAITING_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let list = read_waiting(db_file);
     if list.is_empty() {
         return;
     }
+    let list = complete_unclosed(list, started_ms, read);
     let start = flight.start_time.timestamp_millis();
     let end = flight.end_time.map(|t| t.timestamp_millis()).unwrap_or(start + flight.duration_sec.unwrap_or(0) * 1000);
     let now = chrono::Utc::now().timestamp_millis();
     let mut keep = Vec::new();
     for v in list {
+        // Still open: being written, or unreadable for now.
+        if v.end_unix_ms == 0 {
+            if now - v.start_unix_ms < WAITING_MAX_MS {
+                keep.push(v);
+            }
+            continue;
+        }
         let middle = v.start_unix_ms + (v.end_unix_ms - v.start_unix_ms) / 2;
         if middle > end || middle < start {
             if now - v.end_unix_ms < WAITING_MAX_MS {
@@ -327,7 +375,7 @@ mod tests {
     fn video(dir: &Path, name: &str, start: i64, end: i64) -> RecordedVideo {
         RecordedVideo {
             path: dir.join(format!("{name}.mkv")).to_string_lossy().to_string(),
-            uid: "ab".repeat(16),
+            uid: format!("{:0<32.32}", name.bytes().map(|b| format!("{b:02x}")).collect::<String>()),
             start_unix_ms: start,
             end_unix_ms: end,
             duration_ms: end - start,
@@ -413,7 +461,7 @@ mod tests {
         assert_eq!(rel, "in.mkv");
         // Nothing of this machine's folders goes into the row (and with it into an export).
         assert!(!extra.contains("videos") && !extra.contains("path"));
-        assert_eq!(anchors, (0, -2_000, 122_000, 120_000, "ab".repeat(16)));
+        assert_eq!(anchors, (0, -2_000, 122_000, 120_000, video(&videos, "in", 0, 0).uid));
         // The other two keep waiting.
         assert_eq!(read_waiting(&db_file).len(), 2);
 
@@ -422,6 +470,49 @@ mod tests {
         attach_to_saved_flights(&conn, &db_file);
         assert_eq!(list_for_flight(&conn, flight_id, &videos).unwrap().len(), 2);
         assert_eq!(read_waiting(&db_file).len(), 2);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_recording_a_crash_left_open_joins_the_flight_it_falls_into() {
+        let dir = std::env::temp_dir().join(format!("kite-vcrash-{}", chrono::Utc::now().timestamp_nanos_opt().unwrap()));
+        let videos = dir.join("videos");
+        std::fs::create_dir_all(&videos).unwrap();
+        let db_file = dir.join("flights.db");
+        let conn = db::open_database(&db_file).unwrap();
+        let start = chrono::Utc::now() - chrono::Duration::seconds(600);
+        let t0 = start.timestamp_millis();
+        let fl = flight(start);
+        let flight_id = db::insert_flight(&conn, &fl).unwrap();
+
+        // Announced at open by an earlier run, never closed; the file is there. A second one of this run
+        // is still being written; a third lost its file.
+        let open = |name: &str, at: i64| RecordedVideo { end_unix_ms: 0, duration_ms: 0, uid: name.repeat(16), ..video(&videos, name, at, at) };
+        for name in ["aa", "cc"] {
+            std::fs::write(videos.join(format!("{name}.mkv")), b"x").unwrap();
+        }
+        add_waiting(&db_file, &[open("aa", t0 + 10_000), open("cc", t0 + 200_000), open("dd", t0 + 20_000)]);
+        // The closed file replaces its announcement instead of standing beside it.
+        add_waiting(&db_file, &[open("dd", t0 + 20_000)]);
+        assert_eq!(read_waiting(&db_file).len(), 3);
+
+        let this_run_started = t0 + 100_000;
+        let read = |v: &RecordedVideo| (v.uid == "aa".repeat(16)).then(|| RecordedVideo { end_unix_ms: v.start_unix_ms + 60_000, duration_ms: 60_000, ..v.clone() });
+        attach_waiting_with(&conn, &db_file, flight_id, &fl, this_run_started, &read);
+
+        let rows: Vec<(String, i64, i64, i64)> = conn
+            .prepare("SELECT fingerprint, duration_ms, sync_a_flight_ms, sync_b_flight_ms FROM flight_videos")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(rows, vec![("aa".repeat(16), 60_000, 10_000, 70_000)]);
+        // The one being written keeps waiting; the one without a file is forgotten.
+        let left: Vec<String> = read_waiting(&db_file).into_iter().map(|v| v.uid).collect();
+        assert_eq!(left, vec!["cc".repeat(16)]);
+        assert_eq!(waiting_uids(&db_file).unwrap().len(), 1);
+        drop(conn);
         let _ = std::fs::remove_dir_all(dir);
     }
 

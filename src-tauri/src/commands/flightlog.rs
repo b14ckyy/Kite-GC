@@ -1596,7 +1596,9 @@ fn orphan_recordings(
         .ok_or("The list of recordings that wait for their flight cannot be read — nothing is removed")?;
     let recorder = native_rtsp.recorder();
     keep.extend(recorder.pending_uids());
-    let busy = recorder.status().file.map(std::path::PathBuf::from);
+    // The status keeps the last file's name after the recording has stopped.
+    let status = recorder.status();
+    let busy = status.file.filter(|_| status.recording).map(std::path::PathBuf::from);
     let files = video_files::orphans(&conn, &root, &keep, busy.as_deref(), only).map_err(|e| format!("Database error: {e}"))?;
     Ok((root, files))
 }

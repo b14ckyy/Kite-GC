@@ -453,6 +453,7 @@ pub fn run() {
 
     builder
         .setup(|_app| {
+            flightlog::video_link::note_startup();
             // Android: record where app data actually landed, and flag any disagreement with Tauri's
             // own idea of it (see `android::log_resolved_dirs`).
             #[cfg(target_os = "android")]

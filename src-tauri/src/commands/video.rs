@@ -665,14 +665,19 @@ pub fn video_record_start(
     db_path: Option<String>,
     native_rtsp: State<'_, crate::video::rtsp_native::NativeRtsp>,
 ) -> Result<(), String> {
-    *RECORD_DB.lock().unwrap_or_else(|e| e.into_inner()) = Some(flight_db_file(db_path));
+    let db_file = flight_db_file(db_path);
+    *RECORD_DB.lock().unwrap_or_else(|e| e.into_inner()) = Some(db_file.clone());
     let dir = record_dir(dir.as_deref());
     let name = format!(
         "{}_{}",
         file_name_part(vehicle.as_deref().unwrap_or_default()),
         chrono::Local::now().format("%Y-%m-%d_%H-%M-%S")
     );
-    native_rtsp.recorder().start(&dir, &name)
+    // Announced at once: a part that is never closed (a crash) still finds its flight, by its time.
+    let announce = move |part: &crate::video::record::RecordedVideo| {
+        crate::flightlog::video_link::add_waiting(&db_file, std::slice::from_ref(part));
+    };
+    native_rtsp.recorder().start(&dir, &name, Box::new(announce))
 }
 
 /// Stop, close the file(s) and leave them waiting for the flight they belong to (`flightlog::video_link`).
