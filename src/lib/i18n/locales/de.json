@@ -810,6 +810,15 @@
     }
   },
   "video": {
+    "replayGap": "Für diesen Teil des Flugs ist kein Video aufgezeichnet",
+    "replayFailed": "Die Aufnahme des Flugs konnte nicht geöffnet werden: {reason}",
+    "record": "Videostream aufzeichnen",
+    "recordHint": "Schreibt den RTSP-Stream unverändert, ohne Neukodierung, vom Armen bis zum Disarmen in eine Matroska-Datei (.mkv). Die Datei wird im Logbuch dem Flug zugeordnet. Benötigt den nativen RTSP-Client und eine H.264- oder HEVC-Quelle.",
+    "recordFolder": "Aufnahmeordner",
+    "recordChoose": "Ordner wählen",
+    "recordRunning": "Aufnahme: {file} ({size})",
+    "recordWaiting": "Aufnahme: wartet auf den nächsten Keyframe",
+    "recordError": "Aufnahme fehlgeschlagen: {error}",
     "title": "Video",
     "start": "Video starten",
     "stop": "Video stoppen",
@@ -1274,6 +1283,8 @@
     "temperatureUnit": "Temperatureinheit"
   },
   "logbook": {
+    "video": "Video",
+    "videoMissing": "Datei nicht gefunden: {path}",
     "title": "Flug-Logbuch",
     "disabled": "Flugaufzeichnung ist deaktiviert. In den Einstellungen aktivieren und neu verbinden.",
     "dbNewer": "Diese Flug-Datenbank stammt aus einer neueren Kite-Version. Das Logbuch bleibt deaktiviert, bis eine passende oder neuere Kite-Version installiert ist — die Datenbank wird nicht verändert.",

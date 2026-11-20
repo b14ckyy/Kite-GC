@@ -597,6 +597,16 @@ impl LinuxVideoSink {
 
     /// Queue one access unit (Annex-B) with its unwrapped 90 kHz timestamp.
     pub fn push(&self, au: Vec<u8>, ts90k: u64) {
+        self.push_au(au, ts90k, true);
+    }
+
+    /// Decode without showing: the pictures between a keyframe and the one that is wanted. The decoder
+    /// base class drops the output of a buffer flagged DECODE_ONLY.
+    pub fn push_hidden(&self, au: Vec<u8>, ts90k: u64) {
+        self.push_au(au, ts90k, false);
+    }
+
+    fn push_au(&self, au: Vec<u8>, ts90k: u64, show: bool) {
         let au = match self.window {
             Some(_) => strip_window(&au).unwrap_or(au),
             None => au,
@@ -606,6 +616,9 @@ impl LinuxVideoSink {
         let mut buffer = gst::Buffer::from_mut_slice(au);
         if let Some(b) = buffer.get_mut() {
             b.set_pts(gst::ClockTime::from_nseconds(pts));
+            if !show {
+                b.set_flags(gst::BufferFlags::DECODE_ONLY);
+            }
         }
         // Every window's pipeline gets the SAME access unit from the one RTSP connection — the
         // split is at the decoder, never at the network. Err = flushing/stopped: that pipeline is

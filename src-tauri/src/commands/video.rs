@@ -609,3 +609,143 @@ pub struct DetachedChrome {
     /// Rects the page wants the press for.
     pub chrome: Vec<[f64; 4]>,
 }
+
+/// `<Videos>/KiteGC` — where recordings go unless the user chose a folder.
+fn default_record_dir() -> std::path::PathBuf {
+    dirs::video_dir().or_else(dirs::home_dir).unwrap_or_default().join("KiteGC")
+}
+
+#[tauri::command]
+pub fn video_record_default_dir() -> String {
+    default_record_dir().to_string_lossy().to_string()
+}
+
+/// The video folder: the user's choice, else the default. Recordings are written into it and looked
+/// for below it.
+pub(crate) fn record_dir(chosen: Option<&str>) -> std::path::PathBuf {
+    match chosen.map(str::trim) {
+        Some(d) if !d.is_empty() => std::path::PathBuf::from(d),
+        _ => default_record_dir(),
+    }
+}
+
+/// Recording switched on in the settings: keep the pre-roll so a recording can start at a keyframe.
+#[tauri::command]
+pub fn video_record_enable(on: bool, native_rtsp: State<'_, crate::video::rtsp_native::NativeRtsp>) {
+    native_rtsp.recorder().set_enabled(on);
+}
+
+fn file_name_part(vehicle: &str) -> String {
+    let cleaned: String = vehicle.trim().chars().map(|c| if c.is_alphanumeric() || c == '-' { c } else { '_' }).collect();
+    let cleaned = cleaned.trim_matches('_');
+    if cleaned.is_empty() { "Video".to_string() } else { cleaned.chars().take(40).collect() }
+}
+
+/// The flight database of the running recording: an app exit while armed has no frontend to name it.
+static RECORD_DB: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mutex::new(None);
+
+fn flight_db_file(db_path: Option<String>) -> std::path::PathBuf {
+    crate::flightlog::db::resolve_db_path(&db_path.unwrap_or_default(), crate::commands::flightlog::portable_mode())
+}
+
+/// App exit: close a running recording and leave it waiting, so the flight resumed at the next start
+/// still gets it.
+pub fn finish_recording_at_exit(native_rtsp: &crate::video::rtsp_native::NativeRtsp) {
+    let files = native_rtsp.recorder().stop();
+    if let Some(db_file) = RECORD_DB.lock().unwrap_or_else(|e| e.into_inner()).take() {
+        crate::flightlog::video_link::add_waiting(&db_file, &files);
+    }
+}
+
+/// Start recording into `dir` (empty = the default folder). The file is named `<vehicle>_<local time>`.
+#[tauri::command(async)]
+pub fn video_record_start(
+    dir: Option<String>,
+    vehicle: Option<String>,
+    db_path: Option<String>,
+    native_rtsp: State<'_, crate::video::rtsp_native::NativeRtsp>,
+) -> Result<(), String> {
+    *RECORD_DB.lock().unwrap_or_else(|e| e.into_inner()) = Some(flight_db_file(db_path));
+    let dir = record_dir(dir.as_deref());
+    let name = format!(
+        "{}_{}",
+        file_name_part(vehicle.as_deref().unwrap_or_default()),
+        chrono::Local::now().format("%Y-%m-%d_%H-%M-%S")
+    );
+    native_rtsp.recorder().start(&dir, &name)
+}
+
+/// Stop, close the file(s) and leave them waiting for the flight they belong to (`flightlog::video_link`).
+#[tauri::command(async)]
+pub fn video_record_stop(
+    db_path: Option<String>,
+    native_rtsp: State<'_, crate::video::rtsp_native::NativeRtsp>,
+) -> Vec<crate::video::record::RecordedVideo> {
+    let files = native_rtsp.recorder().stop();
+    RECORD_DB.lock().unwrap_or_else(|e| e.into_inner()).take();
+    let db_file = flight_db_file(db_path);
+    crate::flightlog::video_link::add_waiting(&db_file, &files);
+    match crate::flightlog::db::open_database(&db_file) {
+        Ok(conn) => crate::flightlog::video_link::attach_to_saved_flights(&conn, &db_file),
+        Err(e) => log::warn!("[video] recording stays unattached, flight DB not opened: {e}"),
+    }
+    files
+}
+
+#[tauri::command]
+pub fn video_record_status(native_rtsp: State<'_, crate::video::rtsp_native::NativeRtsp>) -> crate::video::record::RecordingStatus {
+    native_rtsp.recorder().status()
+}
+
+/// Open the recordings of `flight_id` on the decode sink; a live stream ends. Fails when the flight has
+/// no recording below the video folder.
+#[tauri::command(async)]
+pub fn video_replay_open(
+    app: AppHandle,
+    flight_id: i64,
+    db_path: Option<String>,
+    video_dir: Option<String>,
+    native_rtsp: State<'_, crate::video::rtsp_native::NativeRtsp>,
+) -> Result<serde_json::Value, String> {
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+    {
+        let db_file = flight_db_file(db_path);
+        let conn = crate::flightlog::db::open_database(&db_file).map_err(|e| format!("Database error: {e}"))?;
+        let parts = crate::flightlog::video_link::replay_parts(&conn, flight_id, &record_dir(video_dir.as_deref()))
+            .map_err(|e| format!("Database error: {e}"))?;
+        if parts.is_empty() {
+            return Err("the flight has no recording on disk".into());
+        }
+        #[cfg(target_os = "windows")]
+        let parent = {
+            use tauri::Manager;
+            app.get_webview_window("main").and_then(|w| w.hwnd().ok()).map(|h| h.0 as isize)
+        };
+        #[cfg(not(target_os = "windows"))]
+        let parent: Option<isize> = {
+            let _ = &app;
+            None
+        };
+        let (codec, width, height) = native_rtsp.replay_open(parts, parent)?;
+        Ok(serde_json::json!({ "codec": codec, "width": width, "height": height }))
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+    {
+        let _ = (&app, flight_id, &db_path, &video_dir, &native_rtsp);
+        Err("not available on this platform".into())
+    }
+}
+
+/// The replay's position: flight time (ms from the flight's start), running or not, speed. Returns whether
+/// a recording covers it and whether its picture was handed to the sink; `null` while none is open.
+#[tauri::command]
+pub fn video_replay_sync(
+    flight_ms: f64,
+    playing: bool,
+    rate: f64,
+    native_rtsp: State<'_, crate::video::rtsp_native::NativeRtsp>,
+) -> Option<serde_json::Value> {
+    native_rtsp
+        .replay_sync(flight_ms, playing, rate)
+        .map(|(covered, ready)| serde_json::json!({ "covered": covered, "ready": ready }))
+}

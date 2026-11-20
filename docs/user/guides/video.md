@@ -113,6 +113,58 @@ until the feed returns or you stop it. While it retries, every video surface sho
 feed are given a few seconds to heal on their own before a full reconnect is forced, so momentary
 signal dips don't interrupt the stream unnecessarily.
 
+### Recording the RTSP stream (desktop)
+
+Switch on **Record the video stream** below the saved connections and Kite writes the video to a file
+for every flight: the recording starts when the connected vehicle is armed and ends when it is disarmed.
+
+- **What is recorded:** the stream exactly as it arrives — no re-encoding, so the quality is the
+  source's and the recording costs almost no CPU. The file is a Matroska file (`.mkv`) that the common
+  players open (VLC, mpv, the Windows media player).
+- **Requirements:** the **Native RTSP client** and an **H.264 or HEVC** source. An MJPEG stream is not
+  recorded. Windows, Linux and macOS; not on Android and iOS.
+- **Where it goes:** the **Recording folder** — by default a `KiteGC` folder in your videos folder. The
+  file is named after the vehicle and the local time, for example `Wing_2026-11-20_14-05-31.mkv`: the
+  name the vehicle has in your vehicle library, else its craft name, else `Video`.
+- **A few seconds before arming are included:** the recording starts at the last keyframe the source
+  sent before you armed.
+- **In the logbook:** once the flight is saved, its details show the recording under **Video**. The
+  file stays in the recording folder; the logbook only remembers it.
+- **Rename and sort the files as you like:** every recording carries an id of its own, and Kite finds
+  the file by it below the recording folder — under a new name, in subfolders of your own scheme (up
+  to six levels deep). Only the folder itself must stay the one set as **Recording folder**. A file that is no
+  longer below it is shown struck through in the flight details.
+- **Do not convert or re-save the file** with another program if it should stay linked to its flight:
+  tools that rewrite a Matroska file usually give it a new id.
+- **Dropouts:** when the stream reconnects during a flight, the recording continues in a new file
+  (`…_part2.mkv`). A new file also starts just below 4 GB, so a FAT32 drive works as a target.
+- **If Kite is closed mid-flight,** the recording is finished and joins the flight when that is saved
+  after the next start.
+- **After a crash or a power loss** the file stays in the recording folder and plays up to the last
+  keyframe that reached the disk; the last seconds can be missing. Such a file has no seek index, so
+  jumping around in it can be slow, and it is not listed in the flight's details.
+
+Recording runs only while armed and connected; without a link nothing is recorded.
+
+#### Watching the recording with the replay
+
+Open a flight that has a recording in the logbook while no vehicle is connected, and the video plays in
+the video window (or the Video widget) **in step with the replay**: play, pause, the speed button and
+dragging the timeline all move the picture along with the aircraft on the map.
+
+- **A running live stream is stopped** when such a flight is loaded — the recording uses the same
+  video surface. Start the stream again from the Video panel when you are done; a flight without a
+  recording leaves the stream alone.
+- **Where nothing was recorded** — before arming, after disarming, in a dropout between two files, or
+  when the file is no longer in its folder — the window shows *No video recorded for this part of the
+  flight*.
+- **At 4× and faster** the video shows one picture per keyframe instead of every frame.
+- **Jumping backwards** restarts the picture at the keyframe before the new position; with a source
+  that sends keyframes rarely this takes a moment.
+- **Stop video** in the Video panel ends the playback; the replay itself goes on.
+
+With a vehicle connected the logbook does not put a flight on the map, so no recording plays then.
+
 !!! note "Helpers download themselves"
     **Camera (device)** needs nothing extra, and **RTSP with the Native RTSP client** (the default)
     needs no helper either (on Android that is always the case). **Native Capture** uses the bundled

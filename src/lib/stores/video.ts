@@ -93,6 +93,10 @@ export interface VideoState {
   /** Use Kite's own in-process RTSP client — no MediaMTX, no ffmpeg. On by default; off falls back
    *  to the classic engine path. Persisted. */
   rtspNativeClient: boolean;
+  /** Record the native RTSP stream to a file from arming to disarming (desktop). Persisted. */
+  recordEnabled: boolean;
+  /** Folder for the recordings; empty = the default (`<Videos>/KiteGC`). Persisted. */
+  recordDir: string;
   /** Active RTSP reader once live (native engine client vs ffmpeg fallback); runtime-only. */
   rtspEngine: RtspEngine;
   /** Runtime-only: the in-process client decodes this feed natively (H264/HEVC →
@@ -102,6 +106,11 @@ export interface VideoState {
   /** Runtime-only: the codec the native decode sink plays ('H.264'/'H.265'), for the
    *  panel's info line. Null while the sink route isn't active. */
   nativeSinkCodec: string | null;
+  /** A replayed flight's recording plays through the decode sink in place of a live source
+   *  (controllers/videoReplay.ts). Runtime-only. */
+  replay: boolean;
+  /** No recording covers the replay's current time (before, after, between two files). */
+  replayGap: boolean;
   /** Runtime-only: true while the infinite RTSP auto-reconnect loop is running (link dropped/stalled). */
   reconnecting: boolean;
   /** Runtime-only: current reconnect attempt number, shown in the on-video overlay. */
@@ -176,6 +185,8 @@ interface VideoPrefs {
   rtspConnections: RtspConnection[];
   rtspBufferFrames: number;
   rtspNativeClient: boolean;
+  recordEnabled: boolean;
+  recordDir: string;
   /** Set once the 2.0 default (native client on) has been applied to this installation. */
   rtspNativeDefaultApplied: boolean;
   nativeDevice: string | null;
@@ -209,6 +220,8 @@ const PREF_DEFAULTS: VideoPrefs = {
   rtspConnections: [],
   rtspBufferFrames: 0,
   rtspNativeClient: true,
+  recordEnabled: false,
+  recordDir: '',
   rtspNativeDefaultApplied: true,
   nativeDevice: null,
   nativeCodec: 'mjpeg',
@@ -255,6 +268,8 @@ function loadPrefs(): VideoPrefs {
         // the prefs whole is the old default, not a choice; after that the stored value is the user's.
         rtspNativeClient: p.rtspNativeDefaultApplied ? (p.rtspNativeClient ?? true) : true,
         rtspNativeDefaultApplied: true,
+        recordEnabled: p.recordEnabled === true,
+        recordDir: typeof p.recordDir === 'string' ? p.recordDir : '',
         nativeDevice: p.nativeDevice ?? p.v4l2Device ?? null,
         nativeCodec: p.nativeCodec ?? 'mjpeg',
         nativeDeviceName: p.nativeDeviceName ?? null,
@@ -280,7 +295,7 @@ function savePrefs(): void {
       STORAGE_KEY,
       JSON.stringify({
         kind: s.kind,
-        enabled: s.enabled,
+        enabled: s.enabled && !s.replay,
         deviceId: s.deviceId,
         resolution: s.resolution,
         cameraFps: s.cameraFps,
@@ -289,6 +304,8 @@ function savePrefs(): void {
         rtspConnections: s.rtspConnections,
         rtspBufferFrames: get(rtspBufferFrames),
         rtspNativeClient: s.rtspNativeClient,
+        recordEnabled: s.recordEnabled,
+        recordDir: s.recordDir,
         rtspNativeDefaultApplied: true,
         nativeDevice: s.nativeDevice,
         nativeCodec: s.nativeSel.codec,
@@ -342,9 +359,13 @@ const INITIAL: VideoState = {
   rtspTransport: boot.rtspTransport,
   rtspConnections: boot.rtspConnections,
   rtspNativeClient: boot.rtspNativeClient,
+  recordEnabled: boot.recordEnabled,
+  recordDir: boot.recordDir,
   rtspEngine: null,
   nativeSink: false,
   nativeSinkCodec: null,
+  replay: false,
+  replayGap: false,
   reconnecting: false,
   reconnectAttempt: 0,
   mjpegUrl: null,
@@ -860,11 +881,11 @@ async function startMjpegPath(url: string, requireCopy = false): Promise<boolean
 
 /** Stop the in-process native RTSP client (idempotent, fire-and-forget) and undo the
  *  decode-sink surface state (hole clips, router, monitor) if that route was active. */
-function stopKiteRtsp(): void {
+function stopKiteRtsp(keepClient = false): void {
   stopKiteStatsMonitor();
   stopNativeSurfaceRouter();
   if (get(videoState).nativeSink) patch({ nativeSink: false, nativeSinkCodec: null });
-  void invoke('video_rtsp_native_stop').catch(() => {});
+  if (!keepClient) void invoke('video_rtsp_native_stop').catch(() => {});
 }
 
 /** Presented-fps readout of the native decode sink (updated by the 1 Hz monitor below);
@@ -1332,7 +1353,7 @@ function startRtspStallMonitor(pc: RTCPeerConnection): void {
  *  after a short backoff. Guarded so an explicit stop (kind changed / disabled) ends it. */
 function scheduleRtspReconnect(): void {
   const st = get(videoState);
-  if (st.kind !== 'rtsp' || !st.enabled) return; // user stopped → do not reconnect
+  if (st.kind !== 'rtsp' || !st.enabled || st.replay) return; // user stopped → do not reconnect
   // The loop is unbounded by design, so logging every attempt would fill the file on a source that
   // never comes back. Log the first few, then every tenth — enough to see it is still going.
   const attempt = st.reconnectAttempt + 1;
@@ -1389,6 +1410,11 @@ function normalizeRtspUrl(raw: string): string {
  *  frames return or the user stops). `reconnect` distinguishes a loop retry from a fresh start. */
 export async function startRtsp(opts?: { reconnect?: boolean }): Promise<void> {
   const reconnect = opts?.reconnect ?? false;
+  // A recording plays: a retry of the old stream has no say, a deliberate start takes over from it.
+  if (get(videoState).replay) {
+    if (reconnect) return;
+    leaveVideoReplay();
+  }
   clearRtspTimers();
   stopTracks(); // release the camera / previous peer connection
   const st = get(videoState);
@@ -1600,16 +1626,67 @@ export function startActive(): Promise<void> {
 
 /** Stop the source and release the camera / streaming engine. */
 export function stopVideo(): void {
-  const wasBackend = get(videoState).kind === 'rtsp' || get(videoState).kind === 'native';
+  stopSource(false);
+}
+
+/** Stop the live source for a recording that is about to open. The native client stays untouched: the
+ *  open ends it itself, and a stop sent now could arrive after it and end the recording. */
+export function stopVideoForReplay(): void {
+  stopSource(true);
+}
+
+function stopSource(keepNativeClient: boolean): void {
+  const s = get(videoState);
+  const wasBackend = s.kind === 'rtsp' || s.kind === 'native' || s.replay;
   clearRtspTimers(); // end the RTSP reconnect loop on an explicit stop
   stopTracks();
   if (wasBackend) {
     void invoke('video_webrtc_stop').catch(() => {});
     void stopNativeMjpeg();
-    stopKiteRtsp();
+    stopKiteRtsp(keepNativeClient);
   }
-  patch({ enabled: false, status: 'off', error: null, rtspEngine: null, mjpegUrl: null, activeTranscode: null, reconnecting: false, reconnectAttempt: 0 });
+  patch({ enabled: false, status: 'off', error: null, rtspEngine: null, mjpegUrl: null, activeTranscode: null, reconnecting: false, reconnectAttempt: 0, replay: false, replayGap: false });
   savePrefs();
+}
+
+/** The backend opened a flight's recording on the decode sink: show it like a live sink feed.
+ *  Runtime-only: `savePrefs` never stores `enabled` while `replay` is set. */
+export function enterVideoReplay(codec: string | null, width: number, height: number): void {
+  patch({
+    enabled: true,
+    status: 'live',
+    error: null,
+    mjpegUrl: null,
+    nativeSink: true,
+    nativeSinkCodec: codec,
+    activeTranscode: 'none',
+    rtspEngine: null,
+    reconnecting: false,
+    reconnectAttempt: 0,
+    replay: true,
+    replayGap: false,
+    floating: get(videoState).floating || !videoWidgetActive,
+  });
+  if (width > 0 && height > 0) reportVideoSize(width, height);
+  startNativeSurfaceRouter();
+  syncNativeSinkOrient();
+}
+
+/** The replay ended: back to "no source running". The caller stops the backend. */
+export function leaveVideoReplay(): void {
+  if (!get(videoState).replay) return;
+  stopNativeSurfaceRouter();
+  patch({ enabled: false, status: 'off', nativeSink: false, nativeSinkCodec: null, activeTranscode: null, replay: false, replayGap: false });
+}
+
+/** The recording could not be opened, with the live source already stopped for it. */
+export function reportVideoReplayFailure(reason: string): void {
+  patch({ status: 'error', error: get(t)('video.replayFailed', { values: { reason } }) });
+}
+
+export function setVideoReplayGap(gap: boolean): void {
+  const s = get(videoState);
+  if (s.replay && s.replayGap !== gap) patch({ replayGap: gap });
 }
 
 /** Whether a Video widget sits in a dock (the phone grid included) — +page keeps this current.
@@ -1651,7 +1728,7 @@ export async function setRtspTransport(transport: RtspTransport): Promise<void> 
   patch({ rtspTransport: transport });
   savePrefs();
   const st = get(videoState);
-  if (st.enabled && st.kind === 'rtsp') await startRtsp();
+  if (st.enabled && st.kind === 'rtsp' && !st.replay) await startRtsp();
 }
 
 /** Toggle the in-process RTSP client (no MediaMTX/ffmpeg); restarts a live RTSP feed so the choice
@@ -1662,7 +1739,17 @@ export async function setRtspNativeClient(on: boolean): Promise<void> {
   patch({ rtspNativeClient: on, undocked: on ? get(videoState).undocked : false });
   savePrefs();
   const st = get(videoState);
-  if (st.enabled && st.kind === 'rtsp') await startRtsp();
+  if (st.enabled && st.kind === 'rtsp' && !st.replay) await startRtsp();
+}
+
+export function setRecordEnabled(on: boolean): void {
+  patch({ recordEnabled: on });
+  savePrefs();
+}
+
+export function setRecordDir(dir: string): void {
+  patch({ recordDir: dir.trim() });
+  savePrefs();
 }
 
 function genRtspId(): string {

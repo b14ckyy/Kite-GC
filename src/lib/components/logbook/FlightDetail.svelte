@@ -6,7 +6,7 @@
 <script lang="ts">
   import { t } from 'svelte-i18n';
   import { convertAltitude, convertDistance, convertSpeed, convertTemperature, formatConverted } from '$lib/utils/units';
-  import { formatDurationSec, formatFlightDateTime, flightTzLabel, flightDataSizes, type FlightDataSize, missionDbForFlight, flightLoggedWpCount, flightLinkMission, flightUnlinkMission, missionDbSave, missionDbFindByHash, missionDbGeocode, flightSetBatterySerial, batteryDbFindBySerial, batteryDbList, vehicleDbList, flightSetVehicle, getFlight } from '$lib/stores/flightlog';
+  import { formatDurationSec, formatFlightDateTime, flightTzLabel, flightDataSizes, type FlightDataSize, flightVideos, type FlightVideo, missionDbForFlight, flightLoggedWpCount, flightLinkMission, flightUnlinkMission, missionDbSave, missionDbFindByHash, missionDbGeocode, flightSetBatterySerial, batteryDbFindBySerial, batteryDbList, vehicleDbList, flightSetVehicle, getFlight } from '$lib/stores/flightlog';
   import type { Flight, LibraryMission, BatteryPack, Vehicle } from '$lib/stores/flightlogTypes';
   import type { InterfaceSettings } from '$lib/stores/settings';
   import { mission, missionFlags, loadedMissionId, markMissionSynced, filledMissionCount } from '$lib/stores/mission';
@@ -22,6 +22,7 @@
   import { buildArduMissionInput } from '$lib/helpers/missionLibraryArdu';
   import { compassPointKey } from '$lib/helpers/compassPoint';
   import { get } from 'svelte/store';
+  import { videoState } from '$lib/stores/video';
   import { locale } from 'svelte-i18n';
   import WeatherEditor from './WeatherEditor.svelte';
   import Button from '$lib/components/panel/Button.svelte';
@@ -94,16 +95,30 @@
 
   // What the flight's rows take in the database; a linked pair shows both parts.
   let dataSizes = $state<FlightDataSize[]>([]);
+  let videos = $state<FlightVideo[]>([]);
   // By id: saving notes or weather hands in a new flight object for the same flight.
   const flightId = $derived(flight.id);
   $effect(() => {
     const id = flightId;
     dataSizes = [];
+    videos = [];
     if (minimized) return;
     void flightDataSizes(id, dbPath)
       .then((sizes) => { if (flightId === id) dataSizes = sizes; })
       .catch(() => {});
+    void flightVideos(id, dbPath, get(videoState).recordDir)
+      .then((list) => { if (flightId === id) videos = list; })
+      .catch(() => {});
   });
+
+  function videoInfo(v: FlightVideo): string {
+    const parts: string[] = [];
+    if (v.duration_ms != null) parts.push(formatDurationSec(Math.round(v.duration_ms / 1000)));
+    if (v.width && v.height) parts.push(`${v.width}×${v.height}`);
+    if (v.codec) parts.push(v.codec === 'hevc' ? 'H.265' : v.codec === 'h264' ? 'H.264' : v.codec);
+    if (v.file_size != null) parts.push(formatBytes(v.file_size));
+    return parts.join(' · ');
+  }
 
   let craftNameEditing = $state(false);
   let craftNameDraft = $state('');
@@ -620,6 +635,16 @@
         {/if}
       {/if}
     </span>
+    {#if videos.length}
+      <span class="fc-label">{$t('logbook.video')}</span>
+      <span class="fc-value video-list">
+        {#each videos as v (v.id)}
+          <span class="video-file" class:missing={!v.exists} title={v.exists ? (v.path ?? v.name) : $t('logbook.videoMissing', { values: { path: v.path ?? v.name } })}>
+            {v.name}<span class="raw-size">{videoInfo(v)}</span>
+          </span>
+        {/each}
+      </span>
+    {/if}
     <span class="fc-label">{$t('logbook.mission')}</span>
     <span class="fc-value craft-value-row">
       {#if linkedMission}
@@ -882,6 +907,9 @@
     color: #949494;
     margin-left: 8px;
   }
+  .video-list { display: flex; flex-direction: column; gap: 2px; }
+  .video-file { overflow-wrap: anywhere; }
+  .video-file.missing { color: #949494; text-decoration: line-through; }
   .raw-del-btn {
     margin-left: 6px;
     padding: 1px 6px;

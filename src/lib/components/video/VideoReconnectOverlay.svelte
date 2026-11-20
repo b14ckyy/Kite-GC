@@ -6,6 +6,7 @@
   Shown over any video sink (panel preview / widget / floating window) while the RTSP feed is in its
   infinite auto-reconnect loop, so the pilot always sees that the link dropped and is being retried —
   with the attempt counter and an explicit Stop. The parent must be `position: relative`.
+  In a replay it covers the picture where no recording exists for the current time.
 -->
 <script lang="ts">
   import { t } from 'svelte-i18n';
@@ -22,6 +23,10 @@
       <button class="rc-stop" onclick={stopVideo}>{$t('video.reconnectStop')}</button>
     </div>
   </div>
+{:else if $videoState.replay && $videoState.replayGap}
+  <div class="rc-overlay gap">
+    <span class="gap-text">{$t('video.replayGap')}</span>
+  </div>
 {/if}
 
 <style>
@@ -34,6 +39,9 @@
     pointer-events: none; /* let clicks through to the video except on the Stop button */
     z-index: 5;
   }
+  /* Opaque: the last decoded picture stays in the native layer below and must not show through. */
+  .rc-overlay.gap { background: #1b1b1b; }
+  .gap-text { color: #949494; font-size: 13px; text-align: center; padding: 0 12px; }
   .rc-box {
     display: flex;
     align-items: center;

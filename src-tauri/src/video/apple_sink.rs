@@ -51,7 +51,8 @@ use objc2_av_foundation::{
 };
 use objc2_core_foundation::{kCFBooleanTrue, CFArray, CFDictionarySetValue, CFMutableDictionary, CFRetained};
 use objc2_core_media::{
-    kCMBlockBufferAssureMemoryNowFlag, kCMSampleAttachmentKey_DisplayImmediately, kCMTimeInvalid,
+    kCMBlockBufferAssureMemoryNowFlag, kCMSampleAttachmentKey_DisplayImmediately, kCMSampleAttachmentKey_DoNotDisplay,
+    kCMTimeInvalid,
     CMBlockBuffer, CMClock, CMFormatDescription, CMSampleBuffer, CMSampleTimingInfo, CMTime, CMTimebase,
     CMVideoFormatDescriptionCreateFromH264ParameterSets, CMVideoFormatDescriptionCreateFromHEVCParameterSets,
     CMVideoFormatDescriptionGetPresentationDimensions,
@@ -70,8 +71,9 @@ const TIMESCALE: i32 = 90_000;
 const MAX_OUTPUTS: usize = 2;
 
 enum Cmd {
-    /// One access unit (Annex-B, in-band parameter sets) + its unwrapped 90 kHz timestamp.
-    Frame(Vec<u8>, u64),
+    /// One access unit (Annex-B, in-band parameter sets) + its unwrapped 90 kHz timestamp. `false` =
+    /// decode it, never show it.
+    Frame(Vec<u8>, u64, bool),
     Orient { mirror: bool, rotate180: bool },
     Stop,
 }
@@ -137,7 +139,13 @@ impl AppleVideoSink {
 
     /// Queue one access unit (Annex-B) with its unwrapped 90 kHz timestamp.
     pub fn push(&self, au: Vec<u8>, ts90k: u64) {
-        let _ = self.tx.send(Cmd::Frame(au, ts90k));
+        let _ = self.tx.send(Cmd::Frame(au, ts90k, true));
+    }
+
+    /// Decode without showing: the pictures between a keyframe and the one that is wanted.
+    #[cfg_attr(target_os = "ios", allow(dead_code))]
+    pub fn push_hidden(&self, au: Vec<u8>, ts90k: u64) {
+        let _ = self.tx.send(Cmd::Frame(au, ts90k, false));
     }
 
     /// First fatal sink error, if any — the stream ends on it (see rtsp_native).
@@ -323,7 +331,7 @@ fn decode_loop(hevc: bool, rx: &Receiver<Cmd>, shared: &Shared) {
                 return;
             }
             Ok(Cmd::Orient { mirror, rotate180 }) => host::set_orient(mirror, rotate180),
-            Ok(Cmd::Frame(au, ts90k)) => {
+            Ok(Cmd::Frame(au, ts90k, show)) => {
                 // Parameter sets first — a rebuilt description is what makes the next IDR decodable.
                 let changed = sets.absorb(hevc, &au);
                 if changed || format.is_none() {
@@ -424,7 +432,7 @@ fn decode_loop(hevc: bool, rx: &Receiver<Cmd>, shared: &Shared) {
                     }
 
                     if sample.is_none() {
-                        match make_sample(hevc, desc, &au, pts, depth == 0) {
+                        match make_sample(hevc, desc, &au, pts, depth == 0, !show) {
                             Ok(s) => sample = Some(s),
                             Err(e) => {
                                 shared.fail(e);
@@ -603,6 +611,7 @@ fn make_sample(
     au: &[u8],
     pts: i64,
     display_immediately: bool,
+    do_not_display: bool,
 ) -> Result<CFRetained<CMSampleBuffer>, String> {
     let mut data: Vec<u8> = Vec::with_capacity(au.len() + 16);
     for nal in nal_units(au) {
@@ -673,16 +682,25 @@ fn make_sample(
         }
         let sb = CFRetained::from_raw(NonNull::new_unchecked(sb));
 
-        if display_immediately {
+        if display_immediately || do_not_display {
             if let Some(atts) = sb.sample_attachments_array(true) {
                 let atts: &CFArray = &atts;
                 let dict = atts.value_at_index(0) as *const CFMutableDictionary;
                 if let (Some(dict), Some(yes)) = (dict.as_ref(), kCFBooleanTrue) {
-                    CFDictionarySetValue(
-                        Some(dict),
-                        (kCMSampleAttachmentKey_DisplayImmediately as *const _) as *const std::ffi::c_void,
-                        (yes as *const _) as *const std::ffi::c_void,
-                    );
+                    if display_immediately {
+                        CFDictionarySetValue(
+                            Some(dict),
+                            (kCMSampleAttachmentKey_DisplayImmediately as *const _) as *const std::ffi::c_void,
+                            (yes as *const _) as *const std::ffi::c_void,
+                        );
+                    }
+                    if do_not_display {
+                        CFDictionarySetValue(
+                            Some(dict),
+                            (kCMSampleAttachmentKey_DoNotDisplay as *const _) as *const std::ffi::c_void,
+                            (yes as *const _) as *const std::ffi::c_void,
+                        );
+                    }
                 }
             }
         }

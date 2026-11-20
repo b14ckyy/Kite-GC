@@ -14,7 +14,7 @@ use crate::flightlog::types::{
 };
 
 /// Whether the app runs in portable mode (`.portable` marker next to the executable).
-fn portable_mode() -> bool {
+pub(crate) fn portable_mode() -> bool {
     std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|p| p.join(".portable").exists()))
@@ -2117,6 +2117,19 @@ pub fn flightlog_recover_continue(
     )?;
     // A recovered orphan belongs to no connected vehicle yet — queued under its own path.
     state.sessions.put_resume(temp_path, session)
+}
+
+/// The videos attached to a flight, for the flight details. A file that was renamed or moved below the
+/// video folder is found by its id and linked again.
+#[tauri::command(async)]
+pub fn flightlog_flight_videos(
+    flight_id: i64,
+    db_path: Option<String>,
+    video_dir: Option<String>,
+) -> Result<Vec<crate::flightlog::video_link::FlightVideo>, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    let root = crate::commands::video::record_dir(video_dir.as_deref());
+    crate::flightlog::video_link::list_for_flight(&conn, flight_id, &root).map_err(|e| format!("Database error: {e}"))
 }
 
 #[cfg(test)]

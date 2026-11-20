@@ -810,6 +810,15 @@
     }
   },
   "video": {
+    "replayGap": "No video recorded for this part of the flight",
+    "replayFailed": "The flight's recording could not be opened: {reason}",
+    "record": "Record the video stream",
+    "recordHint": "Writes the RTSP stream to a Matroska file (.mkv) as it arrives, without re-encoding, from arming to disarming. The file is attached to the flight in the logbook. Needs the native RTSP client and an H.264 or HEVC source.",
+    "recordFolder": "Recording folder",
+    "recordChoose": "Choose folder",
+    "recordRunning": "Recording: {file} ({size})",
+    "recordWaiting": "Recording: waiting for the next keyframe",
+    "recordError": "Recording failed: {error}",
     "title": "Vidéo",
     "start": "Démarrer la vidéo",
     "stop": "Arrêter la vidéo",
@@ -1270,6 +1279,8 @@
     "temperatureUnit": "Unité de température"
   },
   "logbook": {
+    "video": "Video",
+    "videoMissing": "File not found: {path}",
     "title": "Carnet de vol",
     "disabled": "La journalisation des vols est désactivée. Activez-la dans les paramètres et reconnectez-vous.",
     "dbNewer": "Cette base de données de vols provient d'une version de Kite plus récente. Le carnet de vol reste désactivé jusqu'à l'installation d'une version de Kite égale ou plus récente — la base n'est pas modifiée.",

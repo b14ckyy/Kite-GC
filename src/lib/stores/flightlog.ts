@@ -825,6 +825,29 @@ export interface FlightDataSize {
   bytes: number;
 }
 /** Estimated database size of a flight's own rows, and of its linked partner's — without the stored original log. */
+/** A video attached to a flight (recorded from the RTSP stream). */
+export interface FlightVideo {
+  id: number;
+  name: string;
+  path: string | null;
+  /** The file is below the recording folder (under any name, in any subfolder). */
+  exists: boolean;
+  duration_ms: number | null;
+  codec: string | null;
+  width: number | null;
+  height: number | null;
+  file_size: number | null;
+}
+
+/** `videoDir` = the recording folder ('' = the default): files are looked for below it, by their id. */
+export async function flightVideos(flightId: number, dbPath: string, videoDir: string): Promise<FlightVideo[]> {
+  return invoke<FlightVideo[]>('flightlog_flight_videos', {
+    flightId,
+    dbPath: dbPath || undefined,
+    videoDir: videoDir || undefined,
+  });
+}
+
 export async function flightDataSizes(flightId: number, dbPath: string): Promise<FlightDataSize[]> {
   return invoke<FlightDataSize[]>('flightlog_flight_data_sizes', { flightId, dbPath: dbPath || undefined });
 }
