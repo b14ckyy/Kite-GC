@@ -229,15 +229,17 @@ pub fn orphans(
     Ok(files)
 }
 
-/// Remove the flight folders these files lay in when nothing is left in them.
-pub fn drop_empty_flight_dirs(files: &[PathBuf]) {
+/// Only real folders directly below `<root>/Flights`; `remove_dir` refuses one that still holds something,
+/// which is the check. A link is left alone: removing it would hide what its target holds.
+pub fn drop_empty_flight_dirs(root: &Path, files: &[PathBuf]) {
+    let flights = root.join(video_link::FLIGHTS_DIR);
     let dirs: HashSet<&Path> = files
         .iter()
         .filter_map(|f| f.parent())
-        .filter(|d| d.parent().and_then(|p| p.file_name()).is_some_and(|n| n == video_link::FLIGHTS_DIR))
+        .filter(|d| d.parent() == Some(flights.as_path()))
+        .filter(|d| std::fs::symlink_metadata(d).is_ok_and(|m| m.file_type().is_dir()))
         .collect();
     for dir in dirs {
-        // Fails on a folder that still holds something, which is the check.
         if std::fs::remove_dir(dir).is_ok() {
             log::info!("[video] empty flight folder {} removed", dir.display());
         }
@@ -267,7 +269,9 @@ pub fn import_videos(
         let dir = root.join(video_link::FLIGHTS_DIR).join(&folder);
         std::fs::create_dir_all(&dir).map_err(|e| format!("Creating {} failed: {e}", dir.display()))?;
         let dest = free_name(&dir, name);
-        let size = copy_file(file, &dest, &mut |done| progress(before + done, total))?;
+        let size = copy_file(file, &dest, &mut |done| progress(before + done, total)).inspect_err(|_| {
+            let _ = std::fs::remove_dir(&dir);
+        })?;
         before += size;
         progress(before, total);
         let rel = relative(root, &dest);
@@ -475,12 +479,17 @@ mod tests {
         }
         std::fs::remove_file(&a).unwrap();
         std::fs::remove_file(&loose).unwrap();
-        drop_empty_flight_dirs(&[a.clone(), loose.clone()]);
+        drop_empty_flight_dirs(&root, &[a.clone(), loose.clone()]);
         assert!(root.join("Flights/A").is_dir(), "one recording is left in it");
         assert!(root.join("Moved").is_dir(), "not a flight folder");
         std::fs::remove_file(&b).unwrap();
-        drop_empty_flight_dirs(&[b]);
+        drop_empty_flight_dirs(&root, &[b]);
         assert!(!root.join("Flights/A").exists() && root.join("Flights").is_dir());
+        // A recording folder that itself lies in a folder called Flights is not a flight folder.
+        let own = root.join("Flights/Mine");
+        std::fs::create_dir_all(&own).unwrap();
+        drop_empty_flight_dirs(&own, &[own.join("gone.mkv")]);
+        assert!(own.is_dir());
         let _ = std::fs::remove_dir_all(root);
     }
 }

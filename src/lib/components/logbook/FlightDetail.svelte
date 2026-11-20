@@ -23,7 +23,7 @@
   import { compassPointKey } from '$lib/helpers/compassPoint';
   import { get } from 'svelte/store';
   import { videoState } from '$lib/stores/video';
-  import { revealItemInDir, openPath } from '@tauri-apps/plugin-opener';
+  import { revealItemInDir } from '@tauri-apps/plugin-opener';
   import { isMobile } from '$lib/platform';
   import { locale } from 'svelte-i18n';
   import WeatherEditor from './WeatherEditor.svelte';
@@ -113,17 +113,9 @@
       .catch(() => {});
   });
 
-  // The first recording that is on disk, shown in the file manager; a desktop without a reveal service
-  // gets its folder opened instead.
-  async function showVideoFolder() {
+  function showVideoFolder() {
     const path = videos.find((v) => v.exists && v.path)?.path;
-    if (!path) return;
-    try {
-      await revealItemInDir(path);
-    } catch (e) {
-      console.warn('[logbook] revealItemInDir failed', e);
-      await openPath(path.replace(/[\\/][^\\/]*$/, '')).catch((e2) => console.warn('[logbook] openPath failed', e2));
-    }
+    if (path) void revealItemInDir(path).catch((e) => console.warn('[logbook] revealItemInDir failed', e));
   }
 
   function videoInfo(v: FlightVideo): string {

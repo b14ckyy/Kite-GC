@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-//! Finished recordings wait in a file next to the database until the flight they fall into is committed;
-//! then they move into `Flights/<flight>/` below the video folder, which leaves the folder itself to what
-//! is being written or still waits.
-//! A flight knows its video by the segment UID and a path relative to the video folder, never an absolute
-//! one (an export carries nothing of this machine); `resolve` finds a renamed or moved file by its UID.
+//! Finished recordings wait in a file next to the database until their flight is committed, then move
+//! into `Flights/<flight>/` below the video folder. A flight knows its video by segment UID and a path
+//! relative to that folder, never an absolute one; `resolve` finds a moved file by its UID.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -89,7 +87,7 @@ fn complete_unclosed(list: Vec<RecordedVideo>, started_ms: i64, read: &dyn Fn(&R
         .collect()
 }
 
-/// A recording's name without the part number: `HITL_2026-11-20_22-39-43_part4.mkv` → `HITL_2026-11-20_22-39-43`.
+/// `Wing_2026-11-20_10-00-00_part4.mkv` → `Wing_2026-11-20_10-00-00`.
 fn recording_stem(name: &str) -> String {
     let stem = Path::new(name).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| name.to_string());
     match stem.rfind("_part") {
@@ -99,22 +97,29 @@ fn recording_stem(name: &str) -> String {
 }
 
 /// The flight's folder below `Flights/`: the one its recordings name already, else its first recording's
-/// name, else `new_name`'s. A `rel_path` may come from an imported file, so it only ever gives a plain name.
+/// name, else `new_name`'s. A `rel_path` may come from an imported file: only a name that is one path
+/// component on every system is taken from it.
 pub(super) fn flight_folder(conn: &Connection, flight_id: i64, new_name: &str) -> String {
     let known: Vec<String> = conn
         .prepare("SELECT rel_path FROM flight_videos WHERE flight_id = ?1 ORDER BY sync_a_flight_ms, id")
         .and_then(|mut s| s.query_map(params![flight_id], |r| r.get(0))?.collect())
         .unwrap_or_default();
-    let plain = |name: &str| !name.is_empty() && name != "." && name != ".." && !name.contains(':');
+    let plain = |name: &str| {
+        !name.is_empty()
+            && name.trim_matches(['.', ' ']) == name
+            && !name.contains(['/', '\\', ':', '<', '>', '"', '|', '?', '*'])
+            && !name.chars().any(char::is_control)
+    };
     let in_folder = known.iter().find_map(|rel| {
         let mut parts = rel.split(['/', '\\']);
         (parts.next() == Some(FLIGHTS_DIR)).then(|| parts.next()).flatten().filter(|_| parts.next().is_some()).filter(|f| plain(f)).map(str::to_string)
     });
-    in_folder.unwrap_or_else(|| recording_stem(known.first().map(String::as_str).unwrap_or(new_name)))
+    let stem = |name: &str| Some(recording_stem(name)).filter(|s| plain(s));
+    in_folder.or_else(|| known.first().and_then(|n| stem(n))).or_else(|| stem(new_name)).unwrap_or_else(|| "Video".into())
 }
 
-/// Move a recording into its flight's folder below the folder it lies in. `None` = it stays where it is
-/// (held open by a player, read-only medium); the path it has then is as good as before.
+/// `rel` counts from the file's own folder, which is the video folder for a waiting recording. `None` =
+/// not moved (held open on Windows, read-only medium); its old path stays valid.
 fn move_to_flight(file: &Path, folder: &str) -> Option<(PathBuf, String)> {
     let (base, name) = (file.parent()?, file.file_name()?);
     if !file.is_file() {
@@ -132,6 +137,7 @@ fn move_to_flight(file: &Path, folder: &str) -> Option<(PathBuf, String)> {
         }
         Err(e) => {
             log::warn!("[video] recording {} not moved into {}: {e}", file.display(), dir.display());
+            let _ = std::fs::remove_dir(&dir);
             None
         }
     }
@@ -163,7 +169,7 @@ fn attach_waiting_with(
     let now = chrono::Utc::now().timestamp_millis();
     let mut keep = Vec::new();
     let mut folder: Option<String> = None;
-    for mut v in list {
+    for v in list {
         // Still open: being written, or unreadable for now.
         if v.end_unix_ms == 0 {
             if now - v.start_unix_ms < WAITING_MAX_MS {
@@ -180,8 +186,7 @@ fn attach_waiting_with(
         }
         let mut name = Path::new(&v.path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| v.path.clone());
         let folder = folder.get_or_insert_with(|| flight_folder(conn, flight_id, &name));
-        if let Some((path, rel)) = move_to_flight(Path::new(&v.path), folder) {
-            v.path = path.to_string_lossy().to_string();
+        if let Some((_, rel)) = move_to_flight(Path::new(&v.path), folder) {
             name = rel;
         }
         let extra = serde_json::json!({ "source": "rtsp-recording" }).to_string();
@@ -208,6 +213,7 @@ fn attach_waiting_with(
             Ok(_) => log::info!("[video] recording {name} attached to flight {flight_id}"),
             Err(e) => {
                 log::warn!("[video] recording {name} not attached to flight {flight_id}: {e}");
+                // With the path it had: the next try then links the plain name, and the UID finds the file.
                 keep.push(v);
             }
         }
@@ -646,9 +652,20 @@ mod tests {
         let rel: String = conn.query_row("SELECT rel_path FROM flight_videos ORDER BY id LIMIT 1", [], |r| r.get(0)).unwrap();
         assert_eq!(rel, "Flights/Wing_2026-11-20_10-00-00/Wing_2026-11-20_10-00-00_part2.mkv");
 
-        // A folder name out of an imported row is never a way out of `Flights/`.
-        conn.execute("UPDATE flight_videos SET rel_path = 'Flights/../x.mkv'", []).unwrap();
-        assert_eq!(flight_folder(&conn, flight_id, "new.mkv"), "x");
+        // No row of an imported file leads out of `Flights/`, whichever way the name is found.
+        for (rel, folder) in [
+            ("Flights/../x.mkv", "x"),
+            ("../../..", "new"),
+            ("C:\\Users\\Public\\..", "new"),
+            ("/", "new"),
+            ("Flights/a:b/x.mkv", "x"),
+            ("Flights/con. /x.mkv", "x"),
+        ] {
+            conn.execute("UPDATE flight_videos SET rel_path = ?1", params![rel]).unwrap();
+            assert_eq!(flight_folder(&conn, flight_id, "new.mkv"), folder, "{rel}");
+        }
+        conn.execute("UPDATE flight_videos SET rel_path = '..'", []).unwrap();
+        assert_eq!(flight_folder(&conn, flight_id, ".."), "Video");
         let _ = std::fs::remove_dir_all(dir);
     }
 }
