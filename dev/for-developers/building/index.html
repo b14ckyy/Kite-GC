@@ -2198,15 +2198,10 @@ via their official methods.</p>
 </div>
 <div class="admonition warning">
 <p class="admonition-title">Build on the oldest system you want to support</p>
-<p>Two things follow from the build host, and both reach the user.</p>
-<p><strong>glibc is never bundled</strong> — not even in the AppImage — so the highest <code>GLIBC_*</code> symbol in the
-binary becomes a hard minimum for everyone running it. Building on Debian 13 produces something
-that will not start on Ubuntu 22.04.</p>
-<p><strong>The AppImage bundles the build host's WebKitGTK</strong> (linuxdeploy takes what is installed), so the
-build machine decides the browser engine every AppImage user gets. Avoid the <strong>2.50 series</strong>:
-stopping a video stream can leave it spinning on a full CPU core until the app exits. 2.52 is
-clean. That is why the release workflow builds on Ubuntu 24.04 rather than an older base — the
-<code>.deb</code> and <code>.rpm</code> use the <em>system</em> engine and are unaffected either way, but they share the job.</p>
+<p><strong>glibc is never bundled</strong>, so the highest <code>GLIBC_*</code> symbol in the binary becomes a hard minimum
+for everyone running it. Building on Debian 13 produces something that will not start on Ubuntu
+22.04. The release workflow builds on Ubuntu 24.04 (glibc 2.39). WebKitGTK and GStreamer are
+not bundled either: every package uses the ones of the system it runs on.</p>
 </div>
 <h3 id="macos">macOS<a class="headerlink" href="#macos" title="Permanent link">&para;</a></h3>
 <ol>
@@ -2269,9 +2264,11 @@ Nordic UART, SpeedyBee) live in <code>src-tauri/src/transport/ble_profiles.rs</c
 backend, so a new adapter family is a one-line Rust change. The first scan raises the system's
 "nearby devices" permission prompt (Android 12+; location before that).</p>
 <h4 id="getting-an-apk-without-building-one">Getting an APK without building one<a class="headerlink" href="#getting-an-apk-without-building-one" title="Permanent link">&para;</a></h4>
-<p>The <strong>Android</strong> workflow in GitHub Actions builds the APK and uploads it as a run artifact — Actions →
-Android → <em>Run workflow</em>. That is the recommended route: the runner already has the SDK, the JDK and
-<code>sdkmanager</code>, so nothing has to be installed locally.</p>
+<p>The <strong>Release build</strong> workflow in GitHub Actions builds the APK beside the desktop packages and uploads
+it as a run artifact — Actions → Release build → <em>Run workflow</em>. The runner already has the SDK, the
+JDK and <code>sdkmanager</code>, so nothing has to be installed locally. It builds one APK per ABI: <code>arm64</code> and
+<code>armv7</code> (32-bit ARM, <code>armeabi-v7a</code>). Without the signing secrets described below they are debug-signed
+and named <code>..._debug.apk</code>.</p>
 <h4 id="signing">Signing<a class="headerlink" href="#signing" title="Permanent link">&para;</a></h4>
 <p>Release builds are signed with the <strong>debug</strong> keystore unless you supply a real one, because an APK
 with no signature at all cannot be installed — Android rejects it as an invalid package. That is
@@ -2337,9 +2334,9 @@ digit is for that case: set <code>KITE_ANDROID_BUILD=1</code> (then 2, …; in P
 to upload the same version again. Build the APK of that release <strong>locally with the same value</strong>
 (<code>just build-android</code>) — Android refuses to install a lower code over a higher one, and the GitHub
 workflow always builds with 0. The file names in <code>release/</code> do not carry the digit.</p>
-<p>The <strong>App Bundle</strong> that Google Play takes is built locally only — the GitHub workflow keeps building the
-APK:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>just<span class="w"> </span>build-android-aab<span class="w">    </span><span class="c1"># release/KiteGC_Android_&lt;abi&gt;_&lt;version&gt;_playstore.aab</span>
+<p>The <strong>App Bundle</strong> that Google Play takes is built locally only, one bundle with both ABIs — the GitHub
+workflow builds APKs:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>just<span class="w"> </span>build-android-aab<span class="w">    </span><span class="c1"># release/KiteGC_Android_universal_&lt;version&gt;_playstore.aab</span>
 </code></pre></div>
 <p>Without <code>key.properties</code> the bundle is debug-signed, and Play refuses it. The bundle is for the Play
 Console only; it does not belong on the GitHub release.</p>
@@ -2348,13 +2345,14 @@ Console only; it does not belong on the GitHub release.</p>
 <li><strong>JDK 17</strong> — <code>sudo apt install openjdk-17-jdk</code> (or Temurin on Windows/macOS).</li>
 <li><strong>Android SDK</strong> — Android Studio, or just the command-line tools. Set <code>ANDROID_HOME</code>.</li>
 <li><strong>NDK r27</strong> — <code>sdkmanager --install "ndk;27.2.12479018"</code>, then point <code>NDK_HOME</code> at it.</li>
-<li><strong>Rust targets</strong> — <code>rustup target add aarch64-linux-android</code> (add <code>armv7-linux-androideabi</code>,
-   <code>i686-linux-android</code>, <code>x86_64-linux-android</code> only if you need those ABIs; arm64 covers every
-   Android phone and tablet made in the last decade).</li>
+<li><strong>Rust targets</strong> — <code>rustup target add aarch64-linux-android armv7-linux-androideabi</code>, the two ABIs
+   Kite is built for (<code>i686-linux-android</code> / <code>x86_64-linux-android</code> only for an x86 emulator).</li>
 </ol>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>npm<span class="w"> </span>ci
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>npm<span class="w"> </span>run<span class="w"> </span>tauri<span class="w"> </span>android<span class="w"> </span>build<span class="w"> </span>--<span class="w"> </span>--apk<span class="w"> </span>--target<span class="w"> </span>aarch64<span class="w">   </span><span class="c1"># APK in src-tauri/gen/android/app/build/outputs/apk</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>npm<span class="w"> </span>run<span class="w"> </span>tauri<span class="w"> </span>android<span class="w"> </span>dev<span class="w">                               </span><span class="c1"># on-device dev build with hot reload</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="c1"># APKs in src-tauri/gen/android/app/build/outputs/apk</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>npm<span class="w"> </span>run<span class="w"> </span>tauri<span class="w"> </span>android<span class="w"> </span>build<span class="w"> </span>--<span class="w"> </span>--apk<span class="w"> </span>--split-per-abi<span class="w"> </span>--target<span class="w"> </span>aarch64<span class="w"> </span>armv7
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="c1"># on-device dev build with hot reload</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>npm<span class="w"> </span>run<span class="w"> </span>tauri<span class="w"> </span>android<span class="w"> </span>dev
 </code></pre></div>
 <p>A debug build is signed with your local debug key, so Android refuses to install it over a copy that
 came from Google Play. Set <code>KITE_ANDROID_DEV_ID=1</code> for the build and it gets its own application id
@@ -2489,7 +2487,7 @@ release builds:</p>
 </code></pre></div>
 <ul>
 <li><strong>Type</strong> = <code>installer</code> (<code>.exe</code> / <code>.deb</code> / <code>.rpm</code> / <code>.dmg</code>, and the Android <code>.apk</code>), <code>standalone</code>
-  (<code>.AppImage</code>, or the macOS <code>.app</code> zipped), <code>portable</code> (the bare executable zipped <strong>with an empty
+  (macOS only: the <code>.app</code> zipped), <code>portable</code> (the bare executable zipped <strong>with an empty
   <code>.portable</code> marker</strong>), or <code>update</code> (macOS only: the <code>.app</code> as <code>.tar.gz</code>, what the in-app updater
   downloads).</li>
 <li><strong>In-app updates</strong> (<em>Update and Restart</em> in the update notice) need a <code>.sig</code> beside each installer
@@ -2499,9 +2497,10 @@ release builds:</p>
   offered as an update.</li>
 <li>The naming logic lives in <code>scripts/collect-release.*</code> and is shared by local builds and the GitHub
   release workflow (<code>.github/workflows/release.yml</code>), so filenames match everywhere.</li>
-<li><code>just build-android</code> drops its APK into the same folder as <code>KiteGC_Android_&lt;abi&gt;_&lt;version&gt;_installer.apk</code>
-  (one file per ABI folder Gradle produced, e.g. <code>arm64</code> or <code>universal</code>). It collects <strong>only</strong> the APK and
-  leaves the desktop outputs already in <code>release/</code> alone — an earlier desktop build's binaries still sit in
+<li><code>just build-android</code> drops its APKs into the same folder as <code>KiteGC_Android_&lt;abi&gt;_&lt;version&gt;_installer.apk</code>
+  (one file per ABI: <code>arm64</code> and <code>armv7</code>; the Play bundle holds both and is named <code>universal</code>). It collects
+  <strong>only</strong> the Android files and leaves the desktop outputs already in <code>release/</code> alone — an earlier desktop
+  build's binaries still sit in
   <code>target/release/</code>, and collecting those here would republish a stale one under the current version number.
   A desktop build, in turn, also picks up any Android release APK still lying in the Gradle outputs.</li>
 </ul>
@@ -2547,11 +2546,8 @@ Installer.</p>
   <div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="nv">WEBKIT_DISABLE_DMABUF_RENDERER</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>./kite-gc<span class="w">      </span><span class="c1"># most common fix</span>
 <a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="nv">WEBKIT_DISABLE_COMPOSITING_MODE</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>./kite-gc<span class="w">     </span><span class="c1"># if compositing misbehaves</span>
 </code></pre></div></li>
-<li><strong>Which package to test:</strong> <code>tauri build</code> produces <code>.deb</code>, <code>.AppImage</code> and <code>.rpm</code> in
-  <code>src-tauri/target/release/bundle/</code>. The <code>.deb</code> (or the raw binary in <code>…/release/</code>) is usually the most
-  reliable first smoke test; AppImage adds its own FUSE/sandbox layer — and <strong>video does not work
-  inside the AppImage at all</strong> (its launcher environment hides the system GStreamer plugins; see the
-  user guide's platform notes).</li>
+<li><strong>Which package to test:</strong> <code>tauri build</code> produces <code>.deb</code> and <code>.rpm</code> in
+  <code>src-tauri/target/release/bundle/</code>; the raw binary sits in <code>…/release/</code>.</li>
 <li><strong>Data locations:</strong> installed mode stores the flight DB + terrain cache under <code>~/.local/share/kite-gc/</code>.
   A <strong>portable</strong> build (a <code>.portable</code> marker file next to the binary) keeps everything in a <code>data/</code> folder
   beside the binary.</li>

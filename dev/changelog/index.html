@@ -1880,6 +1880,9 @@ stays <em>Stable releases</em>. <a href="https://github.com/b14ckyy/Kite-GC/pull
   follows later). <a href="https://github.com/b14ckyy/Kite-GC/pull/79">#79</a></li>
 <li><strong>iPhone &amp; iPad support</strong> — native iOS/iPadOS build with phone and tablet layouts, Bluetooth
   LE and Wi-Fi MAVLink (App Store only, follows later). Contributed by Sebastian Kumor. <a href="https://github.com/b14ckyy/Kite-GC/pull/16">#16</a></li>
+<li><strong>Android on 32-bit ARM</strong> — beside the arm64 APK there is one for 32-bit ARM devices
+  (<code>armv7</code>), and the Play Store version carries both. It has not run on such a device yet.
+  [#340]</li>
 <li><strong>RadioMaster AX12</strong> — on this Android transmitter Kite connects through the built-in ELRS
   module: the serial port list offers the internal UART and presets its baud rate, and the
   phone layout is used whatever the display density is set to. [#317]</li>
@@ -2319,6 +2322,8 @@ stays <em>Stable releases</em>. <a href="https://github.com/b14ckyy/Kite-GC/pull
   only existed on Windows. The detached video window replaces it. <a href="https://github.com/b14ckyy/Kite-GC/pull/129">#129</a></li>
 <li><strong>Raw Telemetry widget</strong> — replaced by the <strong>≡ Raw</strong> view. <a href="https://github.com/b14ckyy/Kite-GC/pull/101">#101</a></li>
 <li><strong><code>blackbox_decode</code> download</strong> — no longer needed for INAV Blackbox imports. <a href="https://github.com/b14ckyy/Kite-GC/pull/234">#234</a></li>
+<li><strong>Linux AppImage</strong> — Linux comes as <code>.deb</code>, <code>.rpm</code> and the portable ZIP, each for x64 and
+  arm64. The AppImage could not play video and showed an empty window on Ubuntu 26.04. [#340]</li>
 </ul>
 </details>
 <details class="note">

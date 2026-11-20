@@ -2237,11 +2237,7 @@ the ones that actually help. <strong>1 or more</strong> — the engine can do it
 if any of <code>webrtcbin</code>, <code>ice(nice)</code>, <code>dtls</code>, <code>srtp</code> or <code>rtpbin</code> reads <code>false</code> in your log, install
 <code>gstreamer1.0-plugins-bad</code>, <code>gstreamer1.0-nice</code>, <code>gstreamer1.0-plugins-good</code>, plus
 <code>gstreamer1.0-libav</code> if the decoder list is empty (recent Kite <strong>.deb</strong> packages request these
-automatically on install).</p>
-<p>Either way, package installs only affect the <strong>system installation (.deb)</strong>: the <strong>AppImage</strong> brings
-its own browser engine and does not use the system's media packages at all. If video matters to you
-on Linux, prefer the <strong>.deb / system installation</strong> — it uses your distribution's engine and plugins,
-which you can at least influence.
+automatically on install).
 - <strong>Hardware conversion is used automatically where it exists.</strong> Kite tests the machine once, the first time it is needed, and writes the verdict to the log:
 - Desktop graphics (Intel and AMD, via VAAPI) can do <strong>both halves</strong> — decoding and re-encoding —
   with the frames never leaving the GPU. Look for <code>[ffmpeg] VAAPI hardware H.264-decode +
