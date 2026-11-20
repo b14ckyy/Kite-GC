@@ -2004,10 +2004,10 @@ map-display controls. A <strong>Compact</strong> button collapses it to just the
 kinds of feed at once and merges them into <strong>one ADS-B list</strong> (de-duplicated by the aircraft's ICAO
 address, so the same plane seen by two feeds appears once):</p>
 <ul>
-<li><strong>Online services</strong> — public ADS-B aggregators over the internet. Two are <strong>built-in</strong> (adsb.lol and
-  adsb.fi — just toggle them on). You can <strong>add more</strong> as custom rows (name + URL template + optional API
-  key); <strong>adsb.one</strong> comes <strong>pre-filled as an example</strong> custom row (it's there for convenience but left
-  off by default, as that service has had server-side reliability issues). Set the <strong>download radius</strong>
+<li><strong>Online services</strong> — public ADS-B aggregators over the internet. <strong>adsb.fi</strong> is <strong>built-in</strong> — just
+  toggle it on. You can <strong>add more</strong> as custom rows (name + URL template + optional API key) for any
+  service that answers in the same format, with the placeholders <code>{lat}</code>, <code>{lon}</code> and <code>{dist}</code> (nautical
+  miles) in the URL. Set the <strong>download radius</strong>
   (10–100 km) and the <strong>poll interval</strong> (2–30 s) under <strong>Online service</strong>. Online feeds are fetched
   <strong>around the area you're looking at</strong> — the 2D map centre or the 3D camera focus — so panning the map
   moves the query. No hardware needed.</li>
@@ -2030,9 +2030,11 @@ address, so the same plane seen by two feeds appears once):</p>
 </ul>
 <p>Every source row has its own <strong>on/off toggle</strong> and a <strong>status badge</strong> — a green number is the live
 contact count from that feed, a red ✕ means it errored — so you can mute a feed without deleting it. A
-feed that fails (typically a provider's rate limit, HTTP 429) is <strong>backed off automatically</strong>: Kite doubles
-the spacing of that feed's requests after every failed attempt, up to one minute, and returns to your
-poll interval as soon as a request succeeds again. The other feeds keep their normal rate. An
+feed that fails is <strong>backed off automatically</strong>: Kite doubles the spacing of that feed's requests after
+every failed attempt, up to one minute, and returns to your poll interval as soon as a request succeeds
+again. When a provider answers that its <strong>rate limit</strong> is reached (HTTP 429) and says how long to wait,
+Kite sends that feed nothing until then — a daily quota can mean hours — and the ✕ reads <em>Rate limit
+reached</em> when you point at it. The other feeds keep their normal rate. An
 <strong>enabled</strong> row collapses to a single line (name · count · toggle); a <strong>disabled</strong> row expands to show
 its fields (URL / API key for online, the connection for a receiver) and a <strong>delete</strong> button. New rows
 start disabled so you can fill them in first.</p>
