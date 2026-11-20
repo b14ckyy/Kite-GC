@@ -55,6 +55,15 @@ fun playVersionCode(name: String, build: Int): Int {
 
 android {
     compileSdk = 36
+    // AGP strips the Rust library and extracts its symbols only with an NDK of exactly `ndkVersion`; its
+    // default is rarely the installed one, and then the library ships unstripped, with no symbols file.
+    System.getenv("NDK_HOME")?.takeIf { it.isNotBlank() }?.let { home ->
+        val props = file("$home/source.properties")
+        if (props.exists()) {
+            ndkPath = home
+            ndkVersion = Properties().apply { props.inputStream().use { load(it) } }.getProperty("Pkg.Revision")
+        }
+    }
     namespace = "com.kitegc.app"
     defaultConfig {
         manifestPlaceholders["usesCleartextTraffic"] = "false"
@@ -92,17 +101,14 @@ android {
             isDebuggable = true
             isJniDebuggable = true
             isMinifyEnabled = false
-            packaging {                jniLibs.keepDebugSymbols.add("*/arm64-v8a/*.so")
-                jniLibs.keepDebugSymbols.add("*/armeabi-v7a/*.so")
-                jniLibs.keepDebugSymbols.add("*/x86/*.so")
-                jniLibs.keepDebugSymbols.add("*/x86_64/*.so")
-            }
         }
         getByName("release") {
             // An unsigned APK cannot be installed at all, so without `key.properties` fall back to the debug
             // config. Debug-signed builds are for testing only: not for Play, and the keystore differs per
             // machine, so a CI build and a local one cannot be installed over each other.
             signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
+            // Function names for Play's crash and ANR reports; the cargo release profile has no line tables.
+            ndk { debugSymbolLevel = "SYMBOL_TABLE" }
             isMinifyEnabled = true
             proguardFiles(
                 *fileTree(".") { include("**/*.pro") }
@@ -116,6 +122,14 @@ android {
     }
     buildFeatures {
         buildConfig = true
+    }
+}
+
+// Per variant on purpose: a `packaging {}` inside a build type is the module-wide one, and release then
+// ships the library unstripped too.
+androidComponents {
+    onVariants(selector().withBuildType("debug")) { variant ->
+        variant.packaging.jniLibs.keepDebugSymbols.add("**/*.so")
     }
 }
 
