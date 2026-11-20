@@ -1469,6 +1469,7 @@
       "cleanupMore": "… 还有 {count} 个",
       "cleanupYes": "删除录像",
       "cleanupDone": "已移除 {count} 个录像（{size}）。",
+      "removeLeft": "{count} 个录像无法移除，仍在录像文件夹中。",
       "busyTitle": "正在复制录像",
       "busyMsg": "{done} / {total}\n\n请不要关闭 Kite。",
       "noSpace": "可用空间不足：录像需要 {need}，可用 {free}。",

@@ -1469,6 +1469,7 @@
       "cleanupMore": "… y {count} más",
       "cleanupYes": "Eliminar grabaciones",
       "cleanupDone": "{count} grabación(es) eliminadas ({size}).",
+      "removeLeft": "{count} grabación(es) no se pudieron eliminar y siguen en la carpeta de grabaciones.",
       "busyTitle": "Copiando grabaciones",
       "busyMsg": "{done} de {total}\n\nNo cierres Kite.",
       "noSpace": "No hay espacio libre suficiente: las grabaciones necesitan {need}, hay {free} libres.",

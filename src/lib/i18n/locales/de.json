@@ -1473,6 +1473,7 @@
       "cleanupMore": "… und {count} weitere",
       "cleanupYes": "Aufnahmen löschen",
       "cleanupDone": "{count} Aufnahme(n) entfernt ({size}).",
+      "removeLeft": "{count} Aufnahme(n) konnten nicht entfernt werden und liegen noch im Aufnahmeordner.",
       "busyTitle": "Aufnahmen werden kopiert",
       "busyMsg": "{done} von {total}\n\nBitte Kite nicht schließen.",
       "noSpace": "Nicht genug freier Speicher: Die Aufnahmen brauchen {need}, frei sind {free}.",

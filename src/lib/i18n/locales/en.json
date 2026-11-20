@@ -1473,6 +1473,7 @@
       "cleanupMore": "… and {count} more",
       "cleanupYes": "Delete recordings",
       "cleanupDone": "{count} recording(s) removed ({size}).",
+      "removeLeft": "{count} recording(s) could not be removed and are still in the recording folder.",
       "busyTitle": "Copying recordings",
       "busyMsg": "{done} of {total}\n\nPlease do not close Kite.",
       "noSpace": "Not enough free space: the recordings need {need}, {free} are free.",

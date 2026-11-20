@@ -1469,6 +1469,7 @@
       "cleanupMore": "… et {count} de plus",
       "cleanupYes": "Supprimer les enregistrements",
       "cleanupDone": "{count} enregistrement(s) supprimé(s) ({size}).",
+      "removeLeft": "{count} enregistrement(s) n'ont pas pu être supprimés et se trouvent toujours dans le dossier d'enregistrement.",
       "busyTitle": "Copie des enregistrements",
       "busyMsg": "{done} sur {total}\n\nNe fermez pas Kite.",
       "noSpace": "Espace libre insuffisant : les enregistrements nécessitent {need}, {free} sont libres.",

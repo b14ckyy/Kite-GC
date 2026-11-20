@@ -1469,6 +1469,7 @@
       "cleanupMore": "… a {count} ďalších",
       "cleanupYes": "Odstrániť záznamy",
       "cleanupDone": "{count} záznam(ov) odstránených ({size}).",
+      "removeLeft": "{count} záznam(ov) sa nepodarilo odstrániť a stále sú v priečinku záznamov.",
       "busyTitle": "Kopírujú sa záznamy",
       "busyMsg": "{done} z {total}\n\nNezatvárajte Kite.",
       "noSpace": "Nedostatok voľného miesta: záznamy potrebujú {need}, voľných je {free}.",

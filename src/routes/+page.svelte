@@ -2137,7 +2137,7 @@
     });
     if (result.newer_format) msg += '\n\n' + $t('logbook.importKflightNewer');
     if (result.errors.length > 0) msg += '\n' + result.errors.join('\n');
-    const videos = await offerVideoImport(dbTransferUi, filePath, result.imported_ids ?? [], flightLogDbPath);
+    const videos = await offerVideoImport(dbTransferUi, filePath, result.imported_ids, flightLogDbPath);
     if (videos) msg += '\n' + videos;
     await showInfo($t('logbook.importKflightTitle'), msg);
   }
@@ -2914,11 +2914,13 @@
       idsToDelete.push(bbxId);
     }
 
-    await offerVideoDelete(dbTransferUi, idsToDelete, flightLogDbPath);
+    // Not when only the live half of a pair goes: the flight stays, as its blackbox half.
+    const removeVideos = value === 'live' ? null : await offerVideoDelete(dbTransferUi, idsToDelete, flightLogDbPath);
     for (const id of idsToDelete) {
       if (consolidateBattery) await consolidateBatteryUsage(id);
       await logbookCtrl.removeFlight(id, flightLogDbPath);
     }
+    await removeVideos?.();
 
     forgetSelectedFlight();
     await loadLogbook();
@@ -2951,7 +2953,7 @@
     });
     if (value !== 'delete') return;
     const consolidateBattery = confirmDialog.checkboxResult();
-    await offerVideoDelete(dbTransferUi, ids, flightLogDbPath);
+    const removeVideos = await offerVideoDelete(dbTransferUi, ids, flightLogDbPath);
     const progress = (done: number) => {
       dbTransferNotice = {
         title: $t('logbook.deleteManyBusyTitle'),
@@ -2973,6 +2975,7 @@
       dbTransferNotice = null;
       await loadLogbook();
     }
+    await removeVideos();
   }
 
   function forgetSelectedFlight() {

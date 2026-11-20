@@ -130,13 +130,15 @@ const SEARCH_DEPTH: usize = 6;
 const MISSING_TTL: std::time::Duration = std::time::Duration::from_secs(20);
 static MISSING: std::sync::Mutex<Vec<(PathBuf, String, std::time::Instant)>> = std::sync::Mutex::new(Vec::new());
 
-/// The segment UIDs of the recordings that wait for their flight.
-pub fn waiting_uids(db_file: &Path) -> HashSet<String> {
+/// `None` when the list is there but unreadable: then nothing tells which recordings wait for a flight.
+pub fn waiting_uids(db_file: &Path) -> Option<HashSet<String>> {
     let _guard = WAITING_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    read_waiting(db_file).into_iter().map(|v| v.uid).collect()
+    let Ok(bytes) = std::fs::read(waiting_path(db_file)) else { return Some(HashSet::new()) };
+    let list: Vec<RecordedVideo> = serde_json::from_slice(&bytes).ok()?;
+    Some(list.into_iter().map(|v| v.uid).collect())
 }
 
-/// Every `.mkv` with a segment UID below `root`, as deep as a linked recording is searched.
+/// Every recording Kite wrote below `root`, as deep as a linked recording is searched.
 pub(super) fn recordings_below(root: &Path, each: &mut dyn FnMut(&str, &Path)) {
     fn walk(dir: &Path, depth: usize, each: &mut dyn FnMut(&str, &Path)) {
         let Ok(entries) = std::fs::read_dir(dir) else { return };
@@ -146,7 +148,7 @@ pub(super) fn recordings_below(root: &Path, each: &mut dyn FnMut(&str, &Path)) {
                     walk(&path, depth - 1, each);
                 }
             } else if path.extension().is_some_and(|x| x.eq_ignore_ascii_case("mkv")) {
-                if let Some(uid) = crate::video::record::segment_uid(&path) {
+                if let Some(uid) = crate::video::record::kite_segment_uid(&path) {
                     each(&uid, &path);
                 }
             }

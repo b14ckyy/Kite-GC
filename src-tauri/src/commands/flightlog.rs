@@ -1570,6 +1570,7 @@ fn remove_recordings(files: &[std::path::PathBuf]) -> video_files::VideoSet {
 }
 
 /// The recordings that only these flights are linked to — what deleting the flights would leave behind.
+/// Once the flights are gone, `flightlog_orphan_videos_delete` removes them by the names given here.
 #[tauri::command(async)]
 pub fn flightlog_delete_videos_info(
     flight_ids: Vec<i64>,
@@ -1579,33 +1580,25 @@ pub fn flightlog_delete_videos_info(
     let conn = open_db(&db_path.unwrap_or_default())?;
     let root = crate::commands::video::record_dir(video_dir.as_deref());
     let files = video_files::files_of_only(&conn, &flight_ids, &root).map_err(|e| format!("Database error: {e}"))?;
-    Ok(video_files::set_of(&files))
-}
-
-/// Remove those recordings. Called BEFORE the flights are deleted: afterwards nothing names the files.
-#[tauri::command(async)]
-pub fn flightlog_delete_videos(
-    flight_ids: Vec<i64>,
-    db_path: Option<String>,
-    video_dir: Option<String>,
-) -> Result<video_files::VideoSet, String> {
-    let conn = open_db(&db_path.unwrap_or_default())?;
-    let root = crate::commands::video::record_dir(video_dir.as_deref());
-    let files = video_files::files_of_only(&conn, &flight_ids, &root).map_err(|e| format!("Database error: {e}"))?;
-    Ok(remove_recordings(&files))
+    Ok(video_files::set_of(&root, &files))
 }
 
 fn orphan_recordings(
     db_path: Option<String>,
     video_dir: Option<String>,
+    only: Option<&[String]>,
     native_rtsp: &crate::video::rtsp_native::NativeRtsp,
-) -> Result<Vec<std::path::PathBuf>, String> {
+) -> Result<(std::path::PathBuf, Vec<std::path::PathBuf>), String> {
     let custom = db_path.unwrap_or_default();
     let conn = open_db(&custom)?;
     let root = crate::commands::video::record_dir(video_dir.as_deref());
-    let keep = crate::flightlog::video_link::waiting_uids(&db::resolve_db_path(&custom, portable_mode()));
-    let busy = native_rtsp.recorder().status().file.map(std::path::PathBuf::from);
-    video_files::orphans(&conn, &root, &keep, busy.as_deref()).map_err(|e| format!("Database error: {e}"))
+    let mut keep = crate::flightlog::video_link::waiting_uids(&db::resolve_db_path(&custom, portable_mode()))
+        .ok_or("The list of recordings that wait for their flight cannot be read — nothing is removed")?;
+    let recorder = native_rtsp.recorder();
+    keep.extend(recorder.pending_uids());
+    let busy = recorder.status().file.map(std::path::PathBuf::from);
+    let files = video_files::orphans(&conn, &root, &keep, busy.as_deref(), only).map_err(|e| format!("Database error: {e}"))?;
+    Ok((root, files))
 }
 
 /// Kite's recordings in the video folder that no flight of this database is linked to.
@@ -1615,20 +1608,21 @@ pub fn flightlog_orphan_videos_info(
     video_dir: Option<String>,
     native_rtsp: tauri::State<'_, crate::video::rtsp_native::NativeRtsp>,
 ) -> Result<video_files::VideoSet, String> {
-    let files = orphan_recordings(db_path, video_dir, &native_rtsp)?;
-    let mut set = video_files::set_of(&files);
-    set.names = files.iter().filter_map(|p| p.file_name()).map(|n| n.to_string_lossy().to_string()).collect();
-    Ok(set)
+    let (root, files) = orphan_recordings(db_path, video_dir, None, &native_rtsp)?;
+    Ok(video_files::set_of(&root, &files))
 }
 
-/// Remove them. The list is taken again: a recording may have found its flight since the question.
+/// Remove the recordings in `names` (as an info call listed them) that are unlinked NOW: one that found
+/// its flight since stays, and nothing the user was not shown goes.
 #[tauri::command(async)]
 pub fn flightlog_orphan_videos_delete(
+    names: Vec<String>,
     db_path: Option<String>,
     video_dir: Option<String>,
     native_rtsp: tauri::State<'_, crate::video::rtsp_native::NativeRtsp>,
 ) -> Result<video_files::VideoSet, String> {
-    Ok(remove_recordings(&orphan_recordings(db_path, video_dir, &native_rtsp)?))
+    let (_, files) = orphan_recordings(db_path, video_dir, Some(&names), &native_rtsp)?;
+    Ok(remove_recordings(&files))
 }
 
 #[tauri::command]

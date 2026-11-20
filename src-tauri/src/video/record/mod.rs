@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::video::rtsp::VideoCodec;
 use mkv::MkvWriter;
-pub use mkv_read::segment_uid;
+pub use mkv_read::{kite_segment_uid, segment_uid};
 use nal::{is_keyframe, split_nals, stream_config, StreamConfig};
 
 /// The pre-roll is the running group of pictures, so a recording starts at the keyframe before the
@@ -235,6 +235,12 @@ impl VideoRecorder {
             let _ = a.thread.join();
         }
         std::mem::take(&mut self.shared.lock().unwrap().finished)
+    }
+
+    /// Segment UIDs of the parts a running recording has closed already: they are in no list on disk
+    /// until `stop` hands them out.
+    pub fn pending_uids(&self) -> Vec<String> {
+        self.shared.lock().unwrap().finished.iter().map(|v| v.uid.clone()).collect()
     }
 
     pub fn status(&self) -> RecordingStatus {

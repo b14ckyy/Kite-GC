@@ -24,7 +24,7 @@ interface VideoSet {
   missing: number;
   /** Import only: recordings of the imported flights that were below the recording folder already. */
   present: number;
-  /** Clean-up only: the file names. */
+  /** Delete and clean-up only: the files relative to the recording folder — what may go. */
   names: string[];
 }
 
@@ -128,27 +128,48 @@ export async function offerVideoImport(
   return lines.join('\n');
 }
 
-/** Before flights are deleted (afterwards nothing names the files): offer to remove the recordings only
- *  they are linked to. The flights are deleted either way. */
-export async function offerVideoDelete(ui: DbTransferUi, flightIds: number[], dbPath: string): Promise<void> {
-  if (isMobile || flightIds.length === 0) return;
+/** Remove `names` as far as they are unlinked now, and say so when some stayed. */
+async function removeUnlinked(ui: DbTransferUi, title: string, names: string[], dbPath: string): Promise<VideoSet> {
+  const gone = await invoke<VideoSet>('flightlog_orphan_videos_delete', { names, ...where(dbPath) });
+  const left = names.length - gone.count;
+  if (left > 0) await ui.show({ title, message: ui.tr(`${K}.removeLeft`, { count: String(left) }) });
+  return gone;
+}
+
+/** Before flights are deleted (afterwards nothing names the files): ask whether the recordings only they
+ *  are linked to go as well. Returns what to run AFTER the flights are gone — the files are removed only
+ *  then, so a failed delete leaves a flight with its recording. */
+export async function offerVideoDelete(
+  ui: DbTransferUi,
+  flightIds: number[],
+  dbPath: string,
+): Promise<() => Promise<void>> {
+  const nothing = async () => {};
+  if (isMobile || flightIds.length === 0) return nothing;
   try {
-    const args = { flightIds, ...where(dbPath) };
-    const found = await invoke<VideoSet>('flightlog_delete_videos_info', args);
-    if (found.count === 0) return;
+    const found = await invoke<VideoSet>('flightlog_delete_videos_info', { flightIds, ...where(dbPath) });
+    if (found.count === 0) return nothing;
     const answer = await ui.show({
       title: ui.tr(`${K}.deleteTitle`),
       message: ui.tr(`${K}.deleteMsg`, { count: String(found.count), size: formatBackupSize(found.bytes) }),
       buttons: [{ label: ui.tr(`${K}.deleteYes`), value: 'delete', danger: true }],
       cancelLabel: ui.tr(`${K}.deleteKeep`),
     });
-    if (answer === 'delete') await invoke<VideoSet>('flightlog_delete_videos', args);
+    if (answer !== 'delete') return nothing;
+    const title = ui.tr(`${K}.deleteTitle`);
+    return async () => {
+      try {
+        await removeUnlinked(ui, title, found.names, dbPath);
+      } catch (e) {
+        await ui.show({ title, message: String(e) });
+      }
+    };
   } catch (e) {
-    console.warn('[video] recordings of the deleted flights not removed:', e);
+    console.warn('[video] recordings of the flights to delete not looked up:', e);
+    return nothing;
   }
 }
 
-/** Video panel → clean up: list Kite's recordings no flight is linked to and remove them on a yes. */
 export async function cleanupOrphanVideos(ui: DbTransferUi, dbPath: string): Promise<void> {
   const title = ui.tr(`${K}.cleanupTitle`);
   try {
@@ -170,7 +191,7 @@ export async function cleanupOrphanVideos(ui: DbTransferUi, dbPath: string): Pro
       buttons: [{ label: ui.tr(`${K}.cleanupYes`), value: 'delete', danger: true }],
     });
     if (answer !== 'delete') return;
-    const gone = await invoke<VideoSet>('flightlog_orphan_videos_delete', where(dbPath));
+    const gone = await removeUnlinked(ui, title, found.names, dbPath);
     await ui.show({ title, message: ui.tr(`${K}.cleanupDone`, { count: String(gone.count), size: formatBackupSize(gone.bytes) }) });
   } catch (e) {
     await ui.show({ title, message: String(e) });

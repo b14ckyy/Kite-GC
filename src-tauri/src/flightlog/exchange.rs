@@ -681,7 +681,6 @@ pub struct ImportResult {
     /// The file was written by a newer Kite: what this version knows was imported, the rest was left out.
     pub newer_format: bool,
     /// The new flights' ids in this database.
-    #[serde(default)]
     pub imported_ids: Vec<i64>,
 }
 

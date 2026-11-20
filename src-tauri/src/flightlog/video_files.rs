@@ -14,7 +14,7 @@ use serde::Serialize;
 
 use super::video_link::{self, Row};
 
-/// What a copy would take or took: the recordings and their size.
+/// Recording files and their total size; each further field belongs to one use.
 #[derive(Debug, Default, Clone, Serialize, PartialEq)]
 pub struct VideoSet {
     pub count: usize,
@@ -23,7 +23,8 @@ pub struct VideoSet {
     pub missing: usize,
     /// Import only: recordings of the imported flights that were below the video folder already.
     pub present: usize,
-    /// Orphans only: the file names, for the question before they go.
+    /// Delete and clean-up only: the files, relative to the video folder — shown in the question and
+    /// handed back as what may go.
     pub names: Vec<String>,
 }
 
@@ -78,11 +79,15 @@ fn free_name(dir: &Path, name: &std::ffi::OsStr) -> PathBuf {
     (2..).map(|n| dir.join(format!("{stem}_{n}{ext}"))).find(|p| !p.exists()).unwrap_or(first)
 }
 
-/// Copy with `progress(bytes written so far by this call)`; a failed copy leaves no partial file.
+/// Written as `<name>.part` and renamed when complete: an interrupted copy never carries a `.mkv` name,
+/// which would pass for the whole recording by its UID.
 fn copy_file(from: &Path, to: &Path, progress: &mut dyn FnMut(u64)) -> Result<u64, String> {
+    let mut part = to.as_os_str().to_owned();
+    part.push(".part");
+    let part = PathBuf::from(part);
     let mut run = || -> std::io::Result<u64> {
         let mut src = std::fs::File::open(from)?;
-        let mut dst = std::fs::File::create(to)?;
+        let mut dst = std::fs::File::create(&part)?;
         let mut buf = vec![0u8; 1 << 20];
         let mut done = 0u64;
         loop {
@@ -94,11 +99,13 @@ fn copy_file(from: &Path, to: &Path, progress: &mut dyn FnMut(u64)) -> Result<u6
             done += n as u64;
             progress(done);
         }
-        dst.flush()?;
+        dst.sync_all()?;
+        drop(dst);
+        std::fs::rename(&part, to)?;
         Ok(done)
     };
     run().map_err(|e| {
-        let _ = std::fs::remove_file(to);
+        let _ = std::fs::remove_file(&part);
         format!("Copying {} failed: {e}", from.display())
     })
 }
@@ -187,17 +194,34 @@ pub fn files_of_only(conn: &Connection, flight_ids: &[i64], root: &Path) -> rusq
     Ok(files)
 }
 
-pub fn set_of(files: &[PathBuf]) -> VideoSet {
-    VideoSet { count: files.len(), bytes: files.iter().map(|p| size_of(p)).sum(), ..Default::default() }
+fn relative(root: &Path, file: &Path) -> String {
+    file.strip_prefix(root).unwrap_or(file).to_string_lossy().replace('\\', "/")
+}
+
+pub fn set_of(root: &Path, files: &[PathBuf]) -> VideoSet {
+    VideoSet {
+        count: files.len(),
+        bytes: files.iter().map(|p| size_of(p)).sum(),
+        names: files.iter().map(|p| relative(root, p)).collect(),
+        ..Default::default()
+    }
 }
 
 /// Kite's recordings below `root` that no flight of this database is linked to. `keep` = segment UIDs
-/// that are spoken for (waiting for their flight), `busy` = the file being written right now.
-pub fn orphans(conn: &Connection, root: &Path, keep: &HashSet<String>, busy: Option<&Path>) -> rusqlite::Result<Vec<PathBuf>> {
+/// that are spoken for (waiting for their flight), `busy` = the file being written right now. With
+/// `only`, just those of them (as `relative` names): what the user was shown, nothing found since.
+pub fn orphans(
+    conn: &Connection,
+    root: &Path,
+    keep: &HashSet<String>,
+    busy: Option<&Path>,
+    only: Option<&[String]>,
+) -> rusqlite::Result<Vec<PathBuf>> {
     let linked: HashSet<String> = rows(conn, None)?.into_iter().filter_map(|r| r.uid).collect();
     let mut files = Vec::new();
     video_link::recordings_below(root, &mut |uid, path| {
-        if !linked.contains(uid) && !keep.contains(uid) && busy != Some(path) {
+        let wanted = only.is_none_or(|names| names.contains(&relative(root, path)));
+        if wanted && !linked.contains(uid) && !keep.contains(uid) && busy != Some(path) {
             files.push(path.to_path_buf());
         }
     });
@@ -241,9 +265,16 @@ mod tests {
     use super::*;
     use crate::flightlog::db;
 
-    /// A minimal Matroska head: EBML header, then a Segment whose Info carries `uid`.
+    /// A minimal Matroska head as Kite writes it: EBML header, then a Segment whose Info carries the
+    /// writing app and `uid`.
     fn mkv(path: &Path, uid: [u8; 16], filler: usize) {
-        let mut info = vec![0x73, 0xA4, 0x90];
+        mkv_by(path, b"Kite GC", uid, filler)
+    }
+
+    fn mkv_by(path: &Path, app: &[u8], uid: [u8; 16], filler: usize) {
+        let mut info = vec![0x57, 0x41, 0x80 | app.len() as u8];
+        info.extend_from_slice(app);
+        info.extend_from_slice(&[0x73, 0xA4, 0x90]);
         info.extend_from_slice(&uid);
         let mut segment = vec![0x15, 0x49, 0xA9, 0x66, 0x80 | info.len() as u8];
         segment.extend_from_slice(&info);
@@ -314,6 +345,7 @@ mod tests {
         let side = dir.join("out/Flights_2_video");
         assert_eq!(std::fs::read(side.join("a.mkv")).unwrap(), std::fs::read(root.join("a.mkv")).unwrap());
         assert!(side.join("b.mkv").is_file());
+        assert!(!side.join("a.mkv.part").exists());
 
         // A second export onto the same file adds nothing.
         export_videos(&conn, None, &root, &kflight, &mut |_, _| {}).unwrap();
@@ -377,7 +409,7 @@ mod tests {
     }
 
     #[test]
-    fn orphans_are_kites_recordings_no_flight_knows() {
+    fn orphans_are_kites_own_recordings_no_flight_knows() {
         let dir = scratch("orph");
         let root = dir.join("videos");
         let conn = db::open_database(&dir.join("flights.db")).unwrap();
@@ -387,10 +419,18 @@ mod tests {
         mkv(&root.join("waiting.mkv"), [3; 16], 100);
         mkv(&root.join("running.mkv"), [4; 16], 100);
         std::fs::write(root.join("holiday.mkv"), b"not a matroska file").unwrap();
+        mkv_by(&root.join("obs_capture.mkv"), b"Lavf62.13.102", [6; 16], 100);
+        mkv(&root.join("later.mkv"), [7; 16], 100);
         std::fs::write(root.join("notes.txt"), b"x").unwrap();
         link(&conn, a, "elsewhere.mkv", [1; 16]);
         let keep: HashSet<String> = [hex([3; 16])].into();
-        let found = orphans(&conn, &root, &keep, Some(&root.join("running.mkv"))).unwrap();
+        let busy = root.join("running.mkv");
+        let found = orphans(&conn, &root, &keep, Some(&busy), None).unwrap();
+        assert_eq!(found, vec![root.join("later.mkv"), root.join("sub").join("orphan.mkv")]);
+        assert_eq!(set_of(&root, &found).names, vec!["later.mkv", "sub/orphan.mkv"]);
+        // Only what was confirmed goes.
+        let confirmed = vec!["sub/orphan.mkv".to_string(), "linked.mkv".to_string()];
+        let found = orphans(&conn, &root, &keep, Some(&busy), Some(&confirmed)).unwrap();
         assert_eq!(found, vec![root.join("sub").join("orphan.mkv")]);
         drop(conn);
         let _ = std::fs::remove_dir_all(dir);
