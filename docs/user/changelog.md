@@ -80,7 +80,11 @@ inside the box of the feature release they belong to, so the notes for one relea
         the seconds since the last keyframe before you armed. The file is named after the vehicle and
         the time, lands in a `KiteGC` folder in your videos folder (or one you choose), and the saved
         flight shows it in its details. Needs the native RTSP client and an H.264 or HEVC source;
-        Windows, Linux and macOS. Details:
+        Windows, Linux and macOS.
+
+        **Replay with video.** Open such a flight in the logbook and the recording plays in the
+        video window in step with the replay — play, pause, speed and the timeline move both. Where
+        nothing was recorded, the window says so. Details:
         [Video → Recording the RTSP stream](guides/video.md#recording-the-rtsp-stream-desktop). [#333]
 
     ??? info "INAV over ELRS, mLRS, SiK or Wi-Fi — the full planner on a MAVLink-only link"

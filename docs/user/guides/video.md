@@ -137,6 +137,25 @@ for every flight: the recording starts when the connected vehicle is armed and e
 
 Recording runs only while armed and connected; without a link nothing is recorded.
 
+#### Watching the recording with the replay
+
+Open a flight that has a recording in the logbook while no vehicle is connected, and the video plays in
+the video window (or the Video widget) **in step with the replay**: play, pause, the speed button and
+dragging the timeline all move the picture along with the aircraft on the map.
+
+- **A running live stream is stopped** when such a flight is loaded — the recording uses the same
+  video surface. Start the stream again from the Video panel when you are done; a flight without a
+  recording leaves the stream alone.
+- **Where nothing was recorded** — before arming, after disarming, in a dropout between two files, or
+  when the file is no longer in its folder — the window shows *No video recorded for this part of the
+  flight*.
+- **At 4× and faster** the video shows one picture per keyframe instead of every frame.
+- **Jumping backwards** restarts the picture at the keyframe before the new position; with a source
+  that sends keyframes rarely this takes a moment.
+- **Stop video** in the Video panel ends the playback; the replay itself goes on.
+
+With a vehicle connected the logbook does not put a flight on the map, so no recording plays then.
+
 !!! note "Helpers download themselves"
     **Camera (device)** needs nothing extra, and **RTSP with the Native RTSP client** (the default)
     needs no helper either (on Android that is always the case). **Native Capture** uses the bundled
