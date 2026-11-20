@@ -224,16 +224,11 @@ impl NativeRtsp {
         let slot = self.sink.clone();
         let replay = Replay::start(parts, move |au, ts, show| {
             if let Some(s) = slot.lock().unwrap().as_ref() {
-                // Only the Windows sink can decode without showing so far; elsewhere the run-up to a
-                // seek target is visible.
-                #[cfg(target_os = "windows")]
-                if !show {
+                if show {
+                    s.push(au, ts);
+                } else {
                     s.push_hidden(au, ts);
-                    return;
                 }
-                #[cfg(not(target_os = "windows"))]
-                let _ = show;
-                s.push(au, ts);
             }
         });
         // Surfaces published before the sink existed get their picture like one that appears later.

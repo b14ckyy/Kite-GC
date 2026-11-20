@@ -21,8 +21,13 @@ const CLOCK_TOLERANCE_MS: f64 = 300.0;
 const SKIP_AHEAD_MS: i64 = 1500;
 /// Above this speed only keyframes are shown: no decoder keeps up with 10x at 60 fps.
 const KEYFRAMES_ONLY_ABOVE: f64 = 2.5;
-/// Pictures handed over per second while catching up from a keyframe to the target.
+/// Pictures handed over per second while catching up from a keyframe to the target. The Linux sink's
+/// input queue drops when it is full (120 access units), and a stateless decoder never recovers from a
+/// dropped one, so it is fed slower.
+#[cfg(not(target_os = "linux"))]
 const CATCH_UP_FPS: u64 = 400;
+#[cfg(target_os = "linux")]
+const CATCH_UP_FPS: u64 = 120;
 /// A new seek waits this long after the last one, so a drag over the timeline is not a seek per pixel.
 const SEEK_MIN_GAP: Duration = Duration::from_millis(120);
 /// Shown pictures are at least this far apart: a sink presents at the display's rate, and what arrives
@@ -31,6 +36,9 @@ const SHOW_MIN_GAP: Duration = Duration::from_millis(15);
 /// Pausing reports the replay's last 10 Hz step, which lies a little behind the picture on screen. That
 /// is no reason to go back to the keyframe.
 const PAUSE_BACK_TOLERANCE_MS: i64 = 600;
+/// The frontend's replay clock is a 100 ms timer and can run slow against this thread's; when the
+/// difference is corrected, the picture holds for that long rather than restart at the keyframe.
+const PLAY_BACK_TOLERANCE_MS: i64 = 1200;
 
 /// One recording of the flight with its two sync anchors (video time ↔ flight time, ms).
 #[derive(Clone, Debug)]
@@ -218,7 +226,14 @@ fn run(
             continue;
         }
 
-        let back_ok = if c.just_paused { PAUSE_BACK_TOLERANCE_MS } else { 0 };
+        // A running replay whose clock was set back a little waits for it instead of going back.
+        let back_ok = if c.just_paused {
+            PAUSE_BACK_TOLERANCE_MS
+        } else if c.playing {
+            PLAY_BACK_TOLERANCE_MS
+        } else {
+            0
+        };
         let jump = match o.shown_ms {
             None => true,
             Some(shown) => target < shown - back_ok || target - shown > SKIP_AHEAD_MS,
