@@ -128,8 +128,13 @@ for every flight: the recording starts when the connected vehicle is armed and e
 - **A few seconds before arming are included:** the recording starts at the last keyframe the source
   sent before you armed.
 - **In the logbook:** once the flight is saved, its details show the recording under **Video**. The
-  file stays in the recording folder; the logbook only remembers it. If you move or delete the file,
-  the entry is shown struck through.
+  file stays in the recording folder; the logbook only remembers it.
+- **Rename and sort the files as you like:** every recording carries an id of its own, and Kite finds
+  the file by it anywhere below the recording folder — under a new name, in subfolders of your own
+  scheme. Only the folder itself must stay the one set as **Recording folder**. A file that is no
+  longer below it is shown struck through in the flight details.
+- **Do not convert or re-save the file** with another program if it should stay linked to its flight:
+  tools that rewrite a Matroska file usually give it a new id.
 - **Dropouts:** when the stream reconnects during a flight, the recording continues in a new file
   (`…_part2.mkv`). A new file also starts just below 4 GB, so a FAT32 drive works as a target.
 - **If Kite or the computer stops mid-flight,** the file stays playable up to the last second or so
