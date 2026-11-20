@@ -129,11 +129,12 @@ for every flight: the recording starts when the connected vehicle is armed and e
 - **A few seconds before arming are included:** the recording starts at the last keyframe the source
   sent before you armed.
 - **In the logbook:** once the flight is saved, its details show the recording under **Video**, and
-  its files move into a folder of their own: `Flights/<name of the first recording>/` below the
-  recording folder. What lies directly in the recording folder is therefore still being written or
-  waits for its flight. **Show folder** in the flight details opens the flight's folder in the file
-  manager (not on phones and tablets). A file another program holds open at that moment stays where
-  it is and remains linked all the same. Recordings linked before this version stay where they are.
+  its files move into a folder of their own below the recording folder: `Flights/<name>/`, named
+  after the flight's first recording (without a `_part` number). What lies directly in the
+  recording folder is then a recording that is still being written, has no flight (yet) or could
+  not be moved — on Windows a file another program holds open stays where it is, and remains linked
+  all the same. **Show folder** in the flight details opens the flight's folder in the file manager
+  (not on phones and tablets). Recordings linked before this version stay where they are.
 - **Rename and sort the files as you like:** every recording carries an id of its own, and Kite finds
   the file by it below the recording folder — under a new name, in subfolders of your own scheme (up
   to six levels deep). Only the folder itself must stay the one set as **Recording folder**. A file that is no

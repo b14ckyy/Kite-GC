@@ -93,9 +93,9 @@ inside the box of the feature release they belong to, so the notes for one relea
         well, and the Video panel can clean up recordings no flight is linked to. [#338]
 
         **One folder per flight.** When a flight is saved, its recordings move into
-        `Flights/<flight>/` below the recording folder, so the folder itself only holds what is
-        being written or waits for its flight. **Show folder** in the flight details opens it in
-        the file manager. [#343]
+        `Flights/<flight>/` below the recording folder, which leaves the folder itself to the
+        recordings that are being written or have no flight yet. **Show folder** in the flight
+        details opens it in the file manager. [#343]
 
     ??? info "INAV over ELRS, mLRS, SiK or Wi-Fi — the full planner on a MAVLink-only link"
         ELRS and mLRS in MAVLink mode, SiK radios and MAVLink Wi-Fi bridges carry no MSP, and MSP
