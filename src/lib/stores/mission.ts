@@ -377,25 +377,22 @@ export function addMission(): number {
   return newIdx;
 }
 
-/** Remove a mission tab and its data. Returns the new active index. */
+/** Returns the new active index. */
 export async function removeMission(idx: number): Promise<number> {
   const count = get(missionCount);
   beginUndoGroup();
   try {
   if (count <= 1) {
-    // Last mission — just clear it
     await missionClear();
     return 1;
   }
 
   const currentIdx = get(activeMissionIndex);
 
-  // Save current state before modifying slots
   if (idx !== currentIdx) {
     saveCurrentToSlot();
   }
 
-  // Remove the target slot and shift higher slots down
   missionSlots.delete(idx);
   for (let i = idx; i < count; i++) {
     const wps = missionSlots.get(i + 1);
@@ -405,10 +402,18 @@ export async function removeMission(idx: number): Promise<number> {
     }
   }
 
+  // The sync snapshots are per slot: they move with their mission, or its badges are lost.
+  for (let i = idx; i < count; i++) {
+    const refs = syncRefs.get(i + 1);
+    if (refs) syncRefs.set(i, refs);
+    else syncRefs.delete(i);
+  }
+  syncRefs.delete(count);
+  bumpProv();
+
   const newCount = count - 1;
   missionCount.set(newCount);
 
-  // Determine new active index
   let newActive: number;
   if (idx === currentIdx) {
     newActive = Math.min(idx, newCount);
@@ -508,6 +513,8 @@ interface MissionSnapshot {
   count: number;
   /** 1-based mission index → deep-copied waypoints, for every slot in use */
   missions: Map<number, Waypoint[]>;
+  /** The slots' sync snapshots — put back only when a restore changes the number of slots. */
+  refs: Map<number, Partial<Record<MissionFlag, string>>>;
 }
 
 const UNDO_LIMIT = 50;
@@ -538,13 +545,22 @@ function captureState(): MissionSnapshot {
     const wps = i === activeIdx ? get(mission).waypoints : (missionSlots.get(i) ?? []);
     missions.set(i, cloneWps(wps));
   }
-  return { activeIdx, count, missions };
+  const refs = new Map([...syncRefs].map(([slot, r]) => [slot, { ...r }]));
+  return { activeIdx, count, missions, refs };
 }
 
 /** Restore a captured state to the slot cache + backend (active mission). */
 async function restoreState(snap: MissionSnapshot): Promise<void> {
   undoSuspend++; // restoring must not record further steps
   try {
+    // A tab added or removed shifted the slots: their sync snapshots go back with them. A plain edit
+    // keeps the current ones — a sync made since the snapshot still holds.
+    if (snap.count !== get(missionCount)) {
+      syncRefs.clear();
+      // Not `fc`: what the FC holds may have changed since (upload, disconnect), and that flag is trusted.
+      for (const [slot, { fc: _fc, ...r }] of snap.refs) syncRefs.set(slot, r);
+      bumpProv();
+    }
     missionSlots.clear();
     for (const [i, wps] of snap.missions) missionSlots.set(i, cloneWps(wps));
     missionCount.set(snap.count);

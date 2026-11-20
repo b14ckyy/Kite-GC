@@ -546,6 +546,25 @@ inside the box of the feature release they belong to, so the notes for one relea
 
     Every fix of 1.0.1 and 1.0.2 is part of 2.0. This list holds what is fixed in 2.0 only.
 
+    - **Relay: LTM and CRSF carry the altitude above home.** The LTM output wrote the GPS altitude
+      (above sea level) where LTM consumers expect the altitude above home, and the CRSF output had
+      no altitude above home at all. A tracker or a second Kite behind the relay showed the sea-level
+      figure as the flight altitude. LTM now carries the altitude above home. CRSF follows INAV's
+      current layout: the GPS frame stays above sea level, and the barometer-altitude frame carries
+      the altitude above home and the vertical speed (it replaces the separate vario frame). [#339]
+    - **Telemetry mode over CRSF: INAV's current frame layout is understood.** With
+      `crsf_use_legacy_baro_packet` off, INAV sends the GPS altitude above sea level and packs the
+      vertical speed into the barometer-altitude frame. Kite showed no vertical speed on such a link
+      and took the GPS altitude for a height above home, which left AGL and the 3D altitude without
+      a reference. Kite now tells the two layouts apart by the frame itself, so both work. [#339]
+    - **Telemetry mode: a lost link closes the connection.** When the source of a passive telemetry
+      link went away — the radio's Bluetooth dropped, the TCP side closed — Kite kept showing
+      "connected", and on Android the background notification and the screen hold stayed. The
+      connection now ends as it does on every other link, with the question what to do with a
+      flight that was being recorded. [#339]
+    - **INAV missions: removing a tab kept the wrong badges.** After removing one of several
+      missions, the tabs behind it lost their DB / FILE badge and showed "Modified" although
+      nothing in them had changed. The badges now move with their mission, also through undo. [#339]
     - **Replay: the altitude reference of a flight is handled more robustly.** [#320]
     - **Map: waypoint markers could blink out for a moment** when the aircraft moved on to the next
       waypoint — seen on a tablet under load. The active waypoint is now marked in place. [#326]

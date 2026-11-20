@@ -94,6 +94,11 @@ link in → **MAVLink** out for a MAVLink ground station.
   target IP/port). Listen ports must be unique — Kite bumps a duplicate to the next free port for you.
 - The relay emits a complete frame set paced to the incoming telemetry rate (typically a few Hz), so the
   output cadence follows your link.
+- **Altitude:** LTM carries the altitude above home, as INAV sends it. CRSF uses INAV's layout with
+  `crsf_use_legacy_baro_packet` off: the GPS frame carries the altitude above sea level, and the
+  barometer-altitude frame carries the altitude above home together with the vertical speed (no
+  separate vario frame). A receiver set up for the older layout, which put the altitude above home
+  into the GPS frame, shows sea level there.
 - **Flight-mode / vehicle-type naming** in the MAVLink, CRSF and SmartPort outputs is best-effort — the
   position, attitude, GPS, battery and basic status are the reliable fields. LTM over serial/TCP is the
   most validated path.
