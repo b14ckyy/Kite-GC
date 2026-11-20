@@ -199,11 +199,6 @@ sustain. Two things are worth knowing:
     `gstreamer1.0-plugins-bad`, `gstreamer1.0-nice`, `gstreamer1.0-plugins-good`, plus
     `gstreamer1.0-libav` if the decoder list is empty (recent Kite **.deb** packages request these
     automatically on install).
-
-    Either way, package installs only affect the **system installation (.deb)**: the **AppImage** brings
-    its own browser engine and does not use the system's media packages at all. If video matters to you
-    on Linux, prefer the **.deb / system installation** — it uses your distribution's engine and plugins,
-    which you can at least influence.
 - **Hardware conversion is used automatically where it exists.** Kite tests the machine once, the first time it is needed, and writes the verdict to the log:
     - Desktop graphics (Intel and AMD, via VAAPI) can do **both halves** — decoding and re-encoding —
       with the frames never leaving the GPU. Look for `[ffmpeg] VAAPI hardware H.264-decode +
