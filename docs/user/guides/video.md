@@ -124,21 +124,25 @@ for every flight: the recording starts when the connected vehicle is armed and e
 - **Requirements:** the **Native RTSP client** and an **H.264 or HEVC** source. An MJPEG stream is not
   recorded. Windows, Linux and macOS; not on Android and iOS.
 - **Where it goes:** the **Recording folder** — by default a `KiteGC` folder in your videos folder. The
-  file is named after the vehicle and the local time, for example `Wing_2026-11-20_14-05-31.mkv`.
+  file is named after the vehicle and the local time, for example `Wing_2026-11-20_14-05-31.mkv`: the
+  name the vehicle has in your vehicle library, else its craft name, else `Video`.
 - **A few seconds before arming are included:** the recording starts at the last keyframe the source
   sent before you armed.
 - **In the logbook:** once the flight is saved, its details show the recording under **Video**. The
   file stays in the recording folder; the logbook only remembers it.
 - **Rename and sort the files as you like:** every recording carries an id of its own, and Kite finds
-  the file by it anywhere below the recording folder — under a new name, in subfolders of your own
-  scheme. Only the folder itself must stay the one set as **Recording folder**. A file that is no
+  the file by it below the recording folder — under a new name, in subfolders of your own scheme (up
+  to six levels deep). Only the folder itself must stay the one set as **Recording folder**. A file that is no
   longer below it is shown struck through in the flight details.
 - **Do not convert or re-save the file** with another program if it should stay linked to its flight:
   tools that rewrite a Matroska file usually give it a new id.
 - **Dropouts:** when the stream reconnects during a flight, the recording continues in a new file
   (`…_part2.mkv`). A new file also starts just below 4 GB, so a FAT32 drive works as a target.
-- **If Kite or the computer stops mid-flight,** the file stays playable up to the last second or so
-  that was written. Such a file has no seek index, so jumping around in it can be slow.
+- **If Kite is closed mid-flight,** the recording is finished and joins the flight when that is saved
+  after the next start.
+- **After a crash or a power loss** the file stays in the recording folder and plays up to the last
+  keyframe that reached the disk; the last seconds can be missing. Such a file has no seek index, so
+  jumping around in it can be slow, and it is not listed in the flight's details.
 
 Recording runs only while armed and connected; without a link nothing is recorded.
 
