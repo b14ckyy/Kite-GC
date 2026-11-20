@@ -113,6 +113,30 @@ until the feed returns or you stop it. While it retries, every video surface sho
 feed are given a few seconds to heal on their own before a full reconnect is forced, so momentary
 signal dips don't interrupt the stream unnecessarily.
 
+### Recording the RTSP stream (desktop)
+
+Switch on **Record the video stream** below the saved connections and Kite writes the video to a file
+for every flight: the recording starts when the connected vehicle is armed and ends when it is disarmed.
+
+- **What is recorded:** the stream exactly as it arrives — no re-encoding, so the quality is the
+  source's and the recording costs almost no CPU. The file is a Matroska file (`.mkv`) that the common
+  players open (VLC, mpv, the Windows media player).
+- **Requirements:** the **Native RTSP client** and an **H.264 or HEVC** source. An MJPEG stream is not
+  recorded. Windows, Linux and macOS; not on Android and iOS.
+- **Where it goes:** the **Recording folder** — by default a `KiteGC` folder in your videos folder. The
+  file is named after the vehicle and the local time, for example `Wing_2026-11-20_14-05-31.mkv`.
+- **A few seconds before arming are included:** the recording starts at the last keyframe the source
+  sent before you armed.
+- **In the logbook:** once the flight is saved, its details show the recording under **Video**. The
+  file stays in the recording folder; the logbook only remembers it. If you move or delete the file,
+  the entry is shown struck through.
+- **Dropouts:** when the stream reconnects during a flight, the recording continues in a new file
+  (`…_part2.mkv`). A new file also starts just below 4 GB, so a FAT32 drive works as a target.
+- **If Kite or the computer stops mid-flight,** the file stays playable up to the last second or so
+  that was written. Such a file has no seek index, so jumping around in it can be slow.
+
+Recording runs only while armed and connected; without a link nothing is recorded.
+
 !!! note "Helpers download themselves"
     **Camera (device)** needs nothing extra, and **RTSP with the Native RTSP client** (the default)
     needs no helper either (on Android that is always the case). **Native Capture** uses the bundled

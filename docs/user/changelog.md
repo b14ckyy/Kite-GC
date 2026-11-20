@@ -74,6 +74,15 @@ inside the box of the feature release they belong to, so the notes for one relea
 
         Details in the [Video](guides/video.md) guide.
 
+    ??? info "Video recording — every flight's RTSP stream as a file"
+        With **Record the video stream** switched on, Kite writes the RTSP video to a Matroska file
+        (`.mkv`) from arming to disarming — the stream as it arrives, without re-encoding, including
+        the seconds since the last keyframe before you armed. The file is named after the vehicle and
+        the time, lands in a `KiteGC` folder in your videos folder (or one you choose), and the saved
+        flight shows it in its details. Needs the native RTSP client and an H.264 or HEVC source;
+        Windows, Linux and macOS. Details:
+        [Video → Recording the RTSP stream](guides/video.md#recording-the-rtsp-stream-desktop). [#333]
+
     ??? info "INAV over ELRS, mLRS, SiK or Wi-Fi — the full planner on a MAVLink-only link"
         ELRS and mLRS in MAVLink mode, SiK radios and MAVLink Wi-Fi bridges carry no MSP, and MSP
         is what an INAV flight controller needs for missions, safe homes and geozones. **INAV 10.0**
