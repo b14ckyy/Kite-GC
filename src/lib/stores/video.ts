@@ -93,6 +93,10 @@ export interface VideoState {
   /** Use Kite's own in-process RTSP client — no MediaMTX, no ffmpeg. On by default; off falls back
    *  to the classic engine path. Persisted. */
   rtspNativeClient: boolean;
+  /** Record the native RTSP stream to a file from arming to disarming (desktop). Persisted. */
+  recordEnabled: boolean;
+  /** Folder for the recordings; empty = the default (`<Videos>/KiteGC`). Persisted. */
+  recordDir: string;
   /** Active RTSP reader once live (native engine client vs ffmpeg fallback); runtime-only. */
   rtspEngine: RtspEngine;
   /** Runtime-only: the in-process client decodes this feed natively (H264/HEVC →
@@ -176,6 +180,8 @@ interface VideoPrefs {
   rtspConnections: RtspConnection[];
   rtspBufferFrames: number;
   rtspNativeClient: boolean;
+  recordEnabled: boolean;
+  recordDir: string;
   /** Set once the 2.0 default (native client on) has been applied to this installation. */
   rtspNativeDefaultApplied: boolean;
   nativeDevice: string | null;
@@ -209,6 +215,8 @@ const PREF_DEFAULTS: VideoPrefs = {
   rtspConnections: [],
   rtspBufferFrames: 0,
   rtspNativeClient: true,
+  recordEnabled: false,
+  recordDir: '',
   rtspNativeDefaultApplied: true,
   nativeDevice: null,
   nativeCodec: 'mjpeg',
@@ -255,6 +263,8 @@ function loadPrefs(): VideoPrefs {
         // the prefs whole is the old default, not a choice; after that the stored value is the user's.
         rtspNativeClient: p.rtspNativeDefaultApplied ? (p.rtspNativeClient ?? true) : true,
         rtspNativeDefaultApplied: true,
+        recordEnabled: p.recordEnabled === true,
+        recordDir: typeof p.recordDir === 'string' ? p.recordDir : '',
         nativeDevice: p.nativeDevice ?? p.v4l2Device ?? null,
         nativeCodec: p.nativeCodec ?? 'mjpeg',
         nativeDeviceName: p.nativeDeviceName ?? null,
@@ -289,6 +299,8 @@ function savePrefs(): void {
         rtspConnections: s.rtspConnections,
         rtspBufferFrames: get(rtspBufferFrames),
         rtspNativeClient: s.rtspNativeClient,
+        recordEnabled: s.recordEnabled,
+        recordDir: s.recordDir,
         rtspNativeDefaultApplied: true,
         nativeDevice: s.nativeDevice,
         nativeCodec: s.nativeSel.codec,
@@ -342,6 +354,8 @@ const INITIAL: VideoState = {
   rtspTransport: boot.rtspTransport,
   rtspConnections: boot.rtspConnections,
   rtspNativeClient: boot.rtspNativeClient,
+  recordEnabled: boot.recordEnabled,
+  recordDir: boot.recordDir,
   rtspEngine: null,
   nativeSink: false,
   nativeSinkCodec: null,
@@ -1663,6 +1677,16 @@ export async function setRtspNativeClient(on: boolean): Promise<void> {
   savePrefs();
   const st = get(videoState);
   if (st.enabled && st.kind === 'rtsp') await startRtsp();
+}
+
+export function setRecordEnabled(on: boolean): void {
+  patch({ recordEnabled: on });
+  savePrefs();
+}
+
+export function setRecordDir(dir: string): void {
+  patch({ recordDir: dir.trim() });
+  savePrefs();
 }
 
 function genRtspId(): string {

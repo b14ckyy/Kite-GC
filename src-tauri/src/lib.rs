@@ -48,7 +48,7 @@ mod weather;
 use commands::connection::{connect, disconnect, set_platform_type, inav_set_craft_name, inav_read_stats, scan_ble_devices, ble_scan_start, ble_scan_stop, debug_tunnel_msp_request, debug_tunnel_stats_snapshot};
 use commands::vehicles::{list_links, set_active_vehicle, get_active_vehicle, announce_vehicles, set_fleet_enabled, debug_group_state};
 use commands::connection::list_serial_ports;
-use commands::flightlog::{
+use commands::flightlog::{flightlog_flight_videos, 
     flightlog_list, flightlog_get, flightlog_get_track, flightlog_get_battery_records, flightlog_delete,
     flightlog_update_notes, flightlog_update_craft_name, flightlog_update_platform_type, flightlog_update_pilot, flightlog_update_weather, flightlog_geocode, flightlog_fetch_weather,
     flightlog_default_db_path, flightlog_default_raw_log_path, flightlog_import_blackbox,
@@ -114,6 +114,7 @@ use commands::video::{
     video_rtsp_native_sink_surfaces, video_rtsp_native_stats,
     video_linux_hole_spike,
     video_rtsp_native_sink_buffer, video_rtsp_native_sink_orient,
+    video_record_default_dir, video_record_enable, video_record_start, video_record_stop, video_record_status,
     video_detached_open, video_detached_close, video_detached_pin_top, video_detached_chrome, video_detached_aspect, video_detached_nudge,
 };
 use video::{MediaMtx, MjpegServer};
@@ -824,6 +825,12 @@ pub fn run() {
             video_rtsp_native_stats,
             video_rtsp_native_sink_buffer,
             video_rtsp_native_sink_orient,
+            video_record_default_dir,
+            video_record_enable,
+            video_record_start,
+            video_record_stop,
+            video_record_status,
+            flightlog_flight_videos,
             video_native_mjpeg_stop,
             video_detached_open,
             video_detached_close,

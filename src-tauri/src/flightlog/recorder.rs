@@ -678,6 +678,7 @@ pub fn commit_pending_session(session: &PendingSession) -> Result<i64, String> {
         log::warn!("Flight {flight_id}: altitude reference not stored: {e}");
     }
     db::remove_temp_session(&session.temp_path);
+    super::video_link::attach_waiting(&conn, &session.db_path, flight_id, &session.flight);
 
     // Weather + geocode for a flight with a home (§5e M1). Unit tests never go online.
     #[cfg(not(test))]

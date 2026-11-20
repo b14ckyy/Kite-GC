@@ -52,6 +52,8 @@ export const hasSerialPorts = !isIOS;
 
 /** Video sources exist. Not on iPhone: on iOS video is iPad-only (RTSP_APPLE.md). */
 export const hasVideo = !(isIOS && isPhone);
+/** Recording the RTSP stream to a file: desktop only so far (no shared-storage path on mobile yet). */
+export const hasVideoRecording = !isMobile;
 
 /** "Compact Database" (full VACUUM): desktop only. On Android SQLite keeps the VACUUM's working copy in memory,
  *  which a large DB on a small tablet may not survive, and a mobile DB holds no log blobs anyway. The backend

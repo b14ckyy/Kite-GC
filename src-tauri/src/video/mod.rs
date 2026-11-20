@@ -15,6 +15,8 @@ pub mod native;
 #[cfg(target_os = "linux")]
 pub mod v4l2;
 pub mod mjpeg_server;
+/// Recording of the native RTSP stream into a Matroska file.
+pub mod record;
 pub mod rtsp;
 pub mod rtsp_native;
 /// What the frontend's surface routers publish — the holes every decode sink presents into.

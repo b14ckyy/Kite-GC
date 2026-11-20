@@ -141,6 +141,8 @@ pub struct NativeRtsp {
     sink_codec: Arc<Mutex<Option<&'static str>>>,
     /// Live counters of the running stream (fresh per start) — the Debug Monitor's feed.
     live: Mutex<Option<Arc<LiveRtspStats>>>,
+    /// Outlives a stream: a reconnect during a recording continues it in a new file.
+    recorder: Arc<super::record::VideoRecorder>,
     /// What each window's surface router last published, keyed by window label. The sink always
     /// gets the MERGED list, so one window's push can never drop another window's holes
     /// (VIDEO_MULTISINK_WINDOW.md §4.1).
@@ -173,6 +175,10 @@ fn teardown(r: Running) {
 impl NativeRtsp {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn recorder(&self) -> &super::record::VideoRecorder {
+        &self.recorder
     }
 
     /// Start the native RTSP client on `url` (`transport`: udp | tcp | anything → auto).
@@ -266,7 +272,9 @@ impl NativeRtsp {
             let sink_slot = self.sink.clone();
             #[cfg(any(target_os = "windows", target_os = "android", target_os = "linux", target_os = "macos", target_os = "ios"))]
             let sink_codec_slot = self.sink_codec.clone();
+            let recorder = self.recorder.clone();
             thread::spawn(move || {
+                recorder.stream_reset();
                 let mut first = true;
                 #[cfg(not(any(target_os = "windows", target_os = "android", target_os = "linux", target_os = "macos", target_os = "ios")))]
                 let _ = &sink_first;
@@ -343,6 +351,7 @@ impl NativeRtsp {
                             }
                         }
                         let ts = sink_ts.as_mut().unwrap().unwrap(frame.rtp_timestamp);
+                        recorder.feed(frame.codec, &frame.data, ts);
                         if let Some(sink) = sink_slot.lock().unwrap().as_ref() {
                             sink.push(frame.data, ts);
                             if let Some(e) = sink.error() {

@@ -810,6 +810,13 @@
     }
   },
   "video": {
+    "record": "Record the video stream",
+    "recordHint": "Writes the RTSP stream to a Matroska file (.mkv) as it arrives, without re-encoding, from arming to disarming. The file is attached to the flight in the logbook. Needs the native RTSP client and an H.264 or HEVC source.",
+    "recordFolder": "Recording folder",
+    "recordChoose": "Choose folder",
+    "recordRunning": "Recording: {file} ({size})",
+    "recordWaiting": "Recording: waiting for the next keyframe",
+    "recordError": "Recording failed: {error}",
     "title": "视频",
     "start": "开始视频",
     "stop": "停止视频",
@@ -1270,6 +1277,8 @@
     "temperatureUnit": "温度单位"
   },
   "logbook": {
+    "video": "Video",
+    "videoMissing": "File not found: {path}",
     "title": "飞行日志",
     "disabled": "飞行日志已禁用。在设置中启用并重新连接。",
     "dbNewer": "此飞行数据库来自更新版本的 Kite。在安装匹配或更新的 Kite 版本之前，飞行日志保持禁用——数据库不会被修改。",

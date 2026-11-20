@@ -29,6 +29,8 @@
     setRtspUrl,
     setRtspTransport,
     setRtspNativeClient,
+    setRecordEnabled,
+    setRecordDir,
     saveRtspConnection,
     updateRtspConnection,
     removeRtspConnection,
@@ -57,11 +59,25 @@
   import Button from '$lib/components/panel/Button.svelte';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
   import Toggle from '$lib/components/panel/Toggle.svelte';
-  import { isLinux, isMobile, isAndroid, isPhone, hasVideo } from '$lib/platform';
+  import { isLinux, isMobile, isAndroid, isPhone, hasVideo, hasVideoRecording } from '$lib/platform';
+  import { open as openDialog } from '@tauri-apps/plugin-dialog';
+  import { videoRecording, videoRecordDefaultDir } from '$lib/controllers/videoRecording';
 
   // Which saved RTSP connection is being edited inline (null = none).
   let editingRtspId = $state<string | null>(null);
   const inputVal = (e: Event) => (e.currentTarget as HTMLInputElement).value;
+  const fileName = (path: string) => path.split(/[\\/]/).pop() ?? path;
+  const formatBytes = (n: number) => (n >= 1 << 30 ? `${(n / (1 << 30)).toFixed(2)} GB` : `${(n / (1 << 20)).toFixed(0)} MB`);
+
+  async function chooseRecordDir() {
+    const current = $videoState.recordDir || $videoRecordDefaultDir || undefined;
+    try {
+      const selected = await openDialog({ directory: true, multiple: false, defaultPath: current });
+      if (typeof selected === 'string' && selected.length) setRecordDir(selected);
+    } catch (e) {
+      console.error('[video] choosing the recording folder failed', e);
+    }
+  }
 
   // getUserMedia list: on Linux enumerating drives WebKit's GStreamer/pipewire stack (can hang ~35 s), so only
   // while the camera source is selected. The condition MUST be this narrow $derived: an effect reading
@@ -555,6 +571,46 @@
         </div>
       {/if}
 
+      <!-- Recording: the stream as it arrives, armed → disarmed. Native client only (the engine path never
+           hands the stream out). -->
+      {#if hasVideoRecording}
+        <div class="field-row" title={$t('video.recordHint')}>
+          <Toggle
+            checked={$videoState.recordEnabled}
+            disabled={!$videoState.rtspNativeClient}
+            onchange={setRecordEnabled}
+            id="vp-record"
+          />
+          <span class="label">{$t('video.record')}</span>
+        </div>
+        {#if $videoState.recordEnabled && $videoState.rtspNativeClient}
+          <div class="field">
+            <span class="label">{$t('video.recordFolder')}</span>
+            <div class="rtsp-url-row">
+              <input
+                class="text-input"
+                type="text"
+                placeholder={$videoRecordDefaultDir}
+                value={$videoState.recordDir}
+                onchange={(e) => setRecordDir(inputVal(e))}
+              />
+              <button class="rtsp-save" title={$t('video.recordChoose')} aria-label={$t('video.recordChoose')} onclick={chooseRecordDir}>…</button>
+            </div>
+            {#if $videoRecording.error}
+              <p class="hint err">{$t('video.recordError', { values: { error: $videoRecording.error } })}</p>
+            {:else if $videoRecording.recording}
+              <p class="hint rec">
+                {#if $videoRecording.file}
+                  {$t('video.recordRunning', { values: { file: fileName($videoRecording.file), size: formatBytes($videoRecording.bytes) } })}
+                {:else}
+                  {$t('video.recordWaiting')}
+                {/if}
+              </p>
+            {/if}
+          </div>
+        {/if}
+      {/if}
+
       <!-- Receive-buffer depth in frame times (applied live, persisted) — to the WebRTC receiver, the MJPEG
            reader's cushion or the native sink's presentation queue. 0 = present on arrival; each step trades one
            frame time of latency for jitter smoothing, the same at 30 and 60 fps. -->
@@ -780,6 +836,8 @@
   }
   .hint { font-size: 11px; color: #777; margin: 0; }
   .hint.err { color: #d40000; }
+  .hint.rec { color: #d40000; }
+  .hint.rec::before { content: '● '; }
 
   /* RTSP direct-connect row + saved-connection list */
   .rtsp-url-row { display: flex; align-items: center; gap: 6px; }

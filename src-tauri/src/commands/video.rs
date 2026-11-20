@@ -609,3 +609,69 @@ pub struct DetachedChrome {
     /// Rects the page wants the press for.
     pub chrome: Vec<[f64; 4]>,
 }
+
+// ── Recording of the native RTSP stream (video/record) ──
+
+/// `<Videos>/KiteGC` — where recordings go unless the user chose a folder.
+fn default_record_dir() -> std::path::PathBuf {
+    dirs::video_dir().or_else(dirs::home_dir).unwrap_or_default().join("KiteGC")
+}
+
+#[tauri::command]
+pub fn video_record_default_dir() -> String {
+    default_record_dir().to_string_lossy().to_string()
+}
+
+/// Recording switched on in the settings: keep the pre-roll so a recording can start at a keyframe.
+#[tauri::command]
+pub fn video_record_enable(on: bool, native_rtsp: State<'_, crate::video::rtsp_native::NativeRtsp>) {
+    native_rtsp.recorder().set_enabled(on);
+}
+
+/// A vehicle name as the head of a file name: letters and digits kept, everything else an underscore.
+fn file_name_part(vehicle: &str) -> String {
+    let cleaned: String = vehicle.trim().chars().map(|c| if c.is_alphanumeric() || c == '-' { c } else { '_' }).collect();
+    let cleaned = cleaned.trim_matches('_');
+    if cleaned.is_empty() { "Video".to_string() } else { cleaned.chars().take(40).collect() }
+}
+
+/// Start recording into `dir` (empty = the default folder). The file is named `<vehicle>_<local time>`.
+#[tauri::command(async)]
+pub fn video_record_start(
+    dir: Option<String>,
+    vehicle: Option<String>,
+    native_rtsp: State<'_, crate::video::rtsp_native::NativeRtsp>,
+) -> Result<(), String> {
+    let dir = match dir.as_deref().map(str::trim) {
+        Some(d) if !d.is_empty() => std::path::PathBuf::from(d),
+        _ => default_record_dir(),
+    };
+    let name = format!(
+        "{}_{}",
+        file_name_part(vehicle.as_deref().unwrap_or_default()),
+        chrono::Local::now().format("%Y-%m-%d_%H-%M-%S")
+    );
+    native_rtsp.recorder().start(&dir, &name)
+}
+
+/// Stop, close the file(s) and leave them waiting for the flight they belong to (`flightlog::video_link`).
+#[tauri::command(async)]
+pub fn video_record_stop(
+    db_path: Option<String>,
+    native_rtsp: State<'_, crate::video::rtsp_native::NativeRtsp>,
+) -> Vec<crate::video::record::RecordedVideo> {
+    let files = native_rtsp.recorder().stop();
+    let portable = std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.join(".portable").exists())).unwrap_or(false);
+    let db_file = crate::flightlog::db::resolve_db_path(&db_path.unwrap_or_default(), portable);
+    crate::flightlog::video_link::add_waiting(&db_file, &files);
+    match crate::flightlog::db::open_database(&db_file) {
+        Ok(conn) => crate::flightlog::video_link::attach_to_saved_flights(&conn, &db_file),
+        Err(e) => log::warn!("[video] recording stays unattached, flight DB not opened: {e}"),
+    }
+    files
+}
+
+#[tauri::command]
+pub fn video_record_status(native_rtsp: State<'_, crate::video::rtsp_native::NativeRtsp>) -> crate::video::record::RecordingStatus {
+    native_rtsp.recorder().status()
+}

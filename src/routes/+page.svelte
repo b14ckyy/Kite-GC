@@ -20,6 +20,7 @@
   import { startRadarAlerts, radarAlerts } from "$lib/controllers/radarAlerts";
   import { startBreachMonitor } from "$lib/controllers/breachMonitor";
   import { startTelemetryLostNotice } from "$lib/controllers/telemetryLostNotice";
+  import { startVideoRecording } from "$lib/controllers/videoRecording";
   import { startAlertAudio } from "$lib/controllers/alertAudio";
   import { get } from "svelte/store";
   import { phoneEdit } from "$lib/stores/phoneEdit.svelte";
@@ -1280,6 +1281,7 @@
     void startStatusText();
     startBreachMonitor();
     startTelemetryLostNotice();
+    startVideoRecording();
     pushRadarConfig();
     // Query centre follows the map view: 2D pans update settings.map.center (broad subscribe, gated by
     // the ~100 m key); 3D camera moves come via Map3D's onCamFocus; the mode flip via the effect below.
