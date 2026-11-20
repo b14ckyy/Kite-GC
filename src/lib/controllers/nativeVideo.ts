@@ -165,11 +165,9 @@ export function nativeSurface(el: HTMLElement, spec: NativeSurfaceId | NativeSur
   };
 }
 
-/** Root class while the router runs, i.e. while the `data-nv-clip` layers carry a mask (a hole or the idle
- *  ring, from the first tick on). app.html switches the glass blur off in those layers: under a mask a
- *  glass element only samples the masked subtree, and the compositor renders that whole layer offscreen
- *  once more per blurred element — the four 38 px map corner buttons cost a full-size render of the map
- *  each (no-GPU macOS VM: 0.25 → 5 screen updates/s with a replay on the map). */
+/** Root class while the router runs, i.e. while the `data-nv-clip` layers carry a mask (hole or idle ring).
+ *  Glass under a mask makes the compositor render that whole layer offscreen once more per blurred
+ *  element, so app.html switches the blur off inside those layers. */
 const MASKED_CLASS = 'kite-nv-masked';
 
 /** Start following surfaces (call when the sink route reports live). Idempotent. */
