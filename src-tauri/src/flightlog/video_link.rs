@@ -130,6 +130,36 @@ const SEARCH_DEPTH: usize = 6;
 const MISSING_TTL: std::time::Duration = std::time::Duration::from_secs(20);
 static MISSING: std::sync::Mutex<Vec<(PathBuf, String, std::time::Instant)>> = std::sync::Mutex::new(Vec::new());
 
+/// The segment UIDs of the recordings that wait for their flight.
+pub fn waiting_uids(db_file: &Path) -> HashSet<String> {
+    let _guard = WAITING_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    read_waiting(db_file).into_iter().map(|v| v.uid).collect()
+}
+
+/// Every `.mkv` with a segment UID below `root`, as deep as a linked recording is searched.
+pub(super) fn recordings_below(root: &Path, each: &mut dyn FnMut(&str, &Path)) {
+    fn walk(dir: &Path, depth: usize, each: &mut dyn FnMut(&str, &Path)) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for path in entries.flatten().map(|e| e.path()) {
+            if path.is_dir() {
+                if depth > 0 {
+                    walk(&path, depth - 1, each);
+                }
+            } else if path.extension().is_some_and(|x| x.eq_ignore_ascii_case("mkv")) {
+                if let Some(uid) = crate::video::record::segment_uid(&path) {
+                    each(&uid, &path);
+                }
+            }
+        }
+    }
+    walk(root, SEARCH_DEPTH, each);
+}
+
+/// A recording that was just put below `root` is looked for again at once.
+pub(super) fn forget_missing(root: &Path, uid: &str) {
+    MISSING.lock().unwrap_or_else(|e| e.into_inner()).retain(|(dir, known, _)| !(dir == root && known == uid));
+}
+
 /// The `.mkv` files below `dir` whose segment UID is one of `wanted`, by UID. Stops when all are found.
 fn find_by_uid(dir: &Path, wanted: &mut HashSet<String>, depth: usize, found: &mut HashMap<String, PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else { return };
@@ -155,15 +185,15 @@ fn find_by_uid(dir: &Path, wanted: &mut HashSet<String>, depth: usize, found: &m
     }
 }
 
-struct Row {
-    id: i64,
-    rel_path: String,
-    uid: Option<String>,
+pub(super) struct Row {
+    pub id: i64,
+    pub rel_path: String,
+    pub uid: Option<String>,
 }
 
 /// Where each video row's file is now. A file that is not at its `rel_path` (or is another recording
 /// there) is searched by its UID in the whole video folder, and the row gets the path it was found at.
-fn resolve(conn: &Connection, root: &Path, rows: &[Row]) -> HashMap<i64, PathBuf> {
+pub(super) fn resolve(conn: &Connection, root: &Path, rows: &[Row]) -> HashMap<i64, PathBuf> {
     let mut at: HashMap<i64, PathBuf> = HashMap::new();
     let mut missing: Vec<&Row> = Vec::new();
     for row in rows {

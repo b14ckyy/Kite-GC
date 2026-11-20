@@ -62,6 +62,11 @@
   import { isLinux, isMobile, isAndroid, isPhone, hasVideo, hasVideoRecording } from '$lib/platform';
   import { open as openDialog } from '@tauri-apps/plugin-dialog';
   import { videoRecording, videoRecordDefaultDir } from '$lib/controllers/videoRecording';
+  import { cleanupOrphanVideos } from '$lib/controllers/flightVideoTransfer';
+  import type { DbTransferUi } from '$lib/controllers/dbTransfer';
+
+  // `transferUi` = the page's dialogs; without it the recording clean-up is not offered.
+  let { dbPath = '', transferUi = null }: { dbPath?: string; transferUi?: DbTransferUi | null } = $props();
 
   // Which saved RTSP connection is being edited inline (null = none).
   let editingRtspId = $state<string | null>(null);
@@ -596,6 +601,14 @@
               />
               <button class="rtsp-save" title={$t('video.recordChoose')} aria-label={$t('video.recordChoose')} onclick={chooseRecordDir}>…</button>
             </div>
+            {#if transferUi}
+              <Button
+                variant="standard"
+                size="sm"
+                title={$t('logbook.videoTransfer.cleanupHint')}
+                onclick={() => transferUi && cleanupOrphanVideos(transferUi, dbPath)}
+              >{$t('logbook.videoTransfer.cleanupBtn')}</Button>
+            {/if}
             {#if $videoRecording.error}
               <p class="hint err">{$t('video.recordError', { values: { error: $videoRecording.error } })}</p>
             {:else if $videoRecording.recording}

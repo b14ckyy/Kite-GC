@@ -22,6 +22,7 @@ pub mod timezone;
 pub mod tlog_logger;
 pub mod track_export;
 pub mod types;
+pub mod video_files;
 pub mod video_link;
 pub mod ulog;
 pub mod weather;

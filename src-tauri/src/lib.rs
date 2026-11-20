@@ -49,6 +49,8 @@ use commands::connection::{connect, disconnect, set_platform_type, inav_set_craf
 use commands::vehicles::{list_links, set_active_vehicle, get_active_vehicle, announce_vehicles, set_fleet_enabled, debug_group_state};
 use commands::connection::list_serial_ports;
 use commands::flightlog::{flightlog_flight_videos,
+    flightlog_export_videos_info, flightlog_export_videos, flightlog_import_videos_info, flightlog_import_videos,
+    flightlog_delete_videos_info, flightlog_delete_videos, flightlog_orphan_videos_info, flightlog_orphan_videos_delete,
     flightlog_list, flightlog_get, flightlog_get_track, flightlog_get_battery_records, flightlog_delete,
     flightlog_update_notes, flightlog_update_craft_name, flightlog_update_platform_type, flightlog_update_pilot, flightlog_update_weather, flightlog_geocode, flightlog_fetch_weather,
     flightlog_default_db_path, flightlog_default_raw_log_path, flightlog_import_blackbox,
@@ -834,6 +836,14 @@ pub fn run() {
             video_replay_open,
             video_replay_sync,
             flightlog_flight_videos,
+            flightlog_export_videos_info,
+            flightlog_export_videos,
+            flightlog_import_videos_info,
+            flightlog_import_videos,
+            flightlog_delete_videos_info,
+            flightlog_delete_videos,
+            flightlog_orphan_videos_info,
+            flightlog_orphan_videos_delete,
             video_native_mjpeg_stop,
             video_detached_open,
             video_detached_close,
