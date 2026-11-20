@@ -142,11 +142,10 @@ for every flight: the recording starts when the connected vehicle is armed and e
 - **Clean up unlinked recordings…** (below the recording folder, shown while recording is switched
   on) lists Kite's recordings in the folder that no flight in your logbook is linked to, with their
   names and total size, and removes them when you confirm (recycle bin / trash where there is one).
-  Typical cases: the recording of a flight you deleted while keeping the file, and a recording cut
-  off by a crash — that one belongs to no flight even when the flight itself was recovered, so look
-  at it before you let it go. Left alone are a recording that is still being written, including the
-  earlier parts of it, a recording that waits for its flight to be saved (Kite keeps waiting for 30
-  days, also after you discarded the flight), and every Matroska file Kite did not write. If you use
+  The typical case is the recording of a flight you deleted while keeping the file. Left alone are
+  a recording that is still being written, including the earlier parts of it, a recording that
+  waits for its flight to be saved — also one a crash cut off; Kite keeps waiting for 30 days, even
+  after you discarded the flight — and every Matroska file Kite did not write. If you use
   several flight databases with one recording folder, the recordings of the other databases count
   as unlinked.
 - **Dropouts:** when the stream reconnects during a flight, the recording continues in a new file
@@ -155,7 +154,9 @@ for every flight: the recording starts when the connected vehicle is armed and e
   after the next start.
 - **After a crash or a power loss** the file stays in the recording folder and plays up to the last
   keyframe that reached the disk; the last seconds can be missing. Such a file has no seek index, so
-  jumping around in it can be slow, and it is not listed in the flight's details.
+  jumping around in it can be slow. It still joins its flight: when you start Kite again and the
+  interrupted flight is saved — continued after reconnecting or saved as it is — the recording from
+  before the crash is linked to it, next to the one made afterwards.
 
 Recording runs only while armed and connected; without a link nothing is recorded.
 
