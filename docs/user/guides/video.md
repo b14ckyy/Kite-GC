@@ -139,12 +139,16 @@ for every flight: the recording starts when the connected vehicle is armed and e
 - **Taking recordings to another Kite:** export the flights as `.kflight` and let Kite copy their
   recordings next to the file; the import on the other side offers to copy them into the recording
   folder there. See [Logbook → Exporting](logbook.md#exporting).
-- **Clean up unlinked recordings…** (below the recording folder) lists Kite's recordings in the
-  folder that no flight in your logbook is linked to — left by a crash, or by a flight you deleted
-  or never saved — with their names and total size, and removes them when you confirm (recycle bin /
-  trash where there is one). A recording that is still being written or waits for its flight to be
-  saved is left alone, and so is every file Kite did not record. If you use several flight
-  databases with one recording folder, the recordings of the other databases count as unlinked.
+- **Clean up unlinked recordings…** (below the recording folder, shown while recording is switched
+  on) lists Kite's recordings in the folder that no flight in your logbook is linked to, with their
+  names and total size, and removes them when you confirm (recycle bin / trash where there is one).
+  Typical cases: the recording of a flight you deleted while keeping the file, and a recording cut
+  off by a crash — that one belongs to no flight even when the flight itself was recovered, so look
+  at it before you let it go. Left alone are a recording that is still being written, including the
+  earlier parts of it, a recording that waits for its flight to be saved (Kite keeps waiting for 30
+  days, also after you discarded the flight), and every Matroska file Kite did not write. If you use
+  several flight databases with one recording folder, the recordings of the other databases count
+  as unlinked.
 - **Dropouts:** when the stream reconnects during a flight, the recording continues in a new file
   (`…_part2.mkv`). A new file also starts just below 4 GB, so a FAT32 drive works as a target.
 - **If Kite is closed mid-flight,** the recording is finished and joins the flight when that is saved

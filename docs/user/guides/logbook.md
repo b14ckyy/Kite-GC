@@ -165,8 +165,9 @@ ticks. They stay when you change the search, so you can collect flights over sev
   that is not ticked stays. The confirmation offers to add the battery usage of the deleted
   flights to the lifetime totals of their batteries first. When the flights have video recordings
   that no other flight uses, Kite then asks whether to delete those files too (desktop); they go
-  to the recycle bin / trash where there is one. The same question follows the delete button of a
-  single flight.
+  to the recycle bin / trash where there is one, after the flights are deleted. The same question
+  follows the delete button of a single flight — except when only the live half of a linked pair
+  is deleted, because the flight stays.
 
 ## Exporting
 
