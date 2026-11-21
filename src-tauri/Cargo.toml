@@ -117,6 +117,9 @@ features = [
 
 [target.'cfg(target_os = "linux")'.dependencies]
 evdev = "0.13"
+# BlueZ pairing agent for BLE modules that demand a passkey (transport/ble_pairing.rs); the crate is
+# already in the tree through keepawake and tauri-plugin-opener.
+zbus = "5"
 # TIOCGSERIAL probe to hide phantom 8250 /dev/ttyS* stubs from the port list (serial.rs).
 libc = "0.2"
 # Access the underlying WebKitGTK WebView to pin its page zoom at 1.0 (lib.rs setup). On Linux the

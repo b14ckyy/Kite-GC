@@ -139,7 +139,107 @@ mod imp {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
+mod imp {
+    use zbus::zvariant::ObjectPath;
+    use zbus::{interface, Connection, Proxy};
+
+    const AGENT_PATH: &str = "/org/kitegc/pairing_agent";
+
+    /// BlueZ asks the agent of the client that called `Pair()`, so the desktop's own agent stays out.
+    struct Agent {
+        pin: String,
+    }
+
+    #[interface(name = "org.bluez.Agent1")]
+    impl Agent {
+        fn release(&self) {}
+        fn request_pin_code(&self, _device: ObjectPath<'_>) -> String {
+            self.pin.clone()
+        }
+        fn request_passkey(&self, _device: ObjectPath<'_>) -> u32 {
+            self.pin.parse().unwrap_or(0)
+        }
+        fn display_passkey(&self, _device: ObjectPath<'_>, _passkey: u32, _entered: u16) {}
+        fn display_pin_code(&self, _device: ObjectPath<'_>, _pincode: &str) {}
+        fn request_confirmation(&self, _device: ObjectPath<'_>, _passkey: u32) {}
+        fn request_authorization(&self, _device: ObjectPath<'_>) {}
+        fn authorize_service(&self, _device: ObjectPath<'_>, _uuid: &str) {}
+        fn cancel(&self) {}
+    }
+
+    /// Holds the D-Bus connection the agent lives on; BlueZ drops the agent with it.
+    pub struct Bond {
+        conn: Connection,
+        device: String,
+    }
+
+    /// BlueZ has no unpair: removing the device object is the way, and it is found again by the next scan.
+    async fn remove_device(conn: &Connection, device: &str) -> zbus::Result<()> {
+        let adapter = device
+            .rsplit_once('/')
+            .map(|(a, _)| a)
+            .unwrap_or("/org/bluez/hci0")
+            .to_string();
+        let proxy = Proxy::new(conn, "org.bluez", adapter, "org.bluez.Adapter1").await?;
+        proxy
+            .call_method("RemoveDevice", &(ObjectPath::try_from(device)?,))
+            .await?;
+        Ok(())
+    }
+
+    impl Bond {
+        pub async fn release(self) {
+            if let Err(e) = remove_device(&self.conn, &self.device).await {
+                log::warn!("[ble-pair] removing the bond failed: {e}");
+            }
+        }
+    }
+
+    async fn pair_device(device: &str, pin: &str) -> zbus::Result<Bond> {
+        let conn = Connection::system().await?;
+        conn.object_server()
+            .at(
+                AGENT_PATH,
+                Agent {
+                    pin: pin.to_string(),
+                },
+            )
+            .await?;
+        let manager =
+            Proxy::new(&conn, "org.bluez", "/org/bluez", "org.bluez.AgentManager1").await?;
+        manager
+            .call_method(
+                "RegisterAgent",
+                &(ObjectPath::try_from(AGENT_PATH)?, "KeyboardOnly"),
+            )
+            .await?;
+        let proxy = Proxy::new(&conn, "org.bluez", device.to_string(), "org.bluez.Device1").await?;
+        if proxy.get_property::<bool>("Paired").await.unwrap_or(false) {
+            remove_device(&conn, device).await?;
+            return Err(zbus::Error::Failure(
+                "stale bond removed, the radio is looked for again".into(),
+            ));
+        }
+        proxy.call_method("Pair", &()).await?;
+        Ok(Bond {
+            conn,
+            device: device.to_string(),
+        })
+    }
+
+    /// btleplug's peripheral id on Linux is the BlueZ object path without `/org/bluez/`.
+    pub async fn pair(device_id: &str, pin: &str) -> Result<Bond, String> {
+        let device = format!("/org/bluez/{device_id}");
+        pair_device(&device, pin)
+            .await
+            .map_err(|e| format!("pairing failed: {e}"))
+    }
+
+    pub fn release_all_blocking() {}
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
 mod imp {
     pub struct Bond;
 
@@ -147,8 +247,9 @@ mod imp {
         pub async fn release(self) {}
     }
 
+    /// CoreBluetooth has no pairing call: macOS shows its own dialog when the module asks.
     pub async fn pair(_device_id: &str, _pin: &str) -> Result<Bond, String> {
-        Err("programmatic BLE pairing is only implemented on Windows".into())
+        Err("this system offers no programmatic BLE pairing".into())
     }
 
     pub fn release_all_blocking() {}

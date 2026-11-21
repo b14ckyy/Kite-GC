@@ -2748,6 +2748,7 @@ dependencies = [
  "webkit2gtk",
  "windows 0.61.3",
  "winreg 0.52.0",
+ "zbus",
  "zip 2.4.2",
  "zstd",
 ]
