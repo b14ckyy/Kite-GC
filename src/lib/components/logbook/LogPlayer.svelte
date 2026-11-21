@@ -436,9 +436,11 @@
 {/if}
 
 <style>
+  /* --log-player-drop (set by +page): the player hangs below the terrain strip while that lies under the
+     top bar. Every box of the player takes it, the stick overlay too. */
   .log-player {
     position: absolute;
-    top: 62px;
+    top: calc(62px + var(--log-player-drop, 0px));
     left: 50%;
     transform: translateX(-50%);
     width: var(--log-player-w, 640px);
@@ -456,14 +458,14 @@
     flex-direction: column;
     gap: 4px;
     user-select: none;
-    transition: transform 0.2s ease, opacity 0.2s ease;
+    transition: transform 0.2s ease, opacity 0.2s ease, top 0.2s ease;
   }
 
-  /* Starts at the top bar's bottom edge (53px), so the 9px gap above the panel counts too — that is
-     exactly where the collapsed strip hangs and where users instinctively aim. */
+  /* Starts 9px above the panel (the top bar's or the terrain strip's lower edge), so the gap counts too:
+     the collapsed strip hangs there and users aim for it. */
   .log-player-zone {
     position: absolute;
-    top: 53px;
+    top: calc(53px + var(--log-player-drop, 0px));
     left: 50%;
     transform: translateX(-50%);
     width: var(--log-player-w, 640px);
@@ -473,12 +475,9 @@
     visibility: hidden;
   }
 
-  /* Phone (Dev-Docs archive/PHONE_UI.md D14, revised 2026-09-04): no top bar — the player hangs
-     from the top safe inset, centred in the GAP between the nav-rail burger (12 + 42 + 8 from the
-     left) and the chain-link button (8 + 42 + 8 from the widget column), never wider than that gap
-     minus 8px on each side. The compact strip shrinks into the gap the same way. While the full
-     panel is showing, +page slides the widget column (and the button) right by --phone-shift when
-     the gap is too narrow for the panel's full width, so the player keeps its size. */
+  /* Phone (Dev-Docs archive/PHONE_UI.md D14): no top bar — the player hangs from the top safe inset,
+     centred in the gap between the rail burger and the chain-link button; +page widens that gap by
+     --phone-shift while the full panel shows. */
   :global(html.is-phone) .log-player,
   :global(html.is-phone) .log-player-zone,
   :global(html.is-phone) .log-player-compact {
@@ -487,27 +486,35 @@
     left: calc((var(--phone-gap-l) + var(--phone-gap-r)) / 2);
     max-width: calc(var(--phone-gap-r) - var(--phone-gap-l) - 16px);
   }
+  /* Tablet: the toolbar is taller than 53px (status bar inset) and the panels follow its live height. */
+  :global(html.is-tablet) .log-player {
+    top: calc(var(--toolbar-h, 53px) + 9px + var(--log-player-drop, 0px));
+  }
+  :global(html.is-tablet) .log-player-zone,
+  :global(html.is-tablet) .log-player-compact {
+    top: calc(var(--toolbar-h, 53px) + var(--log-player-drop, 0px));
+  }
   :global(html.is-phone) .log-player {
-    top: calc(8px + var(--safe-top, 0px));
+    top: calc(8px + var(--safe-top, 0px) + var(--log-player-drop, 0px));
   }
   :global(html.is-phone) .log-player-zone,
   :global(html.is-phone) .log-player-compact {
-    top: var(--safe-top, 0px);
+    top: calc(var(--safe-top, 0px) + var(--log-player-drop, 0px));
   }
 
-  /* Collapsed: the full panel slides up under the top bar and fades; it stays in the DOM (its
-     measured height keeps the stick overlay in place) but takes no pointer events. */
+  /* Collapsed: the full panel slides up out of view and fades; it stays in the DOM (its measured
+     height keeps the stick overlay in place) but takes no pointer events. */
   .log-player.collapsed {
     transform: translate(-50%, -120%);
     opacity: 0;
     pointer-events: none;
   }
 
-  /* Compact strip — one readable line, framed, rounded at the bottom only (it "hangs" from the
-     top bar). Starts hidden under the bar and slides down while the full panel is collapsed. */
+  /* Compact strip: hangs from the top bar or the terrain strip (no top border), hidden under it until
+     the full panel collapses. */
   .log-player-compact {
     position: absolute;
-    top: 53px;
+    top: calc(53px + var(--log-player-drop, 0px));
     left: 50%;
     width: var(--log-player-w, 640px);
     max-width: calc(100vw - 40px);
@@ -530,7 +537,7 @@
     pointer-events: none;
     transform: translate(-50%, -110%);
     opacity: 0;
-    transition: transform 0.2s ease, opacity 0.2s ease;
+    transition: transform 0.2s ease, opacity 0.2s ease, top 0.2s ease;
   }
   .log-player-compact.shown {
     transform: translate(-50%, 0);

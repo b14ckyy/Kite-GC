@@ -250,9 +250,13 @@
     width: calc(100% - 124px);
     height: calc(100% - 124px);
   }
+  /* The strip's height is a variable: the replay player hangs below the strip by it (+page). */
+  :global(:root) {
+    --ps-strip-h: max(20vh, 160px);
+  }
   .ps-wide-compact {
     width: calc(100% - 62px - var(--grid-side-width) - 54px - 6px);
-    height: max(20vh, 160px);
+    height: var(--ps-strip-h);
   }
   /* Phone (PHONE_UI.md): no toolbar / status bar / side dock — the fullscreen panel spans safe inset to safe
      inset and from the rail to the right screen edge (over the widget column). */

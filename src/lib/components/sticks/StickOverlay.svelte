@@ -42,7 +42,7 @@
      sit just right of its right edge. */
   .stick-overlay {
     position: absolute;
-    top: 62px;
+    top: calc(62px + var(--log-player-drop, 0px));
     left: 50%;
     transform: translateX(calc(var(--log-player-w, 640px) / 2 + 28px));
     z-index: 50;
@@ -51,6 +51,10 @@
     align-items: center;
     gap: 4px;
     pointer-events: none; /* purely informational — never steal clicks from the map/player */
+    transition: top 0.2s ease;
+  }
+  :global(html.is-tablet) .stick-overlay {
+    top: calc(var(--toolbar-h, 53px) + 9px + var(--log-player-drop, 0px));
   }
 
   /* Phone: the map area is barely wider than the player itself — no room beside it. */
