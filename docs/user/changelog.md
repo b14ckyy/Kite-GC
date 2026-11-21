@@ -478,8 +478,7 @@ inside the box of the feature release they belong to, so the notes for one relea
 
     - **Replay: the player hangs below the terrain strip.** With the Terrain Analysis in its
       **Show Map** strip the replay player lay underneath it; it now hangs from the strip's
-      lower edge, so a flight can be played and followed in the profile at the same time.
-      [#346]
+      lower edge, so the player stays usable while the profile is on screen. [#346]
     - **A smaller flight database** — imported INAV Blackbox flights no longer carry an unused
       text copy of their rows, and space freed by deleting flights or stored logs is handed back
       to the disk. [#232]

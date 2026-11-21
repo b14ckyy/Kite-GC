@@ -162,8 +162,8 @@ If the track carries **logged signal strength**, the **Logged RSSI** line plots 
 strip is a pure tracking view: the chart takes its whole height, and beside it are only **Show Map**,
 **Follow** (while connected), the **↻** reset button and the legend. Mode (Waypoints / Track), datum
 (MSL / AGL), ground clearance and the read-outs are those of the full view — press **Show Map** again to
-get back to them. While a flight is replayed, the replay player hangs below the strip instead of under
-the top bar.
+get back to them. While a flight is replayed, the replay player hangs below the strip instead of at
+the top of the map.
 
 ![The terrain strip above the 2D map during a replay, with the replay player below it](../assets/guides/safety/terrain_strip_replay.png)
 /// caption
