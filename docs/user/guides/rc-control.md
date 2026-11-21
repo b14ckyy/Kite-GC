@@ -74,8 +74,9 @@ Things to know:
 - **Latency.** The radio sends 50 to 90 frames per second, but Bluetooth delivers them in bursts: expect
   30 to 60 ms between bursts, and single gaps of 0.1 to 0.2 s. That suits the 10–25 Hz stick stream of RC
   control; it is not a low-latency link.
-- **Trainer or telemetry, not both.** The radio's Bluetooth does one job at a time. While Kite holds a
-  radio as a trainer input, it cannot be connected as a **BLE** telemetry link. If a remembered radio
+- **Trainer or telemetry, not both.** The radio's Bluetooth does one job at a time. While the RC panel
+  is open or control is engaged, Kite looks for the remembered radios, and such a radio cannot be
+  connected as a **BLE** telemetry link. If a remembered radio
   sends telemetry instead, its line reads *Sends telemetry, not trainer data*; Kite lets go of it and
   looks again every 15 seconds. The other way round, a radio in trainer mode that you connect as a
   **Telemetry** link over BLE is recognised: Kite closes that link and offers the radio for RC control (a
