@@ -66,12 +66,9 @@
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="dialog-box" onclick={(e) => e.stopPropagation()}>
       <div class="dialog-title">{$t('update.title')}</div>
-      <div class="dialog-message">
-        {$t('update.body')}
-        <div class="upd-versions">
-          <div><span class="upd-k">{$t('update.latest')}</span> <span class="upd-v">{info.version}</span>{#if info.prerelease} <span class="upd-pre">{$t('update.prerelease')}</span>{/if}</div>
-          <div><span class="upd-k">{$t('update.current')}</span> <span class="upd-v">{currentVersion}</span></div>
-        </div>
+      <div class="dialog-message upd-versions">
+        <span><span class="upd-k">{$t('update.latest')}</span> <span class="upd-v">{info.version}</span>{#if info.prerelease}<span class="upd-pre">{$t('update.prerelease')}</span>{/if}</span>
+        <span><span class="upd-k">{$t('update.current')}</span> <span class="upd-v">{currentVersion}</span></span>
       </div>
 
       {#if notesHtml}
@@ -150,14 +147,13 @@
   }
 
   .upd-versions {
-    margin-top: 12px;
     display: flex;
-    flex-direction: column;
-    gap: 4px;
+    flex-wrap: wrap;
+    gap: 4px 24px;
   }
   .upd-k { color: #949494; }
   .upd-v { color: #e0e0e0; font-weight: 600; }
-  .upd-pre { color: #f5a623; font-size: 11px; }
+  .upd-pre { color: #f5a623; font-size: 11px; margin-left: 6px; }
 
   /* ── Release notes ─────────────────────────────────────────────────────── */
   .upd-notes-head {
@@ -214,7 +210,7 @@
     overflow-x: auto;
   }
   .upd-notes :global(pre code) { background: none; padding: 0; }
-  .upd-notes :global(table) { border-collapse: collapse; margin: 0 0 8px; }
+  .upd-notes :global(table) { border-collapse: collapse; margin: 0 0 8px; display: block; max-width: 100%; overflow-x: auto; }
   .upd-notes :global(th), .upd-notes :global(td) { border: 1px solid #3a3a3a; padding: 3px 8px; text-align: left; }
   .upd-notes :global(th) { color: #e0e0e0; background: #2a2a2a; }
   .upd-notes :global(hr) { border: 0; border-top: 1px solid #333; margin: 10px 0; }
