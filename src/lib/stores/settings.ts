@@ -266,6 +266,8 @@ export interface RcControlSettings {
   /** Offline platform selection for the config editor (see docs/active/MAVLINK_RC_CONTROL.md §2). When a
    *  FC is connected the detected platform wins and locks; this is the choice used while disconnected. */
   platform: RcPlatform;
+  /** FrSky radio used as the Bluetooth trainer input (BLE id + name); absent in older settings. */
+  trainerRadio?: { id: string; name: string } | null;
 }
 
 /** Flight-stack the RC-control config targets — drives the channel split + the send adapter. */

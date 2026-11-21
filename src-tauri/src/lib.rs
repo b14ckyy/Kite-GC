@@ -88,7 +88,7 @@ use commands::flightlog::{flightlog_flight_videos,
 };
 use commands::aero::{aero_fetch, aero_cache_stats, aero_cache_clear};
 use commands::hid::{
-    hid_start, hid_stop, hid_select_device,
+    hid_start, hid_stop, hid_select_device, trainer_start, trainer_stop,
     hid_profiles_dir, hid_profile_list, hid_profile_save, hid_profile_delete,
 };
 use commands::rc::{
@@ -586,6 +586,7 @@ pub fn run() {
         .manage(TelemetryApi::new())
         .manage(weather::service::WeatherService::new())
         .manage(HidManager::new())
+        .manage(hid::frsky_trainer::TrainerManager::new())
         // As an `Arc` so the start command can hand it to a blocking task (process spawn +
         // readiness poll) without pinning an async runtime thread.
         .manage(std::sync::Arc::new(MediaMtx::new()))
@@ -867,6 +868,8 @@ pub fn run() {
             hid_start,
             hid_stop,
             hid_select_device,
+            trainer_start,
+            trainer_stop,
             hid_profiles_dir,
             hid_profile_list,
             hid_profile_save,

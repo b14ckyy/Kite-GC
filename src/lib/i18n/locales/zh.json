@@ -199,6 +199,27 @@
     "expand": "显示配置",
     "collapse": "隐藏配置",
     "device": "设备",
+    "trainer": {
+      "detectedKnown": "{name} 处于教练模式：遥测链路已关闭，遥控器用于 RC 控制。",
+      "detectedTitle": "遥控器处于教练模式",
+      "detectedAsk": "{name} 发送的是 RC 教练数据，不是遥测数据。链路已关闭。是否将此遥控器用作 RC 控制的蓝牙输入？",
+      "detectedInfo": "{name} 发送的是 RC 教练数据，不是遥测数据。链路已关闭。请将遥控器的蓝牙切换为遥测，或启用 RC 控制以将其用作输入。",
+      "detectedUse": "用于 RC 控制",
+      "title": "通过蓝牙连接 FrSky 遥控器",
+      "hint": "将遥控器设为蓝牙教练模式（Slave）。在此使用期间，它不会作为遥测链路提供。",
+      "scan": "搜索",
+      "scanning": "正在搜索…",
+      "none": "未找到蓝牙设备",
+      "remove": "移除",
+      "state": {
+        "searching": "正在搜索遥控器…",
+        "connecting": "正在连接…",
+        "waiting": "已连接，等待通道数据…",
+        "streaming": "正在接收 {count} 个通道",
+        "stalled": "遥控器无数据",
+        "foreign": "发送的是遥测数据，不是教练数据。遥控器进入教练模式后会自动连接。"
+      }
+    },
     "platform": "平台",
     "platformLocked": "已锁定到连接的飞控",
     "manual": {

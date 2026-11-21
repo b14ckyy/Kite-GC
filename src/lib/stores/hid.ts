@@ -9,6 +9,7 @@
 import { writable } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { startTrainer, stopTrainer } from './trainer';
 
 /** A connected input device (matches the Rust `HidDevice`). */
 export interface HidDevice {
@@ -65,10 +66,12 @@ export async function startHid(): Promise<void> {
   unlistenInput = await listen<HidSnapshot>('hid-input', (e) => hidSnapshot.set(e.payload));
   await invoke('hid_start');
   hidActive.set(true);
+  void startTrainer();
 }
 
 /** Stop the HID input thread and tear down listeners. */
 export async function stopHid(): Promise<void> {
+  await stopTrainer();
   await invoke('hid_stop');
   unlistenDevices?.();
   unlistenInput?.();

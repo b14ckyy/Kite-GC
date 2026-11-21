@@ -15,6 +15,7 @@
 // Each backend yields the same `HidDevice` / `HidSnapshot` shape. The owning thread is the only place
 // a backend is touched (the WGI COM objects aren't `Send`), controlled via `HidManager`.
 
+pub mod frsky_trainer;
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "macos")]
@@ -209,7 +210,8 @@ fn input_loop(app: AppHandle, running: Arc<AtomicBool>, selected: Arc<AtomicUsiz
 
     log::info!("[hid] input thread started");
     while running.load(Ordering::SeqCst) {
-        let devices = backend.poll();
+        let mut devices = backend.poll();
+        devices.extend(frsky_trainer::device());
         if devices != last_devices {
             if devices.is_empty() {
                 log::info!("[hid] no game controllers connected");
@@ -236,7 +238,10 @@ fn input_loop(app: AppHandle, running: Arc<AtomicBool>, selected: Arc<AtomicUsiz
             }
         }
 
-        if let Some(target) = target {
+        // The trainer task emits its own `hid-input` on frame arrival.
+        let trainer = target == Some(frsky_trainer::DEVICE_ID);
+        frsky_trainer::set_selected(trainer);
+        if let Some(target) = target.filter(|_| !trainer) {
             if let Some(mut snap) = backend.snapshot(target) {
                 for axis in &mut snap.axes {
                     axis.value = apply_deadband(axis.value);
@@ -269,5 +274,6 @@ fn input_loop(app: AppHandle, running: Arc<AtomicBool>, selected: Arc<AtomicUsiz
 
         thread::sleep(POLL_INTERVAL);
     }
+    frsky_trainer::set_selected(false);
     log::info!("[hid] input thread stopped");
 }

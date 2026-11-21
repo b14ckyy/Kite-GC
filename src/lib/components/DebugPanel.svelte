@@ -23,6 +23,7 @@
   import { nativeHoleDebug } from "$lib/controllers/nativeVideo";
   import { isLinux } from "$lib/platform";
   import NumberStepper from "$lib/components/NumberStepper.svelte";
+  import DebugTrainerTab from "$lib/components/DebugTrainerTab.svelte";
   import { mjpegStats, uiJankMs, startJankProbe, stopJankProbe } from "$lib/controllers/mjpegSink";
   import { activeVehicleId } from "$lib/stores/vehicles";
   import { activeFcModes } from "$lib/stores/fcModes";
@@ -36,7 +37,7 @@
 
   let { onclose }: { onclose: () => void } = $props();
 
-  type Tab = 'msp' | 'mavlink' | 'modes' | 'tunnel' | 'alerts' | 'telemetry' | 'rc' | 'performance' | 'video' | 'fleet' | 'customMaps';
+  type Tab = 'msp' | 'mavlink' | 'modes' | 'tunnel' | 'alerts' | 'telemetry' | 'rc' | 'trainer' | 'performance' | 'video' | 'fleet' | 'customMaps';
   let tab = $state<Tab>('msp');
 
   // ── Custom maps: the active map's coverage index + the last resolved tiles ──
@@ -609,7 +610,7 @@
     <button class="debug-close" onclick={onclose}>✕</button>
   </div>
 
-  <div class="debug-tabs">
+  <div class="debug-tabs" onwheel={(e) => { if (!e.deltaX) e.currentTarget.scrollLeft += e.deltaY; }}>
     <button class="tab" class:active={tab === 'msp'} onclick={() => tab = 'msp'}>{$t('debug.tabMsp')}</button>
     <button class="tab" class:active={tab === 'mavlink'} onclick={() => tab = 'mavlink'}>{$t('debug.tabMavlink')}</button>
     <button class="tab" class:active={tab === 'modes'} onclick={() => tab = 'modes'}>{$t('debug.tabModes')}</button>
@@ -617,6 +618,7 @@
     <button class="tab" class:active={tab === 'telemetry'} onclick={() => tab = 'telemetry'}>{$t('debug.tabTelemetry')}</button>
     <button class="tab" class:active={tab === 'alerts'} onclick={() => tab = 'alerts'}>{$t('debug.tabAlerts')}</button>
     <button class="tab" class:active={tab === 'rc'} onclick={() => tab = 'rc'}>{$t('debug.tabRc')}</button>
+    <button class="tab" class:active={tab === 'trainer'} onclick={() => tab = 'trainer'}>{$t('debug.tabTrainer')}</button>
     <button class="tab" class:active={tab === 'performance'} onclick={() => tab = 'performance'}>{$t('debug.tabPerformance')}</button>
     <button class="tab" class:active={tab === 'video'} onclick={() => tab = 'video'}>{$t('debug.tabVideo')}</button>
     <button class="tab" class:active={tab === 'fleet'} onclick={() => tab = 'fleet'}>{$t('debug.tabFleet')}</button>
@@ -1102,6 +1104,8 @@
         <span class="cap-path">{$fcChannels.length ? $fcChannels.map((v, i) => `CH${i + 1}:${v}`).join('  ') : '—'}</span>
       </div>
     </div>
+  {:else if tab === 'trainer'}
+    <DebugTrainerTab />
   {:else if tab === 'alerts'}
     <div class="debug-stats alerts-stats">
       {#if !alerts.uavValid}
@@ -1732,9 +1736,14 @@
     gap: 4px;
     padding: 6px 8px 0;
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    overflow-x: auto;
+    flex: none;
+    scrollbar-width: thin;
   }
 
   .tab {
+    flex: none;
+    white-space: nowrap;
     background: none;
     border: none;
     border-bottom: 2px solid transparent;

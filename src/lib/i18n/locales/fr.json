@@ -199,6 +199,27 @@
     "expand": "Afficher la configuration",
     "collapse": "Masquer la configuration",
     "device": "Périphérique",
+    "trainer": {
+      "detectedKnown": "{name} est en mode écolage : liaison de télémétrie fermée, la radio sert au contrôle RC.",
+      "detectedTitle": "La radio est en mode écolage",
+      "detectedAsk": "{name} envoie des données d’écolage RC, pas de la télémétrie. La liaison a été fermée. Utiliser cette radio comme entrée Bluetooth du contrôle RC ?",
+      "detectedInfo": "{name} envoie des données d’écolage RC, pas de la télémétrie. La liaison a été fermée. Passez le Bluetooth de la radio en télémétrie ou activez le contrôle RC pour l’utiliser comme entrée.",
+      "detectedUse": "Utiliser pour le contrôle RC",
+      "title": "Radio FrSky en Bluetooth",
+      "hint": "Mettez la radio en mode écolage Bluetooth (Slave). Tant qu’elle est utilisée ici, elle n’est pas proposée comme liaison de télémétrie.",
+      "scan": "Rechercher",
+      "scanning": "Recherche…",
+      "none": "Aucun appareil Bluetooth trouvé",
+      "remove": "Retirer",
+      "state": {
+        "searching": "Recherche de la radio…",
+        "connecting": "Connexion…",
+        "waiting": "Connectée, en attente des données de voies…",
+        "streaming": "Réception de {count} voies",
+        "stalled": "Aucune donnée de la radio",
+        "foreign": "Envoie de la télémétrie, pas des données d’écolage. Se connecte d’elle-même dès que la radio est en mode écolage."
+      }
+    },
     "platform": "Plateforme",
     "platformLocked": "Verrouillé sur le contrôleur de vol connecté",
     "manual": {

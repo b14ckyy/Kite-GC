@@ -519,7 +519,7 @@ struct GattCharData {
 /// pairing (PIN) prompt — even though the vendor telemetry characteristic itself needs no pairing. The
 /// telemetry stream always lives on a vendor service (e.g. 0xFFF0 on FrSky radios), so skipping these is
 /// safe and avoids the spurious pairing entirely.
-fn is_standard_gatt_service(uuid: uuid::Uuid) -> bool {
+pub(crate) fn is_standard_gatt_service(uuid: uuid::Uuid) -> bool {
     // 16-bit SIG UUIDs use the base 0000xxxx-0000-1000-8000-00805f9b34fb.
     let b = uuid.as_bytes();
     const BASE: [u8; 12] = [0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0x80, 0x5f, 0x9b, 0x34, 0xfb];
@@ -541,6 +541,23 @@ fn char_property_names(p: btleplug::api::CharPropFlags) -> Vec<String> {
     if p.contains(F::NOTIFY) { v.push("Notify".into()); }
     if p.contains(F::INDICATE) { v.push("Indicate".into()); }
     v
+}
+
+/// Devices a listen link holds; the trainer task must not connect to (and disconnect) one of them.
+static LISTEN_DEVICES: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+pub fn is_listen_device(device_id: &str) -> bool {
+    LISTEN_DEVICES.lock().map(|l| l.iter().any(|d| d == device_id)).unwrap_or(false)
+}
+
+/// Valid trainer frames on a listen link before it is taken for a trainer radio.
+const TRAINER_FRAMES_TO_HAND_OVER: usize = 5;
+
+/// Payload of `ble-trainer-detected`.
+#[derive(Clone, serde::Serialize)]
+struct TrainerDetected {
+    id: String,
+    name: String,
 }
 
 /// Connect to a BLE device in **listen-only** mode (no profile required, no writes). Emits the full
@@ -693,13 +710,34 @@ pub async fn connect_ble_listen(
 
     let peripheral_clone = peripheral.clone();
     let app_clone = app.clone();
+    let trainer_id = device_id.to_string();
+    let trainer_name = device_name.clone();
+    if let Ok(mut held) = LISTEN_DEVICES.lock() {
+        held.push(trainer_id.clone());
+    }
     tauri::async_runtime::spawn(async move {
         let mut notifications = notification_stream;
+        // A radio in Bluetooth trainer mode sends RC frames, not telemetry: end the link and say so.
+        let mut trainer = crate::hid::frsky_trainer::TrainerDecoder::default();
+        let mut trainer_frames = Vec::new();
+        let mut trainer_seen = 0usize;
         loop {
             tokio::select! {
                 maybe = notifications.next() => {
                     match maybe {
                         Some(n) => {
+                            trainer.feed(&n.value, &mut trainer_frames);
+                            trainer_seen += trainer_frames.len();
+                            trainer_frames.clear();
+                            if trainer_seen >= TRAINER_FRAMES_TO_HAND_OVER {
+                                log::warn!("BLE listen: '{}' sends trainer frames, not telemetry — closing the link", trainer_name);
+                                let _ = app_clone.emit("ble-trainer-detected", TrainerDetected {
+                                    id: trainer_id.clone(),
+                                    name: trainer_name.clone(),
+                                });
+                                let _ = peripheral_clone.disconnect().await;
+                                break;
+                            }
                             let _ = app_clone.emit("ble-gatt-char-data", GattCharData {
                                 uuid: n.uuid.to_string(),
                                 len: n.value.len(),
@@ -737,6 +775,9 @@ pub async fn connect_ble_listen(
                     break;
                 }
             }
+        }
+        if let Ok(mut held) = LISTEN_DEVICES.lock() {
+            held.retain(|d| d != &trainer_id);
         }
     });
 
