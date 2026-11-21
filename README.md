@@ -10,7 +10,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="License: GPL-3.0-or-later" src="https://img.shields.io/badge/License-GPLv3-blue.svg"></a>
   <a href="https://b14ckyy.github.io/Kite-GC/"><img alt="Documentation" src="https://img.shields.io/badge/docs-online-37a8db"></a>
-  <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-555">
+  <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Android-555">
   <a href="https://github.com/b14ckyy/Kite-GC/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/b14ckyy/Kite-GC?label=release&color=59aa29"></a>
   <a href="https://discord.gg/3FM7EWhkg9"><img alt="Discord" src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white"></a>
   <a href="https://paypal.me/b14ckyy"><img alt="Donate via PayPal" src="https://img.shields.io/badge/Donate-PayPal-00457C?logo=paypal&logoColor=white"></a>
@@ -19,19 +19,23 @@
 ---
 ## Development state
 
-**Kite 1.0 is released** — the first stable version, after a summer of betas and release candidates.
-Work on 2.0 (mobile, native video decode, a new flight-database schema, and more) continues on the
-integration trunk:
+**Kite 2.0 is in beta, and beta 2 is its feature freeze.** What 2.0.0-b2 contains is what 2.0 ships
+with: Android and iOS apps, native video decoding with recording, a new flight-database schema, INAV
+planning over MAVLink-only links, and more — see the
+[changelog](https://b14ckyy.github.io/Kite-GC/dev/changelog/). From here on 2.0 only takes fixes, through
+the release candidates to the final. **Kite 1.0 stays the stable version** until then.
 
-- **All changes** → pull request against **`development`**, the always-current trunk. Features and
-  fixes alike land there and reach `master` as tested snapshots — so `master` builds are what you
-  install if you want to try the development state.
-- **A fix for the released 1.0** → pull request against **`release/1.0.x`**, the maintenance branch cut
-  from the `v1.0.0` tag. Patch releases are tagged from it, and it is merged forward into `development`.
-  1.0 stays maintained until 2.1.0 ships — see
-  **[Release support](https://b14ckyy.github.io/Kite-GC/release-support/)** for the policy.
+- **New features** → pull request against **`development`**, the always-current trunk. They reach
+  `master` as tested snapshots and go into the version after 2.0.
+- **A fix for 2.0** → the release line **`release/2.0.x`** is cut from `master` as soon as beta 2 is
+  published. From then on a 2.0 fix is a pull request against that branch; it carries the release
+  candidates, the final and the patches, and is merged forward into `development`. Until the branch
+  exists, fixes go to `development` like everything else.
+- **A fix for the released 1.0** → pull request against **`release/1.0.x`**. Patch releases are tagged
+  from it, and it is merged forward through the newer lines. 1.0 stays maintained until 2.1.0 ships —
+  see **[Release support](https://b14ckyy.github.io/Kite-GC/release-support/)** for the policy.
 
-Nobody commits to either branch directly — see
+Nobody commits to any of these branches directly — see
 **[Contributing](https://b14ckyy.github.io/Kite-GC/for-developers/contributing/)** for the full
 branching model.
 
@@ -90,7 +94,7 @@ Everything you'd expect from a ground station:
   and live *terrain radar* / AGL widgets in flight.
 - **Flight Logbook** — automatic recording with replay, plus import of INAV blackbox, **ArduPilot
   Dataflash**, MAVLink `.tlog` and **MWPTools-compatible raw-MSP** logs — unified into one searchable
-  flight history.
+  flight history. 2.0 decodes Blackbox logs itself and adds PX4 `.ulg` logs.
 - **Fleet (Vehicle) Manager** — a build sheet per aircraft (airframe, propulsion, FC, sensors, photo)
   with lifetime statistics, auto-linked to your flights; export/import as `.kvehicle`.
 - **Battery Manager** — track each pack by serial: cycles, lifetime usage and health, with `.kbatt`
@@ -99,10 +103,12 @@ Everything you'd expect from a ground station:
   airspace overlays (airports, controlled airspace, obstacles) and **foreign-vehicle radar** with
   ADS-B proximity & conflict alerts.
 - **Live video** — a local capture device (webcam / USB capture card) or a low-latency RTSP stream,
-  shown alongside (or behind) the map, with one-click map ⇄ video swapping.
+  shown alongside (or behind) the map, with one-click map ⇄ video swapping. 2.0 decodes RTSP with the
+  system's hardware decoder and records the stream per flight, played back in sync with the replay.
 - **Telemetry relay** — re-encode and forward live telemetry to other ground stations, handsets or an
   antenna tracker.
-- **RC control** — fly from the GCS with a gamepad/joystick (HID).
+- **RC control** — fly from the GCS with a gamepad/joystick (HID); from 2.0 also with a radio in
+  Bluetooth trainer mode, without a cable.
 - **RF link analysis** — visualise signal quality to find the best antenna setup.
 
 ## Supported setups
@@ -113,7 +119,8 @@ Everything you'd expect from a ground station:
 - **Link modes:** live control link, **passive** listen-only telemetry, or a **relay** that
   re-broadcasts to other ground stations.
 - **Platforms:** Windows, macOS (universal, signed and notarized) and Linux (x86-64 / ARM64).
-  Android and iOS / iPadOS are in development on `development` and target the 2.0 release.
+  2.0 adds **Android** (tablets and phones; in the beta as an APK download) and **iPhone / iPad**
+  (through the App Store, which follows later).
 
 ## Download
 
