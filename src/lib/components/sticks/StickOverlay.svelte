@@ -51,6 +51,10 @@
     align-items: center;
     gap: 4px;
     pointer-events: none; /* purely informational — never steal clicks from the map/player */
+    transition: top 0.2s ease;
+  }
+  :global(html.is-tablet) .stick-overlay {
+    top: calc(var(--toolbar-h, 53px) + 9px + var(--log-player-drop, 0px));
   }
 
   /* Phone: the map area is barely wider than the player itself — no room beside it. */

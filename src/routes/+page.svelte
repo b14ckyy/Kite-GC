@@ -513,7 +513,6 @@
   // Telemetry Relay dropdown (under the connection bar).
   let relayPanelOpen = $state(false);
 
-  // Terrain Analysis overlay (NavRail-triggered, full-width over the map)
   let terrainOpen = $state(false);
   let terrainCompact = $state(false);
   terrainAnalysis.subscribe((s) => { terrainOpen = s.open; terrainCompact = s.compact; });
@@ -1404,10 +1403,10 @@
   });
 
   // The terrain strip (wide-compact) lies where the replay player hangs: the player moves below it, by the
-  // strip's height (PanelShell `.ps-wide-compact`) and its 9px offset from the top bar.
+  // strip's height (`--ps-strip-h`, PanelShell) and the 9px the strip starts below the bar.
   $effect(() => {
     const below = terrainOpen && terrainCompact && !panelHidden;
-    document.documentElement.style.setProperty('--log-player-drop', below ? 'calc(max(20vh, 160px) + 9px)' : '0px');
+    document.documentElement.style.setProperty('--log-player-drop', below ? 'calc(var(--ps-strip-h) + 9px)' : '0px');
   });
 
   /** Width of the area the map shows in: the window, on a phone without the widget column at its side. */
