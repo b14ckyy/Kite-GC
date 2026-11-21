@@ -552,7 +552,6 @@
   },
   "update": {
     "title": "Update verfügbar",
-    "body": "Eine neue Version von Kite Ground Control ist verfügbar.",
     "latest": "Neueste:",
     "current": "Installiert:",
     "prerelease": "Pre-Release",

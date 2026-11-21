@@ -552,7 +552,6 @@
   },
   "update": {
     "title": "Update available",
-    "body": "A new version of Kite Ground Control is available.",
     "latest": "Latest:",
     "current": "You have:",
     "prerelease": "pre-release",
