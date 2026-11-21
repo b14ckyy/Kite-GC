@@ -23,7 +23,7 @@
   import { panelState, type SettingsTab } from '$lib/stores/panelState';
   import { resetGcsManual, gcsManuallySet } from '$lib/stores/gcsLocation';
   import type { AppSettings, InterfaceSettings, RadarSettings, GcsMode, AirspaceSettings, AirspaceProvider, SystemMessagesLevel, LogLevel, RcControlSettings, TelemetryApiSettings, UpdateCheckSettings, UpdateCheckMode, DefaultProtocol } from '$lib/stores/settings';
-  import { revealItemInDir, openPath } from '@tauri-apps/plugin-opener';
+  import { revealItemInDir } from '@tauri-apps/plugin-opener';
   import { isAndroid, isMobile, hasDbCompact, hasCustomMaps, hasRcControl } from '$lib/platform';
   import { updatesSupported, updateKind } from '$lib/controllers/updateCheck';
   import { blackboxDecoderVersion, blackboxLegacyMode, downloadBlackboxDecode } from '$lib/stores/flightlog';
@@ -238,13 +238,12 @@
     } catch (e) {
       console.warn('[settings] revealItemInDir failed', e);
     }
-    // Second try: open the containing folder itself, which some file managers handle when "reveal"
-    // isn't wired up.
+    // Second try: the folder itself, which a file manager opens also where "reveal" isn't wired up.
     try {
-      await openPath(p.replace(/[\/][^\/]*$/, ''));
+      await invoke('system_open_folder', { path: p });
       return;
     } catch (e) {
-      console.warn('[settings] openPath failed', e);
+      console.warn('[settings] system_open_folder failed', e);
       logOpenError = e instanceof Error ? e.message : String(e);
     }
   }

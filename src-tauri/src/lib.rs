@@ -101,7 +101,7 @@ use commands::geozone::{geozone_read_all, geozone_write_all};
 use commands::fence::{fence_read_all, fence_write_all};
 use commands::rally::{rally_read_all, rally_write_all};
 use commands::info::{get_app_version, is_debug_mode, is_fleet_mode, is_fleet_group_recording};
-use commands::system::{system_active_net_is_wifi, system_on_battery};
+use commands::system::{system_active_net_is_wifi, system_on_battery, system_open_folder};
 use commands::storage::{
     export_copy, export_scratch_clear, export_scratch_path, export_take_save_request, file_display_name,
     share_file, storage_pick_folder, storage_flush_raw_logs,
@@ -801,6 +801,7 @@ pub fn run() {
             terrain_cache_stats,
             terrain_cache_clear,
             system_on_battery,
+            system_open_folder,
             system_active_net_is_wifi,
             storage_pick_folder,
             storage_flush_raw_logs,

@@ -97,3 +97,24 @@ pub fn system_on_battery() -> bool {
     }
     false
 }
+
+/// Open the folder `path` is, or lies in, in the file manager — for a desktop where "reveal" has no
+/// service to talk to. From the backend: the opener's `openPath` wants a path scope in the capability.
+/// Only ever a directory, since opening a file would run it.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn system_open_folder(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let given = std::path::Path::new(&path);
+    let dir = if given.is_dir() { given } else { given.parent().unwrap_or(given) };
+    if !dir.is_dir() {
+        return Err(format!("Folder not found: {}", dir.display()));
+    }
+    app.opener().open_path(dir.to_string_lossy(), None::<&str>).map_err(|e| e.to_string())
+}
+
+#[cfg(mobile)]
+#[tauri::command]
+pub fn system_open_folder(_path: String) -> Result<(), String> {
+    Err("Not available on this platform".to_string())
+}

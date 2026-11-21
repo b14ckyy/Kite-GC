@@ -1286,6 +1286,8 @@
   "logbook": {
     "video": "Video",
     "videoMissing": "File not found: {path}",
+    "videoFolder": "Show folder",
+    "videoFolderTip": "Show this flight's recordings in the file manager",
     "title": "Flight Logbook",
     "disabled": "Flight logging is disabled. Enable it in Settings and reconnect.",
     "dbNewer": "This flight database comes from a newer Kite version. The logbook stays disabled until a matching or newer Kite is installed — the database is not modified.",

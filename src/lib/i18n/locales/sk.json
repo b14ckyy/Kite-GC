@@ -1282,6 +1282,8 @@
   "logbook": {
     "video": "Video",
     "videoMissing": "File not found: {path}",
+    "videoFolder": "Zobraziť priečinok",
+    "videoFolderTip": "Zobraziť nahrávky tohto letu v správcovi súborov",
     "title": "Letový denník",
     "disabled": "Zaznamenávanie letov je vypnuté. Zapnite ho v nastaveniach a znova sa pripojte.",
     "dbNewer": "Táto databáza letov pochádza z novšej verzie Kite. Letový denník zostane vypnutý, kým nenainštalujete rovnakú alebo novšiu verziu Kite. Databáza sa nemení.",

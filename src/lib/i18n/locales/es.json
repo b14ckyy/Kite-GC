@@ -1282,6 +1282,8 @@
   "logbook": {
     "video": "Video",
     "videoMissing": "File not found: {path}",
+    "videoFolder": "Mostrar carpeta",
+    "videoFolderTip": "Mostrar las grabaciones de este vuelo en el gestor de archivos",
     "title": "Bitácora de vuelo",
     "disabled": "El registro de vuelos está desactivado. Actívalo en Ajustes y vuelve a conectar.",
     "dbNewer": "Esta base de datos de vuelos procede de una versión más reciente de Kite. La bitácora permanece desactivada hasta que se instale un Kite igual o más reciente — la base de datos no se modifica.",

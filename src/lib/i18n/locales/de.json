@@ -1286,6 +1286,8 @@
   "logbook": {
     "video": "Video",
     "videoMissing": "Datei nicht gefunden: {path}",
+    "videoFolder": "Ordner anzeigen",
+    "videoFolderTip": "Die Aufnahmen dieses Flugs im Dateimanager anzeigen",
     "title": "Flug-Logbuch",
     "disabled": "Flugaufzeichnung ist deaktiviert. In den Einstellungen aktivieren und neu verbinden.",
     "dbNewer": "Diese Flug-Datenbank stammt aus einer neueren Kite-Version. Das Logbuch bleibt deaktiviert, bis eine passende oder neuere Kite-Version installiert ist — die Datenbank wird nicht verändert.",

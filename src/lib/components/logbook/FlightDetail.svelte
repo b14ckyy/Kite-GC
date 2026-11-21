@@ -5,6 +5,7 @@
 
 <script lang="ts">
   import { t } from 'svelte-i18n';
+  import { invoke } from '@tauri-apps/api/core';
   import { convertAltitude, convertDistance, convertSpeed, convertTemperature, formatConverted } from '$lib/utils/units';
   import { formatDurationSec, formatFlightDateTime, flightTzLabel, flightDataSizes, type FlightDataSize, flightVideos, type FlightVideo, missionDbForFlight, flightLoggedWpCount, flightLinkMission, flightUnlinkMission, missionDbSave, missionDbFindByHash, missionDbGeocode, flightSetBatterySerial, batteryDbFindBySerial, batteryDbList, vehicleDbList, flightSetVehicle, getFlight } from '$lib/stores/flightlog';
   import type { Flight, LibraryMission, BatteryPack, Vehicle } from '$lib/stores/flightlogTypes';
@@ -23,6 +24,8 @@
   import { compassPointKey } from '$lib/helpers/compassPoint';
   import { get } from 'svelte/store';
   import { videoState } from '$lib/stores/video';
+  import { revealItemInDir } from '@tauri-apps/plugin-opener';
+  import { isMobile } from '$lib/platform';
   import { locale } from 'svelte-i18n';
   import WeatherEditor from './WeatherEditor.svelte';
   import Button from '$lib/components/panel/Button.svelte';
@@ -110,6 +113,15 @@
       .then((list) => { if (flightId === id) videos = list; })
       .catch(() => {});
   });
+
+  // The second try opens the folder itself, for a desktop without a "reveal" service.
+  function showVideoFolder() {
+    const path = videos.find((v) => v.exists && v.path)?.path;
+    if (!path) return;
+    void revealItemInDir(path)
+      .catch(() => invoke('system_open_folder', { path }))
+      .catch((e) => console.warn('[logbook] folder not opened', e));
+  }
 
   function videoInfo(v: FlightVideo): string {
     const parts: string[] = [];
@@ -643,6 +655,9 @@
             {v.name}<span class="raw-size">{videoInfo(v)}</span>
           </span>
         {/each}
+        {#if !isMobile && videos.some((v) => v.exists && v.path)}
+          <span><Button variant="compact" icon="folder" onclick={showVideoFolder} title={$t('logbook.videoFolderTip')}>{$t('logbook.videoFolder')}</Button></span>
+        {/if}
       </span>
     {/if}
     <span class="fc-label">{$t('logbook.mission')}</span>

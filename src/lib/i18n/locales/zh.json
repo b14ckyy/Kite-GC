@@ -1282,6 +1282,8 @@
   "logbook": {
     "video": "Video",
     "videoMissing": "File not found: {path}",
+    "videoFolder": "显示文件夹",
+    "videoFolderTip": "在文件管理器中显示此航班的录像",
     "title": "飞行日志",
     "disabled": "飞行日志已禁用。在设置中启用并重新连接。",
     "dbNewer": "此飞行数据库来自更新版本的 Kite。在安装匹配或更新的 Kite 版本之前，飞行日志保持禁用——数据库不会被修改。",

@@ -1557,7 +1557,7 @@ pub fn flightlog_import_videos(
 }
 
 /// Remove recording files (trash where there is one) and report what went.
-fn remove_recordings(files: &[std::path::PathBuf]) -> video_files::VideoSet {
+fn remove_recordings(root: &std::path::Path, files: &[std::path::PathBuf]) -> video_files::VideoSet {
     let mut gone = Vec::new();
     for file in files {
         let size = std::fs::metadata(file).map(|m| m.len()).unwrap_or(0);
@@ -1566,6 +1566,7 @@ fn remove_recordings(files: &[std::path::PathBuf]) -> video_files::VideoSet {
             Err(e) => log::warn!("[flightlog] recording not removed: {e}"),
         }
     }
+    video_files::drop_empty_flight_dirs(root, &gone.iter().map(|(f, _)| f.clone()).collect::<Vec<_>>());
     video_files::VideoSet { count: gone.len(), bytes: gone.iter().map(|(_, s)| s).sum(), ..Default::default() }
 }
 
@@ -1623,8 +1624,8 @@ pub fn flightlog_orphan_videos_delete(
     video_dir: Option<String>,
     native_rtsp: tauri::State<'_, crate::video::rtsp_native::NativeRtsp>,
 ) -> Result<video_files::VideoSet, String> {
-    let (_, files) = orphan_recordings(db_path, video_dir, Some(&names), &native_rtsp)?;
-    Ok(remove_recordings(&files))
+    let (root, files) = orphan_recordings(db_path, video_dir, Some(&names), &native_rtsp)?;
+    Ok(remove_recordings(&root, &files))
 }
 
 #[tauri::command]

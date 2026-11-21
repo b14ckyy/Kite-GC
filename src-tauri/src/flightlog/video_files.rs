@@ -68,7 +68,7 @@ pub fn export_set(conn: &Connection, flight_ids: Option<&[i64]>, root: &Path) ->
 }
 
 /// `name` in `dir`, or `name_2`, `name_3`… when that is taken.
-fn free_name(dir: &Path, name: &std::ffi::OsStr) -> PathBuf {
+pub(super) fn free_name(dir: &Path, name: &std::ffi::OsStr) -> PathBuf {
     let first = dir.join(name);
     if !first.exists() {
         return first;
@@ -229,7 +229,24 @@ pub fn orphans(
     Ok(files)
 }
 
-/// Copy the recordings beside `kflight` into the video folder and point their flights at them.
+/// Only real folders directly below `<root>/Flights`; `remove_dir` refuses one that still holds something,
+/// which is the check. A link is left alone: removing it would hide what its target holds.
+pub fn drop_empty_flight_dirs(root: &Path, files: &[PathBuf]) {
+    let flights = root.join(video_link::FLIGHTS_DIR);
+    let dirs: HashSet<&Path> = files
+        .iter()
+        .filter_map(|f| f.parent())
+        .filter(|d| d.parent() == Some(flights.as_path()))
+        .filter(|d| std::fs::symlink_metadata(d).is_ok_and(|m| m.file_type().is_dir()))
+        .collect();
+    for dir in dirs {
+        if std::fs::remove_dir(dir).is_ok() {
+            log::info!("[video] empty flight folder {} removed", dir.display());
+        }
+    }
+}
+
+/// Copy the recordings beside `kflight` into their flights' folders and point the flights at them.
 pub fn import_videos(
     conn: &Connection,
     kflight: &Path,
@@ -241,16 +258,23 @@ pub fn import_videos(
     if files.is_empty() {
         return Ok(VideoSet::default());
     }
-    std::fs::create_dir_all(root).map_err(|e| format!("Creating {} failed: {e}", root.display()))?;
     let mut before = 0u64;
     let mut set = VideoSet::default();
     for (uid, file) in &files {
         let Some(name) = file.file_name() else { continue };
-        let dest = free_name(root, name);
-        let size = copy_file(file, &dest, &mut |done| progress(before + done, total))?;
+        let flight: i64 = conn
+            .query_row("SELECT flight_id FROM flight_videos WHERE fingerprint = ?1 ORDER BY id LIMIT 1", params![uid], |r| r.get(0))
+            .map_err(|e| format!("Database error: {e}"))?;
+        let folder = video_link::flight_folder(conn, flight, &name.to_string_lossy());
+        let dir = root.join(video_link::FLIGHTS_DIR).join(&folder);
+        std::fs::create_dir_all(&dir).map_err(|e| format!("Creating {} failed: {e}", dir.display()))?;
+        let dest = free_name(&dir, name);
+        let size = copy_file(file, &dest, &mut |done| progress(before + done, total)).inspect_err(|_| {
+            let _ = std::fs::remove_dir(&dir);
+        })?;
         before += size;
         progress(before, total);
-        let rel = dest.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        let rel = relative(root, &dest);
         conn.execute("UPDATE flight_videos SET rel_path = ?1 WHERE fingerprint = ?2", params![rel, uid])
             .map_err(|e| format!("Database error: {e}"))?;
         video_link::forget_missing(root, uid);
@@ -364,7 +388,7 @@ mod tests {
         link(&conn, a, "have.mkv", [2; 16]);
         mkv(&root.join("have.mkv"), [2; 16], 100);
         // Another recording already sits under the name the import would use.
-        mkv(&root.join("a.mkv"), [5; 16], 100);
+        mkv(&root.join("Flights/a/a.mkv"), [5; 16], 100);
 
         let kflight = dir.join("in/x.kflight");
         let side = sidecar_dir(&kflight);
@@ -379,8 +403,8 @@ mod tests {
         assert_eq!(set.count, 1);
         let rel: String =
             conn.query_row("SELECT rel_path FROM flight_videos WHERE fingerprint = ?1", params![hex([1; 16])], |r| r.get(0)).unwrap();
-        assert_eq!(rel, "a_2.mkv");
-        assert_eq!(crate::video::record::segment_uid(&root.join("a_2.mkv")), Some(hex([1; 16])));
+        assert_eq!(rel, "Flights/a/a_2.mkv");
+        assert_eq!(crate::video::record::segment_uid(&root.join(&rel)), Some(hex([1; 16])));
         assert!(!root.join("stranger.mkv").exists());
         assert_eq!(import_set(&conn, &kflight, &root, &[]).unwrap().count, 0);
         let listed = video_link::list_for_flight(&conn, a, &root).unwrap();
@@ -443,5 +467,29 @@ mod tests {
         assert_eq!(import_set(&conn, &dir.join("x.kflight"), &dir, &[]).unwrap(), VideoSet::default());
         drop(conn);
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_flight_folder_goes_with_its_last_recording() {
+        let root = scratch("folders");
+        let (a, b) = (root.join("Flights/A/one.mkv"), root.join("Flights/A/two.mkv"));
+        let loose = root.join("Moved/three.mkv");
+        for f in [&a, &b, &loose] {
+            mkv(f, [7; 16], 10);
+        }
+        std::fs::remove_file(&a).unwrap();
+        std::fs::remove_file(&loose).unwrap();
+        drop_empty_flight_dirs(&root, &[a.clone(), loose.clone()]);
+        assert!(root.join("Flights/A").is_dir(), "one recording is left in it");
+        assert!(root.join("Moved").is_dir(), "not a flight folder");
+        std::fs::remove_file(&b).unwrap();
+        drop_empty_flight_dirs(&root, &[b]);
+        assert!(!root.join("Flights/A").exists() && root.join("Flights").is_dir());
+        // A recording folder that itself lies in a folder called Flights is not a flight folder.
+        let own = root.join("Flights/Mine");
+        std::fs::create_dir_all(&own).unwrap();
+        drop_empty_flight_dirs(&own, &[own.join("gone.mkv")]);
+        assert!(own.is_dir());
+        let _ = std::fs::remove_dir_all(root);
     }
 }

@@ -128,8 +128,13 @@ for every flight: the recording starts when the connected vehicle is armed and e
   name the vehicle has in your vehicle library, else its craft name, else `Video`.
 - **A few seconds before arming are included:** the recording starts at the last keyframe the source
   sent before you armed.
-- **In the logbook:** once the flight is saved, its details show the recording under **Video**. The
-  file stays in the recording folder; the logbook only remembers it.
+- **In the logbook:** once the flight is saved, its details show the recording under **Video**, and
+  its files move into a folder of their own below the recording folder: `Flights/<name>/`, named
+  after the flight's first recording (without a `_part` number). What lies directly in the
+  recording folder is then a recording that is still being written, has no flight (yet) or could
+  not be moved — on Windows a file another program holds open stays where it is, and remains linked
+  all the same. **Show folder** in the flight details opens the flight's folder in the file manager
+  (not on phones and tablets). Recordings linked before this version stay where they are.
 - **Rename and sort the files as you like:** every recording carries an id of its own, and Kite finds
   the file by it below the recording folder — under a new name, in subfolders of your own scheme (up
   to six levels deep). Only the folder itself must stay the one set as **Recording folder**. A file that is no
@@ -138,10 +143,12 @@ for every flight: the recording starts when the connected vehicle is armed and e
   tools that rewrite a Matroska file usually give it a new id.
 - **Taking recordings to another Kite:** export the flights as `.kflight` and let Kite copy their
   recordings next to the file; the import on the other side offers to copy them into the recording
-  folder there. See [Logbook → Exporting](logbook.md#exporting).
+  folder there, each flight into its own folder. See [Logbook → Exporting](logbook.md#exporting).
 - **Clean up unlinked recordings…** (below the recording folder, shown while recording is switched
   on) lists Kite's recordings in the folder that no flight in your logbook is linked to, with their
   names and total size, and removes them when you confirm (recycle bin / trash where there is one).
+  A flight's folder that is empty afterwards goes with its last recording, also when you delete a
+  flight together with its recordings.
   The typical case is the recording of a flight you deleted while keeping the file. Left alone are
   a recording that is still being written, including the earlier parts of it, a recording that
   waits for its flight to be saved — also one a crash cut off; Kite keeps waiting for 30 days, even

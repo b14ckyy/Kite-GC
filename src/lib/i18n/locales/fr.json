@@ -1282,6 +1282,8 @@
   "logbook": {
     "video": "Video",
     "videoMissing": "File not found: {path}",
+    "videoFolder": "Afficher le dossier",
+    "videoFolderTip": "Afficher les enregistrements de ce vol dans le gestionnaire de fichiers",
     "title": "Carnet de vol",
     "disabled": "La journalisation des vols est désactivée. Activez-la dans les paramètres et reconnectez-vous.",
     "dbNewer": "Cette base de données de vols provient d'une version de Kite plus récente. Le carnet de vol reste désactivé jusqu'à l'installation d'une version de Kite égale ou plus récente — la base n'est pas modifiée.",
