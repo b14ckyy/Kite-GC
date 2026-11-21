@@ -22,6 +22,7 @@ import { connection } from './connection';
 import { rcFcConfig } from './rcFcConfig';
 import { currentChannels } from './rcProfiles';
 import { rcLayout } from './rcLayout';
+import { settings } from './settings';
 import { evaluateRcSafety } from '../helpers/rcSafety';
 import './rcStream'; // the engage-driven injection pump (self-initialising)
 
@@ -51,12 +52,20 @@ hidWanted.subscribe(() => void reconcileHid());
 // ── Involuntary disengage: ONLY a genuine loss of control authority ends a background session ─────────
 // NOT app navigation. Holding a frozen-stick stream after a real loss is unsafe, so we stop and let the
 // FC's RC failsafe / RC_OVERRIDE_TIME grace window take over (no explicit release frame — same as before).
+/** Device the session was engaged with. */
+let engagedUuid: string | null = null;
+rcEngaged.subscribe((e) => {
+  engagedUuid = e.on ? (engagedUuid ?? get(settings).rcControl.selectedUuid) : null;
+});
+
 const authorityLost = derived(
   [rcEngaged, connection, hidDevices, rcFcConfig, currentChannels, rcLayout],
   ([$eng, $conn, $devs, $fc, $chans, $layout]) => {
     if (!$eng.on) return false;
     if ($conn.status !== 'connected') return true; // link/FC disconnect
     if ($devs.length === 0) return true; // input device unplugged / driver drop
+    // Never fall over to another connected device with the same mapping.
+    if (engagedUuid && !$devs.some((d) => d.uuid === engagedUuid)) return true;
     if ($fc) {
       // INAV: a critical mode-channel configuration lock (never set for ArduPilot/PX4 — no rcFcConfig).
       const safety = evaluateRcSafety($fc.mode_ranges, Object.keys($chans).map(Number), $layout.rawMax);
