@@ -36,12 +36,18 @@ const ID_HOME_POSITION: f32 = 242.0;
 const ID_WIND: f32 = 168.0;
 const ID_WIND_COV: f32 = 231.0;
 const ID_POSITION_TARGET_GLOBAL_INT: f32 = 87.0;
+const ID_SERVO_OUTPUT_RAW: f32 = 36.0;
+/** ArduPilot's ESC telemetry (BLHeli32, or a VESC over DroneCAN): per-ESC voltage/current/RPM. */
+const ID_ESC_TELEMETRY_1_TO_4: f32 = 11030.0;
 
 // Rate kinds for the wanted messages (resolved against the two settings at apply time).
 const R_ATTITUDE: u8 = 0;
 const R_POSITION: u8 = 1;
 const R_FIXED_1HZ: u8 = 2;
 const R_HOME_LOW: u8 = 3;
+/** A fixed rate above 1 Hz: the throttle bars of the Speed widget are read at a glance, so 1 Hz
+ *  looked like a 1-second lag on every thrust change. */
+const R_FIXED_2HZ: u8 = 4;
 
 /// Wanted messages: (message_id, rate_kind). Single source of truth — also drives the reset list.
 const WANTED: &[(f32, u8)] = &[
@@ -66,6 +72,11 @@ const WANTED: &[(f32, u8)] = &[
     // FC's active navigation target → the map's Guided marker (FC-confirmed, incl. external GCS
     // changes). Small message; the frontend ignores it outside the guided mode.
     (ID_POSITION_TARGET_GLOBAL_INT, R_FIXED_1HZ),
+    // Per-output PWM — the only per-side thrust the link carries (VFR_HUD has just the average).
+    // Drives the Speed widget's left/right bars of a differential-thrust boat. Small message.
+    (ID_SERVO_OUTPUT_RAW, R_FIXED_2HZ),
+    // ESC telemetry (voltage of an ESC's own pack, current, RPM). Surface-only, see interval_for.
+    (ID_ESC_TELEMETRY_1_TO_4, R_FIXED_1HZ),
 ];
 
 // ── Ballast: high-rate messages no widget consumes — disabled (interval = -1) ────────────────
@@ -73,8 +84,7 @@ const BALLAST_IDS: &[f32] = &[
     2.0,   // SYSTEM_TIME
     27.0,  // RAW_IMU
     29.0,  // SCALED_PRESSURE
-    36.0,  // SERVO_OUTPUT_RAW
-    // 65 (RC_CHANNELS) is now WANTED at 1 Hz — it is our RSSI source.
+    // 36 (SERVO_OUTPUT_RAW) is now WANTED at 2 Hz — per-side thrust for the Speed widget.
     116.0, // SCALED_IMU2
     125.0, // POWER_STATUS
     129.0, // SCALED_IMU3
@@ -105,6 +115,7 @@ fn rate_hz(kind: u8, attitude_hz: f64, position_hz: f64) -> f32 {
         R_ATTITUDE => attitude_hz as f32,
         R_POSITION => position_hz as f32,
         R_HOME_LOW => 0.2,
+        R_FIXED_2HZ => 2.0,
         _ => 1.0, // R_FIXED_1HZ
     }
 }
@@ -119,6 +130,33 @@ fn hz_to_interval_us(hz: f32) -> f32 {
     }
 }
 
+/// The interval (µs) to request for one wanted message; -1 disables it.
+///
+/// The module gates and the surface-only message are sent as -1 rather than skipped, because
+/// SET_MESSAGE_INTERVAL is sticky FC-side across sessions: a link narrowed by an earlier session must
+/// be able to release the message again. `surface` (a rover/boat) is the one case that wants
+/// SERVO_OUTPUT_RAW — the per-side thrust of the Speed widget's differential display; a flying
+/// vehicle never reads it, so it stays off its (often narrow) RC link.
+fn interval_for(
+    msg_id: f32,
+    kind: u8,
+    attitude_hz: f64,
+    position_hz: f64,
+    airspeed_enabled: bool,
+    wind_enabled: bool,
+    surface: bool,
+) -> f32 {
+    if (msg_id == ID_SERVO_OUTPUT_RAW && !surface)
+        || (msg_id == ID_ESC_TELEMETRY_1_TO_4 && !surface)
+        || (msg_id == ID_VFR_HUD && !airspeed_enabled)
+        || ((msg_id == ID_WIND || msg_id == ID_WIND_COV) && !wind_enabled)
+    {
+        -1.0
+    } else {
+        hz_to_interval_us(rate_hz(kind, attitude_hz, position_hz))
+    }
+}
+
 /// Apply the reduced GCS-requested stream rates (default mode): wanted messages at the two knobs,
 /// ballast disabled. Fire-and-forget over the (pre-handler) byte transport.
 pub fn apply_stream_rates(
@@ -129,6 +167,7 @@ pub fn apply_stream_rates(
     airspeed_enabled: bool,
     wind_enabled: bool,
     is_px4: bool,
+    surface: bool,
 ) {
     let header = codec::gcs_header();
     let mut seq = MavSequence::new();
@@ -138,16 +177,7 @@ pub fn apply_stream_rates(
         if skip_foreign_wind(msg_id, is_px4) {
             continue;
         }
-        // VFR_HUD (airspeed) and the wind estimate each cost an extra message and are gated on their
-        // module — sent as -1 when off (not skipped) because SET_MESSAGE_INTERVAL is sticky FC-side
-        // across sessions.
-        let interval = if (msg_id == ID_VFR_HUD && !airspeed_enabled)
-            || ((msg_id == ID_WIND || msg_id == ID_WIND_COV) && !wind_enabled)
-        {
-            -1.0
-        } else {
-            hz_to_interval_us(rate_hz(kind, attitude_hz, position_hz))
-        };
+        let interval = interval_for(msg_id, kind, attitude_hz, position_hz, airspeed_enabled, wind_enabled, surface);
         if send_set_interval(transport, &header, &mut seq, fc_sysid, msg_id, interval) {
             sent += 1;
         }
@@ -221,5 +251,34 @@ fn send_set_interval(
             log::warn!("Failed to send SET_MESSAGE_INTERVAL for msg {}: {}", msg_id as u32, e);
             false
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn servo_outputs_are_requested_only_for_surface_vehicles() {
+        // Rover/boat: 2 Hz (500 ms) — the Speed widget's per-side thrust bars.
+        assert_eq!(interval_for(ID_SERVO_OUTPUT_RAW, R_FIXED_2HZ, 5.0, 2.0, true, false, true), 500_000.0);
+        // Anything that flies: disabled, so the message never reaches its (often narrow) RC link.
+        assert_eq!(interval_for(ID_SERVO_OUTPUT_RAW, R_FIXED_2HZ, 5.0, 2.0, true, false, false), -1.0);
+    }
+
+    #[test]
+    fn esc_telemetry_is_requested_only_for_surface_vehicles() {
+        // 1 Hz is plenty for a pack voltage.
+        assert_eq!(interval_for(ID_ESC_TELEMETRY_1_TO_4, R_FIXED_1HZ, 5.0, 2.0, true, false, true), 1_000_000.0);
+        assert_eq!(interval_for(ID_ESC_TELEMETRY_1_TO_4, R_FIXED_1HZ, 5.0, 2.0, true, false, false), -1.0);
+    }
+
+    #[test]
+    fn the_two_knobs_and_the_module_gates_are_unchanged() {
+        assert_eq!(interval_for(ID_ATTITUDE, R_ATTITUDE, 10.0, 2.0, true, true, true), 100_000.0);
+        assert_eq!(interval_for(ID_GLOBAL_POSITION_INT, R_POSITION, 5.0, 4.0, true, true, false), 250_000.0);
+        assert_eq!(interval_for(ID_HOME_POSITION, R_HOME_LOW, 5.0, 2.0, true, true, false), 5_000_000.0);
+        assert_eq!(interval_for(ID_VFR_HUD, R_POSITION, 5.0, 4.0, false, true, false), -1.0);
+        assert_eq!(interval_for(ID_WIND, R_FIXED_1HZ, 5.0, 2.0, true, false, false), -1.0);
     }
 }

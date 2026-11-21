@@ -4,11 +4,12 @@
 -->
 
 <!-- Speed widget — ground/airspeed readout, flanked by a throttle bar (left) and a derived
-     acceleration bar (right). -->
+     acceleration bar (right). With differential thrust on (dual-motor boat), the two bars become
+     the LEFT and RIGHT thrust of the vehicle instead (per-output PWM, bipolar around neutral). -->
 <script lang="ts">
   import type { TelemetryData } from "$lib/stores/telemetry";
   import type { InterfaceSettings } from "$lib/stores/settings";
-  import { settings } from "$lib/stores/settings";
+  import { settings, DEFAULT_SPEED_WIDGET } from "$lib/stores/settings";
   import { convertSpeed, speedDigits } from "$lib/utils/units";
   import { t } from 'svelte-i18n';
 
@@ -43,6 +44,24 @@
   // Throttle bar fill, 0–100% (FC output via MSP2_INAV_MISC2 / VFR_HUD).
   let thrPct = $derived(Math.max(0, Math.min(100, telem.lastUpdate ? telem.throttle : 0)));
 
+  // ── Differential thrust (dual-motor boat) ────────────────────────────────
+  // Both bars read one FC servo/motor output each (MAVLink SERVO_OUTPUT_RAW): ArduPilot skid steering
+  // puts left/right thrust on two outputs, and that pair is the only per-side value the link carries.
+  // PWM is bipolar around the 1500 µs neutral, so a boat reversing shows the bar dropping below the
+  // centre line instead of sitting empty.
+  const cfg = $derived($settings.speedWidget ?? DEFAULT_SPEED_WIDGET);
+  let diffThrust = $derived(!!cfg.diffThrust);
+  const PWM_NEUTRAL = 1500;
+  const PWM_SPAN = 500; // 1000 / 2000 µs at full deflection
+
+  /** −1…+1 of the bar for a µs output value; 0 when the output is absent (0 / not reported). */
+  function thrustFrac(us: number | undefined): number {
+    if (!us || us <= 0) return 0;
+    return Math.max(-1, Math.min(1, (us - PWM_NEUTRAL) / PWM_SPAN));
+  }
+  let leftFrac = $derived(telem.lastUpdate ? thrustFrac(telem.servoOutputs?.[cfg.left - 1]) : 0);
+  let rightFrac = $derived(telem.lastUpdate ? thrustFrac(telem.servoOutputs?.[cfg.right - 1]) : 0);
+
   // ── Derived longitudinal acceleration (m/s²) ──────────────────────────────
   // No FC field for it — we estimate it from the speed we display (airspeed when present, else ground
   // speed). The raw speed is quantized (it only changes by ~1 km/h every few frames), so an
@@ -76,6 +95,8 @@
   }
 
   $effect(() => {
+    // Differential thrust shows no acceleration — don't even estimate it there.
+    if (diffThrust) { samples = []; accel = 0; return; }
     const now = telem.lastUpdate;
     const v = telem.airspeed > 0 ? telem.airspeed : telem.groundSpeed; // raw m/s (unit-independent)
     if (!now) { samples = []; accel = 0; return; }
@@ -92,17 +113,32 @@
 </script>
 
 <div class="widget-card" style="--ws: {size}px">
-  <!-- Throttle (left): fills bottom→top 0–100%. -->
-  <div class="vbar">
-    <span class="vbar-label">{$t('widgetLabels.thr')}</span>
-    <div class="vbar-track">
-      <div class="vbar-fill thr" style="height: {thrPct}%"></div>
-      <!-- 25 / 50 / 75 % reference ticks (above the fill so they stay visible) -->
-      <div class="thr-tick" style="bottom: 25%"></div>
-      <div class="thr-tick" style="bottom: 50%"></div>
-      <div class="thr-tick" style="bottom: 75%"></div>
+  {#if diffThrust}
+    <!-- Left motor thrust: bipolar from the centre — up = ahead, down = astern. -->
+    <div class="vbar">
+      <span class="vbar-label">{$t('widgetLabels.thrL')}</span>
+      <div class="vbar-track acc-track">
+        <div
+          class="vbar-fill thrust {leftFrac >= 0 ? 'pos' : 'neg'}"
+          style={leftFrac >= 0
+            ? `bottom: 50%; height: ${leftFrac * 50}%`
+            : `top: 50%; height: ${-leftFrac * 50}%`}
+        ></div>
+      </div>
     </div>
-  </div>
+  {:else}
+    <!-- Throttle (left): fills bottom→top 0–100%. -->
+    <div class="vbar">
+      <span class="vbar-label">{$t('widgetLabels.thr')}</span>
+      <div class="vbar-track">
+        <div class="vbar-fill thr" style="height: {thrPct}%"></div>
+        <!-- 25 / 50 / 75 % reference ticks (above the fill so they stay visible) -->
+        <div class="thr-tick" style="bottom: 25%"></div>
+        <div class="thr-tick" style="bottom: 50%"></div>
+        <div class="thr-tick" style="bottom: 75%"></div>
+      </div>
+    </div>
+  {/if}
 
   <div class="center">
     <span class="w-label">{label}</span>
@@ -113,18 +149,33 @@
     {/if}
   </div>
 
-  <!-- Acceleration (right): bipolar from the centre — up = speeding up, down = slowing down. -->
-  <div class="vbar">
-    <span class="vbar-label">{$t('widgetLabels.acc')}</span>
-    <div class="vbar-track acc-track">
-      <div
-        class="vbar-fill acc {accFrac >= 0 ? 'pos' : 'neg'}"
-        style={accFrac >= 0
-          ? `bottom: 50%; height: ${accFrac * 50}%`
-          : `top: 50%; height: ${-accFrac * 50}%`}
-      ></div>
+  {#if diffThrust}
+    <!-- Right motor thrust (same bipolar scale as the left). -->
+    <div class="vbar">
+      <span class="vbar-label">{$t('widgetLabels.thrR')}</span>
+      <div class="vbar-track acc-track">
+        <div
+          class="vbar-fill thrust {rightFrac >= 0 ? 'pos' : 'neg'}"
+          style={rightFrac >= 0
+            ? `bottom: 50%; height: ${rightFrac * 50}%`
+            : `top: 50%; height: ${-rightFrac * 50}%`}
+        ></div>
+      </div>
     </div>
-  </div>
+  {:else}
+    <!-- Acceleration (right): bipolar from the centre — up = speeding up, down = slowing down. -->
+    <div class="vbar">
+      <span class="vbar-label">{$t('widgetLabels.acc')}</span>
+      <div class="vbar-track acc-track">
+        <div
+          class="vbar-fill acc {accFrac >= 0 ? 'pos' : 'neg'}"
+          style={accFrac >= 0
+            ? `bottom: 50%; height: ${accFrac * 50}%`
+            : `top: 50%; height: ${-accFrac * 50}%`}
+        ></div>
+      </div>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -236,12 +287,20 @@
   .vbar-fill.acc {
     transition: height 0.15s ease, bottom 0.15s ease, top 0.15s ease;
   }
+  /* Differential thrust (dual-motor boat): forward above the centre line, astern below it — same
+     bipolar geometry as the acceleration bar, blue/amber so the two sides read at a glance. */
+  .vbar-fill.thrust {
+    transition: height 0.15s ease, bottom 0.15s ease, top 0.15s ease;
+  }
+  .vbar-fill.thrust.pos { background: #37a8db; }
+  .vbar-fill.thrust.neg { background: #f5a623; }
   /* Low-power mode: drop the bar smoothing. These transitions animate layout properties, so each
      frame costs a reflow + repaint — and in flight the values change continuously, which makes the
      transitions overlap into a permanent reflow at display rate. Snapping to the value is free and
      the reading is identical. */
   :global(html.kite-low-power) .vbar-fill.thr,
-  :global(html.kite-low-power) .vbar-fill.acc {
+  :global(html.kite-low-power) .vbar-fill.acc,
+  :global(html.kite-low-power) .vbar-fill.thrust {
     transition: none;
   }
   .vbar-fill.acc.pos { background: #59aa29; } /* accelerating */

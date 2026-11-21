@@ -561,6 +561,12 @@ fn connect_mavlink(
     // everything). Applied here, before the handler thread starts, while we still own the transport.
     // Which of the two wind messages this FC speaks — WIND on ArduPilot, WIND_COV on PX4.
     let is_px4 = fc_info.fc_variant == "PX4";
+    // Surface vehicle (rover / boat): the only case that needs the per-output PWM message (the Speed
+    // widget's differential thrust). Everything else keeps it off the link.
+    let surface = matches!(
+        fc_info.platform_type,
+        mavlink_proto::vehicle::platform::ROVER | mavlink_proto::vehicle::platform::BOAT
+    );
     if mavlink_full_telemetry.unwrap_or(false) {
         // SET_MESSAGE_INTERVAL is sticky on the FC until reboot, so a prior reduced session would
         // otherwise keep the link narrow. Reset our managed messages to the FC's SRn defaults.
@@ -574,6 +580,7 @@ fn connect_mavlink(
             airspeed_enabled.unwrap_or(false),
             wind_enabled.unwrap_or(false),
             is_px4,
+            surface,
         );
     }
 

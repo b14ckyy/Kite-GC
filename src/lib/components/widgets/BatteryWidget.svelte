@@ -113,8 +113,6 @@
   );
   let watt = $derived(shown ? `${Math.round(shown.voltage * shown.current)}W` : '—W');
   let mah = $derived(shown ? `${shown.mahDrawn} mAh` : '—');
-  // Alert state: shown pack below the configured threshold.
-  let alert = $derived(!!shown && shown.percentage > 0 && alertPct > 0 && shown.percentage < alertPct);
   // Mode chip: in AUTO show the auto-selected pack number too (so you know which is shown); when
   // manually pinned the number alone is enough (you chose it).
   let chip = $derived(
@@ -126,26 +124,45 @@
   let title = $derived(
     widgetId === 'battery2' ? `${$t('widgetLabels.bat')} 2` : $t('widgetLabels.bat')
   );
+
+  // ── Voltage source (per widget, tap the widget to change) ─────────────────
+  // Default 'fc' = the FC's own battery monitor (everything above). 'esc:<n>' takes the voltage from
+  // one ESC's own telemetry instead (ArduPilot ESC_TELEMETRY — BLHeli32, or a VESC over DroneCAN):
+  // a dual-motor boat with two ESCs and no separate battery monitor reads its pack there. In that
+  // mode only the voltage is shown, because the pack percentage / current total an FC monitor would
+  // have do not exist.
+  let source = $derived($settings.batteryVoltageSource?.[widgetId] ?? 'fc');
+  let escIndex = $derived(source.startsWith('esc:') ? Number(source.slice(4)) : 0);
+  let escMode = $derived(escIndex > 0);
+  let esc = $derived(escIndex > 0 ? (telem.escs?.find((e) => e.index === escIndex) ?? null) : null);
+  let escVoltage = $derived(esc ? `${esc.voltage.toFixed(1)}V` : '—V');
+  // Alert state: shown pack below the configured threshold (an ESC source has no percentage).
+  let alert = $derived(!escMode && !!shown && shown.percentage > 0 && alertPct > 0 && shown.percentage < alertPct);
 </script>
 
-<div class="widget-card" class:alert style="--ws: {size}px">
-  <button class="w-label" class:clickable={multi} onclick={cycle} disabled={!multi} type="button">
-    {title}{#if multi}<span class="chip">{chip}</span>{/if}
+<div class="widget-card" class:alert class:esc-only={escMode} style="--ws: {size}px">
+  <button class="w-label" class:clickable={multi && !escMode} onclick={cycle} disabled={!multi || escMode} type="button">
+    {title}{#if escMode}<span class="chip">ESC {escIndex}</span>{:else if multi}<span class="chip">{chip}</span>{/if}
   </button>
 
-  <!-- Voltage bar — only shown when battery % is available from FC -->
-  {#if pct > 0}
-  <div class="bat-bar-track">
-    <div class="bat-bar-fill" style="width: {pct}%; background: {barColor}"></div>
-  </div>
-  {/if}
+  {#if escMode}
+    <!-- ESC source: one pack voltage, nothing else — that is all the ESC reports. -->
+    <span class="w-value">{escVoltage}</span>
+  {:else}
+    <!-- Voltage bar — only shown when battery % is available from FC -->
+    {#if pct > 0}
+    <div class="bat-bar-track">
+      <div class="bat-bar-fill" style="width: {pct}%; background: {barColor}"></div>
+    </div>
+    {/if}
 
-  <span class="w-value">{voltage}</span>
-  <div class="w-secondary-row">
-    <span class="w-secondary">{current}</span>
-    <span class="w-secondary">{watt}</span>
-  </div>
-  <span class="w-tertiary">{mah}</span>
+    <span class="w-value">{voltage}</span>
+    <div class="w-secondary-row">
+      <span class="w-secondary">{current}</span>
+      <span class="w-secondary">{watt}</span>
+    </div>
+    <span class="w-tertiary">{mah}</span>
+  {/if}
 </div>
 
 <style>
@@ -215,6 +232,15 @@
     font-variant-numeric: tabular-nums;
     line-height: 1.1;
     margin-top: calc(var(--ws) * 0.01);
+  }
+  /* ESC voltage source: the one number the widget has — centred, a little larger. */
+  .widget-card.esc-only {
+    justify-content: center;
+    gap: calc(var(--ws) * 0.04);
+  }
+  .widget-card.esc-only .w-value {
+    font-size: calc(var(--ws) * 0.3);
+    margin-top: 0;
   }
   /* Current + power sit side by side, evenly spaced, sharing the same type. */
   .w-secondary-row {

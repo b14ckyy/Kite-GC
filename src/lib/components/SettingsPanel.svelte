@@ -57,6 +57,7 @@
     gcsMode = 'manual',
     userLocation = null,
     defaultProtocol = 'last',
+    autoConnectNetwork = true,
     attitudeRateHz = 5,
     positionRateHz = 2,
     airspeedEnabled = true,
@@ -112,6 +113,7 @@
     gcsMode?: GcsMode;
     userLocation?: { lat: number; lon: number } | null;
     defaultProtocol?: DefaultProtocol;
+    autoConnectNetwork?: boolean;
     attitudeRateHz?: number;
     positionRateHz?: number;
     airspeedEnabled?: boolean;
@@ -621,6 +623,13 @@
           <option value="mavlink">MAVLink</option>
           <option value="telemetry">Telemetry</option>
         </select>
+      </div>
+      <!-- Startup auto-connect: a stored TCP/UDP address is a fixed target, so Kite can reopen it
+           without asking. Serial/BLE stay manual — the port has to be there first. -->
+      <div class="s-row" title={$t('settings.autoConnectNetworkHint')}>
+        <label class="s-label" for="auto-connect-network">{$t('settings.autoConnectNetwork')}</label>
+        <Toggle checked={autoConnectNetwork} id="auto-connect-network"
+          onchange={(c) => onPatch({ autoConnectNetwork: c })} />
       </div>
     </div>
 

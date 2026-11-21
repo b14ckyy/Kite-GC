@@ -22,7 +22,7 @@ use crate::msp::FcInfo;
 use crate::scheduler::rc_tx::{self, RcTxHandle};
 use crate::scheduler::telemetry::{
     AttitudeData, GpsData, AltitudeData, AnalogData, StatusData,
-    SensorStatusData, AirspeedData, WindData, Misc2Data, BatteryInstanceData,
+    SensorStatusData, AirspeedData, WindData, Misc2Data, BatteryInstanceData, EscTelemetryData,
 };
 use crate::transport::ByteTransport;
 
@@ -330,13 +330,24 @@ fn shutdown_secondaries(vehicles: &mut std::collections::BTreeMap<u8, VehicleCtx
 
 /// Give a newly discovered vehicle the same treatment the connect path gave the handshake vehicle:
 /// stream shaping (or the full-telemetry reset) plus the one-shot EKF-type / home / Q_ENABLE requests.
-fn configure_new_vehicle(transport: &mut dyn ByteTransport, sysid: u8, fc_variant: &str, rates: &StreamRateConfig) {
+fn configure_new_vehicle(
+    transport: &mut dyn ByteTransport,
+    sysid: u8,
+    fc_variant: &str,
+    platform_type: u8,
+    rates: &StreamRateConfig,
+) {
     let is_px4 = fc_variant == "PX4";
+    let surface = matches!(
+        platform_type,
+        super::vehicle::platform::ROVER | super::vehicle::platform::BOAT
+    );
     if rates.full_telemetry {
         super::streamrates::reset_stream_rates(transport, sysid, is_px4);
     } else {
         super::streamrates::apply_stream_rates(
-            transport, sysid, rates.attitude_hz, rates.position_hz, rates.airspeed_enabled, rates.wind_enabled, is_px4,
+            transport, sysid, rates.attitude_hz, rates.position_hz, rates.airspeed_enabled,
+            rates.wind_enabled, is_px4, surface,
         );
     }
     super::params::request_ekf_type(transport, sysid);
@@ -791,7 +802,7 @@ fn handler_loop(
                         if ctx.fc_variant.starts_with("Ardu") {
                             ctx.modes = Some(super::modes::ModeEnumerator::new(sysid, Instant::now()));
                         }
-                        configure_new_vehicle(&mut *transport, sysid, &ctx.fc_variant, &rates);
+                        configure_new_vehicle(&mut *transport, sysid, &ctx.fc_variant, platform_type, &rates);
                         let _ = ctx.emitter.emit("vehicle-discovered", ctx.info(sysid, false));
                         vehicles.insert(sysid, ctx);
                     }
@@ -1510,6 +1521,44 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
                     ..Default::default()
                 };
                 let _ = app_handle.emit("telemetry-linkstats", &ls);
+            }
+        }
+
+        // ── SERVO_OUTPUT_RAW → per-output PWM (differential-thrust Speed widget) ──
+        // A dual-motor boat drives one ESC per output (ArduPilot skid steering: left/right thrust on
+        // two servo outputs), and this is the only per-side value the link carries — VFR_HUD has just
+        // the average. Values are PWM in µs, 1500 = neutral; 0 = output unassigned. No recorder hook:
+        // the flight log keeps the vehicle state, not raw outputs.
+        MavMessage::SERVO_OUTPUT_RAW(s) => {
+            let outputs: Vec<u16> = vec![
+                s.servo1_raw, s.servo2_raw, s.servo3_raw, s.servo4_raw,
+                s.servo5_raw, s.servo6_raw, s.servo7_raw, s.servo8_raw,
+            ];
+            let _ = app_handle.emit("telemetry-servo-outputs", &outputs);
+        }
+
+        // ── ESC_TELEMETRY_1_TO_4 → per-ESC telemetry (voltage of a motor's own pack) ──
+        // ArduPilot republishes ESC telemetry here (BLHeli32 directly, a VESC over DroneCAN/UAVCAN).
+        // `count[i]` is that ESC's packet counter, so 0 means "no telemetry from this output" — those
+        // are dropped instead of being reported as 0 V ESCs. Only the ESCs actually answering are
+        // emitted, so the frontend can offer exactly those as a voltage source.
+        MavMessage::ESC_TELEMETRY_1_TO_4(t) => {
+            let mut escs: Vec<EscTelemetryData> = Vec::new();
+            for i in 0..4 {
+                if t.count[i] == 0 || t.voltage[i] == 0 {
+                    continue;
+                }
+                escs.push(EscTelemetryData {
+                    index: (i + 1) as u8,
+                    voltage: t.voltage[i] as f64 / 100.0, // cV → V
+                    current: t.current[i] as f64 / 100.0, // cA → A
+                    mah: t.totalcurrent[i],
+                    rpm: t.rpm[i] as u32,
+                    temperature: t.temperature[i] as f64,
+                });
+            }
+            if !escs.is_empty() {
+                let _ = app_handle.emit("telemetry-escs", &escs);
             }
         }
 

@@ -70,6 +70,10 @@ export function toTelemetryData(r: TelemetryRecord, fcVariant = 'INAV'): Telemet
     batteryPercentage: r.battery_percentage ?? 0,
     cellCount: 0,         // not recorded in DB yet
     throttle: r.throttle_pct ?? 0,
+    // Replay carries no per-output PWM — the differential-thrust bars stay empty (live only).
+    servoOutputs: [],
+    // …and no ESC telemetry either (live only).
+    escs: [],
     // Per-instance batteries joined from battery_records (multi-battery); empty → widget falls back to
     // the primary fields above.
     batteries: r.batteries ?? [],

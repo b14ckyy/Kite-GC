@@ -1171,6 +1171,8 @@
     "defaultProtocol": "Protocole par défaut",
     "defaultProtocolLast": "Dernier utilisé",
     "defaultProtocolHint": "Le protocole utilisé au démarrage. « Dernier utilisé » conserve celui de la session précédente ; un choix fixe le remplace à chaque lancement.",
+    "autoConnectNetwork": "Connexion automatique TCP/UDP",
+    "autoConnectNetworkHint": "Au démarrage, rouvre seul le dernier lien TCP/UDP : une station au sol redémarrée retrouve le véhicule sans clic. Série et Bluetooth restent manuels — leur port doit exister au préalable. Une seule tentative : si le véhicule n'est pas encore allumé, appuyez sur Connecter.",
     "units": "Unités",
     "cesiumHintPre": "Jeton gratuit sur",
     "cesiumHintPost": "— active le terrain 3D. Redémarrez la vue 3D après modification.",
@@ -1402,7 +1404,17 @@
     "bottomCentre": "En bas au centre",
     "bottomRight": "En bas à droite",
     "phoneNoSpaceTitle": "Aucun emplacement libre",
-    "phoneNoSpace": "La grille de widgets est pleine sur les deux pages. Réduisez ou désactivez d'abord un autre widget."
+    "phoneNoSpace": "La grille de widgets est pleine sur les deux pages. Réduisez ou désactivez d'abord un autre widget.",
+    "speedSettings": "Widget vitesse",
+    "diffThrust": "Poussée différentielle (G/D)",
+    "diffThrustHint": "Pour un bateau à deux moteurs : les deux barres latérales affichent la poussée gauche et droite issue des sorties servo du FC (MAVLink SERVO_OUTPUT_RAW, bipolaire autour de 1500 µs) au lieu des gaz et de l’accélération. Nécessite une liaison ArduPilot ou PX4 — INAV ne remonte pas les sorties servo.",
+    "leftOutput": "Sortie gauche",
+    "rightOutput": "Sortie droite",
+    "batterySettings": "Widget batterie",
+    "batterySource": "Source de tension",
+    "batterySourceFc": "Moniteur batterie du FC",
+    "batterySourceEsc": "ESC {n}",
+    "batterySourceHint": "Prend la tension du pack depuis la télémétrie propre à un ESC (ArduPilot ESC_TELEMETRY — BLHeli32, ou un VESC via DroneCAN). Seule la tension est alors affichée. « Moniteur batterie du FC » utilise le capteur du contrôleur de vol."
   },
   "widgetLabels": {
     "spd": "SPD",
@@ -1415,6 +1427,8 @@
     "bat": "BAT",
     "home": "HOME",
     "thr": "THR",
+    "thrL": "THR L",
+    "thrR": "THR R",
     "acc": "ACC",
     "auto": "AUTO",
     "na": "N/D"

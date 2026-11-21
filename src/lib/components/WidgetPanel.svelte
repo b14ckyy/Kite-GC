@@ -29,6 +29,7 @@
     onreorder,
     onreceive,
     onresize,
+    onwidgettap,
     panelId,
   }: {
     widgetIds: string[];
@@ -54,6 +55,8 @@
     onreceive: (targetPanel: string, widgetId: string, index: number) => void;
     /** Edit-mode resize button: step this widget to its next size state. */
     onresize?: (widgetId: string) => void;
+    /** Short tap on a widget (no drag, not edit mode) — opens that widget's own settings. */
+    onwidgettap?: (widgetId: string, rect: DOMRect) => void;
     panelId: string;
   } = $props();
 
@@ -140,7 +143,18 @@
     };
 
     const onWindowPointerUp = (e: PointerEvent) => {
+      // A short press (the long-press never fired) inside one of this panel's widgets is a TAP — the
+      // gesture that opens a widget's own settings (the Speed widget's differential-thrust config).
+      // Sampled before `clearPress()` consumes the timer.
+      const tapSlot = pressTimer !== null && !editing
+        && Math.hypot(e.clientX - pressX, e.clientY - pressY) <= PRESS_SLOP_PX
+        ? slotAt(e.clientX, e.clientY)
+        : null;
       clearPress();
+      if (tapSlot && onwidgettap) {
+        const idx = Number(tapSlot.dataset.slotIdx);
+        if (Number.isFinite(idx) && widgetIds[idx]) onwidgettap(widgetIds[idx], tapSlot.getBoundingClientRect());
+      }
       if (!editing) return;
       const payload = getGlobalDragPayload();
       if (!payload) {

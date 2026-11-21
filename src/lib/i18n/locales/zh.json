@@ -1171,6 +1171,8 @@
     "defaultProtocol": "默认协议",
     "defaultProtocolLast": "上次使用",
     "defaultProtocolHint": "连接栏启动时使用的协议。“上次使用”保留上一次会话的协议；固定选项在每次启动时覆盖它。",
+    "autoConnectNetwork": "自动连接 TCP/UDP",
+    "autoConnectNetworkHint": "启动时自动重新打开上次使用的 TCP/UDP 连接，重启的地面站无需点击即可重新连上飞行器。串口和蓝牙保持手动——其端口必须先存在。仅尝试一次：如果飞行器尚未上电，请点击“连接”。",
     "units": "单位",
     "cesiumHintPre": "免费令牌来自",
     "cesiumHintPost": "— 启用3D地形。更改后重启3D视图。",
@@ -1402,7 +1404,17 @@
     "bottomCentre": "底部中间",
     "bottomRight": "底部右侧",
     "phoneNoSpaceTitle": "没有空位",
-    "phoneNoSpace": "两页的小组件网格均已满。请先缩小或关闭另一个小组件。"
+    "phoneNoSpace": "两页的小组件网格均已满。请先缩小或关闭另一个小组件。",
+    "speedSettings": "速度小部件",
+    "diffThrust": "双电机差速（左/右）",
+    "diffThrustHint": "用于双电机船：两侧竖条显示飞控舵机输出（MAVLink SERVO_OUTPUT_RAW，以 1500 µs 为零点双向显示）的左/右推力，取代油门和加速度。需要 ArduPilot 或 PX4 链路——INAV 不上报舵机输出。",
+    "leftOutput": "左输出",
+    "rightOutput": "右输出",
+    "batterySettings": "电池小部件",
+    "batterySource": "电压来源",
+    "batterySourceFc": "飞控电池监测",
+    "batterySourceEsc": "电调 {n}",
+    "batterySourceHint": "从某个电调自身的遥测读取电池电压（ArduPilot ESC_TELEMETRY——BLHeli32，或通过 DroneCAN 的 VESC）。此时只显示电压。“飞控电池监测”使用飞控的电池传感器。"
   },
   "widgetLabels": {
     "spd": "速度",
@@ -1415,6 +1427,8 @@
     "bat": "电池",
     "home": "家",
     "thr": "油门",
+    "thrL": "THR L",
+    "thrR": "THR R",
     "acc": "加速",
     "auto": "自动",
     "na": "N/A"

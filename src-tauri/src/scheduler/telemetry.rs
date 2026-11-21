@@ -158,6 +158,19 @@ pub struct BatteryInstanceData {
     pub temperature: Option<f64>, // °C, when the monitor reports it
 }
 
+/// One ESC's own telemetry (ArduPilot `ESC_TELEMETRY_1_TO_4`; the values come from the ESC itself —
+/// BLHeli32, or a VESC over DroneCAN/UAVCAN). A dual-motor boat reads its pack voltage from one of
+/// these instead of a separate battery monitor. `index` is 1-based (ESC 1 = the first output).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EscTelemetryData {
+    pub index: u8,
+    pub voltage: f64,   // V
+    pub current: f64,   // A
+    pub mah: u16,       // mAh drawn, as the ESC counts it
+    pub rpm: u32,       // electrical RPM as reported
+    pub temperature: f64, // °C
+}
+
 /// MSP2_INAV_MISC2 (0x203A): FC throttle output + timers. Small message added to the regular poller —
 /// `throttle_pct` drives the Speed widget's throttle bar; `uptime_s`/`flight_time_s` ride along for
 /// upcoming flight-timer use.

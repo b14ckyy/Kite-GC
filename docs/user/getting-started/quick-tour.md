@@ -165,6 +165,11 @@ Each widget, at a glance — expand for what it shows and how it works:
     **throttle bar** (0–100 %, from the FC) sits on the left and a **derived acceleration bar** on the
     right (±4 m/s², estimated from the speed trend — no number, just a bipolar bar from centre).
 
+    **Dual-motor boat?** Tap the widget to open its settings and switch on **Differential thrust**: the
+    two bars then show **left and right thrust** instead — each from one of the FC's servo outputs (S1–S8,
+    pick the two in the same popover), bipolar around the 1500 µs neutral so astern fills below the centre
+    line. This reads ArduPilot / PX4 `SERVO_OUTPUT_RAW`; INAV does not report servo outputs.
+
     ![The Speed widget](../assets/getting-started/widgets/speed.png)
 
 ??? note "Altitude"
@@ -184,6 +189,11 @@ Each widget, at a glance — expand for what it shows and how it works:
     the **FC's** percentage when available, otherwise the **voltage** (no guessed % from voltage). Add a
     second **Battery 2** widget to watch two packs at once (e.g. a QuadPlane's forward and lift packs).
     See **[Batteries](../guides/batteries.md)**.
+
+    **Voltage from an ESC instead?** Tap the widget and pick a source: the **FC battery monitor** (default)
+    or the telemetry of one **ESC**. Useful for a twin-motor boat whose ESCs each report their own pack —
+    the widget then shows that one voltage and nothing else. ESC telemetry arrives as ArduPilot
+    `ESC_TELEMETRY` (BLHeli32, or a VESC over DroneCAN/UAVCAN); INAV has no ESC telemetry.
 
     ![The Battery widget](../assets/getting-started/widgets/battery.png)
 

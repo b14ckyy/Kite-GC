@@ -44,6 +44,7 @@
     onresize,
     onmove,
     onmovetobottom,
+    onwidgettap,
     widthPx = $bindable(0),
   }: {
     config: PhoneWidgetsConfig;
@@ -55,6 +56,8 @@
     onmove?: (id: string, page: number, row: number, col: number) => void;
     /** Edit mode: the user dropped the widget on a bottom slot. */
     onmovetobottom?: (id: string, slot: PhoneBottomSlot) => void;
+    /** Short tap on a widget (no hold, not edit mode) — opens that widget's own settings. */
+    onwidgettap?: (widgetId: string, rect: DOMRect) => void;
     /** OUT: the panel's rendered width in css px. */
     widthPx?: number;
   } = $props();
@@ -309,7 +312,16 @@
       }
     };
     const onUp = (e: PointerEvent) => {
+      // A short tap (hold never fired, no movement) on a widget opens its own settings.
+      const tapId = pressTimer !== null && !editing && pressId
+        && Math.hypot(e.clientX - pressX, e.clientY - pressY) <= DRAG_SLOP_PX
+        ? pressId
+        : null;
       clearPress();
+      if (tapId && onwidgettap) {
+        const cell = cellElAt(e.clientX, e.clientY);
+        if (cell) onwidgettap(tapId, cell.getBoundingClientRect());
+      }
       if (phoneEdit.drag) {
         if (ownDrag) endDrag(true);
         return;

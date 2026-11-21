@@ -37,6 +37,8 @@
   import UpdateDialog from "$lib/components/UpdateDialog.svelte";
   import { runUpdateCheck } from "$lib/controllers/updateCheck";
   import ContextMenu from "$lib/components/ContextMenu.svelte";
+  import SpeedWidgetSettings from "$lib/components/widgets/SpeedWidgetSettings.svelte";
+  import BatteryWidgetSettings from "$lib/components/widgets/BatteryWidgetSettings.svelte";
   import BatchEditPopup from "$lib/components/mission/BatchEditPopup.svelte";
   import ArduBatchEditPopup from "$lib/components/mission/ArduBatchEditPopup.svelte";
   import type { DialogButton, DialogOptions } from "$lib/components/ConfirmDialog.svelte";
@@ -2914,6 +2916,21 @@
     }
   }
 
+  /** Startup auto-connect (Settings → Interface → UI): a TCP/UDP link is a fixed, stored target, so
+   *  Kite reopens the last one by itself and a restarted GCS is back on the vehicle without a click.
+   *  Serial and BLE stay manual — their port / device has to be present first. One attempt only: with
+   *  the vehicle still powered down it fails visibly (the connection error banner) instead of looping
+   *  in the background, and the pilot presses Connect once the vehicle is up. */
+  async function autoConnectNetworkOnStartup(): Promise<void> {
+    if (!get(settings).autoConnectNetwork) return;
+    // The stored transport, not the resolved one: a dropped serial value (no ports on iOS) must not
+    // turn into an auto-connect to the mobile default UDP target.
+    if (saved.lastTransport !== 'tcp' && saved.lastTransport !== 'udp') return;
+    if (get(connection).status !== 'disconnected' || isConnecting) return; // a recovered link wins
+    console.log(`[connect] startup auto-connect: ${startupProtocol} over ${saved.lastTransport} → ${netHostOrLocal(tcpHost)}:${tcpPort}`);
+    await handleConnect();
+  }
+
   async function initPage() {
     await startBleDeviceListener(); // live BLE discovery → bleDevices store
     await loadInfo();
@@ -2921,8 +2938,11 @@
     // recorded" notice of a fleet session without group recording.
     void loadFleetMode().then(startFleetRecordingNotice);
     // Links the backend still holds (page reload / a UI state that drifted) → show them as connected.
-    void recoverBackendLinks().catch((e) => {
+    // Kept a promise (not awaited here) so the lookups below still run in parallel; the auto-connect
+    // waits for it, because a recovered link must win over a fresh connect.
+    const recovered = recoverBackendLinks().catch((e) => {
       void invoke('log_frontend', { level: 'warn', area: 'ui', message: `recoverBackendLinks failed at start-up: ${e}` }).catch(() => {});
+      return false;
     });
     try {
       defaultFlightLogPath = await getDefaultFlightlogPath();
@@ -2937,6 +2957,8 @@
     if (activeTab === 'logbook') {
       await loadLogbook();
     }
+    await recovered;
+    await autoConnectNetworkOnStartup();
   }
 
   initPage();
@@ -2954,6 +2976,14 @@
   function handleResize(widgetId: string) {
     panels = widgetCtrl.cycleWidgetSize(panels, widgetId);
     settings.patch({ panels });
+  }
+
+  // A tap on a widget opens its own settings (Speed: differential thrust; Battery: voltage source).
+  // The widget's rect anchors the popover above it.
+  let widgetCfg = $state<{ id: string; rect: DOMRect } | null>(null);
+  function handleWidgetTap(widgetId: string, rect: DOMRect): void {
+    if (widgetId !== 'speed' && widgetId !== 'battery' && widgetId !== 'battery2') return;
+    widgetCfg = { id: widgetId, rect };
   }
 
   // ── Phone widget grid (Dev-Docs active/PHONE_UI.md D13) — its own config, its own rules ──
@@ -3959,6 +3989,7 @@
       onresize={(id) => patchPhoneWidgets(phoneCtrl.cyclePhoneWidgetSize(phoneWidgets, id))}
       onmove={phoneMoveToColumn}
       onmovetobottom={phoneMoveToBottom}
+      onwidgettap={handleWidgetTap}
       bind:widthPx={phonePanelW}
     />
   </div>
@@ -4185,6 +4216,7 @@
         onreorder={handleReorder}
         onreceive={handleReceive}
         onresize={handleResize}
+        onwidgettap={handleWidgetTap}
         panelId="bottom"
       />
     </div>
@@ -4209,6 +4241,7 @@
       onreorder={handleReorder}
       onreceive={handleReceive}
       onresize={handleResize}
+      onwidgettap={handleWidgetTap}
       panelId="right"
     />
   </div>
@@ -4297,6 +4330,7 @@
             userLocation={$userGeoLocation}
             onGeoCheck={requestUserLocation}
             defaultProtocol={$settings.defaultProtocol}
+            autoConnectNetwork={$settings.autoConnectNetwork}
             {attitudeRateHz}
             {positionRateHz}
             {airspeedEnabled}
@@ -4439,6 +4473,11 @@
   <ContextMenu />
   <BatchEditPopup {interfaceSettings} />
   <ArduBatchEditPopup />
+  {#if widgetCfg?.id === 'speed'}
+    <SpeedWidgetSettings rect={widgetCfg.rect} onclose={() => (widgetCfg = null)} />
+  {:else if widgetCfg}
+    <BatteryWidgetSettings widgetId={widgetCfg.id} rect={widgetCfg.rect} onclose={() => (widgetCfg = null)} />
+  {/if}
 </div><!-- .ui-root -->
 
 <style>

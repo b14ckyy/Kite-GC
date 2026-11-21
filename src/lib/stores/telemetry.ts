@@ -36,6 +36,17 @@ export interface LinkStats {
   snrDb: number | null;       // dB (CRSF, INAV 9.1+)
 }
 
+/** One ESC's own telemetry (ArduPilot `ESC_TELEMETRY_1_TO_4` — BLHeli32, or a VESC over
+ *  DroneCAN/UAVCAN). `index` is 1-based; only ESCs that actually report appear in the list. */
+export interface EscTelemetry {
+  index: number;
+  voltage: number;     // V
+  current: number;     // A
+  mah: number;         // mAh drawn, as the ESC counts it
+  rpm: number;         // electrical RPM as reported
+  temperature: number; // °C
+}
+
 export interface TelemetryData {
   // GPS
   lat: number;
@@ -74,6 +85,14 @@ export interface TelemetryData {
 
   // Throttle output, 0–100% (INAV MSP2_INAV_MISC2 / MAVLink VFR_HUD). Drives the Speed widget bar.
   throttle: number;
+
+  /** FC servo/motor outputs in µs, S1..S8 (MAVLink SERVO_OUTPUT_RAW). Empty until the FC reports —
+   *  a differential-thrust boat reads its left/right thrust from two of these (Speed widget). */
+  servoOutputs: number[];
+
+  /** Per-ESC telemetry (ArduPilot ESC_TELEMETRY_1_TO_4). Empty when no ESC reports — a boat with
+   *  VESC/BLHeli32 ESCs can take its battery voltage from one of these (Battery widget). */
+  escs: EscTelemetry[];
 
   // Per-instance batteries (ArduPilot/PX4 multi-monitor). Empty for single-battery; the battery widget
   // then falls back to the primary fields above. See docs/active/MULTI_BATTERY.md.
@@ -148,6 +167,8 @@ const defaultTelemetry: TelemetryData = {
   windDirFrom: 0, windSpeedMs: 0,
   voltage: 0, current: 0, mAhDrawn: 0, rssi: 0, power: 0, batteryPercentage: 0, cellCount: 0,
   throttle: 0,
+  servoOutputs: [],
+  escs: [],
   batteries: [],
   link: { rssiPercent: null, rssiDbm: null, lq: null, snrDb: null },
   armingFlags: 0, statusSeen: false, cpuLoad: 0, sensorStatus: 0, flightModeFlags: 0, mspRcOverride: false,
@@ -419,6 +440,22 @@ async function startTelemetryListenersInner() {
         upd(event.payload, (t) => ({ ...t, throttle: event.payload.throttle_pct, lastUpdate: Date.now() }));
       }
     )
+  );
+
+  fresh.push(
+    await listen<{ value: number[] }>('telemetry-servo-outputs', (event) => {
+      // Per-output PWM in µs (S1..). Not a liveness source: it does not touch `lastUpdate`, so a FC
+      // that stops sending it cannot keep the link looking alive on its own.
+      const outputs = Array.isArray(event.payload?.value) ? event.payload.value : [];
+      upd(event.payload, (t) => ({ ...t, servoOutputs: outputs }));
+    })
+  );
+
+  fresh.push(
+    await listen<{ value: EscTelemetry[] }>('telemetry-escs', (event) => {
+      const escs = Array.isArray(event.payload?.value) ? event.payload.value : [];
+      upd(event.payload, (t) => ({ ...t, escs }));
+    })
   );
 
   fresh.push(

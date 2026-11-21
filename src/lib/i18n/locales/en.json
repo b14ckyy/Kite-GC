@@ -1171,6 +1171,8 @@
     "defaultProtocol": "Default Protocol",
     "defaultProtocolLast": "Last used",
     "defaultProtocolHint": "Which protocol the connection bar starts on. \"Last used\" keeps the protocol from your last session; a fixed choice overrides it on every launch.",
+    "autoConnectNetwork": "Auto-connect TCP/UDP",
+    "autoConnectNetworkHint": "On startup, reopens the last TCP/UDP link by itself, so a restarted ground station is back on the vehicle without a click. Serial and Bluetooth stay manual — their port has to be present first. One attempt only: if the vehicle is not up yet, press Connect.",
     "units": "Units",
     "cesiumHintPre": "Free token from",
     "cesiumHintPost": "— enables 3D terrain. Restart the 3D view after changing.",
@@ -1402,7 +1404,17 @@
     "bottomCentre": "Bottom centre",
     "bottomRight": "Bottom right",
     "phoneNoSpaceTitle": "No free slot",
-    "phoneNoSpace": "The widget grid is full on both pages. Shrink or switch off another widget first."
+    "phoneNoSpace": "The widget grid is full on both pages. Shrink or switch off another widget first.",
+    "speedSettings": "Speed widget",
+    "diffThrust": "Differential thrust (left/right)",
+    "diffThrustHint": "For a dual-motor boat: the two side bars show left and right thrust from the FC’s servo outputs (MAVLink SERVO_OUTPUT_RAW, bipolar around 1500 µs) instead of throttle and acceleration. Requires an ArduPilot or PX4 link — INAV does not report servo outputs.",
+    "leftOutput": "Left output",
+    "rightOutput": "Right output",
+    "batterySettings": "Battery widget",
+    "batterySource": "Voltage source",
+    "batterySourceFc": "FC battery monitor",
+    "batterySourceEsc": "ESC {n}",
+    "batterySourceHint": "Take the pack voltage from one ESC’s own telemetry (ArduPilot ESC_TELEMETRY — BLHeli32, or a VESC over DroneCAN). Only the voltage is shown then. “FC battery monitor” uses the flight controller’s battery sensor."
   },
   "widgetLabels": {
     "spd": "SPD",
@@ -1415,6 +1427,8 @@
     "bat": "BAT",
     "home": "HOME",
     "thr": "THR",
+    "thrL": "THR L",
+    "thrR": "THR R",
     "acc": "ACC",
     "auto": "AUTO",
     "na": "N/A"

@@ -316,6 +316,32 @@ export const DEFAULT_TELEMETRY_API: TelemetryApiSettings = {
  *  launch, for a pilot who always flies the same link and does not want a stray session to decide. */
 export type DefaultProtocol = 'last' | 'msp' | 'mavlink' | 'telemetry';
 
+// ── Speed widget (differential thrust) ────────────────────────────────────────────────────────────
+/** A dual-motor boat has no use for a throttle + acceleration pair — it needs the thrust of each
+ *  side. Both come from the FC's servo/motor outputs (MAVLink `SERVO_OUTPUT_RAW`), so the config is
+ *  just the two output numbers (1-based, S1..S8) plus the switch. */
+export interface SpeedWidgetSettings {
+  /** Show left/right thrust bars instead of throttle + acceleration. */
+  diffThrust: boolean;
+  /** Servo output carrying the left motor's thrust (1 = S1). */
+  left: number;
+  /** Servo output carrying the right motor's thrust (1 = S1). */
+  right: number;
+}
+
+export const DEFAULT_SPEED_WIDGET: SpeedWidgetSettings = {
+  diffThrust: false,
+  left: 1,
+  right: 3,
+};
+
+/** One servo output number from a stored profile: an integer 1..8, else the default. */
+function servoOutputNumber(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 1 && value <= 8
+    ? Math.round(value)
+    : fallback;
+}
+
 // ── Update check (GitHub releases — see controllers/updateCheck.ts) ─────────────────────────────────
 /** Update-check channel: off, stable releases, patch releases of the running minor only, or include
  *  pre-releases. Default `release`. */
@@ -346,6 +372,9 @@ export interface AppSettings {
   lastProtocol: string;
   /** Startup protocol preference (Settings → Interface → UI). `last` = restore `lastProtocol`. */
   defaultProtocol: DefaultProtocol;
+  /** Reopen a stored TCP/UDP link by itself on startup (Settings → Interface → UI). Serial and BLE
+   *  stay manual: their port / device has to be present first. One attempt — no retry loop. */
+  autoConnectNetwork: boolean;
   // Full last-used connection path (restored on startup so nothing has to be re-entered)
   lastTransport: string;
   lastHost: string;
@@ -411,6 +440,13 @@ export interface AppSettings {
   /** Per-widget battery selection: 'auto' or an instance id (as a string). Keyed by widget id
    *  ('battery' / 'battery2'). Lets each battery widget pin a specific pack. See MULTI_BATTERY.md. */
   batterySelect: Record<string, string>;
+  /** Per-widget battery VOLTAGE source: 'fc' (the FC's own battery monitor, default) or 'esc:<n>'
+   *  for one ESC's telemetry (ArduPilot ESC_TELEMETRY — BLHeli32, or a VESC over DroneCAN). A boat
+   *  with two ESCs and no battery monitor reads its pack voltage from one of them. */
+  batteryVoltageSource: Record<string, string>;
+  /** Speed widget: differential-thrust display for a dual-motor boat (left/right thrust from two FC
+   *  servo outputs instead of throttle + acceleration). Configured by tapping the widget. */
+  speedWidget: SpeedWidgetSettings;
   /** Which FC system messages (MAVLink STATUSTEXT) surface as on-screen toasts. */
   systemMessages: SystemMessagesLevel;
   /** Backend diagnostic file-log verbosity (applied to the Rust logger on startup + on change). */
@@ -469,6 +505,7 @@ const defaults: AppSettings = {
   lastBaud: 115200,
   lastProtocol: 'msp',
   defaultProtocol: 'last',
+  autoConnectNetwork: true,
   lastTransport: 'serial',
   lastHost: '',
   lastTcpPort: 5761,
@@ -507,6 +544,8 @@ const defaults: AppSettings = {
   warnAltitudeM: 120,
   batteryAlertPct: 30,
   batterySelect: {},
+  batteryVoltageSource: {},
+  speedWidget: DEFAULT_SPEED_WIDGET,
   systemMessages: 'warning',
   logLevel: 'warning',
   interface: {
@@ -575,6 +614,19 @@ function load(): AppSettings {
           ...defaults.interface,
           ...(parsed.interface ?? {}),
         },
+        speedWidget: (() => {
+          const p = (parsed.speedWidget ?? {}) as Partial<SpeedWidgetSettings>;
+          return {
+            diffThrust: p.diffThrust === true,
+            left: servoOutputNumber(p.left, DEFAULT_SPEED_WIDGET.left),
+            right: servoOutputNumber(p.right, DEFAULT_SPEED_WIDGET.right),
+          };
+        })(),
+        // Only values the widget understands survive (a hand-edited 'esc:9' would silently show —V).
+        batteryVoltageSource: Object.fromEntries(
+          Object.entries(parsed.batteryVoltageSource ?? {})
+            .filter(([, v]) => typeof v === 'string' && (v === 'fc' || /^esc:[1-8]$/.test(v))),
+        ),
         radar: (() => {
           const dr = defaults.radar;
           const pr = (parsed.radar ?? {}) as Partial<RadarSettings>;

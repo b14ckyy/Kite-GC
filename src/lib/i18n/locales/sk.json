@@ -1171,6 +1171,8 @@
     "defaultProtocol": "Predvolený protokol",
     "defaultProtocolLast": "Naposledy použitý",
     "defaultProtocolHint": "S ktorým protokolom sa spustí lišta pripojenia. „Naposledy použitý“ ponechá protokol z poslednej relácie, pevná voľba ho pri každom spustení prepíše.",
+    "autoConnectNetwork": "Automatické pripojenie TCP/UDP",
+    "autoConnectNetworkHint": "Pri spustení samo znovu otvorí posledné TCP/UDP spojenie, takže reštartovaná pozemná stanica je späť pri zariadení bez kliknutia. Sériový port a Bluetooth zostávajú manuálne — ich port musí najprv existovať. Len jeden pokus: ak zariadenie ešte nie je zapnuté, stlačte Pripojiť.",
     "units": "Jednotky",
     "cesiumHintPre": "Bezplatný token z",
     "cesiumHintPost": "zapne 3D terén. Po zmene reštartujte 3D zobrazenie.",
@@ -1402,7 +1404,17 @@
     "bottomCentre": "Dole v strede",
     "bottomRight": "Dole vpravo",
     "phoneNoSpaceTitle": "Žiadne voľné miesto",
-    "phoneNoSpace": "Mriežka widgetov je plná na oboch stranách. Najprv zmenšite alebo vypnite iný widget."
+    "phoneNoSpace": "Mriežka widgetov je plná na oboch stranách. Najprv zmenšite alebo vypnite iný widget.",
+    "speedSettings": "Widget rýchlosti",
+    "diffThrust": "Diferenciálny ťah (vľavo/vpravo)",
+    "diffThrustHint": "Pre loď s dvoma motormi: dve bočné lišty zobrazujú ľavý a pravý ťah zo servovýstupov FC (MAVLink SERVO_OUTPUT_RAW, bipolárne okolo 1500 µs) namiesto plynu a zrýchlenia. Vyžaduje prepojenie ArduPilot alebo PX4 — INAV servovýstupy nehlási.",
+    "leftOutput": "Ľavý výstup",
+    "rightOutput": "Pravý výstup",
+    "batterySettings": "Widget batérie",
+    "batterySource": "Zdroj napätia",
+    "batterySourceFc": "Monitor batérie FC",
+    "batterySourceEsc": "ESC {n}",
+    "batterySourceHint": "Zober napätie batérie z vlastnej telemetrie jedného ESC (ArduPilot ESC_TELEMETRY — BLHeli32 alebo VESC cez DroneCAN). Vtedy sa zobrazuje len napätie. „Monitor batérie FC“ používa senzor letového kontroléra."
   },
   "widgetLabels": {
     "spd": "SPD",
@@ -1415,6 +1427,8 @@
     "bat": "BAT",
     "home": "HOME",
     "thr": "THR",
+    "thrL": "THR L",
+    "thrR": "THR R",
     "acc": "ACC",
     "auto": "AUTO",
     "na": "N/A"
