@@ -39,8 +39,9 @@ pub fn trainer_start(
 }
 
 #[tauri::command]
-pub fn trainer_stop(manager: State<'_, TrainerManager>) {
+pub fn trainer_stop(manager: State<'_, TrainerManager>) -> Result<(), String> {
     manager.stop();
+    Ok(())
 }
 
 // ── RC control profiles (Documents/KiteGC/HID-Profiles) ──────────────────────────────────────────

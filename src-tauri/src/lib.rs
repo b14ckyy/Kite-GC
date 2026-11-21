@@ -903,6 +903,9 @@ pub fn run() {
                 app.state::<MjpegServer>().stop();
                 app.state::<video::rtsp_native::NativeRtsp>().stop();
                 commands::video::finish_recording_at_exit(&app.state::<video::rtsp_native::NativeRtsp>());
+                // A bond left in the OS makes the older FrSky module drop every later connection.
+                #[cfg(not(any(target_os = "ios", target_os = "android")))]
+                transport::ble_pairing::release_all_blocking();
             }
             // The detached video window would keep the app alive alone (Tauri exits with the LAST window): close it
             // with — and after — the main window, so the main window's "docked back" handler cannot clear the

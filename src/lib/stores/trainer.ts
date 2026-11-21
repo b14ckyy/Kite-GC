@@ -71,6 +71,9 @@ function onStatus(status: TrainerStatus): void {
   if (status.pairing && radio && !radio.pairing) {
     saveRadios(list.map((r) => (r.id === radio.id ? { ...r, pairing: true } : r)));
   }
+  if (HOLDING.includes(status.state)) {
+    bleDevices.update((devs) => (devs.some((d) => d.id === status.device_id) ? devs.filter((d) => d.id !== status.device_id) : devs));
+  }
   if (status.state === 'streaming') {
     trainerForeign.update((ids) => (ids.includes(status.device_id) ? ids.filter((d) => d !== status.device_id) : ids));
   }
@@ -110,8 +113,9 @@ export async function rememberTrainer(radio: { id: string; name: string }): Prom
   const list = radios();
   if (!list.some((r) => r.id === radio.id)) saveRadios([...list, radio]);
   bleDevices.update((devs) => devs.filter((d) => d.id !== radio.id));
-  // Without the HID input running, the next start of it connects.
-  if (get(hidActive)) await startTrainer();
+  // A restart drops the link of a radio that streams (and with it an engaged session): the next
+  // start of the HID input picks the new radio up instead.
+  if (get(hidActive) && trainerRadioId() == null) await startTrainer();
 }
 
 export async function forgetTrainer(id: string): Promise<void> {

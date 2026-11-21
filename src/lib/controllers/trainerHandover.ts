@@ -10,7 +10,7 @@ import { t } from 'svelte-i18n';
 import type { DialogOptions } from '$lib/components/ConfirmDialog.svelte';
 import { connection } from '$lib/stores/connection';
 import { settings } from '$lib/stores/settings';
-import { rememberTrainer, startTrainer } from '$lib/stores/trainer';
+import { rememberTrainer, startTrainer, trainerRadioId } from '$lib/stores/trainer';
 import { hidActive } from '$lib/stores/hid';
 import { pushLocalStatus } from '$lib/stores/statusText';
 
@@ -42,7 +42,7 @@ export async function initTrainerHandover(
     if (rc.enabled && rc.trainerRadios?.some((r) => r.id === id)) {
       // A known radio switches over without a question.
       pushLocalStatus(6, tr('rc.trainer.detectedKnown', { values: { name } }));
-      if (get(hidActive)) await startTrainer();
+      if (get(hidActive) && trainerRadioId() == null) await startTrainer();
       return;
     }
     if (!rc.enabled) {

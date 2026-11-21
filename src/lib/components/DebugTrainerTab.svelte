@@ -8,29 +8,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { t } from 'svelte-i18n';
   import type { BleDeviceInfo } from '$lib/stores/connection';
-
-  /** Matches the Rust `TrainerStatus`. */
-  interface TrainerStatus {
-    state: string;
-    device_id: string;
-    device: string;
-    error: string | null;
-    characteristic: string;
-    channels: number[];
-    frames: number;
-    rejected: number;
-    notifications: number;
-    interval_last_ms: number;
-    interval_mean_ms: number;
-    interval_p95_ms: number;
-    interval_max_ms: number;
-    frame_age_ms: number | null;
-    stalls: number;
-    reconnects: number;
-    last_raw: string;
-    last_rejected_raw: string;
-    pairing: boolean;
-  }
+  import type { TrainerStatus } from '$lib/stores/trainer';
 
   let devices = $state<BleDeviceInfo[]>([]);
   let scanning = $state(false);

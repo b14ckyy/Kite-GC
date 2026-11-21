@@ -27,9 +27,9 @@ pub mod ble;
 #[cfg(target_os = "android")]
 #[path = "ble_android.rs"]
 pub mod ble;
-/// The BLE-serial profile table, shared by the desktop and Android BLE backends.
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod ble_pairing;
+/// The BLE-serial profile table, shared by the desktop and Android BLE backends.
 pub mod ble_profiles;
 
 use std::fmt;

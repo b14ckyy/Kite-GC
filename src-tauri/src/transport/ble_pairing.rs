@@ -30,6 +30,8 @@ pub fn flagged(device_id: &str) -> bool {
 
 #[cfg(target_os = "windows")]
 mod imp {
+    use std::sync::Mutex;
+
     use windows::core::HSTRING;
     use windows::Devices::Bluetooth::BluetoothLEDevice;
     use windows::Devices::Enumeration::{
@@ -38,38 +40,58 @@ mod imp {
     };
     use windows::Foundation::TypedEventHandler;
 
+    /// Bonds this run made and has not removed yet; the exit hook clears what a dropped task left.
+    static BONDED: Mutex<Vec<u64>> = Mutex::new(Vec::new());
+
     /// Keeps the paired link open; a stale bond makes the module drop every later connection.
     pub struct Bond {
-        device: BluetoothLEDevice,
+        _device: BluetoothLEDevice,
+        address: u64,
     }
 
     impl Bond {
         pub async fn release(self) {
-            let _ = tokio::task::spawn_blocking(move || {
-                if let Err(e) = unpair(&self.device) {
-                    log::warn!("[ble-pair] unpair failed: {e}");
-                }
+            let _ = tauri::async_runtime::spawn_blocking(move || {
+                release_address(self.address);
+                drop(self._device);
             })
             .await;
         }
     }
 
-    fn unpair(device: &BluetoothLEDevice) -> windows::core::Result<()> {
-        let pairing = device.DeviceInformation()?.Pairing()?;
-        if pairing.IsPaired()? {
-            pairing.UnpairAsync()?.get()?;
+    fn release_address(address: u64) {
+        if let Err(e) = unpair_address(address) {
+            log::warn!("[ble-pair] unpair failed: {e}");
         }
+        if let Ok(mut list) = BONDED.lock() {
+            list.retain(|a| *a != address);
+        }
+    }
+
+    /// Unpairs through a new device object: the pairing state of an older one is a stale snapshot.
+    fn unpair_address(address: u64) -> windows::core::Result<()> {
+        let device = BluetoothLEDevice::FromBluetoothAddressAsync(address)?.get()?;
+        device
+            .DeviceInformation()?
+            .Pairing()?
+            .UnpairAsync()?
+            .get()?;
         Ok(())
+    }
+
+    /// For the exit hook: Tauri drops the running task without its cleanup.
+    pub fn release_all_blocking() {
+        let addresses = BONDED.lock().map(|l| l.clone()).unwrap_or_default();
+        for address in addresses {
+            release_address(address);
+        }
     }
 
     fn pair_blocking(
         address: u64,
         pin: &str,
     ) -> windows::core::Result<(BluetoothLEDevice, DevicePairingResultStatus)> {
-        let stale = BluetoothLEDevice::FromBluetoothAddressAsync(address)?.get()?;
-        unpair(&stale)?;
-        drop(stale);
-        // The pairing state is a snapshot of the device object: take a new one after the unpair.
+        unpair_address(address)?;
         let device = BluetoothLEDevice::FromBluetoothAddressAsync(address)?.get()?;
         let custom = device.DeviceInformation()?.Pairing()?.Custom()?;
         let pin = HSTRING::from(pin);
@@ -96,14 +118,21 @@ mod imp {
         let address = u64::from_str_radix(&device_id.replace(':', ""), 16)
             .map_err(|_| format!("'{device_id}' is not a Bluetooth address"))?;
         let pin = pin.to_string();
-        let (device, status) = tokio::task::spawn_blocking(move || pair_blocking(address, &pin))
-            .await
-            .map_err(|e| e.to_string())?
-            .map_err(|e| format!("pairing failed: {e}"))?;
+        let (device, status) =
+            tauri::async_runtime::spawn_blocking(move || pair_blocking(address, &pin))
+                .await
+                .map_err(|e| e.to_string())?
+                .map_err(|e| format!("pairing failed: {e}"))?;
         if status == DevicePairingResultStatus::Paired
             || status == DevicePairingResultStatus::AlreadyPaired
         {
-            Ok(Bond { device })
+            if let Ok(mut list) = BONDED.lock() {
+                list.push(address);
+            }
+            Ok(Bond {
+                _device: device,
+                address,
+            })
         } else {
             Err(format!("pairing refused (status {})", status.0))
         }
@@ -121,6 +150,8 @@ mod imp {
     pub async fn pair(_device_id: &str, _pin: &str) -> Result<Bond, String> {
         Err("programmatic BLE pairing is only implemented on Windows".into())
     }
+
+    pub fn release_all_blocking() {}
 }
 
-pub use imp::{pair, Bond};
+pub use imp::{pair, release_all_blocking, Bond};

@@ -1,19 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// HID / joystick input backend for GCS RC control (INAV RC over MSP — see docs/archive/MSP_RC_CONTROL.md).
-//
-// Phase 1: raw device input only. A dedicated thread polls the selected device at ~50 Hz and streams
-// RAW axis/button/hat state to the frontend (`hid-input`), plus the connected-device list
-// (`hid-devices`) on hotplug. No channel mapping happens here yet — the frontend's calibration UI
-// consumes raw values; mapping → RC channels is a later phase that will move into this thread.
-//
-// We use **native per-OS backends** (not a gamepad-abstraction library): flight hardware / RC
-// transmitters expose many axes + hats that a gamepad model (Xbox layout) misclassifies as buttons.
-//   Windows → Windows.Gaming.Input `RawGameController` (raw axes/buttons/switches, no projection).
-//   Linux   → evdev (raw ABS axes / BTN keys / HAT axes).
-// Each backend yields the same `HidDevice` / `HidSnapshot` shape. The owning thread is the only place
-// a backend is touched (the WGI COM objects aren't `Send`), controlled via `HidManager`.
+// HID input for RC control: one thread polls the OS backend at ~50 Hz (`hid-devices`, `hid-input`); the
+// FrSky Bluetooth trainer (frsky_trainer.rs) joins that list and emits its own `hid-input` per frame.
+// The owning thread is the only place a backend is touched (the WGI COM objects aren't `Send`).
 
 pub mod frsky_trainer;
 #[cfg(target_os = "linux")]
@@ -199,8 +189,6 @@ const SILENT_WARN_AFTER: Duration = Duration::from_secs(5);
 fn input_loop(app: AppHandle, running: Arc<AtomicBool>, selected: Arc<AtomicUsize>) {
     let mut backend = make_backend();
     let mut last_devices: Vec<HidDevice> = Vec::new();
-    // Diagnostics: which target we are streaming, whether it has produced a reading yet, when it was
-    // selected, and the last axis vector we logged (1 Hz debug trace while the values change).
     let mut cur_target: Option<usize> = None;
     let mut got_reading = false;
     let mut since = Instant::now();

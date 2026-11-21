@@ -170,7 +170,6 @@ pub struct TrainerStatus {
     pub pairing: bool,
 }
 
-/// A remembered radio as the frontend hands it over.
 #[derive(serde::Deserialize)]
 pub struct TrainerDevice {
     pub id: String,
@@ -178,11 +177,13 @@ pub struct TrainerDevice {
     pub pairing: bool,
 }
 
-/// Owns the stop handle of the running trainer task.
+/// Stop handle and the radios the running task looks for (`holds()` is what `connect` refuses).
 #[derive(Default)]
 pub struct TrainerManager {
     stop: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
     devices: Mutex<Vec<String>>,
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    task: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
 }
 
 impl TrainerManager {
@@ -232,7 +233,15 @@ impl TrainerManager {
         let (tx, rx) = tokio::sync::oneshot::channel::<()>();
         *self.stop.lock().map_err(|e| e.to_string())? = Some(tx);
         *self.devices.lock().map_err(|e| e.to_string())? = ids.clone();
-        tauri::async_runtime::spawn(link::run(app, ids, rx));
+        // The previous task ends first: its cleanup (disconnect, unpair) must not hit the new session.
+        let mut task = self.task.lock().map_err(|e| e.to_string())?;
+        let previous = task.take();
+        *task = Some(tauri::async_runtime::spawn(async move {
+            if let Some(previous) = previous {
+                let _ = previous.await;
+            }
+            link::run(app, ids, rx).await;
+        }));
         Ok(())
     }
 
@@ -300,6 +309,7 @@ mod link {
             self.session_notifications = 0;
             self.stalled = false;
             self.status.interval_last_ms = 0.0;
+            self.status.interval_mean_ms = 0.0;
             self.status.interval_max_ms = 0.0;
         }
 
@@ -343,7 +353,7 @@ mod link {
             }
         }
 
-        /// Refreshes the derived fields; returns the age of the last valid frame.
+        /// Age of the last valid frame, or of the session while none has arrived.
         fn refresh(&mut self, now: Instant, session_start: Instant) -> Duration {
             let age = now.duration_since(self.last_frame.unwrap_or(session_start));
             self.status.rejected = self.decoder.rejected;
@@ -454,7 +464,9 @@ mod link {
             failed = (result.is_err() && stats.status.state == "connecting")
                 .then(|| stats.status.device_id.clone());
             if let Err(e) = result {
-                log::warn!("[trainer] {e}");
+                if stats.status.error.as_deref() != Some(e.as_str()) {
+                    log::warn!("[trainer] {e}");
+                }
                 stats.status.error = Some(e);
             }
             if let Some(p) = peripheral.take() {
@@ -491,7 +503,6 @@ mod link {
         clear_feed();
         stats.status.channels.clear();
         if gave_up {
-            app.state::<TrainerManager>().stop();
             log::info!("[trainer] ended: no radio left that sends trainer frames");
         } else {
             set_state(&app, &mut stats, "stopped");
@@ -588,7 +599,7 @@ mod link {
         // its raw bytes. SIG services stay out: subscribing there raises a pairing prompt on Windows.
         let all = peripheral.characteristics();
         for c in &all {
-            log::info!(
+            log::debug!(
                 "[trainer] GATT {} / {} {:?}",
                 c.service_uuid,
                 c.uuid,
@@ -602,6 +613,7 @@ mod link {
         if pin_module && !stats.status.pairing {
             ble_pairing::flag(device_id);
             stats.status.pairing = true;
+            stats.status.state = "searching";
             return Err("module demands a passkey: reconnecting with PIN pairing".into());
         }
         let mut targets: Vec<_> = all
@@ -664,7 +676,7 @@ mod link {
                     }
                     if logged_raw < 8 {
                         logged_raw += 1;
-                        log::info!("[trainer] raw {} ({} bytes): {}", n.uuid, n.value.len(), stats.status.last_raw);
+                        log::debug!("[trainer] raw {} ({} bytes): {}", n.uuid, n.value.len(), stats.status.last_raw);
                     }
                     if first && stats.session_frames > 0 {
                         log::info!("[trainer] first frame, {} channels", stats.status.channels.len());
