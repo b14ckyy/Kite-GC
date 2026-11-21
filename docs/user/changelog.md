@@ -4,11 +4,16 @@ What's new in each Kite Ground Control release — the big features up top, the 
 below. The newest release is expanded; click an older version to unfold it. This page is shared by
 every released version of the documentation; the **Dev** docs also list what is still being built.
 
-Each version heading ends with the line's support status — **Live**, **Maintenance** or **EOL** — as
-defined on the [release support](release-support.md) page. Patch releases (1.0.1, 1.0.2, …) are listed
+Each version heading ends with the line's support status — **Live**, **Maintenance** or **EOL**, or
+**Pre-release** before the first release of a line — as defined on the
+[release support](release-support.md) page. Patch releases (1.0.1, 1.0.2, …) are listed
 inside the box of the feature release they belong to, so the notes for one release line stay together.
 
-???+ note "2.0 — in development"
+???+ note "2.0 — Beta · Pre-release"
+
+    **2.0 is in beta.** Its features are complete with 2.0.0-b2; until the final release it
+    only takes fixes. Kite 1.0 stays the stable version meanwhile. The betas are on the
+    [releases page](https://github.com/b14ckyy/Kite-GC/releases).
 
     **Why 2.0, not 1.1:** the flight database changes its schema with this release. Kite
     writes one backup next to it before migrating (`flights.pre-migration-backup.db`) — but the
