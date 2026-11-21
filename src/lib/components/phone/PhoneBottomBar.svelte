@@ -3,24 +3,9 @@
   Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 -->
 
-<!-- PhoneBottomBar — three fixed widget slots on the bottom edge of the phone's map area
-     (Dev-Docs active/PHONE_BOTTOM_WIDGETS.md). Left / right: square, 20 % of the map viewport
-     height; centre: 30 %, square or 2:1 wide (the wide widget family only). No surface of its own —
-     the widgets show their natural card glass, an empty slot takes no space (B2) — and the triplet
-     is centred on the CENTRE slot, whose width collapses to zero while it is empty outside edit
-     mode, so two side widgets close up around the middle line (B3).
-
-     The tiles must fit between the arming pill — or the open nav rail, whichever reaches further
-     right — plus clearance, and the map corner controls on either side of the middle line; when they
-     don't, all three scale down by the missing factor (B4). Of the chip row only the arming pill
-     counts (its widest state seen, so arming never resizes the tiles); the sensor
-     chip stacks above the tiles while a slot is filled (`html.phone-bar`, B5), as do the other
-     bottom-band elements (`--phone-bar-lift`).
-
-     Edit mode + drag are shared with the column (stores/phoneEdit.svelte.ts): a long-press on a
-     tile arms edit mode and picks the widget up; in edit mode every slot shows at its real size
-     with a dashed frame, a hold picks a widget up, the drop lands on a slot (a filled one swaps) or
-     in a column cell. The docked video window is not considered — it lies above the tiles (B8). -->
+<!-- PhoneBottomBar — three widget slots on the bottom edge of the phone's map area (Dev-Docs
+     active/PHONE_BOTTOM_WIDGETS.md B2–B8): sides 20 %, centre 30 % of the map height, centred on the centre
+     slot and scaled to fit. Edit mode + drag are shared with the column (stores/phoneEdit.svelte.ts). -->
 <script lang="ts">
   import { t } from 'svelte-i18n';
   import { WIDGET_MAP } from '$lib/config/widgetRegistry';
@@ -38,7 +23,7 @@
     type PhoneBottomSlot,
     type PhoneWidgetsConfig,
   } from '$lib/controllers/phoneWidgetController';
-  import { phoneEdit, phoneHitTests, bottomSlotAt, sameTarget, type PhoneDragTarget } from '$lib/stores/phoneEdit.svelte';
+  import { phoneEdit, phoneHitTests, dragSlotAt, claimTouch, sameTarget, type PhoneDragTarget } from '$lib/stores/phoneEdit.svelte';
   import WidgetRenderer from '$lib/components/WidgetRenderer.svelte';
   import type { TelemetryData } from '$lib/stores/telemetry';
   import type { InterfaceSettings } from '$lib/stores/settings';
@@ -59,8 +44,8 @@
     interfaceSettings: InterfaceSettings;
     /** `--phone-shift`: how far the widget column has slid out (the map frame grows by it). */
     frameShift?: number;
-    /** Right edge (css px) of a left-edge overlay the tiles must clear besides the arming pill — the
-     *  open nav rail (Marc, 2026-09-12: its lower buttons reach into the tiles' band). 0 = none. */
+    /** Right edge (css px) of a left-edge overlay the tiles must clear besides the arming pill — the open
+     *  nav rail, whose lower buttons reach into the tiles' band. 0 = none. */
     leftReserve?: number;
     /** Edit mode: the user dropped a widget on a slot. */
     onmovetobottom?: (id: string, slot: PhoneBottomSlot) => void;
@@ -165,9 +150,8 @@
   $effect(() => {
     if (barH !== filledH) barH = filledH;
   });
-  // Published on the root: the sensor chip, the error bar and the resume banner move up by the
-  // lift while a tile is on the bottom edge (or the slots show in edit mode). The Debug button and
-  // the Leaflet credit stay on the bottom edge — a tile may cover the credit (Marc: no priority).
+  // Published on the root: the sensor chip, the error bar and the resume banner move up by the lift while
+  // a tile is on the bottom edge (or in edit mode). The Debug button and the credit stay (a tile may cover it).
   $effect(() => {
     const lift = anyFilled || editing ? Math.max(filledH, editing ? Math.max(sideH, centreH) : 0) + PHONE_BOTTOM_GAP : 0;
     const root = document.documentElement;
@@ -215,10 +199,12 @@
   }
 
   function startDrag(e: PointerEvent, id: string) {
+    if (e.pointerType === 'touch') claimTouch(e.target);
     const tile = (e.target as HTMLElement).closest<HTMLElement>('.tile');
     const r = tile?.getBoundingClientRect();
-    grabDx = r ? e.clientX - r.left : 0;
-    grabDy = r ? e.clientY - r.top : 0;
+    // Centred under the finger, like a widget picked up in the column.
+    grabDx = (r?.width ?? sideH) / 2;
+    grabDy = (r?.height ?? sideH) / 2;
     phoneEdit.drag = {
       id,
       owner: 'bottom',
@@ -227,6 +213,7 @@
       y: e.clientY - grabDy,
       w: r?.width ?? sideH,
       h: r?.height ?? sideH,
+      small: (r?.width ?? sideH) < (r?.height ?? sideH) * 1.5,
     };
     console.log('[phoneBar] drag start', id, Math.round(e.clientX), Math.round(e.clientY));
     updateDrag(e.clientX, e.clientY);
@@ -237,14 +224,16 @@
     if (!d) return;
     d.x = clientX - grabDx;
     d.y = clientY - grabDy;
-    const slot = bottomSlotAt(clientX, clientY);
+    const slot = dragSlotAt(clientX, clientY);
     let target: PhoneDragTarget | null = slot ? { kind: 'bottom', slot } : null;
     if (!target) {
       const cell = phoneHitTests.column?.(clientX, clientY);
       if (cell) target = { kind: 'column', ...cell };
     }
-    // Over nothing: keep the last target (a finger just past a slot's edge still means that slot).
-    if (target && !sameTarget(target, d.target)) d.target = target;
+    // Over nothing there is no target: the preview falls back to the stored layout and a release
+    // there drops nothing (the same rule, and the same reach beside the column, as for a drag that
+    // started in the column).
+    if (!sameTarget(target, d.target)) d.target = target;
   }
 
   function endDrag(commit: boolean) {
@@ -285,13 +274,9 @@
   });
 </script>
 
-<!-- The docked video window lies OVER the slots (B8). With the native sink that is not a matter of
-     z-order — the picture is a hardware layer below the WebView, seen through a hole — so each tile
-     asks the surface router (`data-nv-inset`) to cut away the part of it under the window; the
-     value "main" ranks the tiles above the fullscreen swap (an OSD there) and below the docked frame
-     and the video widget. An inset clip, not the mask the map uses: the widgets' glass keeps its
-     blur. A slot hidden under the window is no drop target either — the clipped part is not hit-
-     testable — which matches what the user sees. -->
+<!-- The docked video window lies OVER the slots (B8): with the native sink each tile asks the router
+     (`data-nv-inset`, rank "main": above the fullscreen swap, below the docked frame and video widget) to cut
+     away the part under the window — an inset, not a mask, so the glass keeps its blur; that part isn't hit-testable. -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="pbb" class:editing data-phone-edit-zone oncontextmenu={(e) => e.preventDefault()}>
   <!-- The inner box is the map viewport minus the safe insets (B1's reference height). -->
@@ -312,7 +297,7 @@
           onpointerdown={(e) => id && onTilePointerDown(e, id)}
         >
           {#if id}
-            <WidgetRenderer {id} {telem} {interfaceSettings} sizePx={box.h} wPx={box.w} hPx={box.h} {editing} />
+            <WidgetRenderer {id} {telem} {interfaceSettings} sizePx={box.h} wPx={box.w} hPx={box.h} small={box.w < box.h * 1.5} {editing} />
             {#if editing && slot === 'centre' && isWideFamily(id)}
               <button
                 class="wide-btn"
@@ -339,9 +324,8 @@
 </div>
 
 <style>
-  /* The bar spans the map area (left of the widget column); nothing but the tiles takes touches.
-     `:global(.app) >` outranks +page's `.app > * { pointer-events: auto }` (same specificity as a
-     plain scoped .pbb, and the page's rule came later — the bar swallowed every map touch). */
+  /* The bar spans the map area; only the tiles take touches. `:global(.app) >` outranks +page's
+     `.app > * { pointer-events: auto }`, which would otherwise win and swallow every map touch. */
   :global(.app) > .pbb {
     position: absolute;
     left: 0;

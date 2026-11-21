@@ -39,6 +39,11 @@ inside the box of the feature release they belong to, so the notes for one relea
         column, and a double-tap swaps map and video. Video on the iPhone is being looked into
         but is not available yet. [#105]
 
+        **The screen stays on while the aircraft is armed.** Connected but disarmed, the device's
+        own screen timeout applies. A continuous raw recording, or a telemetry feed that does not
+        report arming, keeps the screen on for the whole connection, and **Stay awake without
+        connection** in the settings keeps it on whenever Kite is open. [#285]
+
         **Android only: the link keeps running in the background.** While connected, Android shows
         a notification with the aircraft, battery, flight mode and distance to home. Minimising
         Kite or switching apps does not stop telemetry or the recording. iOS does not offer the
@@ -69,6 +74,29 @@ inside the box of the feature release they belong to, so the notes for one relea
 
         Details in the [Video](guides/video.md) guide.
 
+    ??? info "Video recording — every flight's RTSP stream as a file"
+        With **Record the video stream** switched on, Kite writes the RTSP video to a Matroska file
+        (`.mkv`) from arming to disarming — the stream as it arrives, without re-encoding, including
+        the seconds since the last keyframe before you armed. The file is named after the vehicle and
+        the time, lands in a `KiteGC` folder in your videos folder (or one you choose), and the saved
+        flight shows it in its details. Needs the native RTSP client and an H.264 or HEVC source;
+        Windows, Linux and macOS.
+
+        **Replay with video.** Open such a flight in the logbook and the recording plays in the
+        video window in step with the replay — play, pause, speed and the timeline move both. Where
+        nothing was recorded, the window says so. Details:
+        [Video → Recording the RTSP stream](guides/video.md#recording-the-rtsp-stream-desktop). [#333]
+
+        **Recordings travel with a `.kflight`.** After exporting flights Kite offers to copy their
+        recordings into a folder next to the file, and the import on another computer offers to copy
+        them into the recording folder there. Deleting a flight asks whether its recordings go as
+        well, and the Video panel can clean up recordings no flight is linked to. [#338]
+
+        **One folder per flight.** When a flight is saved, its recordings move into
+        `Flights/<flight>/` below the recording folder, which leaves the folder itself to the
+        recordings that are being written or have no flight yet. **Show folder** in the flight
+        details opens it in the file manager. [#343]
+
     ??? info "INAV over ELRS, mLRS, SiK or Wi-Fi — the full planner on a MAVLink-only link"
         ELRS and mLRS in MAVLink mode, SiK radios and MAVLink Wi-Fi bridges carry no MSP, and MSP
         is what an INAV flight controller needs for missions, safe homes and geozones. **INAV 10.0**
@@ -82,6 +110,9 @@ inside the box of the feature release they belong to, so the notes for one relea
         receiver are not available on this path. INAV versions before 10.0 connect over MAVLink on a
         best-effort basis and are not officially supported. Setup and limits:
         [Connecting → INAV over MAVLink](guides/connecting.md#inav-over-mavlink-mspmav). [#202]
+
+        On a slow link Kite measures the round trip and gives the tunnel more time, so it is found
+        there too instead of falling back to plain MAVLink. [#337]
 
     ??? info "Your own maps — online with your own key, offline from a folder"
         **Custom online providers.** Add any online tile service by its URL template under
@@ -142,8 +173,9 @@ inside the box of the feature release they belong to, so the notes for one relea
         again — on Windows and Linux through the installer of the package you have (a `.deb`/`.rpm`
         asks for your password), on macOS by replacing the app bundle, and a **portable** copy
         replaces its own executable. Nothing is downloaded until you press the button. Android has
-        no in-app install and offers the release page instead; on iPhone and iPad the update check
-        is off.
+        no in-app install: a copy from Google Play gets the notice with a button to the Play Store
+        and an on/off switch in the settings, a copy from the `.apk` is offered the release page.
+        On iPhone and iPad the update check is off.
 
         **Patch releases only.** A new choice under Settings → Updates keeps you on the bug-fix
         line of the version you run: 2.0.0 is told about 2.0.1, never about 2.1.0. The default
@@ -158,6 +190,12 @@ inside the box of the feature release they belong to, so the notes for one relea
       follows later). [#79]
     - **iPhone & iPad support** — native iOS/iPadOS build with phone and tablet layouts, Bluetooth
       LE and Wi-Fi MAVLink (App Store only, follows later). Contributed by Sebastian Kumor. [#16]
+    - **Android on 32-bit ARM** — beside the arm64 APK there is one for 32-bit ARM devices
+      (`armv7`), and the Play Store version carries both. It has not run on such a device yet.
+      [#340]
+    - **RadioMaster AX12** — on this Android transmitter Kite connects through the built-in ELRS
+      module: the serial port list offers the internal UART and presets its baud rate, and the
+      phone layout is used whatever the display density is set to. [#317]
     - **Phone layout** — landscape interface with a full-screen map, a connection pop-out, a widget
       column with two pages, three widget slots on the map's bottom edge and long-press editing.
       [#102] · [#173]
@@ -165,6 +203,9 @@ inside the box of the feature release they belong to, so the notes for one relea
       column and a map ⇄ video swap. [#105] · [#152]
     - **Background telemetry on Android** — a notification keeps the link, the recording and the
       track running while Kite is minimised. [#111]
+    - **Screen stays on while armed** — on phones and tablets; for the whole connection during a
+      continuous raw recording or without an arming state in the feed, and always with **Stay awake
+      without connection**. [#285]
 
     *Video*
 
@@ -205,6 +246,77 @@ inside the box of the feature release they belong to, so the notes for one relea
 
     *Logbook and replay*
 
+    - **Android: exports go to the share sheet** — flights, tracks, missions, vehicles and batteries
+      are handed to the system share sheet instead of a save dialog (Android 14 and later also offer
+      *Save to device* there). See [Logbook](guides/logbook.md#exporting). [#315]
+    - **Readable file names for exported flights** — vehicle, location, date and time instead of
+      the flight number, on every platform. [#315]
+    - **Database upgrade you can see** — while Kite backs up and upgrades the flight database it
+      shows a notice instead of an empty logbook; afterwards it names the size of the backup and asks
+      whether to delete it (to the recycle bin on desktop), keep it, or be reminded in 14 days.
+      Choosing a database folder with an older database asks before upgrading it. See
+      [Logbook](guides/logbook.md#the-database-updates-and-the-automatic-backup). [#313]
+    - **The flight database moves with its folder** — changing the database folder on Windows,
+      Linux and macOS now asks whether to move the database there. A database already in the new
+      folder can be opened or overwritten, and the previous one backed up into the new folder, kept
+      or deleted. Kite's work files (running recordings, the HI-RES replay cache, logs opened
+      without importing) now always stay in its own data folder, so a database on a slow, removable
+      or network drive does not slow them down.
+      See [Logbook](guides/logbook.md#changing-the-database-folder). [#325]
+    - **Export database, Import database, Export all flights** — Settings → Data saves the whole
+      flight database as one file and writes every flight into one `.kflight`, on every platform;
+      Android and iOS can import a database file again, which is the way to keep a logbook across
+      a reinstall. See [Logbook](guides/logbook.md#exporting-and-importing-the-whole-database). [#325]
+    - **Android: no database folder any more, raw logs are moved** — the copy of the database that
+      Kite wrote into a chosen folder at every disconnect doubled the storage and slowed the
+      disconnect; it is replaced by **Export database**. A database copy already in your folder
+      stays there. Raw logs now arrive in the chosen folder — they are moved there at disconnect,
+      and at the first start every raw log recorded so far. [#325]
+    - **Logbook: select several flights** — **Select** next to the search field puts a tick box
+      on every flight and every group, so several flights can be exported into one `.kflight` or
+      deleted in one go, by touch as well. An export now shows its progress instead of leaving
+      the window unresponsive. See [Logbook](guides/logbook.md#selecting-several-flights). [#330]
+    - **Missions: a download from the aircraft is recognised as a library mission** — when the
+      library already holds exactly the mission that came from the flight controller, it shows the
+      **DB** badge next to **FC** and is linked to that entry. An INAV mission planned with AGL
+      altitudes comes back with them, instead of the AMSL values the aircraft stores. [#330]
+    - **Missions: AGL waypoints without terrain data are marked and locked** — an amber ring on
+      the map, and FC upload and `.mission` export stay locked until the terrain data is there;
+      the altitude-mode button no longer offers AGL where it cannot be converted.
+      See [Missions](guides/missions.md). [#330]
+    - **Panels and the docked video share the left edge** — with the video window docked bottom-left
+      a panel ends above it and follows its size, instead of lying over the picture; a panel
+      narrower than the gap to the widget tiles runs down to the status bar. Where the window is
+      too low for that, the panel overlays the video as before. [#330]
+    - **Panels get out of the way on small screens** — a panel that covers a large part of the map
+      parks itself when you start an action that goes on on the map (place or edit a waypoint,
+      start a survey pattern, load a library mission, add or show a zone, a fence or a rally point,
+      set a safehome, switch Guided on), and the Logbook parks itself where
+      its info card would cover the replay player. A tap on the icon brings it back. [#330]
+    - **Alerts and windows are layered the right way round** — a traffic alert no longer lies
+      over an open panel's controls; where the panel hides it, the panel's title bar takes the
+      alert's colour. The raw-telemetry window and the HI-RES progress window now open in front
+      of the panels and dim them. [#330]
+    - **Waypoint editor** — its remove buttons show a trash can instead of an X, and an editor too
+      tall for the map docks at the right edge and scrolls instead of growing out of the screen. [#330]
+    - **Missions: a click in the waypoint list shows the waypoint on the map** — the map centres on
+      it, or shows the whole mission when none of it is in view. A selected waypoint also holds a
+      follow camera, so the map stays on it until you deselect it.
+      See [Missions](guides/missions.md#building-a-mission). [#330]
+    - **Control panel: Takeoff and AUTO swap places** (ArduPilot, PX4) — once the vehicle flies, or
+      when the mission begins with a takeoff waypoint, the mission mode sits under the mode readout
+      and the takeoff moves to the other modes. From the ground it is a **Hold to AUTO**.
+      See [Vehicle control](guides/vehicle-control.md#takeoff-return-and-landing). [#330]
+    - **Dialogs close through their buttons** — a click beside a dialog that asks for a decision
+      or holds input no longer dismisses it (and with it what you typed); Escape still cancels. [#330]
+    - **Replay shows the guided target** (ArduPilot, PX4) — a flight recorded by Kite, or imported from
+      a `.tlog`, keeps the target the flight controller reported; in replay the Fly Here marker is back
+      wherever the aircraft flew in its guided mode.
+      See [Vehicle control](guides/vehicle-control.md#guided-flight-fly-here). [#331]
+    - **`.kflight` from a newer Kite version** — the import takes over what this version knows and
+      says that not all data could be imported, instead of leaving it out silently. [#331]
+    - **Storage use is shown** — Settings → Data names the size of the flight database, and a
+      flight's detail view shows what its data and its stored original log take. [#330]
     - **INAV Blackbox import without a helper program** — Kite decodes INAV Blackbox logs itself;
       imports are faster and no longer lose the frames after a flight-mode change. [#234]
     - **PX4 ULog import** — the logbook imports `.ulg` logs, split into flights like any other
@@ -218,6 +330,13 @@ inside the box of the feature release they belong to, so the notes for one relea
 
     *Vehicles and control*
 
+    - **RC control: a radio over Bluetooth (desktop)** — a radio in FrSky's Bluetooth trainer mode
+      becomes an input device of RC control, without a cable. Kite remembers a list of radios,
+      connects to the one in trainer mode by itself and tells trainer data from telemetry in both
+      directions. The older FrSky Bluetooth module, also retro-fitted to EdgeTX radios, is paired
+      with its code without a prompt (confirmed on Windows). Frame format taken from garfield2412's
+      FrSky-Bluetooth-Trainer. See
+      [A FrSky radio over Bluetooth](guides/rc-control.md#a-frsky-radio-over-bluetooth). [#348]
     - **INAV over a MAVLink-only link (MSP/MAV)** — with INAV 10.0, missions, safe homes, geozones,
       craft name and flight statistics work over ELRS/mLRS in MAVLink mode, SiK radios and MAVLink
       Wi-Fi bridges. INAV versions before 10.0 connect over MAVLink on a best-effort basis and
@@ -226,8 +345,25 @@ inside the box of the feature release they belong to, so the notes for one relea
     - **ArduPlane: Takeoff button for fixed-wing planes** — switches the plane to TAKEOFF mode
       (hold to confirm). In that mode the motor starts as soon as you arm. [#242]
     - **Vehicle type override, FC ID and "Save to vehicle library" in the UAV Info panel** — the
-      detected type can be changed for the session, the flight controller's hardware ID is shown,
-      and the connected craft can be saved as a library vehicle. [#157]
+      detected type can be changed until you disconnect, the flight controller's hardware ID is
+      shown, and the connected craft can be saved as a library vehicle. [#157]
+    - **Kite mission file (`.kmission`)** — the Mission Manager exports a library entry with
+      everything it holds (name, notes, target system, planned home, vehicle class) and imports it on
+      another install; the flight stack's own format stays available. ArduPilot missions now
+      remember the vehicle class they were planned for, and a QGroundControl plan sets it. See
+      [Missions](guides/missions.md#the-mission-library-mission-manager). [#314]
+    - **INAV: several missions as one library entry** — with more than one mission tab in use,
+      *Save to library* can store all of them together; loading the entry brings every tab back. A
+      `.mission` file with several missions now opens into the tabs instead of one long mission. See
+      [Missions](guides/missions.md#multiple-missions-inav). [#309]
+    - **QGroundControl plans with a Survey can be imported** — the survey arrives as the waypoints
+      QGC generated for it, camera commands included. Before, such a plan was refused. See
+      [Missions](guides/missions.md#files-the-mission-library). [#308]
+    - **Vehicle type from the vehicle library** — a library vehicle whose FC ID matches the
+      connected flight controller sets the type on every connect: map model, UAV Info and the
+      recorded flights. Check the type of your library vehicles — until now it was only a label.
+      The library also knows *Tricopter* now. See
+      [Telemetry & display](guides/telemetry-and-display.md). [#305]
     - **Local radar devices over the network** — an ADS-B receiver and the FormationFlight module
       connect over TCP or UDP as well as over a serial port. See
       [Radar & ADS-B](guides/radar-and-adsb.md#connecting-a-local-device). [#261]
@@ -239,8 +375,47 @@ inside the box of the feature release they belong to, so the notes for one relea
     - **Default protocol** — Settings → Interface → UI pins the protocol Kite opens with to MSP,
       MAVLink or Telemetry; the default stays *Last used*. [#151]
 
+    - **Telemetry API: every GPS receiver on its own** — on a MAVLink link the new `gpsReceivers`
+      group lists each receiver the autopilot reports with its own position, satellites, fix type
+      (unified and raw MAVLink value) and HDOP. See the
+      [Telemetry API](reference/telemetry-api.md) reference. [#297]
+
     *Interface*
 
+    - **GPS widget shows both receivers** — on an ArduPilot aircraft with two GPS receivers the
+      widget's title switches between **EKF** (the fused position, with fix type and satellites
+      of the better receiver) and **CYC**, which alternates between GPS1 and GPS2 every three
+      seconds. On MAVLink the fix type now also reads NO GPS, RTK FLT and RTK FIX. The GPS
+      sensor tile turns amber as soon as one of the two receivers is below a 3D fix. See
+      [Telemetry & display](guides/telemetry-and-display.md). [#297]
+    - **Weather widget** — the forecast wind at the aircraft's height, shown relative to the nose,
+      with gusts, a weather icon, the direction home and, in the wide size, the wind for the next
+      30, 60 and 90 minutes. Needs internet. See
+      [Telemetry & display](guides/telemetry-and-display.md). [#299]
+    - **Weather is recorded with the flight** — the forecast wind by height is fetched every five
+      minutes while a flight is recorded, with or without the weather widget, and stored with the
+      flight; in replay the weather widget shows it as it was at the replayed moment. On Android
+      the widget's data now stays current while Kite runs in the background with a connection. [#316]
+    - **GPS receivers are recorded with the flight** — on a MAVLink link the raw values of each
+      receiver (position, fix, satellites, HDOP / VDOP, accuracy, speed, course, dual-antenna yaw) are
+      stored as the autopilot sends them (once per second, or at its own rate with Full MAVLink
+      Telemetry), and the GPS widget's **CYC** view works in the replay. The Raw
+      telemetry popup lists every receiver, and the Telemetry API's `gpsReceivers` group carries
+      the added values. An imported ArduPilot DataFlash or PX4 ULog log brings its receivers'
+      values as well. [#319] · [#322]
+    - **The logbook remembers its sort order.** [#319]
+    - **Weather requests carry a rounded position** — two decimals, about 1 km: enough for the
+      forecast model, too coarse to follow the aircraft. Two new switches under Settings → Data →
+      Flight Logbook, both on by default: **Record Weather with Flights** and **Auto-Detect Flight
+      Location** (the place-name lookup). See [Privacy](privacy.md). [#316]
+    - **Terrain Analysis: Show Map is a tracking strip** — the chart takes the whole height of the
+      strip; beside it are only Show Map, Follow, reset and the legend. See
+      [Terrain analysis](guides/terrain-analysis.md#map-view-the-chart-on-the-map). [#301]
+    - **Vehicle Control: larger buttons and fields**, all at the normal button height. [#301]
+    - **Telemetry lost notice** — when a link that had delivered data is silent for five seconds, a red
+      line is pinned above the system messages with a running timer and an alarm tone that repeats
+      every minute, until data returns or you disconnect. See
+      [Connecting](guides/connecting.md#reconnecting). [#300]
     - **Resizable widgets** — every flight widget has two or three sizes, switched with a corner
       button in edit mode; the docks adapt to their largest widget. [#101]
     - **Raw telemetry view** — the **≡ Raw** button in the top bar lists every telemetry value in
@@ -249,6 +424,9 @@ inside the box of the feature release they belong to, so the notes for one relea
       version in place. [#162]
     - **Patch releases only** — an update channel that offers bug-fix releases of the running
       version only (2.0.0 → 2.0.1, never 2.1.0). [#162]
+    - **The computer stays awake while armed** — on Windows, macOS and Linux the screen stays on and
+      the computer does not go to sleep by itself while the aircraft is armed, by the same rule as on
+      phones and tablets; **Stay awake without connection** is in the settings there too. [#292]
     - **Slovak interface language**, contributed by Sebastian Kumor. [#222]
     - **Spanish interface language.** [#225]
 
@@ -278,9 +456,36 @@ inside the box of the feature release they belong to, so the notes for one relea
       visibly changes, not on every position update. [#174]
     - **Location names for the logbook** — requests to OpenStreetMap's Nominatim are at least a
       second apart, and flights from the same field reuse the name instead of asking again. [#255]
+    - **Following an aircraft on the 2D map costs much less.** The aircraft model is turned
+      instead of redrawn on every heading change, and in heading-up mode turning the map no
+      longer restyles every tile and line on it — smoother panels and gestures while following,
+      on every platform. [#288]
+    - **Live AGL widget: lighter, and more room ahead.** The terrain profile redraws once per
+      new position or turn instead of on every telemetry message, which costs noticeably fewer
+      frames on tablets and phones. The flown part now takes 15 % of the width instead of a third,
+      so more of the terrain ahead is visible. [#298]
+    - **Widgets on phones and tablets update together, ten times a second.** Every telemetry
+      message used to redraw its widgets on its own, and each redraw repaints the whole widget
+      row. One shared update step keeps the map and the panels smoother; the desktop is unchanged. [#298]
+    - **The video tile makes room when it has nothing to show.** In the widget docks the Video
+      widget takes no space while video is off (unless it is the dock's only widget), and on
+      Android — for an RTSP stream on the native client — also while the floating video window
+      is shown; it comes back by itself, and edit mode always shows it for placing. A mini map
+      in the floating window moves into the video tile when the window is put away; in that
+      Android case it returns to the window when the window is shown again. [#298]
+    - **Android: the floating video window keeps its picture while you drag it.** It used to go
+      black until the finger stood still. [#298]
+    - **The aircraft model no longer fills a mini map.** On the 2D map its span is capped at a
+      quarter of the visible map height, so a map shown in the floating window or a widget tile
+      keeps its content readable. [#298]
+    - **A larger floating video window** — it can be resized up to 40 % of the app window's height
+      instead of 30 %. [#298]
 
     *Logbook and replay*
 
+    - **Replay: the player hangs below the terrain strip.** With the Terrain Analysis in its
+      **Show Map** strip the replay player lay underneath it; it now hangs from the strip's
+      lower edge, so the player stays usable while the profile is on screen. [#346]
     - **A smaller flight database** — imported INAV Blackbox flights no longer carry an unused
       text copy of their rows, and space freed by deleting flights or stored logs is handed back
       to the disk. [#232]
@@ -289,6 +494,9 @@ inside the box of the feature release they belong to, so the notes for one relea
       second; when unsure, the flight stays unassigned. Existing flights are linked once during
       the database upgrade. The post-flight summary and the flight detail show the vehicle and
       let you change it. [#228]
+    - **`.kflight` files carry the linked mission and the recorded weather** — an imported flight
+      shows its mission again, and the weather widget works in its replay. Kite 1.0 imports such a
+      file without them. [#318]
     - **`.kflight` files of INAV Blackbox flights are smaller** — a file written by 2.0 still
       imports into Kite 1.0. [#232]
     - **Compact Database runs in the background** behind a notice, is refused while a flight is
@@ -335,6 +543,18 @@ inside the box of the feature release they belong to, so the notes for one relea
       panel off the map without losing its state; click once more to bring it back. [#102]
     - **The mouse wheel steps any + / − number field** that has the focus; a field without focus
       never reacts, so scrolling a panel stays safe. [#189] · [#191]
+    - **Less graphics load while an aircraft moves** — the heading and course lines on the 2D map no
+      longer redraw a map-sized layer for every frame. On a laptop-class graphics chip the map's share
+      of the load fell to a fraction in free pan and to about half while following. [#332]
+    - **Power Saving also slows the 2D map's motion to 20 frames per second**, like the 3D view; the
+      setting now reads Off / On / Auto. On a tablet this roughly halves the battery current while the
+      map follows a moving aircraft. [#332]
+    - **The 3D view rests while the aircraft stands** — with a live link it kept drawing the globe at
+      the telemetry rate even when nothing moved; it now draws only what changed. [#332]
+    - **The 3D view keeps more of the terrain it has shown** — on the desktop, looking away and back
+      no longer rebuilds terrain and imagery; phones and tablets keep a smaller part. [#332]
+    - **The + / − map buttons zoom continuously while held**, and in the free 3D camera one press
+      now zooms as far as one mouse wheel click instead of a fixed 80 m. [#332]
     - **Power Saving also drops the glass blur** of panels and widgets. [#174]
     - **Live AGL: the projected flight line is smoother**, and the compass and horizon have the
       frosted-glass look of the other widgets. [#101]
@@ -344,6 +564,64 @@ inside the box of the feature release they belong to, so the notes for one relea
 
     Every fix of 1.0.1 and 1.0.2 is part of 2.0. This list holds what is fixed in 2.0 only.
 
+    - **RC control: a second controller no longer takes over.** With two controllers connected,
+      losing the one in use let the stick stream continue from the other with the same mapping.
+      Control now ends when the controller it was started with disappears. [#348]
+    - **Relay: LTM and CRSF carry the altitude above home.** The LTM output wrote the GPS altitude
+      (above sea level) where LTM consumers expect the altitude above home, and the CRSF output had
+      no altitude above home at all. A tracker or a second Kite behind the relay showed the sea-level
+      figure as the flight altitude. LTM now carries the altitude above home. CRSF follows INAV's
+      current layout: the GPS frame stays above sea level, and the barometer-altitude frame carries
+      the altitude above home and the vertical speed (it replaces the separate vario frame). [#339]
+    - **Telemetry mode over CRSF: INAV's current frame layout is understood.** With
+      `crsf_use_legacy_baro_packet` off, INAV sends the GPS altitude above sea level and packs the
+      vertical speed into the barometer-altitude frame. Kite showed no vertical speed on such a link
+      and took the GPS altitude for a height above home, which left AGL and the 3D altitude without
+      a reference. Kite now tells the two layouts apart by the frame itself, so both work. [#339]
+    - **ArduPilot and PX4: the mission on the aircraft is offered when you connect.** INAV
+      already asked whether to download the flight controller's mission; on ArduPilot and PX4
+      nothing happened and the mission had to be fetched by hand. Where the firmware reports
+      the mission size with the telemetry, Kite now asks once per connection, without an extra
+      request to the aircraft. [#344]
+    - **Radar: adsb.lol is no longer a built-in source, a rate limit pauses a feed.** adsb.lol now
+      allows 500 requests a day per address, which Kite's polling uses up in well under an hour;
+      the feed then showed a source error for the rest of the day. **adsb.fi** is the built-in
+      source, and the example row for adsb.one, a service that no longer exists, is gone. A feed
+      whose provider reports its rate limit and a time to wait is left alone until then, and its
+      status says so. adsb.lol can still be added as a custom source. [#342]
+    - **Telemetry mode: a lost link closes the connection.** When the source of a passive telemetry
+      link went away — the radio's Bluetooth dropped, the TCP side closed — Kite kept showing
+      "connected", and on Android the background notification and the screen hold stayed. The
+      connection now ends as it does on every other link, with the question what to do with a
+      flight that was being recorded. [#339]
+    - **INAV missions: removing a tab kept the wrong badges.** After removing one of several
+      missions, the tabs behind it lost their DB / FILE badge and showed "Modified" although
+      nothing in them had changed. The badges now move with their mission, also through undo. [#339]
+    - **Replay: the altitude reference of a flight is handled more robustly.** [#320]
+    - **Map: waypoint markers could blink out for a moment** when the aircraft moved on to the next
+      waypoint — seen on a tablet under load. The active waypoint is now marked in place. [#326]
+    - **Missions: waypoints could not be set on a repeated copy of the world map** — with the view
+      east of the date line, or panned once around the world, a new waypoint was refused and a
+      dragged one jumped back. [#330]
+    - **Missions: the waypoint editor was pulled away by a follow camera** — with the map following
+      the aircraft, opening a waypoint's editor moved the map to the waypoint and the next position
+      update took it back to the aircraft. The map now stays on the waypoint while it is selected. [#330]
+    - **Missions (INAV): Move up / down left the modifiers behind** — a waypoint moved in the
+      editor without its Jump, RTH or Set Heading; a single waypoint with an RTH ended up behind
+      the end of its own mission. A waypoint now moves together with what belongs to it. [#329]
+    - **Replay of imported ArduPilot and PX4 logs showed the wrong GPS fix type** — a plain 3D fix
+      read as "3D DGPS". Logs imported from now on are right; re-import an older one to correct
+      it. [#322]
+    - **Android: text followed the system font size, the boxes around it did not** — with a larger
+      system font, labels ran out of their buttons and digits overlapped the units in number fields;
+      with a smaller one everything was smaller than designed. Text now keeps its size. [#301]
+    - **Full-width buttons were too flat** where they stood alone in a column (Set Home Here and
+      Download Mission in Vehicle Control, Add Source and Add Local Source in the radar settings). [#301]
+    - **Dialogs taller than the window were cut off** at the top and the bottom, with their buttons
+      out of reach — on a phone, in a small window or at a high UI scale. Every dialog now stays
+      inside the window and scrolls, and its buttons stay in view. [#300]
+    - **Phone: the link button stayed green on a silent link.** Its dot is amber now while the link
+      is connected without data. [#300]
     - **3D map: leaving FPV left the camera in the cockpit** — banked with the aircraft and
       looking at the horizon, and on a touch screen it could hardly be tilted or turned. The free
       camera now starts behind and above the aircraft, looking down at it. [#262]
@@ -377,6 +655,8 @@ inside the box of the feature release they belong to, so the notes for one relea
       only existed on Windows. The detached video window replaces it. [#129]
     - **Raw Telemetry widget** — replaced by the **≡ Raw** view. [#101]
     - **`blackbox_decode` download** — no longer needed for INAV Blackbox imports. [#234]
+    - **Linux AppImage** — Linux comes as `.deb`, `.rpm` and the portable ZIP, each for x64 and
+      arm64. The AppImage could not play video and showed an empty window on Ubuntu 26.04. [#340]
 
 ??? note "1.0 — Initial release · Live"
 
@@ -390,7 +670,7 @@ inside the box of the feature release they belong to, so the notes for one relea
 
     ---
 
-    **1.0.2**{ .kite-patch } *unreleased*{ .kite-badge }
+    **1.0.2**{ .kite-patch } *2026-11-15*{ .kite-badge }
 
     **Fixed**
 
@@ -506,6 +786,10 @@ inside the box of the feature release they belong to, so the notes for one relea
       fix: after each zoom step the map shows the previous zoom level for a single frame. That is a
       fault in WebKitGTK 2.54 itself (WebKit bug 321993), corrected by its developers; it goes away
       with a later system update.
+    - **Update check with *Include pre-releases*: a beta or release candidate could go unannounced.**
+      Kite compared itself against whichever release GitHub listed first, which is not always the
+      highest version: a patch release published after a beta of the next version hid that beta.
+      Kite now picks the highest version from the list itself.
     ---
 
     **1.0.1**{ .kite-patch } *2026-09-13*{ .kite-badge }
@@ -596,6 +880,9 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#265]: https://github.com/b14ckyy/Kite-GC/pull/265
 [#271]: https://github.com/b14ckyy/Kite-GC/pull/271
 [#274]: https://github.com/b14ckyy/Kite-GC/pull/274
+[#285]: https://github.com/b14ckyy/Kite-GC/pull/285
+[#288]: https://github.com/b14ckyy/Kite-GC/pull/288
+[#292]: https://github.com/b14ckyy/Kite-GC/pull/292
 [#259]: https://github.com/b14ckyy/Kite-GC/pull/259
 [#143]: https://github.com/b14ckyy/Kite-GC/pull/143
 [#145]: https://github.com/b14ckyy/Kite-GC/pull/145

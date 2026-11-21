@@ -21,7 +21,8 @@ use super::types::{BatteryRecord, Flight, FlightEvent, FlightLogSettings, Teleme
 use crate::msp::FcInfo;
 use crate::vehicle_registry::emitter::VehicleEmitter;
 use crate::scheduler::telemetry::{
-    AirspeedData, AltitudeData, AnalogData, AttitudeData, BatteryInstanceData, GpsData, GpsStatsData,
+    AirspeedData, AltitudeData, AnalogData, AttitudeData, BatteryInstanceData, GpsData, GpsReceiverData,
+    GpsStatsData,
     LinkStatsData, Misc2Data, NavStatusData, SensorStatusData, StatusData, WindData,
 };
 
@@ -45,16 +46,9 @@ pub const EVENT_LINK_BACK: &str = "link_back";
 const ROLE_SINGLE: &str = "single";
 const ROLE_MEMBER: &str = "member";
 
-/// Lowest `GpsData::fix_type` that counts as a position fix: a 3D fix (`FIX_3D` on the unified scale,
-/// `scheduler::telemetry::FIX_*` — every link delivers 0 none / 1 2D / 2 3D / 3 DGPS-RTK), via `has_3d_fix`.
-/// - The group INITIATOR needs it (GROUP_FLIGHTS.md §5b): its arm anchors the group, and later
-///   formation / safety guards need precise GPS (checked by `group::GroupCoordinator::on_arm`).
-/// - A single flight starts recording only with it (§5e, Marc 2026-10-02: no fix → nothing to record):
-///   an arm without one waits armed for the fix (`awaiting_fix`); continuous raw logging records anyway.
-/// - The home / stats reference of every session is the first position with it after an arm (§5e M1);
-///   positions below it stay in the recording but count for no distance (`counts_for_distance`).
-///
-/// Group members record regardless of fix (§5b) — their rows before the fix just have no reference.
+/// Lowest `GpsData::fix_type` counting as a position fix (3D on the unified `FIX_*` scale). Needed by the
+/// group INITIATOR (§5b) and a single flight's recording start (§5e: an arm without it waits armed;
+/// continuous raw logging records anyway); it sets the home reference. Group members record regardless.
 const MIN_FIX_TYPE_3D: u8 = 2;
 
 /// One armed stretch of a session on its relative timeline (`timestamp_ms`, ms since the session
@@ -87,11 +81,9 @@ pub fn armed_segments_from(events: &[FlightEvent], end_ms: i64) -> Vec<ArmedSegm
     out
 }
 
-/// Flight statistics over the armed segments of a recorded track (GROUP_FLIGHTS.md §3.8): only rows
-/// inside a segment count; distance is summed per segment (no jump across a disarmed gap), battery
-/// use per segment (a battery swap resets `mah_drawn`). With one segment over the whole track this is
-/// exactly the pre-group whole-span rule. Distances count positions with a 3D fix only, and the max
-/// distance is measured from the home reference (`start_*`, §5e M1) — none without one.
+/// Flight statistics over the armed segments of a recorded track (GROUP_FLIGHTS.md §3.8): distance and
+/// battery use per segment (no jump across a disarmed gap; a battery swap resets `mah_drawn`). Distances
+/// count 3D-fix positions only; max distance is from the home reference (§5e M1).
 struct SegmentStats {
     duration_sec: i64,
     max_alt: f64,
@@ -217,10 +209,8 @@ struct RecordingInterruptedEvent {
     sample_count: i64,
 }
 
-/// A finished live-recording session awaiting commit/discard (deferred commit, ADR-041). Held in
-/// app-state so it survives a disconnect while the End-Flight dialog is open. Carries everything
-/// both consumers need: the finalized `Flight` + temp/db paths (to commit), and the resume fields
-/// (`start_mah`, `last_timestamp_ms`) so a re-arm within grace can continue the same `.ktmp`.
+/// A finished live-recording session awaiting commit/discard (ADR-041), held in app-state so it survives a
+/// disconnect; carries the resume fields so a re-arm within grace continues the same `.ktmp`.
 pub struct PendingSession {
     pub temp_path: PathBuf,
     pub db_path: PathBuf,
@@ -236,6 +226,12 @@ pub struct PendingSession {
     /// session-local identity of a vehicle without a hardware id (`same_fc`). `None` for a session
     /// recovered from disk — its key belonged to an earlier run.
     pub vehicle_key: Option<String>,
+    /// Last weather answer the session stored (`ActiveFlight::weather_seq`): a reopened session must
+    /// not store the same answer again.
+    pub weather_seq: u64,
+    /// The link reports altitude relative to the arming point (`FlightRecorder::alt_relative`); `None`
+    /// for a session recovered from disk.
+    pub alt_relative: Option<bool>,
 }
 
 impl PendingSession {
@@ -312,22 +308,16 @@ impl Clock for FakeClock {
     }
 }
 
-/// Recording slots shared by every recorder (primary or secondary, any link) and the command layer.
-/// Lives in app-state so a pending session survives a disconnect while its End-Flight dialog is open
-/// (ADR-041). Keyed per vehicle, so two recorders can never overwrite each other's session and the
-/// protected-path set covers every file a recorder owns.
-///
-/// Lock rule: each map / set is locked on its own and never while another of the seven is held; a
-/// recorder may lock them while holding its own recorder lock (recorder → slots, never reverse).
+/// Recording slots shared by every recorder and the command layer, in app-state so a pending session
+/// survives a disconnect (ADR-041); keyed per vehicle. Lock rule: each map / set is locked on its own,
+/// never while another is held; recorder lock → slots, never the reverse.
 #[derive(Default)]
 pub struct SessionSlots {
     /// Finished sessions awaiting Save/Discard (or the re-arm grace), keyed by the vehicle key of the
     /// recorder that finalized them (`"L1:S1"`).
     pending: Mutex<HashMap<String, PendingSession>>,
-    /// Sessions to continue on reconnect (ADR-042), keyed by the vehicle key they were recorded under
-    /// (pending → continue) or by the temp path (a recovered orphan, or a Continue issued without a
-    /// vehicle id). A reconnect gets a new vehicle key, so the next primary recorder claims one by
-    /// identity instead (see `take_resume_for`).
+    /// Sessions to continue on reconnect (ADR-042), keyed by vehicle key or temp path; a reconnect gets a new
+    /// vehicle key, so the next primary recorder claims one by identity (`take_resume_for`).
     resume: Mutex<HashMap<String, PendingSession>>,
     /// Every temp `.ktmp` a recorder is writing right now, plus a session taken out of its slot while
     /// it is being committed or reopened (live-path registry).
@@ -344,10 +334,8 @@ pub struct SessionSlots {
     /// aircraft's next recorder adopts one on its first status (`take_suspended_for`); the coordinator
     /// finalizes the rest when the group ends (`take_suspended_of_group`).
     suspended: Mutex<HashMap<PathBuf, PendingSession>>,
-    /// Temp `.ktmp` files whose commit failed in this run (Save, recovery Save, auto-commit), or which
-    /// could not be reopened to continue a flight — whichever vehicle they belong to. Their recording is
-    /// still on disk and must survive until the next start, where the orphan scan offers it again, so
-    /// the discard sweeps and the orphan scan of this run leave them alone (`protected_paths`).
+    /// Temp `.ktmp` files whose commit (or reopen to continue) failed in this run. Their recording must
+    /// survive until the next start's orphan scan, so this run's discard sweeps leave them alone.
     kept: Mutex<HashSet<PathBuf>>,
 }
 
@@ -381,12 +369,9 @@ impl SessionSlots {
         self.pending.lock().map(|map| map.contains_key(key)).unwrap_or(false)
     }
 
-    /// A pending session left by a connection that has closed since (its vehicle key is no longer
-    /// attached) — the End-Flight dialog outlives a disconnect, and a reconnect gives the aircraft a new
-    /// key. Claimed by the same FC (as `take_resume_for`). A recorder that is the only one connected
-    /// also claims a single such session of another identity (e.g. the same aircraft back over passive
-    /// telemetry) — the pre-multi-vehicle single-slot behaviour; with other vehicles connected that
-    /// guess could hand one aircraft's flight to another, so it is not made.
+    /// A pending session of a closed connection (the End-Flight dialog outlives a disconnect), claimed by
+    /// the same FC. Only a recorder that is alone also claims a single one of another identity — with other
+    /// vehicles connected that guess could hand one aircraft's flight to another.
     fn take_detached_pending_for(&self, own_key: &str, fc: &FcInfo) -> Option<PendingSession> {
         let attached: HashSet<String> = self.attached.lock().ok()?.clone();
         let alone = attached.iter().all(|k| k == own_key);
@@ -442,10 +427,9 @@ impl SessionSlots {
         Ok(map.remove(&key).map(|session| (key, session)))
     }
 
-    /// A Save whose commit failed must not lose the recording: its temp path is kept (protected for the
-    /// rest of this run, whichever slot the session ends up in), and the session goes back into `key`'s
-    /// pending slot so Save can be retried — unless that slot was refilled in the meantime (a new flight
-    /// of the same vehicle), then the file stays on disk for the next start's orphan scan.
+    /// A Save whose commit failed must not lose the recording: its temp path is kept and the session goes
+    /// back into `key`'s pending slot for a retry — unless a new flight refilled that slot meanwhile; then
+    /// the file waits for the next start's orphan scan.
     pub fn restore_failed_pending(&self, key: &str, session: PendingSession) {
         self.keep_path(&session.temp_path);
         let path = session.temp_path.clone();
@@ -495,17 +479,9 @@ impl SessionSlots {
         Ok(())
     }
 
-    /// The continue-on-reconnect session the recorder `own_key` of `fc` claims on its first status: the
-    /// one recorded by the same FC (hardware id when both sides know it, else craft name + variant),
-    /// else — only while this recorder is the only one connected — the oldest queued one. With a single
-    /// queued session that is exactly the pre-multi-vehicle behaviour (the next connection takes it);
-    /// with other vehicles connected that guess could hand one aircraft's flight to another, so it is
-    /// not made (as in `take_detached_pending_for`).
-    ///
-    /// Residual: a recorder whose identity is not final on its first status — INAV over MAVLink starts
-    /// with the heartbeat identity until the MSP-tunnel probe replaces it (`set_fc_info`) — matches by
-    /// identity only by chance, so with several links connected its Continue stays queued (protected)
-    /// until a later lone connection claims it, or the startup recovery offers the file after a restart.
+    /// The continue-on-reconnect session this recorder claims on its first status: the same FC's, else — only
+    /// while it is the only one connected — the oldest queued one (never a guess otherwise). A recorder whose
+    /// identity is not final yet (INAV over MAVLink before the probe) may leave it queued.
     fn take_resume_for(&self, own_key: &str, fc: &FcInfo) -> Option<PendingSession> {
         let alone = self.attached.lock().ok()?.iter().all(|k| k == own_key);
         let mut map = self.resume.lock().ok()?;
@@ -536,11 +512,9 @@ impl SessionSlots {
         }
     }
 
-    /// Commit a session taken out of its slot (see `commit_pending_session`) with its temp file
-    /// registered as live for the whole commit — otherwise it sits in no protected set while the main
-    /// DB copies it, and a concurrent discard sweep (e.g. another vehicle's Discard) could delete it.
-    /// A failed commit keeps the path (before it leaves the live set) and the caller still owns the
-    /// session; a successful one releases a path kept by an earlier failure.
+    /// Commit a session taken out of its slot with its temp file registered as live for the whole
+    /// commit — else a concurrent discard sweep could delete it mid-copy. A failed commit keeps the path
+    /// (before it leaves the live set) and the caller still owns the session.
     pub fn commit_protected(&self, session: &PendingSession) -> Result<i64, String> {
         let path = &session.temp_path;
         self.set_live(None, Some(path));
@@ -616,10 +590,8 @@ impl SessionSlots {
         take_where(&self.suspended, |s| s.flight.group_id.as_deref() == Some(group_id))
     }
 
-    /// Move every suspended member session of `group_id` to the group's finalized members (the group
-    /// ended): they go to its store prompt, and a later connection of the same aircraft can no longer
-    /// adopt them into a finished group. Their files are registered as live across the move (the two
-    /// maps are locked one at a time). Returns how many moved.
+    /// Move every suspended member session of the ended group `group_id` to its finalized members, so a later
+    /// connection cannot adopt them into a finished group (files registered as live across the move).
     pub fn drain_suspended_of_group(&self, group_id: &str) -> usize {
         let paths: Vec<PathBuf> = self
             .suspended
@@ -668,20 +640,10 @@ fn take_where(
 }
 
 /// Whether a recorded session came from the FC `fc` of the recorder `own_key`: the hardware id when both
-/// sides know it; otherwise (a known synthetic id dropped by `msp::hardware_uid`, passive telemetry, or an
-/// id that arrived only after the session was recorded — a vehicle discovered on a shared link answers
-/// its identity request after its recorder started) the session-local identity: the same vehicle key
-/// (`"L{link}:S{sysid}"` — the sysid on a MAVLink link, the connection-order link id on MSP / passive
-/// links) within this app run, with the same firmware variant; else craft name + variant — never by an
-/// empty craft name (§5e M2: two identity-less vehicles with no craft name, e.g. passive links, are not
-/// the same aircraft; the callers' "only one connected" fallback still covers a lone reconnect).
-///
-/// Known limitation (for 2.1: defer adoption until the identity is known): MAVLink secondaries record
-/// under the synthetic craft name `"<variant> #<sysid>"` (`mavlink_proto::handler::secondary_recorder`).
-/// Two such sessions with real FC ids on both sides are told apart — but a secondary's id arrives after
-/// its recorder's first status, which is when adoption is decided, so in practice the claiming side has
-/// no id yet and two secondaries with the same variant and sysid on different links can still match
-/// through the craft-name arm.
+/// sides know it, else the same vehicle key and variant within this run, else craft name + variant —
+/// never by an empty craft name (two identity-less vehicles are not the same aircraft).
+/// Known limit: a MAVLink secondary's id arrives after adoption is decided, so two secondaries with the
+/// same variant and sysid on different links can still match through their synthetic craft name.
 fn same_fc(s: &PendingSession, own_key: &str, fc: &FcInfo) -> bool {
     let f = &s.flight;
     match (&f.fc_uid, &fc.fc_uid) {
@@ -700,13 +662,10 @@ fn file_key(vehicle_key: &str) -> String {
 const COMPACT_COMMIT_ERROR: &str =
     "the flight database is being compacted — the recording is kept; save it again once the compact has finished";
 
-/// Commit a pending session into the main DB: insert the finalized flight, copy the temp
-/// `telemetry_records`, remove the temp file, and spawn weather/geocode enrichment. Returns the new
-/// flight id. Shared by the Save command and the recorder's grace-lapsed re-arm path. On failure the
-/// session is untouched (the commit runs in one transaction) and the caller still owns it.
-/// While "Compact Database" runs on that file it fails at once instead of waiting out the busy timeout
-/// on the VACUUM's lock — the recorder's commits run on telemetry threads (MSP scheduler, MAVLink
-/// handler); the callers' keep / Retry paths take over.
+/// Commit a pending session into the main DB (insert the flight, copy the temp telemetry, remove the
+/// temp file, spawn enrichment) and return the new flight id. On failure the caller still owns the
+/// session. While "Compact Database" runs it fails at once: commits run on telemetry threads and must
+/// not wait out the busy timeout on the VACUUM's lock.
 pub fn commit_pending_session(session: &PendingSession) -> Result<i64, String> {
     let conn = db::open_database(&session.db_path)
         .map_err(|e| format!("Failed to open flight DB for commit: {}", e))?;
@@ -715,14 +674,18 @@ pub fn commit_pending_session(session: &PendingSession) -> Result<i64, String> {
     }
     let flight_id = db::commit_session_to_main(&conn, &session.temp_path, &session.flight)
         .map_err(|e| format!("Failed to commit session: {}", e))?;
+    if let Err(e) = db::set_flight_alt_relative(&conn, flight_id, session.alt_relative) {
+        log::warn!("Flight {flight_id}: altitude reference not stored: {e}");
+    }
     db::remove_temp_session(&session.temp_path);
+    super::video_link::attach_waiting(&conn, &session.db_path, flight_id, &session.flight);
 
-    // Weather + geocode for a flight with a home (§5e M1: a session that never armed with a fix has none).
-    // Unit tests commit sessions with real positions now (no recording without a fix) — they never go online.
+    // Weather + geocode for a flight with a home (§5e M1). Unit tests never go online.
     #[cfg(not(test))]
     if let Some((lat, lon)) = valid_start(session.flight.start_lat, session.flight.start_lon) {
         let db_path = session.db_path.to_string_lossy().to_string();
-        tauri::async_runtime::spawn(enrich_flight_async(flight_id, lat, lon, db_path));
+        let start_time = session.flight.start_time.to_rfc3339();
+        tauri::async_runtime::spawn(enrich_flight_async(flight_id, start_time, lat, lon, db_path));
     }
     log::info!("Pending session committed as flight {}", flight_id);
     Ok(flight_id)
@@ -734,15 +697,9 @@ pub fn discard_pending_session(session: PendingSession) {
     log::info!("Pending session discarded: {}", session.temp_path.display());
 }
 
-/// Reconstruct a `PendingSession` from an orphan temp `.ktmp` left by a crash/close (recovery,
-/// ADR-042): read its `session_meta` + telemetry, recompute the flight stats, and finalize the
-/// `Flight` (`end_time` = last sample). Returns the session + its telemetry sample count. The temp
-/// file is left in place (the caller decides: commit / discard / continue-on-reconnect).
-///
-/// A group member's stats count its armed segments only (GROUP_FLIGHTS.md §3.8), paired from the
-/// session's arm/disarm events; a segment still open ends at the last sample. Every other session — a
-/// single flight, or one written before those events existed (`session_meta.role` NULL) — counts as
-/// armed over its whole span, as before group flights.
+/// Reconstruct a `PendingSession` from an orphan `.ktmp` (recovery, ADR-042) with recomputed stats and
+/// `end_time` = last sample; the file stays in place. Returns it + its sample count. A group member counts
+/// its armed segments only (§3.8); every other session counts as armed over its whole span.
 pub fn summarize_temp_session(
     temp_path: PathBuf,
     db_path: PathBuf,
@@ -830,6 +787,8 @@ pub fn summarize_temp_session(
             armed_segments,
             membership,
             vehicle_key: None,
+            weather_seq: 0,
+            alt_relative: None,
         },
         count,
     ))
@@ -838,12 +797,9 @@ pub fn summarize_temp_session(
 /// Longest link gap the wall-clock path of `wall_pair_offset_ms` accepts.
 const MAX_WALL_GAP_MS: i64 = 24 * 60 * 60 * 1000;
 
-/// Where an adopted member session's relative timeline continues when its suspend did NOT happen in
-/// this process — a future cross-restart adoption (GROUP_FLIGHTS.md §3.2), which has no monotonic
-/// suspend instant: the file's last point with both `timestamp_ms` and `wall_ms` known
-/// (`db::last_session_time_pair`), advanced by the wall time since. A gap outside 0..=24 h (a
-/// wall-clock step, a wrong clock), a file without a wall stamp or a read error falls back to
-/// `monotonic_ms`. The in-process adoption (`FlightRecorder::adopt_member`) uses the monotonic gap.
+/// Where an adopted member session's timeline continues after a suspend in ANOTHER process (future
+/// cross-restart adoption): the file's last (timestamp, wall) pair advanced by the wall time since; a gap
+/// outside 0..=24 h, no wall stamp or a read error falls back to `monotonic_ms`.
 #[allow(dead_code)] // cross-restart adoption: not wired yet
 fn wall_pair_offset_ms(conn: &Connection, now_wall_ms: i64, monotonic_ms: i64) -> i64 {
     match db::last_session_time_pair(conn) {
@@ -892,16 +848,18 @@ fn valid_start(lat: Option<f64>, lon: Option<f64>) -> Option<(f64, f64)> {
     }
 }
 
-/// Async enrichment: fetch weather + geocode for a newly armed flight.
-/// Runs in the background, never blocks the recorder thread.
+/// Weather + place name of a committed flight, in the background — never blocks the recorder thread.
 #[cfg_attr(test, allow(dead_code))] // unit tests never go online (`commit_pending_session`)
-async fn enrich_flight_async(flight_id: i64, lat: f64, lon: f64, db_path: String) {
-    // Fetch weather and geocode (sequential — no tokio::join available)
+async fn enrich_flight_async(flight_id: i64, start_time: String, lat: f64, lon: f64, db_path: String) {
     let weather = super::weather::fetch_weather(lat, lon).await;
-    let location = super::geocode::reverse_geocode(lat, lon, "en").await;
+    let location = super::geocode::flight_location(lat, lon, "en").await;
 
-    // Open a fresh connection for the update (recorder's conn is on another thread)
-    let conn = match db::open_database(std::path::Path::new(&db_path)) {
+    // No CREATE: a database moved away meanwhile must not come back as an empty file. The start time
+    // in the WHERE keeps the answer out of another database imported at this path meanwhile.
+    let conn = match rusqlite::Connection::open_with_flags(
+        std::path::Path::new(&db_path),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE,
+    ) {
         Ok(c) => c,
         Err(e) => {
             log::warn!("Enrichment: failed to open DB: {}", e);
@@ -911,8 +869,8 @@ async fn enrich_flight_async(flight_id: i64, lat: f64, lon: f64, db_path: String
 
     if let Some(w) = weather {
         if let Err(e) = conn.execute(
-            "UPDATE flights SET weather_temp_c = ?1, weather_wind_ms = ?2, weather_wind_deg = ?3, weather_desc = ?4 WHERE id = ?5",
-            rusqlite::params![w.temp_c, w.wind_ms, w.wind_deg, w.description, flight_id],
+            "UPDATE flights SET weather_temp_c = ?1, weather_wind_ms = ?2, weather_wind_deg = ?3, weather_desc = ?4 WHERE id = ?5 AND start_time = ?6",
+            rusqlite::params![w.temp_c, w.wind_ms, w.wind_deg, w.description, flight_id, start_time],
         ) {
             log::warn!("Enrichment: failed to write weather for flight {}: {}", flight_id, e);
         } else {
@@ -922,8 +880,8 @@ async fn enrich_flight_async(flight_id: i64, lat: f64, lon: f64, db_path: String
 
     if let Some(name) = location {
         if let Err(e) = conn.execute(
-            "UPDATE flights SET location_name = ?1 WHERE id = ?2",
-            rusqlite::params![name, flight_id],
+            "UPDATE flights SET location_name = ?1 WHERE id = ?2 AND start_time = ?3",
+            rusqlite::params![name, flight_id, start_time],
         ) {
             log::warn!("Enrichment: failed to write location for flight {}: {}", flight_id, e);
         } else {
@@ -983,6 +941,8 @@ struct TelemetrySnapshot {
     // Navigation (MSP_NAV_STATUS) — mission context for replay
     active_wp_number: Option<i32>,
     nav_state: Option<i32>,
+    // The FC's position target (POSITION_TARGET_GLOBAL_INT), in any mode
+    target: Option<(f64, f64, f64)>,
     // GPS quality (MSP_GPSSTATISTICS)
     gps_hdop: Option<f64>,
     gps_eph: Option<f64>,
@@ -1007,6 +967,11 @@ struct ActiveFlight {
     buffer: Vec<TelemetryRecord>,
     /// Accumulated per-instance battery records pending flush (multi-battery; ArduPilot/PX4).
     bat_buffer: Vec<BatteryRecord>,
+    /// Raw GPS receiver samples `(session ms, sample)` pending flush; written with the telemetry batch so
+    /// a crash loses the same tail of both.
+    gps_buffer: Vec<(i64, GpsReceiverData)>,
+    /// Sequence number of the last weather answer written to the temp store; 0 = none yet.
+    weather_seq: u64,
     // Statistics tracking
     max_alt: f64,
     max_speed: f64,
@@ -1024,7 +989,11 @@ pub struct FlightRecorder {
     settings: FlightLogSettings,
     fc_info: FcInfo,
     protocol: String,
+    /// Set by the passive handler at protocol lock (true for LTM / CRSF); `None` on an active MSP or
+    /// MAVLink link, which reports MSL.
+    alt_relative: Option<bool>,
     db_file_path: std::path::PathBuf,
+    sessions_dir: PathBuf,
     /// Base dir for raw logs (raw_logs/*.tlog | *.rawmsp) — separate from the DB folder.
     raw_log_dir: std::path::PathBuf,
     /// Shared MSP raw-log sink (ADR-049): the transport writes the raw serial bytes into it; the
@@ -1049,10 +1018,8 @@ pub struct FlightRecorder {
     /// Whether the first polled status has been seen on this connection (the trustworthy point to
     /// evaluate the continue-on-reconnect decision — past any handshake residual flags).
     first_status_seen: bool,
-    /// Multi-vehicle: a recorder for a SECONDARY vehicle on a shared link runs unattended — its flights
-    /// commit on their own once the re-arm grace has passed (or on teardown) instead of opening the
-    /// End-Flight dialog, which belongs to the primary vehicle. Until the group coordinator
-    /// (GROUP_FLIGHTS.md step 6) takes secondaries over; member mode switches it off.
+    /// A SECONDARY vehicle's recorder runs unattended: its flights commit on their own after the re-arm
+    /// grace (or on teardown) instead of opening the primary's End-Flight dialog; member mode switches it off.
     auto_commit: bool,
     /// The recorder was set unattended (`set_auto_commit`) — what `finalize_member` restores once a
     /// group no longer decides on its sessions (§5e m2).
@@ -1072,6 +1039,18 @@ pub struct FlightRecorder {
 
 /// Thread-safe handle to the flight recorder
 pub type FlightRecorderHandle = Arc<Mutex<FlightRecorder>>;
+
+/// Write the pending GPS receiver samples to the temp store. The buffer is emptied either way: a
+/// failing store must not grow it for the rest of the flight.
+fn flush_gps(conn: &Connection, buffer: &mut Vec<(i64, GpsReceiverData)>) {
+    if buffer.is_empty() {
+        return;
+    }
+    let rows = std::mem::take(buffer);
+    if let Err(e) = db::insert_gps_records_batch(conn, 0, &rows) {
+        log::error!("Failed to flush GPS receiver batch to temp store: {}", e);
+    }
+}
 
 impl FlightRecorder {
     /// Create a new recorder on the system clock. Returns None if logging is disabled.
@@ -1111,11 +1090,18 @@ impl FlightRecorder {
             format!("Failed to open flight log database: {}", e)
         })?;
         slots.attach(emitter.key());
+        #[cfg(not(test))]
+        let sessions_dir = db::sessions_dir(portable);
+        // Tests: next to the rig's database, so every rig keeps its sessions to itself.
+        #[cfg(test)]
+        let sessions_dir = db_path.parent().unwrap_or(Path::new(".")).join("sessions");
 
         Ok(Self {
             settings,
             fc_info,
             protocol: protocol.to_string(),
+            alt_relative: None,
+            sessions_dir,
             db_file_path: db_path,
             raw_log_dir,
             msp_raw_sink,
@@ -1174,9 +1160,8 @@ impl FlightRecorder {
     }
 
     /// Commit a parked session now (auto-commit mode) and tell the frontend to refresh the logbook.
-    /// A failed commit keeps the file (`commit_protected`) for the next start's orphan scan; the
-    /// session does not go back into the slot — the lapsed-grace check in `on_status` would retry it on
-    /// the telemetry thread with every status.
+    /// A failed commit keeps the file for the next start's orphan scan, NOT the slot: `on_status` would
+    /// retry it on the telemetry thread with every status.
     fn auto_commit_now(&self, p: PendingSession) {
         match self.slots.commit_protected(&p) {
             Ok(flight_id) => {
@@ -1224,10 +1209,9 @@ impl FlightRecorder {
         log::info!("{}: home / stats reference set at the first 3D fix after the arm", self.key());
     }
 
-    /// The single-flight recording start of an arm (§5e, Marc 2026-10-02): only with a 3D fix — without
-    /// one there is no position to record and no home. The arm then waits for the fix (`awaiting_fix`;
-    /// `on_gps` starts the recording when it arrives while still armed). Continuous raw logging records
-    /// regardless (a log without a map is the user's business). Returns whether a session runs now.
+    /// The single-flight recording start of an arm (§5e): only with a 3D fix — otherwise the arm waits for
+    /// one (`awaiting_fix`, `on_gps` starts it while still armed). Continuous raw logging records regardless.
+    /// Returns whether a session runs now.
     fn start_armed_session(&mut self) -> bool {
         if !self.has_3d_fix() && !self.settings.raw_always {
             if !self.awaiting_fix {
@@ -1258,7 +1242,7 @@ impl FlightRecorder {
 
     /// The folder of this recorder's temp sessions (a group's `.kgrp` goes there too).
     pub(crate) fn sessions_dir(&self) -> PathBuf {
-        self.db_file_path.parent().unwrap_or(Path::new(".")).join("sessions")
+        self.sessions_dir.clone()
     }
 
     /// The group flight this recorder is a member of.
@@ -1281,11 +1265,9 @@ impl FlightRecorder {
         })
     }
 
-    /// Follow the group coordinator's view (GROUP_FLIGHTS.md §3.2): join the running group, or finalize
-    /// the member session of a group that has ended. Run at the top of every status after the first
-    /// (so the status's own arm/disarm edge already sees the result), and by the coordinator's `tick`
-    /// for recorders that get no status (`from_status` false — only a status counts as a sign of life for
-    /// the member-stall rule). No-op without a coordinator.
+    /// Follow the group coordinator (§3.2): join the running group or finalize the member session of an
+    /// ended one. Run at the top of every status after the first, and by `tick` for silent recorders
+    /// (`from_status` false — only a status counts as a sign of life for the member-stall rule).
     pub(crate) fn group_sync(&mut self, from_status: bool) {
         let Some(c) = self.coordinator.clone() else { return };
         let directive = c.sync(self.key(), self.group_id(), from_status);
@@ -1396,11 +1378,9 @@ impl FlightRecorder {
         }
     }
 
-    /// Group coordinator hook: this recorder is a member of group `group_id` (its `.kgrp` at
-    /// `kgrp_path`) from now on — the running session (if any) records continuously and names the group
-    /// in its `session_meta`; a session started later does so from its start. An unattended
-    /// (auto-commit) secondary stops auto-committing here — the group's store prompt decides on its
-    /// sessions — until `finalize_member` restores it after the group (§5e m2).
+    /// Group coordinator hook: member of `group_id` (its `.kgrp` at `kgrp_path`) from now on — the session
+    /// records continuously and names the group in its `session_meta`. An unattended secondary stops
+    /// auto-committing until `finalize_member` (§5e m2).
     pub fn enter_member_mode(&mut self, group_id: &str, kgrp_path: &Path) {
         log::info!("{} joins group flight {}", self.key(), group_id);
         self.auto_commit = false;
@@ -1418,14 +1398,9 @@ impl FlightRecorder {
         }
     }
 
-    /// Group coordinator hook (§5.5): the group's first arm (the initiator, 3D fix — `has_3d_fix`)
-    /// happened — start recording this connected vehicle although it is not armed. No fix needed (§5b:
-    /// everything after the group start records; rows without a fix have no position). Returns whether a
-    /// session is running afterwards (true as well when one already was). The session has no armed
-    /// time until the vehicle's own arm. Emits nothing (group members never announce their sessions).
-    /// Only in member mode (`enter_member_mode` first): a single flight's session exists only while
-    /// armed, so without membership this refuses (false). False as well when the new session's temp
-    /// store failed to open (a member is a temp file).
+    /// Group coordinator hook (§5.5): the group started — record this connected vehicle although unarmed,
+    /// without a fix (§5b). Member mode only (`enter_member_mode` first), else false; false as well when the
+    /// temp store cannot open. True when a session runs afterwards. Emits nothing.
     pub fn start_recording_unarmed(&mut self) -> bool {
         if self.membership.is_none() { return false; }
         if self.active_flight.is_some() {
@@ -1438,10 +1413,8 @@ impl FlightRecorder {
         self.active_flight.as_ref().is_some_and(|f| f.temp_db.is_some())
     }
 
-    /// Group coordinator hook: the group ended (last disarm + grace) — finalize this member's session
-    /// with armed-segment stats and park it for the group's store prompt (`SessionSlots::
-    /// take_group_members`). Leaves member mode; an unattended (secondary) recorder auto-commits its
-    /// flights again from here on (§5e m2). Returns whether a session was parked.
+    /// Group coordinator hook: the group ended — finalize this member's session with armed-segment stats and
+    /// park it for the store prompt; leaves member mode (§5e m2). Returns whether a session was parked.
     pub fn finalize_member(&mut self) -> bool {
         if self.membership.is_none() {
             log::warn!("{}: finalize_member outside a group flight — ignored", self.key());
@@ -1486,9 +1459,11 @@ impl FlightRecorder {
         self.protocol = protocol.to_string();
     }
 
-    /// Start continuous raw logging immediately on connect.
-    /// Called when `raw_always` is enabled. Opens a session-level raw/tlog file
-    /// that records all data (including pre-arm) until disconnect.
+    pub fn set_alt_relative(&mut self, relative: bool) {
+        self.alt_relative = Some(relative);
+    }
+
+    /// Start continuous raw logging on connect (`raw_always`): one session-level file incl. pre-arm data.
     pub fn start_continuous_log(&mut self) {
         if !self.settings.raw_always {
             return;
@@ -1574,6 +1549,40 @@ impl FlightRecorder {
         self.maybe_record_sample();
     }
 
+    /// Whether an answer of the weather service would be stored now (a session with a temp store).
+    pub fn records_weather(&self) -> bool {
+        self.active_flight.as_ref().is_some_and(|f| f.temp_db.is_some())
+    }
+
+    /// An answer of the weather service; offered repeatedly, stored once per `seq` and session.
+    pub fn on_weather(&mut self, seq: u64, lat: f64, lon: f64, source: &str, data_json: &str) {
+        let now = self.clock.instant();
+        let Some(flight) = self.active_flight.as_mut() else { return };
+        if flight.weather_seq == seq {
+            return;
+        }
+        let Some(conn) = flight.temp_db.as_ref() else { return };
+        let elapsed_ms = now.saturating_duration_since(flight.start_instant).as_millis() as i64;
+        // Also after a failed insert: the answer comes again every few seconds.
+        flight.weather_seq = seq;
+        if let Err(e) = db::insert_weather_record(conn, 0, elapsed_ms, lat, lon, source, data_json) {
+            log::warn!("Failed to store the weather answer: {}", e);
+        }
+    }
+
+    /// One raw message of one GPS receiver: a `gps_records` row while a flight is recorded.
+    pub fn on_gps_receiver(&mut self, data: &GpsReceiverData) {
+        let now = self.clock.instant();
+        let Some(flight) = self.active_flight.as_mut() else { return };
+        let Some(conn) = flight.temp_db.as_ref() else { return };
+        let elapsed_ms = now.saturating_duration_since(flight.start_instant).as_millis() as i64;
+        flight.gps_buffer.push((elapsed_ms, *data));
+        // Normally flushed with the telemetry batch; this bounds it while no samples are recorded.
+        if flight.gps_buffer.len() >= FLUSH_THRESHOLD {
+            flush_gps(conn, &mut flight.gps_buffer);
+        }
+    }
+
     /// Feed altitude data from the scheduler
     pub fn on_altitude(&mut self, data: &AltitudeData) {
         self.snapshot.alt_baro = Some(data.altitude);
@@ -1617,9 +1626,8 @@ impl FlightRecorder {
     }
 
     /// The FC hardware id and firmware version of a vehicle that reported them only after its recorder
-    /// was built (a vehicle discovered on a shared link answers its identity request then). Applied like
-    /// `set_fc_info` — to the running session (its temp meta, a group member's `.kgrp` row) and every
-    /// later flight; the rest of the identity (craft name, platform, …) stays. `None` keeps the value.
+    /// was built. Applied like `set_fc_info`, to the running session and every later flight; the rest of
+    /// the identity stays. `None` keeps the value.
     pub fn set_fc_identity(&mut self, fc_uid: Option<String>, fc_version: Option<String>) {
         let mut info = self.fc_info.clone();
         if fc_uid.is_some() {
@@ -1631,10 +1639,8 @@ impl FlightRecorder {
         self.set_fc_info(info);
     }
 
-    /// Replace the recorded FC identity (craft name, variant, version, board, platform, FC id) — for the
-    /// flight being recorded (its temp session meta too) and every later flight on this link. Used when
-    /// the MSP-over-MAVLink probe turns a MAVLink link into an INAV one after the recorder was created
-    /// with the heartbeat identity. The protocol label stays (the link still records a .tlog).
+    /// Replace the recorded FC identity for the running and every later flight on this link — when the
+    /// MSP-over-MAVLink probe turns a MAVLink link into an INAV one. The protocol label stays (still a .tlog).
     pub fn set_fc_info(&mut self, fc_info: FcInfo) {
         self.fc_info = fc_info;
         if let Some(conn) = self.active_flight.as_ref().and_then(|f| f.temp_db.as_ref()) {
@@ -1692,6 +1698,12 @@ impl FlightRecorder {
         self.snapshot.nav_state = Some(data.nav_state as i32);
     }
 
+    /// Feed the FC's position target `(lat, lon, alt_m)` — see `TelemetryRecord::target_lat`. `None` = the
+    /// FC reports no target.
+    pub fn on_nav_target(&mut self, target: Option<(f64, f64, f64)>) {
+        self.snapshot.target = target;
+    }
+
     /// Feed GPS quality stats (MSP_GPSSTATISTICS) — HDOP/EPH/EPV carried in one message.
     pub fn on_gps_stats(&mut self, data: &GpsStatsData) {
         self.snapshot.gps_hdop = Some(data.hdop);
@@ -1723,6 +1735,11 @@ impl FlightRecorder {
     /// Feed the canonical flight mode (protocol-agnostic). Stored per telemetry row so replay reads
     /// it directly — no re-classification. See docs/active/FLIGHT_MODE_UNIFIED.md.
     pub fn on_flightmode(&mut self, fm: &crate::flightmode::FlightModeState) {
+        // The target belongs to the mode it was reported in: until the FC reports the new mode's own, the
+        // last mission item must not stand in as a guided target.
+        if self.snapshot.mode_primary.as_deref() != Some(fm.primary.as_str()) {
+            self.snapshot.target = None;
+        }
         self.snapshot.mode_primary = Some(fm.primary.clone());
         self.snapshot.mode_modifiers = if fm.modifiers.is_empty() {
             None
@@ -1756,12 +1773,9 @@ impl FlightRecorder {
 
     /// The first-status decisions and the arm/disarm edges of one status (`on_status`).
     fn handle_status(&mut self, is_armed: bool) {
-        // First polled status of this connection: settle any continue-on-reconnect session (ADR-042).
-        // The poller's status is past any handshake residual flags, so it is the trustworthy point.
-        // A suspended group member of the same aircraft comes first: it is adopted without a prompt.
-        // Unattended (secondary) recorders never claim a continue-on-reconnect session — they had no
-        // resume slot before either. A session already running (a group coordinator started one before
-        // this status) is never replaced: the queued sessions stay in their slots.
+        // First polled status (past any handshake residual flags): settle continue-on-reconnect (ADR-042); a
+        // suspended group member of the same aircraft is adopted first, without a prompt. Unattended recorders
+        // never claim one, and a session already running is never replaced.
         if !self.first_status_seen && self.active_flight.is_some() {
             log::warn!("{}: first status with a session already running — no adoption / continue-on-reconnect", self.key());
             self.first_status_seen = true;
@@ -1808,7 +1822,9 @@ impl FlightRecorder {
     /// Move a finalized session into this vehicle's pending entry and tell the frontend to show the
     /// End-Flight summary (Save/Discard). Used by `on_disarm` and the continue-on-reconnect
     /// disarmed-on-first-poll path.
-    fn stash_pending_and_emit_ended(&self, session: PendingSession) {
+    fn stash_pending_and_emit_ended(&self, mut session: PendingSession) {
+        // A session queued before the database folder changed is saved where the database is now.
+        session.db_path = self.db_file_path.clone();
         let ev = RecordingEndedEvent {
             duration_sec: session.flight.duration_sec.unwrap_or(0),
             max_alt_m: session.flight.max_alt_m.unwrap_or(0.0),
@@ -1827,11 +1843,9 @@ impl FlightRecorder {
     /// commit + grace, ADR-041): a re-arm within the grace window continues the SAME log; beyond it
     /// the previous flight is auto-committed and a fresh session starts.
     fn on_arm(&mut self) {
-        // Group member: the session runs on through disarms — an arm is only an event. A member
-        // without a session (none was started for it at the group's start) opens one now, with or
-        // without a fix (§5b). The coordinator hears of the arm first: when the group has ended in the
-        // meantime (its grace lapsed), the member session is finalized for the group and this arm
-        // starts a new flight.
+        // Group member: an arm is only an event; a member without a session opens one now, fix or not (§5b).
+        // The coordinator hears of the arm first — if the group ended meanwhile, the member session is
+        // finalized and this arm starts a new flight.
         if let Some(group_id) = self.group_id().map(String::from) {
             let running = self.coordinator.as_ref().is_none_or(|c| c.on_member_arm(self.key(), &group_id));
             if running {
@@ -1871,9 +1885,8 @@ impl FlightRecorder {
                 return;
             }
             // Grace lapsed → auto-commit the previous flight, then start a fresh session (with a fix). A
-            // session whose commit already failed is not retried here (attended or unattended alike): the
-            // database is likely still busy, and blocking the telemetry thread at takeoff would cost the
-            // new flight's first seconds. Its file stays protected (kept) and the next start offers it again.
+            // session whose commit already failed is not retried: blocking the telemetry thread at takeoff
+            // would cost the new flight's first seconds. Its file stays kept for the next start.
             if self.slots.is_kept(&p.temp_path) {
                 log::warn!(
                     "Re-arm: recording {} failed to save before — not retried now, offered at the next start",
@@ -1905,10 +1918,9 @@ impl FlightRecorder {
         self.start_armed_session();
     }
 
-    /// Reopen a parked session's `.ktmp` as the active flight, its relative timeline continuing at
-    /// `offset_ms(conn)` from now. False when the file cannot be opened (logged; the caller starts a
-    /// fresh session). Callers guarantee that no session is active (`on_arm`, the first-status guard
-    /// in `on_status`): a running session is never replaced without being parked.
+    /// Reopen a parked session's `.ktmp` as the active flight, its timeline continuing at `offset_ms(conn)`.
+    /// False when it cannot be opened (the caller starts fresh). Callers guarantee no session is active: a
+    /// running session is never replaced without being parked.
     fn reopen_session(&mut self, p: PendingSession, offset_ms: impl FnOnce(&Connection) -> i64) -> bool {
         debug_assert!(self.active_flight.is_none(), "reopen_session over a running session");
         // Taken out of its slot, the file is in no protected set until the flight is active again:
@@ -1961,6 +1973,8 @@ impl FlightRecorder {
             start_lon: p.flight.start_lon,
             buffer: Vec::with_capacity(FLUSH_THRESHOLD),
             bat_buffer: Vec::new(),
+            gps_buffer: Vec::new(),
+            weather_seq: p.weather_seq,
             max_alt: p.flight.max_alt_m.unwrap_or(0.0),
             max_speed: p.flight.max_speed_ms.unwrap_or(0.0),
             max_distance: p.flight.max_distance_m.unwrap_or(0.0),
@@ -1974,14 +1988,9 @@ impl FlightRecorder {
         true
     }
 
-    /// Re-arm within the grace window — reopen the same `.ktmp` and continue the flight. The relative
-    /// timeline (`timestamp_ms`) resumes at the last sample, so the disarmed gap is not in it; the
-    /// wall-clock gap stays visible through each row's `wall_ms`. Called only while armed: an `arm`
-    /// is recorded unless the session's last arm/disarm event already is one (the re-arm after a
-    /// disarm always gets one; the continue-on-reconnect path stayed armed across the link loss, but a
-    /// file without its `arm` gets it here). The session's `vehicle_key` becomes this recorder's (a
-    /// resume across a reconnect runs under a new key). A fresh session that replaces an unreadable
-    /// file starts armed.
+    /// Re-arm within grace — reopen the same `.ktmp`: the timeline resumes at the last sample (the gap stays
+    /// visible in `wall_ms`), an `arm` event is written unless the last event already is one, and the
+    /// session takes this recorder's `vehicle_key`. Called only while armed.
     fn resume_session(&mut self, p: PendingSession) {
         log::info!("Re-arm within grace — continuing the same recording");
         let last_timestamp_ms = p.last_timestamp_ms;
@@ -1997,12 +2006,9 @@ impl FlightRecorder {
         self.emit("flight-recording-resumed", ());
     }
 
-    /// The same aircraft came back while its group ran: adopt its suspended member session (§3.2).
-    /// Unlike the single-flight resume, the relative timeline keeps the **real** gap — the monotonic
-    /// time since the suspend (a suspended session lives only in this process, so it keeps its original
-    /// time base, and a wall-clock step such as an NTP sync on a Pi can neither restart nor shift the
-    /// timeline) — so a synchronised group replay stays aligned. Writes `link_back`, plus the arm or
-    /// disarm that happened while the link was gone. No lifecycle event (members never emit them).
+    /// The same aircraft came back while its group ran: adopt its suspended member session (§3.2), keeping
+    /// the REAL monotonic gap (a wall-clock step such as an NTP sync cannot shift it), so a group replay
+    /// stays aligned. Writes `link_back` plus the arm/disarm missed meanwhile.
     fn adopt_member(&mut self, p: PendingSession, is_armed: bool) {
         log::info!("{}: adopting the suspended group-member session {}", self.key(), p.temp_path.display());
         self.auto_commit = false; // a member from now on, as after `enter_member_mode`
@@ -2027,23 +2033,16 @@ impl FlightRecorder {
         }
     }
 
-    /// Open a brand-new recording session (temp store + raw logger); `announce` = emit
-    /// `flight-recording-started` (single flights — group members never announce); `why` names the
-    /// kind of start for the log. Nothing is written to the main DB here — the real `flight_id` is born
-    /// at commit (ADR-041).
+    /// Open a brand-new session (temp store + raw logger); `announce` = emit `flight-recording-started`
+    /// (members never do). Nothing reaches the main DB here — the `flight_id` is born at commit (ADR-041).
     fn start_fresh_session(&mut self, announce: bool, why: &str) {
         log::info!("{}: starting flight recording ({})", self.key(), why);
         self.awaiting_fix = false;
 
         let now = self.clock.utc();
 
-        // Open the per-session temp store (DB recording only).
         let (temp_db, temp_path) = if self.settings.db_enabled {
-            let sessions_dir = self
-                .db_file_path
-                .parent()
-                .unwrap_or(std::path::Path::new("."))
-                .join("sessions");
+            let sessions_dir = self.sessions_dir.clone();
             // The vehicle key makes the name unique per recorder: two vehicles arming in the same
             // second ("arm all") must never share a file. Not the FC id — it is missing on secondary /
             // passive links and not unique (ArduPilot SITL instances share one).
@@ -2117,6 +2116,8 @@ impl FlightRecorder {
             start_lon: None,
             buffer: Vec::with_capacity(FLUSH_THRESHOLD),
             bat_buffer: Vec::new(),
+            gps_buffer: Vec::new(),
+            weather_seq: 0,
             max_alt: 0.0,
             max_speed: 0.0,
             max_distance: 0.0,
@@ -2138,18 +2139,9 @@ impl FlightRecorder {
         }
     }
 
-    /// Take the active flight, close its raw loggers, flush + close its temp store, and build the
-    /// finalized `PendingSession` (+ its telemetry sample count). Returns `None` in raw-only mode
-    /// (no DB session to commit). Shared by `on_disarm` and `shutdown` — they differ only in which
-    /// lifecycle event they then emit — and by the group-member paths (`finalize_member`,
-    /// `suspend_member`), where the stats are recomputed over the armed segments.
-    ///
-    /// The file stays registered as live until the caller has parked (or committed) the session and
-    /// calls `publish_active_path`, so the hand-over into the pending slot leaves no gap
-    /// (`protected_paths` reads the live set before the slots). The reverse moves — out of a slot into
-    /// a commit or a reopen — register the path before the file is used (`commit_protected`,
-    /// `reopen_session`); only the instant between the take and that registration is uncovered, since
-    /// the maps are locked one at a time.
+    /// Take the active flight, close its loggers and temp store, and build the finalized `PendingSession`
+    /// (+ sample count); `None` in raw-only mode. The file stays registered as live until the caller parks
+    /// or commits it and calls `publish_active_path`, so the hand-over leaves no unprotected gap.
     fn take_active_as_pending(&mut self) -> Option<(PendingSession, i64)> {
         let mut flight = self.active_flight.take()?;
         let end_time = self.clock.utc();
@@ -2188,12 +2180,11 @@ impl FlightRecorder {
                 log::error!("Failed to flush final battery batch to temp store: {}", e);
             }
         }
+        flush_gps(&temp_db, &mut flight.gps_buffer);
         let sample_count = db::temp_session_row_count(&temp_db).unwrap_or(0);
         let armed_segments = armed_segments_from(&flight.events, last_timestamp_ms);
-        // A group member recorded disarmed stretches too: its stats count the armed segments only
-        // (§3.8), recomputed from the file (the stats columns only — this runs under the recorder
-        // lock) — the open segment ends at the last sample, as in recovery. A read error keeps the
-        // live whole-span stats rather than zeroing them.
+        // A group member's stats count its armed segments only (§3.8), recomputed from the file; a read error
+        // keeps the live whole-span stats rather than zeroing them.
         let member_stats = match &self.membership {
             Some(_) => match db::read_stats_samples(&temp_db) {
                 Ok(rows) => {
@@ -2272,6 +2263,8 @@ impl FlightRecorder {
                 armed_segments,
                 membership: self.membership.clone(),
                 vehicle_key: Some(self.key().to_string()),
+                weather_seq: flight.weather_seq,
+                alt_relative: self.alt_relative.or(Some(false)),
             },
             sample_count,
         ))
@@ -2319,9 +2312,8 @@ impl FlightRecorder {
         self.publish_active_path();
     }
 
-    /// Record a telemetry sample into the active flight's temp store / statistics.
-    /// Called after attitude or GPS updates (the highest-frequency data). Raw serial logging is
-    /// independent — it happens at the transport (tlog frames / MSP raw sink), not here.
+    /// Record a telemetry sample into the active flight (after attitude or GPS updates). Raw serial logging
+    /// happens at the transport, not here.
     fn maybe_record_sample(&mut self) {
         // The first 3D fix after the arm becomes the home / stats reference (§5e M1).
         self.set_home_if_due(self.was_armed);
@@ -2344,9 +2336,8 @@ impl FlightRecorder {
             timestamp_ms: elapsed_ms,
             lat: self.snapshot.lat,
             lon: self.snapshot.lon,
-            // GPS MSL — the replay map/3D height (the adapter maps alt_m → altMsl, matching the live
-            // track + Blackbox import). baro is relative-to-home, so storing it here made replay
-            // AGL = baro − terrain (e.g. −84 m at a ~84 m-MSL field).
+            // GPS MSL — the replay map/3D height. NOT baro: it is relative to home, and replay AGL = baro − terrain
+            // goes negative at any field above sea level.
             alt_m: self.snapshot.alt_gps,
             speed_ms: self.snapshot.speed,
             airspeed_ms: self.snapshot.airspeed,
@@ -2385,6 +2376,9 @@ impl FlightRecorder {
             nav_lat: None,
             nav_lon: None,
             nav_alt_m: None,
+            target_lat: self.snapshot.target.map(|t| t.0),
+            target_lon: self.snapshot.target.map(|t| t.1),
+            target_alt_m: self.snapshot.target.map(|t| t.2),
             mode_primary: self.snapshot.mode_primary.clone(),
             mode_modifiers: self.snapshot.mode_modifiers.clone(),
             link_snr: self.snapshot.link_snr,
@@ -2466,14 +2460,13 @@ impl FlightRecorder {
                         log::error!("Failed to flush battery batch to temp store: {}", e);
                     }
                 }
+                flush_gps(temp_db, &mut flight.gps_buffer);
             }
         }
     }
 
-    /// Graceful shutdown (disconnect). An **active (armed) flight** is finalized as a pending session
-    /// and the frontend is shown the **recovery prompt** via `flight-recording-interrupted` — the
-    /// flight may not be over (the user could be changing the COM port or switching to telemetry), so
-    /// Continue-on-Reconnect must be offered (ADR-042), not the End-Flight dialog.
+    /// Disconnect: an armed flight becomes a pending session and the frontend gets the RECOVERY prompt
+    /// (`flight-recording-interrupted`) — the flight may not be over, so Continue-on-Reconnect is offered.
     pub fn shutdown(&mut self) {
         if self.membership.is_some() {
             self.suspend_member();
@@ -2496,7 +2489,7 @@ impl FlightRecorder {
             self.publish_active_path();
         }
         self.close_continuous_loggers();
-        self.mirror_to_shared_folders();
+        self.move_raw_logs_out();
         self.report_teardown();
         self.slots.detach(self.key());
     }
@@ -2529,7 +2522,7 @@ impl FlightRecorder {
             self.publish_active_path();
         }
         self.close_continuous_loggers();
-        self.mirror_to_shared_folders();
+        self.move_raw_logs_out();
         self.report_teardown();
         self.slots.detach(self.key());
     }
@@ -2549,16 +2542,10 @@ impl FlightRecorder {
         self.publish_active_path();
     }
 
-    /// Mirror the session's artefacts into user-granted shared folders where the settings name one
-    /// (Android SAF tree URIs) — no-op everywhere else. Lives in `user_file`, the module that owns
-    /// user-storage platform differences; called on both teardown paths so a lost link mirrors too.
-    fn mirror_to_shared_folders(&self) {
-        crate::user_file::mirror_session(
-            &self.db_file_path,
-            &self.raw_log_dir,
-            &self.settings.db_path,
-            &self.settings.raw_log_path,
-        );
+    /// Android: the closed raw logs go to the shared folder the setting names. Called on both
+    /// teardown paths, so a lost link moves them too.
+    fn move_raw_logs_out(&self) {
+        crate::user_file::move_raw_logs(&self.raw_log_dir, &self.settings.raw_log_path);
     }
 
     /// Close the continuous (pre-arm) raw/tlog loggers on disconnect.
@@ -2636,6 +2623,9 @@ mod tests {
             nav_lat: None,
             nav_lon: None,
             nav_alt_m: None,
+            target_lat: None,
+            target_lon: None,
+            target_alt_m: None,
             mode_primary: None,
             mode_modifiers: None,
             link_snr: None,
@@ -2688,6 +2678,8 @@ mod tests {
             armed_segments: Vec::new(),
             membership: None,
             vehicle_key: None,
+            weather_seq: 0,
+            alt_relative: None,
         }
     }
 
@@ -3202,10 +3194,8 @@ mod tests {
         assert!(rec.has_3d_fix());
     }
 
-    /// (h) A member suspended by its link and adopted by the same aircraft's new recorder keeps the real
-    /// gap — the monotonic one: the wall clock is held back over the outage (a backward step, e.g. an
-    /// NTP sync), and the timeline still advances by the 30 s that passed, neither compressed nor
-    /// shifted by the wall clock.
+    /// (h) A member suspended by its link and adopted by its new recorder keeps the real monotonic gap: the
+    /// wall clock is held back over the outage, and the timeline still advances by the 30 s that passed.
     #[test]
     fn adopt_inside_a_group_keeps_the_monotonic_gap() {
         let rig = Rig::new("adopt");
@@ -3542,12 +3532,9 @@ mod tests {
         assert!(slots.take_suspended_for("L2:S0", &FcInfo { fc_uid: Some("UID1".into()), ..anon }).is_some());
     }
 
-    /// A vehicle without a hardware id is the same aircraft within this app run under the same vehicle
-    /// key and firmware variant — the same sysid on the same MAVLink link, the same MSP link. Without a
-    /// craft name (a PX4 SITL primary) another link with the same sysid, or a session recovered from disk,
-    /// is not. A MAVLink secondary records under the synthetic craft name "<variant> #<sysid>", so on
-    /// another link with the same variant and sysid it DOES match, through the craft-name arm — the
-    /// residual GROUP_FLIGHTS.md step 6 removes (secondaries get their own FC id).
+    /// Without a hardware id: same vehicle key and variant within this run = same aircraft; without a
+    /// craft name, another link or a recovered session is not. A MAVLink secondary's synthetic craft name
+    /// still matches across links (the residual GROUP_FLIGHTS.md step 6 removes).
     #[test]
     fn identity_less_sessions_match_by_vehicle_key_within_the_run() {
         let sim = FcInfo { fc_variant: "PX4".into(), ..FcInfo::default() };
@@ -3807,7 +3794,7 @@ mod tests {
         assert_eq!(db::list_flight_group_member_ids(&main, "g1").unwrap(), [id]);
     }
 
-    // ── A failed commit keeps the recording (PR #233, merged up from 1.0.x) ──────────────────────────
+    // ── A failed commit keeps the recording ──────────────────────────────────────────────────────────
 
     /// A main-DB path that cannot be opened on any OS: its folder is a plain file.
     fn unreachable_db(rig: &Rig) -> PathBuf {
@@ -3834,6 +3821,105 @@ mod tests {
         rec.on_status(&status(false));
         assert!(rec.active_flight.is_none());
         path
+    }
+
+    /// The weather service offers its answer on every tick: a session stores each answer once, at the
+    /// session time it was first offered, and nothing outside a session.
+    #[test]
+    fn a_weather_answer_is_stored_once_per_session() {
+        let rig = Rig::new("weather-once");
+        let (mut rec, _) = rig.recorder("L1:S1", fc("Solo", None));
+        rec.on_weather(1, 48.1, 11.5, "open-meteo", "{}");
+        assert!(!rec.records_weather());
+
+        rec.on_gps(&gps(2, 48.1, 11.5));
+        rec.on_status(&status(false));
+        rec.on_status(&status(true));
+        assert!(rec.records_weather());
+        let path = active_path(&rec);
+        rig.advance_s(2);
+        rec.on_weather(1, 48.1, 11.5, "open-meteo", "{\"a\":1}");
+        rig.advance_s(3);
+        rec.on_weather(1, 48.1, 11.5, "open-meteo", "{\"a\":1}");
+        rig.advance_s(3);
+        rec.on_weather(2, 48.2, 11.6, "open-meteo", "{\"a\":2}");
+
+        let conn = Connection::open(&path).unwrap();
+        let rows: Vec<(i64, f64, String)> = conn
+            .prepare("SELECT timestamp_ms, lat, data_json FROM weather_records ORDER BY id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert_eq!(rows, vec![(2000, 48.1, "{\"a\":1}".to_string()), (8000, 48.2, "{\"a\":2}".to_string())]);
+    }
+
+    /// What the link said about its altitude travels with the finished session into the flight row; a
+    /// link that never said anything reports MSL.
+    #[test]
+    fn the_altitude_reference_travels_with_the_session() {
+        for (name, told, expected) in [("alt-ref-crsf", Some(true), Some(true)), ("alt-ref-msp", None, Some(false))] {
+            let rig = Rig::new(name);
+            let (mut rec, _) = rig.recorder("L1:S1", fc("Solo", None));
+            if let Some(relative) = told {
+                rec.set_alt_relative(relative);
+            }
+            rec.on_gps(&gps(2, 48.1, 11.5));
+            rec.on_status(&status(false));
+            rec.on_status(&status(true));
+            rig.advance_s(2);
+            rec.on_gps(&gps(2, 48.101, 11.5));
+            rec.on_status(&status(false));
+            let p = rig.slots.take_pending_for("L1:S1").expect("a pending session");
+            assert_eq!(p.alt_relative, expected, "{name}");
+            let id = commit_pending_session(&p).unwrap();
+            let main = db::open_database(&p.db_path).unwrap();
+            assert_eq!(db::get_flight_alt_relative(&main, id).unwrap(), expected, "{name}: stored with the flight");
+        }
+    }
+
+    /// Every raw receiver message becomes one `gps_records` row on the session timeline, written when
+    /// the session is flushed; nothing is stored before a flight is recorded.
+    #[test]
+    fn gps_receiver_samples_are_stored_per_message() {
+        let rig = Rig::new("gps-receivers");
+        let (mut rec, _) = rig.recorder("L1:S1", fc("Solo", None));
+        let rx = |id: u8, num_sat: u8, yaw_deg: Option<f64>| GpsReceiverData {
+            id,
+            fix_type: 3,
+            fix_raw: 6,
+            num_sat,
+            hdop: Some(0.7),
+            lat: 48.1,
+            lon: 11.5,
+            alt_msl: 520.0,
+            vdop: None,
+            h_acc_m: Some(0.02),
+            v_acc_m: None,
+            speed_ms: Some(12.5),
+            course_deg: Some(90.0),
+            yaw_deg,
+        };
+        rec.on_gps_receiver(&rx(0, 5, None));
+
+        rec.on_gps(&gps(2, 48.1, 11.5));
+        rec.on_status(&status(false));
+        rec.on_status(&status(true));
+        let path = active_path(&rec);
+        rig.advance_s(1);
+        rec.on_gps_receiver(&rx(0, 17, None));
+        rec.on_gps_receiver(&rx(1, 19, Some(271.5)));
+        rig.advance_s(1);
+        rec.on_gps_receiver(&rx(0, 18, None));
+        assert!(db::get_flight_gps_records(&Connection::open(&path).unwrap(), 0).unwrap().is_empty(), "buffered");
+        rec.on_status(&status(false));
+
+        let rows = db::get_flight_gps_records(&Connection::open(&path).unwrap(), 0).unwrap();
+        let seen: Vec<(i64, i64, Option<i64>, Option<f64>)> =
+            rows.iter().map(|r| (r.timestamp_ms, r.instance, r.num_sat, r.yaw_deg)).collect();
+        assert_eq!(seen, vec![(1000, 0, Some(17), None), (1000, 1, Some(19), Some(271.5)), (2000, 0, Some(18), None)]);
+        assert_eq!((rows[0].fix_raw, rows[0].h_acc_m, rows[0].vdop, rows[0].speed_ms), (Some(6), Some(0.02), None, Some(12.5)));
     }
 
     /// A commit while "Compact Database" runs on the main DB fails at once — no busy-timeout wait on the

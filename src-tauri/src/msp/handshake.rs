@@ -50,12 +50,8 @@ fn request(
     }
 }
 
-/// Run the INAV MSP handshake: API_VERSION, FC_VARIANT (must be "INAV"), FC_VERSION, BOARD_INFO,
-/// version gate + feature set, MIXER, NAME, UID, BLACKBOX_CONFIG, WP #0 (home).
-///
-/// `attempts` = tries per request (1 on a direct MSP link; the MAVLink tunnel passes 2 because a lost
-/// TUNNEL chunk means no reply at all). Returns `Err` for a non-INAV / unsupported firmware or a failed
-/// identity request; the informational requests (mixer, name, …) only log on failure.
+/// Run the INAV MSP handshake (identity, version gate + features, mixer, name, UID, blackbox, home).
+/// `attempts` per request: 2 over the MAVLink tunnel (a lost chunk = no reply). Only identity fails it.
 pub fn run(transport: &mut dyn Transport, attempts: u32) -> Result<MspHandshake, String> {
     let mut fc_info = FcInfo::default();
 
@@ -91,7 +87,6 @@ pub fn run(transport: &mut dyn Transport, attempts: u32) -> Result<MspHandshake,
             (resp.payload[4] as u16) | ((resp.payload[5] as u16) << 8);
     }
 
-    // ── Version check & feature detection ────────────────────────────
     if fc_info.fc_variant != "INAV" {
         return Err(format!(
             "Unsupported firmware variant: '{}'. Only INAV is currently supported.",
@@ -170,11 +165,8 @@ pub fn run(transport: &mut dyn Transport, attempts: u32) -> Result<MspHandshake,
         Err(e) => log::debug!("MSP_BLACKBOX_CONFIG not answered: {}", e),
     }
 
-    // 7) Home position — MSP_WP #0 is INAV's RTH home (GPS_home, lat/lon in deg·1e7). One-shot at
-    //    connect so a mid-flight connect / app restart recovers Home; the live arm-transition path
-    //    only sets it when we actually witness the arm. Raw-parse the 21-byte WP payload (the home
-    //    WP's action byte isn't a normal nav action, so we don't go through decode_wp). lat==lon==0
-    //    means no home is set yet (on the ground, pre-arm) → skip; arm will set it live.
+    // 7) Home: MSP_WP #0 is INAV's RTH home (deg·1e7) — read once so a mid-flight connect recovers it.
+    //    Raw-parsed (its action byte is no nav action, so not decode_wp); lat == lon == 0 = no home yet.
     let mut home = None;
     match request(transport, MSP_WP, &[0], attempts) {
         Ok(resp) if resp.payload.len() >= 14 => {

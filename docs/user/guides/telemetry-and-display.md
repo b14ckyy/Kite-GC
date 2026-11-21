@@ -87,7 +87,7 @@ along the bottom. Each widget is self-contained and updates live.
   place or into the other dock. In edit mode a press picks a widget up immediately. Click anywhere
   outside the docks, or press **Escape**, to leave edit mode.
 - **Resize them**: in edit mode each widget shows a **resize button** in its corner. Every tap steps
-  it to its next size — square widgets toggle **small ↔ large**, the wide ones (Live AGL, Video) cycle
+  it to its next size — square widgets toggle **small ↔ large**, the wide ones (Live AGL, Weather, Video) cycle
   **wide → large square → small square**. The aspect ratio never changes (a widget is only rescaled),
   and a dock shrinks to its largest widget, so a row of small tiles frees the space above it. The
   Video widget always **crops to fill** its tile, whatever its size.
@@ -110,13 +110,14 @@ Edit mode — drag widgets to reorder them or move them between the docks.
 | **Speed** | Airspeed when available (ground speed otherwise), with ground speed on a second line — or **ground speed only** (no second line) when airspeed is turned off in Settings. A **throttle** bar (0–100 %) sits on the left and a derived **acceleration** bar on the right. |
 | **Altitude** | The aircraft's barometric / navigation altitude (relative to home). |
 | **Compass** | A rotating rose with the heading at the centre and a fixed top pointer. An amber **course-over-ground** bug rides the rim while moving — the gap to the nose is your **crab angle** — with the COG value read out above the heading. When wind is reported, a blue **wind arrow** (pointing downwind) and wind speed appear — see **Wind** in **[Settings](../reference/settings.md)** for which firmware sends it live. |
-| **GPS** | Latitude / longitude, satellite count, fix type (No fix / 2D / 3D / 3D DGPS) and HDOP. |
+| **GPS** | Latitude / longitude, satellite count, fix type (No fix / 2D / 3D / 3D DGPS) and HDOP. On a MAVLink link the position is the autopilot's fused estimate, and the fix type also reads **RTK FLT**, **RTK FIX** and **NO GPS** (a receiver that was detected has stopped reporting). When the autopilot reports **two GPS receivers** (ArduPilot), the fix type, satellite count and HDOP come from the better receiver — the higher fix, then more satellites — and the title becomes a button: **EKF** is this fused view, **CYC** alternates every three seconds between **GPS1** and **GPS2** with each receiver's own position and values. The autopilot does not report which receiver it is navigating on. The receivers' own values are recorded with the flight, so **CYC** works in the replay of a flight recorded by Kite 2.0 as well, and in the replay of an ArduPilot DataFlash or PX4 ULog log imported with it. |
 | **Home** | A large arrow pointing to home relative to the aircraft's heading, with distance and bearing. |
 | **Battery** | A charge bar (FC % when reported), voltage, current and **power (V × A)**, plus charge drawn. On multi-battery aircraft (ArduPilot / PX4) it follows the highest-draw pack automatically, with manual pinning; add a second **Battery 2** widget to watch two packs at once — see **[Batteries](batteries.md)**. |
 | **Flight Mode** | The current flight mode as a colour-coded badge — colour by mode category (shared with the track colours), with sub-mode modifier chips and waypoint progress during a mission. |
 | **RC Link** | Link quality — shows whatever the active protocol provides and hides the rest (CRSF / SmartPort / INAV 9.1+ give LQ + RSSI %/dBm + SNR; MAVLink, LTM and INAV before 9.1 give RSSI only). |
 | **Live AGL** | A forward-looking terrain-profile HUD: flown terrain on the left, **estimated** terrain ahead on the right, with a projected flight line that warns of a ground intersection. |
 | **Terrain Radar** | A top-down, track-up terrain-awareness display (EGPWS-style): a forward fan coloured by clearance against your altitude, with a **range** and **REL / PRED** mode button (shown in dock edit mode). |
+| **Weather** | The **forecast wind at the aircraft's height**, from a weather model — independent of the wind the flight controller estimates. A blue arrow on the rose shows where the wind blows **relative to the nose** (the aircraft shape points up), an orange triangle on the rim points **home**, so you see at a glance whether the way back is into the wind. Next to it: the wind speed, the gusts near the ground (**G**), an icon for the general weather, and a height scale from the ground to 200 m with dots at 30, 80, 130 and 180 m and a marker at the aircraft's height above home; above 200 m the tip of the scale lights up instead. The wind value is for the real height at any altitude. The wide size adds the wind at the same height **30, 60 and 90 minutes** from now; the small size shows the rose and the speed only. Needs internet: the data is fetched every five minutes for the aircraft's position (the home position without a GPS fix), and the icon and the arrows turn grey when it is older than 30 minutes — the last values stay on as a reference. The home triangle appears from 100 m away from home. In replay the widget shows the weather that was recorded with the flight, as it was at the replayed moment; a flight without recorded weather shows N/A. The position is sent rounded to about 1 km. While a flight is recorded the data is stored with the flight — also without the widget, unless **Record Weather with Flights** is off ([Settings](../reference/settings.md)). |
 | **Video** | A live video feed embedded as a widget — an RTSP stream or a local capture device / camera (e.g. a USB capture card). See **[Video](video.md)**. |
 
 !!! tip "Units are global"
@@ -126,7 +127,8 @@ Edit mode — drag widgets to reorder them or move them between the docks.
 ### Raw telemetry
 
 For the unconverted figures, click **≡ Raw** in the top bar (it appears next to **⇅ Relay** while you
-are connected). A popup lists **every value the telemetry pipeline holds** — GPS, attitude, altitude
+are connected). A popup lists **every value the telemetry pipeline holds** — GPS (the fused position,
+and on a MAVLink link each receiver with its own position, fix, DOP and accuracy values), attitude, altitude
 and speeds, wind, battery (per pack on multi-battery aircraft), RC link, status and flight-mode flags,
 sensor health, EKF and flight-controller identity — each with its name and **raw unit** (metres, m/s,
 degrees, volts, the FC's own RSSI scale). Bitfields are shown as decimal and hex. It is read-only and
@@ -163,12 +165,15 @@ INAV mixer platform, or the MAVLink vehicle type plus the QuadPlane check), and 
 time — when the flight controller's platform setting does not match the airframe, or on a telemetry-only
 link where Kite can only say *Generic*. The map and the 3D model follow your choice, and the flight
 recorder stores it with the flight, including a flight that is already being recorded. The override is
-not saved: it lasts for the session, and after a reconnect it comes back only when Kite recognises the
-same flight controller. INAV and MAVLink links report a hardware ID for that, shown as **FC ID**
-(shortened, with a copy button for the full value) and stored with each flight — it is also how a flight
-finds its [vehicle](vehicles.md#linking-flights). Telemetry-only links, INAV over plain MAVLink (without
-MSP/MAV) and simulators that report a placeholder (INAV SITL, PX4 SITL as system ID 1) have none: there
-the override is not restored after a reconnect, and the type starts from what the link detects.
+not saved: it lasts until you disconnect, and every connect starts from the detected type again.
+
+To set the type for good, give the aircraft an entry in the [vehicle library](vehicles.md): when a
+vehicle there carries the flight controller's hardware ID, its type is used on every connect, whatever
+the link detects. A library type of *Other* leaves the detection alone. INAV and MAVLink links report
+that ID, shown as **FC ID** (shortened, with a copy button for the full value) and stored with each
+flight — it is also how a flight finds its [vehicle](vehicles.md#linking-flights). Telemetry-only
+links, INAV over plain MAVLink (without MSP/MAV) and simulators that report a placeholder (INAV SITL,
+PX4 SITL as system ID 1) have none: there the type always starts from what the link detects.
 
 **Save to vehicle library** creates a [vehicle library](vehicles.md) entry from the connected craft in
 one click — name and craft name, the vehicle type, the board as FC model, firmware and version, the FC

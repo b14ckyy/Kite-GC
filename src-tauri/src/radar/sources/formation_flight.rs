@@ -1,17 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Radar — FormationFlight (INAV-Radar / ESP32) over MSP (Phase F1).
-//
-// An ESP32 INAV-Radar module (LoRa / ESP-NOW) talks MSP to a flight controller: it polls the FC for its
-// own telemetry, broadcasts it to the formation, and relays received peers back into the FC via
-// MSP2_COMMON_SET_RADAR_POS. Kite joins as a GROUND NODE by emulating an INAV FC over this link (serial,
-// or TCP / UDP to a network bridge in front of the module — see `radar::link`):
-//   - We answer the module's MSP requests as an armed "INAV" FC at the GCS location (so the module runs
-//     as a full TX node — sidestepping the historical "GCS" listen-only bug, which gated on the host type).
-//   - We parse the peers it pushes (MSP2_COMMON_SET_RADAR_POS) into TrackedVehicles (system=FormationFlight).
-// Runs on a dedicated thread, fully isolated from the main scheduler/FC link. See
-// docs/active/RADAR_FORMATION_FLIGHT.md.
+// Radar — FormationFlight (INAV-Radar ESP32) over MSP: Kite joins as a GROUND NODE by emulating an armed
+// "INAV" FC at the GCS location (a "GCS" host type leaves the module listen-only) and parses the peers it
+// pushes (MSP2_COMMON_SET_RADAR_POS). Dedicated thread; docs/active/RADAR_FORMATION_FLIGHT.md.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};

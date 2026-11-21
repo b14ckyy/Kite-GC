@@ -42,11 +42,18 @@ automatically:
 
 1. Connect with the **MAVLink** protocol as you would for ArduPilot.
 2. Kite recognises an INAV flight controller during the handshake and checks for the MSP tunnel (this
-   takes up to two seconds). If it answers, the connection status shows **MSP/MAV** and UAV Info lists
-   the real INAV version, board and craft name plus the feature badge **MSP over MAVLink**.
+   takes up to two seconds, on a slow link up to ten). If it answers, the connection status shows
+   **MSP/MAV** and UAV Info lists the real INAV version, board and craft name plus the feature badge
+   **MSP over MAVLink**.
 3. From there the INAV features work as over a direct MSP link: mission upload and download (including
    EEPROM and multi-mission), safe homes, geozones, craft name, flight statistics. Telemetry itself
    still comes over MAVLink — nothing is polled through the tunnel.
+
+On a **slow link** — a radio with a small uplink, such as ELRS in MAVLink mode — Kite measures how long
+the flight controller takes to answer and gives the tunnel that much more time, when it looks for it
+and for the requests that follow. Connecting then takes noticeably longer, and so do mission and safe
+home transfers. After saving geozones on such a link Kite does not watch the flight controller
+restart; it reports the restart as done when the flight controller acknowledged the request.
 
 What you need on the INAV side: firmware **10.0 or newer**, a serial port with the **MAVLink telemetry**
 function, `mavlink_version` left at 2 (the default) and a board with more than 512 KB of flash (F722 and
@@ -87,6 +94,12 @@ COM ports — Windows and Linux present both as serial ports.
     usual Wi-Fi telemetry setup. **Android** offers Serial for a USB cable on an OTG adapter (Android
     asks per device — pick Kite in the dialog when you plug the cable in). **iPhone and iPad have no Serial transport** — use
     **BLE**, **TCP** or **UDP** there.
+
+!!! note "RadioMaster AX12"
+    On the AX12 transmitter Kite talks to the built-in ELRS module directly — no cable, no Wi-Fi
+    bridge. Choose **Serial**; the port list carries an extra entry, **`/dev/ttyS1` — Internal UART
+    (ELRS module)**. Selecting it sets the baud rate to **460800**, the rate the module runs at; if
+    yours is set differently, change it afterwards. Kite always uses the phone layout on this device.
 
 1. **Transport** → **Serial**.
 2. **Port** — pick it from the list. The list refreshes by itself; a freshly plugged-in board is
@@ -221,6 +234,12 @@ Because nothing is transmitted:
 Passive telemetry works over any transport. On **Serial**, set the **baud rate to match your telemetry
 source** (e.g. SmartPort and CRSF have their own rates) — it isn't auto-detected.
 
+!!! note "A FrSky radio in trainer mode"
+    A FrSky radio whose Bluetooth is set to **trainer** sends stick data, not telemetry. Kite
+    recognises that on a BLE link, closes the link and — on the desktop, with RC control enabled —
+    offers the radio as an input for **[RC control](rc-control.md#a-frsky-radio-over-bluetooth)**.
+    For telemetry, switch the radio's Bluetooth to telemetry.
+
 !!! tip "Recording works in passive mode"
     Flight logging still runs while passively connected — arm/disarm is derived from the decoded
     telemetry, so passively monitored flights land in your **[logbook](logbook.md)** like any other.
@@ -263,7 +282,10 @@ usually a single click on **Connect**. To drop the link, click **Disconnect**.
 A link that **goes quiet** is not dropped: when the aircraft has sent nothing for three seconds on an
 MSP or MAVLink link, the status bar switches to **Reconnecting…** (amber dot), Kite keeps the link
 open, and the display returns to normal as soon as data arrives again — a radio dropout heals on its
-own. Only a **lost transport** — a USB cable unplugged, a Bluetooth link gone, a TCP socket closed —
+own. Once a link that had delivered data is silent for five seconds, a red **Telemetry lost** line is pinned above the system messages,
+with a timer counting up and an alarm tone that repeats every minute; on the phone the dot of the
+**🔗** button turns amber. The line stays until data returns or you disconnect, whatever
+**System Messages** is set to. Only a **lost transport** — a USB cable unplugged, a Bluetooth link gone, a TCP socket closed —
 ends the connection; if a flight was being recorded, Kite then asks what to do with it (**Device
 connection lost**: **Discard**, **Save Incomplete** or **Continue on Reconnect**).
 

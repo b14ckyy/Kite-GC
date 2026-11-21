@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-//! Hi-res replay cache (Dev-Docs active/HIRES_REPLAY.md): re-parse a flight's archived original
-//! log at FULL temporal resolution into a disposable per-flight SQLite file under
-//! `<db_dir>/hires-cache/`. The 10 Hz track in the main DB stays the replay timeline (scrubber,
-//! map, playback index); these rows only feed the instrument values, sampled by timestamp
-//! (`db::get_hires_sample`). Cache files are always reproducible from the archived blob — they are
-//! wiped at app start (crash leftovers) and dropped when the flight is deselected.
+//! Hi-res replay cache (Dev-Docs active/HIRES_REPLAY.md): a flight's archived log re-parsed at FULL rate
+//! into a disposable per-flight SQLite file under `<db_dir>/hires-cache/`. The 10 Hz track stays the
+//! replay timeline; these rows only feed the instrument values.
 
 use std::path::{Path, PathBuf};
 
@@ -59,10 +56,18 @@ pub fn cleanup_cache_dir(cache_dir: &Path) {
     }
 }
 
-/// Re-parse the flight's archived log at full rate into `<cache_dir>/hires_<flight_id>.db`.
-/// `get_blackbox_file` transparently falls back to the linked partner flight, so a REC flight of a
-/// linked pair yields the BBX blob — matching the player, which only offers hi-res on the blackbox
-/// track. Rows are written with `flight_id` 0 (the cache has no `flights` table).
+/// Remove a cache folder that may hold other files: only `hires_*` files go, the folder only if empty.
+pub fn remove_cache_dir(cache_dir: &Path) {
+    for entry in std::fs::read_dir(cache_dir).into_iter().flatten().flatten() {
+        if entry.file_name().to_string_lossy().starts_with("hires_") {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+    let _ = std::fs::remove_dir(cache_dir);
+}
+
+/// Re-parse the flight's archived log at full rate into `<cache_dir>/hires_<flight_id>.db`. Falls back to
+/// the linked partner's blob (as the player does); rows carry `flight_id` 0 (the cache has no `flights`).
 pub fn parse_to_cache<F>(
     main_conn: &Connection,
     flight_id: i64,

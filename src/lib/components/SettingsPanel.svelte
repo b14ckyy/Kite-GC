@@ -4,16 +4,15 @@
 -->
 
 <script lang="ts">
-  // Settings on the panel framework (docs/active/PANEL_FRAMEWORK.md): a `compact` PanelShell with
-  // a SegmentedToggle tab switcher (Interface / Map / Data) in the toolbar; each tab is grouped into
-  // labelled subsections. On/off switches use the shared <Toggle>, actions use <Button>, selects
-  // match the framework height. Most hints are tooltips; only the Cesium-token, airspace-key and
-  // update-check hints are shown as text (`.cesium-hint`).
+  // Settings: a `compact` PanelShell (docs/active/PANEL_FRAMEWORK.md) with a tab switcher (Interface / Map /
+  // Data) in the toolbar. Most hints are tooltips; only a few are shown as text (`.cesium-hint`).
   import { invoke } from '@tauri-apps/api/core';
   import { t, locale } from 'svelte-i18n';
   import { SUPPORTED_LOCALES } from '$lib/i18n';
   import { MAP_PROVIDERS, getProviderById, isCustomProviderId, userProviderId } from '$lib/config/mapProviders';
   import { settings } from '$lib/stores/settings';
+  import { formatBackupSize, type DbBackupInfo } from '$lib/controllers/dbBackupPrompt';
+  import { connection } from '$lib/stores/connection';
   import UserMapsDialog from '$lib/components/UserMapsDialog.svelte';
   import {
     customMaps, ensureCustomMapsLoaded, chooseCustomMapsFolder, resetCustomMapsFolder, rescanCustomMaps,
@@ -24,9 +23,9 @@
   import { panelState, type SettingsTab } from '$lib/stores/panelState';
   import { resetGcsManual, gcsManuallySet } from '$lib/stores/gcsLocation';
   import type { AppSettings, InterfaceSettings, RadarSettings, GcsMode, AirspaceSettings, AirspaceProvider, SystemMessagesLevel, LogLevel, RcControlSettings, TelemetryApiSettings, UpdateCheckSettings, UpdateCheckMode, DefaultProtocol } from '$lib/stores/settings';
-  import { revealItemInDir, openPath } from '@tauri-apps/plugin-opener';
+  import { revealItemInDir } from '@tauri-apps/plugin-opener';
   import { isAndroid, isMobile, hasDbCompact, hasCustomMaps, hasRcControl } from '$lib/platform';
-  import { updatesSupported } from '$lib/controllers/updateCheck';
+  import { updatesSupported, updateKind } from '$lib/controllers/updateCheck';
   import { blackboxDecoderVersion, blackboxLegacyMode, downloadBlackboxDecode } from '$lib/stores/flightlog';
   import type { TileCacheStats } from '$lib/cache/tileCache';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
@@ -43,6 +42,7 @@
   let {
     localeValue = 'en',
     uiScale = 1,
+    stayAwake = false,
     mapProvider = 'osm',
     mapCacheMaxMB = 200,
     cacheStats = { usedBytes: 0, maxBytes: 0, tileCount: 0 },
@@ -91,6 +91,10 @@
     onChooseFlightLogPath = () => {},
     onResetFlightLogPath = () => {},
     onCompactDb = () => {},
+    onExportDatabase = () => {},
+    onImportDatabase = () => {},
+    onExportAllFlights = () => {},
+    onRemoveOriginalLogs = async (_count: number, _sizeBytes: number) => {},
     onChooseRawLogPath = () => {},
     onResetRawLogPath = () => {},
     onToggleWidget = (_widgetId: string) => {},
@@ -98,6 +102,7 @@
   }: {
     localeValue?: string;
     uiScale?: number;
+    stayAwake?: boolean;
     mapProvider?: string;
     mapCacheMaxMB?: number;
     cacheStats?: TileCacheStats;
@@ -145,7 +150,11 @@
     onClearCache?: () => void;
     onChooseFlightLogPath?: () => void;
     onResetFlightLogPath?: () => void;
-    onCompactDb?: () => void;
+    onCompactDb?: () => void | Promise<void>;
+    onExportDatabase?: () => void;
+    onImportDatabase?: () => void;
+    onExportAllFlights?: () => void;
+    onRemoveOriginalLogs?: (count: number, sizeBytes: number) => Promise<void>;
     onChooseRawLogPath?: () => void;
     onResetRawLogPath?: () => void;
     onToggleWidget?: (widgetId: string) => void;
@@ -200,11 +209,9 @@
     }
   }
 
-  // Reveal the backend diagnostic log file in the OS file manager (Settings → Diagnostics).
-  // The path is also shown as plain text: on a minimal desktop (a Raspberry Pi was the case that
-  // exposed this) there may be no `org.freedesktop.FileManager1` service and no xdg-open at all, so
-  // "reveal" simply cannot work — and this is the one screen a stuck user is sent to. It must never
-  // fail silently, which is exactly what the old `catch {}` did.
+  // Reveal the diagnostic log file in the OS file manager. The path is also shown as text: a minimal desktop
+  // may have no FileManager1 service and no xdg-open, so "reveal" can't work — and this is the screen a stuck
+  // user is sent to, so it must never fail silently.
   let logPath = $state<string | null>(null);
   let logOpenError = $state('');
 
@@ -231,24 +238,20 @@
     } catch (e) {
       console.warn('[settings] revealItemInDir failed', e);
     }
-    // Second try: open the containing folder itself, which some file managers handle when "reveal"
-    // isn't wired up.
+    // Second try: the folder itself, which a file manager opens also where "reveal" isn't wired up.
     try {
-      await openPath(p.replace(/[\/][^\/]*$/, ''));
+      await invoke('system_open_folder', { path: p });
       return;
     } catch (e) {
-      console.warn('[settings] openPath failed', e);
+      console.warn('[settings] system_open_folder failed', e);
       logOpenError = e instanceof Error ? e.message : String(e);
     }
   }
   let logFiles = $state<LogFileInfo[]>([]);
   let showLogPicker = $state(false);
 
-  /** Share the diagnostics log through the system sheet — the Android replacement for "open
-   *  folder": an app-private path is unreachable in any file manager, so opening it on the device
-   *  is useless, while sharing reaches mail, messengers or a text editor directly. The log is one
-   *  file per day and the one a tester needs after a restart is usually yesterday's, so the button
-   *  lists the day-files and `sharePickedLog` sends the chosen one. */
+  /** Share the diagnostics log through the system sheet — Android's replacement for "open folder" (the
+   *  app-private path is unreachable). The needed day-file is often yesterday's, so the user picks one. */
   async function shareLogFile() {
     logOpenError = '';
     if (!logPath) await loadLogPath();
@@ -320,33 +323,52 @@
     onPatch({ uiScale: Number((event.target as HTMLSelectElement).value) });
   }
 
-  // ── Pre-migration DB backup (Dev-Docs active/DB_MIGRATIONS.md) ──────
-  // Exactly ONE backup exists (created automatically before a schema upgrade, next to the DB
-  // file — multi-GB with blackbox logs, hence no rotation). Shown with its size + a delete
-  // button; anyone wanting a permanent copy moves the file elsewhere themselves.
-  let dbBackup = $state<{ path: string; size_bytes: number } | null>(null);
+  // A link records into, and finishes its flight in, the database it was opened with.
+  let dbFolderLocked = $derived($connection.status !== 'disconnected');
+
+  // ── Pre-migration DB backup (Dev-Docs archive/DB_MIGRATIONS.md) ──
+  let dbBackup = $state<DbBackupInfo | null>(null);
+  // The folder the row was loaded for: Delete must hit the backup that is shown, also when the folder
+  // changed while the row was on screen.
+  let dbBackupFor = '';
   async function loadDbBackup(): Promise<void> {
+    const dbPath = flightLogDbPath;
     try {
-      dbBackup = await invoke<{ path: string; size_bytes: number } | null>('flightlog_backup_info', {
-        dbPath: flightLogDbPath,
-      });
+      dbBackup = await invoke<DbBackupInfo | null>('flightlog_backup_info', { dbPath });
     } catch {
       dbBackup = null;
     }
+    dbBackupFor = dbPath;
   }
-  void loadDbBackup();
+  $effect(() => { void loadDbBackup(); });
+  let dbSizeBytes = $state<number | null>(null);
+  async function loadDbSize(): Promise<void> {
+    const state = await invoke<{ exists: boolean; size_bytes: number }>('flightlog_folder_state', { dbPath: flightLogDbPath }).catch(() => null);
+    dbSizeBytes = state?.exists ? state.size_bytes : null;
+  }
+  $effect(() => { void loadDbSize(); });
+
+  // Mobile: original log files only arrive with a database imported from a desktop.
+  let originalLogs = $state<{ count: number; size_bytes: number } | null>(null);
+  async function loadOriginalLogs(): Promise<void> {
+    if (!isMobile) return;
+    originalLogs = await invoke<{ count: number; size_bytes: number }>('flightlog_original_logs_info', { dbPath: flightLogDbPath }).catch(() => null);
+  }
+  $effect(() => { void loadOriginalLogs(); });
+  async function removeOriginalLogs(): Promise<void> {
+    if (!originalLogs) return;
+    await onRemoveOriginalLogs(originalLogs.count, originalLogs.size_bytes);
+    await loadOriginalLogs();
+    void loadDbSize();
+  }
+
   async function deleteDbBackup(): Promise<void> {
     try {
-      await invoke('flightlog_backup_delete', { dbPath: flightLogDbPath });
+      await invoke('flightlog_backup_delete', { dbPath: dbBackupFor });
     } catch {
       /* refresh below shows the truth either way */
     }
     await loadDbBackup();
-  }
-  function fmtBackupSize(bytes: number): string {
-    return bytes >= 1024 ** 3
-      ? `${(bytes / 1024 ** 3).toFixed(2)} GB`
-      : `${Math.max(1, Math.round(bytes / 1024 ** 2))} MB`;
   }
   function handleMapProviderChange(event: Event) {
     onPatch({ mapProvider: (event.target as HTMLSelectElement).value });
@@ -610,6 +632,10 @@
           <option value={1.5}>150%</option>
         </select>
       </div>
+      <div class="s-row" title={$t('settings.stayAwakeHint')}>
+        <label class="s-label" for="stay-awake">{$t('settings.stayAwake')}</label>
+        <Toggle checked={stayAwake} id="stay-awake" onchange={(c) => onPatch({ stayAwake: c })} />
+      </div>
       <!-- Which protocol the connection bar starts on. "Last used" is the historic behaviour and
            stays the default; a fixed choice overrides the stored one on every launch. -->
       <div class="s-row" title={$t('settings.defaultProtocolHint')}>
@@ -628,17 +654,27 @@
     {#if updatesSupported}
     <div class="s-group">
       <h4 class="s-head">{$t('settings.updates')}</h4>
-      <div class="s-row">
-        <span class="s-label">{$t('settings.updateCheck')}</span>
-        <select id="update-check" class="s-select" value={updateCheck.mode}
-          onchange={(e) => onPatch({ updateCheck: { ...updateCheck, mode: (e.target as HTMLSelectElement).value as UpdateCheckMode } })}>
-          <option value="disabled">{$t('settings.updateDisabled')}</option>
-          <option value="release">{$t('settings.updateRelease')}</option>
-          <option value="patch">{$t('settings.updatePatch')}</option>
-          <option value="prerelease">{$t('settings.updatePrerelease')}</option>
-        </select>
-      </div>
-      <p class="cesium-hint">{$t('settings.updateHint')}</p>
+      {#if $updateKind === 'store'}
+        <!-- A store installation: the store decides the version, so the channel choice is an on/off switch. -->
+        <div class="s-row">
+          <label class="s-label" for="update-check">{$t('settings.updateCheck')}</label>
+          <Toggle checked={updateCheck.mode !== 'disabled'} id="update-check"
+            onchange={(c) => onPatch({ updateCheck: { ...updateCheck, mode: c ? 'release' : 'disabled' } })} />
+        </div>
+        <p class="cesium-hint">{$t('settings.updateHintStore')}</p>
+      {:else}
+        <div class="s-row">
+          <span class="s-label">{$t('settings.updateCheck')}</span>
+          <select id="update-check" class="s-select" value={updateCheck.mode}
+            onchange={(e) => onPatch({ updateCheck: { ...updateCheck, mode: (e.target as HTMLSelectElement).value as UpdateCheckMode } })}>
+            <option value="disabled">{$t('settings.updateDisabled')}</option>
+            <option value="release">{$t('settings.updateRelease')}</option>
+            <option value="patch">{$t('settings.updatePatch')}</option>
+            <option value="prerelease">{$t('settings.updatePrerelease')}</option>
+          </select>
+        </div>
+        <p class="cesium-hint">{$updateKind === 'sideload' ? $t('settings.updateHintSideload') : $t('settings.updateHint')}</p>
+      {/if}
     </div>
     {/if}
   {:else if tab === 'map'}
@@ -943,28 +979,69 @@
         <label class="s-label" for="flightlog-raw-always">{$t('settings.continuousRawLogging')}</label>
         <Toggle checked={flightLogRawAlways} id="flightlog-raw-always" disabled={!flightRecordingEnabled} onchange={(c) => onPatch({ flightLogRawAlways: c })} />
       </div>
-      <div class="s-row s-row-stack">
-        <span class="s-label">{$t('settings.flightLogDbPath')}</span>
-        <div class="path-picker-row">
-          <input class="s-input path-input" type="text" readonly value={flightLogDbPath || defaultFlightLogPath || $t('settings.defaultPathUnknown')} />
-          <Button variant="standard" size="sm" onclick={onChooseFlightLogPath}>{$t('settings.choose')}</Button>
-          <Button variant="standard" size="sm" onclick={onResetFlightLogPath}>{$t('settings.useDefault')}</Button>
+      <div class="s-row" title={$t('settings.flightWeatherRecordingHint')}>
+        <label class="s-label" for="flightlog-weather">{$t('settings.flightWeatherRecording')}</label>
+        <Toggle checked={$settings.flightWeatherRecording} id="flightlog-weather" onchange={(c) => onPatch({ flightWeatherRecording: c })} />
+      </div>
+      <div class="s-row" title={$t('settings.flightAutoLocationHint')}>
+        <label class="s-label" for="flightlog-auto-location">{$t('settings.flightAutoLocation')}</label>
+        <Toggle checked={$settings.flightAutoLocation} id="flightlog-auto-location" onchange={(c) => onPatch({ flightAutoLocation: c })} />
+      </div>
+      <!-- Mobile: the database lives in app storage only; it leaves and returns as a file. -->
+      {#if !isMobile}
+        <div class="s-row s-row-stack">
+          <span class="s-label">{$t('settings.flightLogDbPath')}</span>
+          <div class="path-picker-row">
+            <input class="s-input path-input" type="text" readonly value={flightLogDbPath || defaultFlightLogPath || $t('settings.defaultPathUnknown')} />
+            <Button variant="standard" size="sm" disabled={dbFolderLocked} title={dbFolderLocked ? $t('settings.dbFolderLockedHint') : undefined} onclick={onChooseFlightLogPath}>{$t('settings.choose')}</Button>
+            <Button variant="standard" size="sm" disabled={dbFolderLocked} title={dbFolderLocked ? $t('settings.dbFolderLockedHint') : undefined} onclick={onResetFlightLogPath}>{$t('settings.useDefault')}</Button>
+          </div>
         </div>
+      {/if}
+      <div class="s-row">
+        <span class="s-label" title={$t('settings.dbTransfer.exportDbHint')}>{$t('settings.dbTransfer.exportDb')}</span>
+        <Button variant="standard" size="sm" disabled={dbFolderLocked} title={dbFolderLocked ? $t('settings.dbTransfer.lockedHint') : $t('settings.dbTransfer.exportDbHint')} onclick={onExportDatabase}>{$t('settings.dbTransfer.exportBtn')}</Button>
+      </div>
+      {#if isMobile}
+        <div class="s-row">
+          <span class="s-label" title={$t('settings.dbTransfer.importDbHint')}>{$t('settings.dbTransfer.importDb')}</span>
+          <Button variant="standard" size="sm" disabled={dbFolderLocked} title={dbFolderLocked ? $t('settings.dbTransfer.lockedHint') : $t('settings.dbTransfer.importDbHint')} onclick={onImportDatabase}>{$t('settings.dbTransfer.importBtn')}</Button>
+        </div>
+      {/if}
+      <div class="s-row">
+        <span class="s-label" title={$t('settings.dbTransfer.exportFlightsHint')}>{$t('settings.dbTransfer.exportFlights')}</span>
+        <Button variant="standard" size="sm" title={$t('settings.dbTransfer.exportFlightsHint')} onclick={onExportAllFlights}>{$t('settings.dbTransfer.exportBtn')}</Button>
       </div>
       <!-- Desktop only — see `hasDbCompact`. -->
       {#if hasDbCompact}
         <div class="s-row">
           <span class="s-label" title={$t('settings.compactDbHint')}>{$t('settings.compactDb')}</span>
-          <Button variant="standard" size="sm" onclick={onCompactDb} title={$t('settings.compactDbHint')}>{$t('settings.compactDbBtn')}</Button>
+          <Button variant="standard" size="sm" onclick={async () => { await onCompactDb(); void loadDbSize(); }} title={$t('settings.compactDbHint')}>{$t('settings.compactDbBtn')}</Button>
+        </div>
+      {/if}
+      {#if dbSizeBytes != null}
+        <div class="s-row">
+          <span class="s-label">{$t('settings.dbSize')}</span>
+          <span class="s-readout">{formatBackupSize(dbSizeBytes)}</span>
         </div>
       {/if}
       {#if dbBackup}
         <div class="s-row" title={dbBackup.path}>
           <span class="s-label" title={$t('settings.dbBackupHint')}>
-            {$t('settings.dbBackup')} · {fmtBackupSize(dbBackup.size_bytes)}
+            {$t('settings.dbBackup')} · {formatBackupSize(dbBackup.size_bytes)}
           </span>
           <Button variant="standard" size="sm" onclick={deleteDbBackup} title={$t('settings.dbBackupHint')}>
             {$t('settings.dbBackupDelete')}
+          </Button>
+        </div>
+      {/if}
+      {#if originalLogs && originalLogs.count > 0}
+        <div class="s-row">
+          <span class="s-label" title={$t('settings.dbTransfer.originalLogsHint')}>
+            {$t('settings.dbTransfer.originalLogs')} · {formatBackupSize(originalLogs.size_bytes)}
+          </span>
+          <Button variant="standard" size="sm" disabled={dbFolderLocked} title={dbFolderLocked ? $t('settings.dbTransfer.lockedHint') : $t('settings.dbTransfer.originalLogsHint')} onclick={removeOriginalLogs}>
+            {$t('settings.dbTransfer.originalLogsRemove')}
           </Button>
         </div>
       {/if}

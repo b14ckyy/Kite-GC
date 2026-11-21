@@ -51,9 +51,8 @@ pub fn mission_clear(store: State<'_, MissionStore>) {
     store.clear();
 }
 
-/// Replace the entire active-mission waypoint list in one call. Preserves
-/// every field (including `alt_mode`). Used by undo/redo restore, where the
-/// snapshot is already a valid, numbered mission.
+/// Replace the entire active-mission waypoint list in one call. Preserves every field (including
+/// `alt_mode`) and does not renumber: the caller passes a numbered, flagged list.
 #[tauri::command]
 pub fn mission_set(waypoints: Vec<Waypoint>, store: State<'_, MissionStore>) -> Mission {
     store.set_waypoints(waypoints);
@@ -226,7 +225,7 @@ pub async fn mission_upload(
     }
 
     // Resolve AGL → AMSL before touching the serial handle (async terrain lookup).
-    let resolved = resolve_agl(&mission, &terrain).await;
+    let resolved = resolve_agl(&mission, &terrain).await?;
 
     with_msp_blocking(&app, move |app, handle| {
         let store = app.state::<MissionStore>();
@@ -262,11 +261,9 @@ pub async fn mission_upload(
     .await
 }
 
-/// Concatenate per-mission waypoint lists into one INAV multi-mission sequence: global 1-based
-/// numbering and each segment's last WP flagged `WP_FLAG_LAST` (0xA5) — or `WP_FLAG_FBH` (0x48) kept
-/// when that last WP is already a fly-by-home — with every other WP `WP_FLAG_NORMAL`. INAV stores all
-/// missions as one list split on those terminator flags, so a stray mid-segment terminator would break
-/// the boundaries; mid-segment flags are therefore forced to NORMAL. Empty missions are skipped.
+/// One INAV multi-mission list, numbered through. INAV ends a mission on 0xA5 only: a stray one inside is
+/// cleared, fly-by-home (0x48) stays inside. On the last WP that byte is taken, so fly-by-home goes as
+/// lat/lon 0, INAV's other home marker. Resolve AGL before this: (0,0) has no terrain.
 fn assemble_multi_mission(missions: &[Vec<Waypoint>]) -> Vec<Waypoint> {
     let mut out: Vec<Waypoint> = Vec::new();
     for seg in missions {
@@ -276,11 +273,15 @@ fn assemble_multi_mission(missions: &[Vec<Waypoint>]) -> Vec<Waypoint> {
         let last = seg.len() - 1;
         for (i, wp) in seg.iter().enumerate() {
             let mut w = wp.clone();
-            w.flag = if i == last {
-                if w.flag == WP_FLAG_FBH { WP_FLAG_FBH } else { WP_FLAG_LAST }
-            } else {
-                WP_FLAG_NORMAL
-            };
+            if i == last {
+                if w.flag == WP_FLAG_FBH {
+                    w.lat = 0;
+                    w.lon = 0;
+                }
+                w.flag = WP_FLAG_LAST;
+            } else if w.flag == WP_FLAG_LAST {
+                w.flag = WP_FLAG_NORMAL;
+            }
             out.push(w);
         }
     }
@@ -290,13 +291,9 @@ fn assemble_multi_mission(missions: &[Vec<Waypoint>]) -> Vec<Waypoint> {
     out
 }
 
-/// Upload one or more missions to the FC as a single INAV multi-mission.
-///
-/// `missions` is the per-mission waypoint lists in order (slot 1..N); they're concatenated with the
-/// proper end-of-mission flags + global numbering (`assemble_multi_mission`), AGL waypoints resolved to
-/// AMSL, and uploaded WP-by-WP via MSP_SET_WP. The **active** mission index is intentionally NOT set
-/// here — selecting the active mission will be handled by the planned INAV control panel.
-/// `(async)` off the main thread — the AGL resolve awaits terrain, then the MSP exchange blocks.
+/// Upload all slots as one INAV multi-mission (`assemble_multi_mission`); the FC's active mission
+/// index is not written. `(async)` off the main thread — the AGL resolve awaits terrain, then the MSP
+/// exchange blocks.
 #[tauri::command]
 pub async fn mission_upload_multi(
     missions: Vec<Vec<Waypoint>>,
@@ -304,15 +301,21 @@ pub async fn mission_upload_multi(
     app: tauri::AppHandle,
     terrain: State<'_, TerrainProvider>,
 ) -> Result<Mission, String> {
-    let combined = assemble_multi_mission(&missions);
+    // AGL → AMSL per mission, before the serial handle is taken (async terrain lookup) and before the
+    // assembly moves a final fly-by-home to lat/lon 0.
+    let mut amsl: Vec<Vec<Waypoint>> = Vec::with_capacity(missions.len());
+    for (k, seg) in missions.iter().enumerate() {
+        let m = Mission { waypoints: seg.clone(), info: MissionInfo::default(), dirty: false, home: None };
+        let resolved = resolve_agl(&m, &terrain).await;
+        // The waypoint number in the error counts within its mission.
+        amsl.push(resolved.map_err(|e| if missions.len() > 1 { format!("Mission {}: {e}", k + 1) } else { e })?.waypoints);
+    }
+    let combined = assemble_multi_mission(&amsl);
     if combined.is_empty() {
         return Err("No waypoints to upload".into());
     }
     let mission_count = missions.iter().filter(|m| !m.is_empty()).count();
-
-    // Resolve AGL → AMSL before touching the serial handle (async terrain lookup).
-    let mission = Mission { waypoints: combined, info: MissionInfo::default(), dirty: false, home: None };
-    let resolved = resolve_agl(&mission, &terrain).await;
+    let resolved = Mission { waypoints: combined, info: MissionInfo::default(), dirty: false, home: None };
 
     with_msp_blocking(&app, move |app, handle| {
         let store = app.state::<MissionStore>();
@@ -358,24 +361,69 @@ pub fn mission_get_active_index(state: State<'_, AppState>) -> Result<u8, String
     })
 }
 
-/// Resolve AGL waypoints to AMSL for export. INAV/.mission only understand
-/// REL/AMSL, so each AGL waypoint's above-ground value is turned into an
-/// absolute altitude: `AMSL = terrain_elevation(lat,lon) + AGL`. Non-AGL
-/// waypoints pass through unchanged. Best-effort: if terrain is unavailable for
-/// a point, the waypoint is left as-is.
-async fn resolve_agl(mission: &Mission, terrain: &TerrainProvider) -> Mission {
+/// Resolve AGL waypoints to AMSL for the FC and the `.mission` file, which only know REL / AMSL:
+/// `AMSL = terrain elevation + AGL`. Fails where terrain data is missing — sent unresolved, the
+/// waypoint's AGL number would be flown as an altitude relative to home.
+async fn resolve_agl(mission: &Mission, terrain: &TerrainProvider) -> Result<Mission, String> {
     let mut out = mission.clone();
+    // The number the planner shows: Jump, RTH and Set Heading are not counted.
+    let mut shown = 0;
     for wp in out.waypoints.iter_mut() {
+        if !matches!(wp.action, WpAction::Jump | WpAction::Rth | WpAction::SetHead) {
+            shown += 1;
+        }
         if wp.alt_mode == ALT_MODE_AGL && wp.action.has_location() {
-            if let Some(ground) = terrain.elevation(wp.lat_deg(), wp.lon_deg()).await {
-                let amsl_m = ground as f64 + wp.altitude as f64 / 100.0;
-                wp.altitude = (amsl_m * 100.0).round() as i32;
-                wp.p3 |= P3_ALT_TYPE as i16; // mark AMSL
-                wp.alt_mode = ALT_MODE_AMSL;
+            let ground = terrain.elevation(wp.lat_deg(), wp.lon_deg()).await;
+            if !agl_to_amsl(wp, ground) {
+                return Err(format!(
+                    "No terrain data for waypoint {shown} (no internet connection, or none for this \
+                     location): its AGL altitude cannot be converted. Nothing was sent or written."
+                ));
             }
         }
     }
-    out
+    Ok(out)
+}
+
+/// `false` without a ground elevation; the waypoint is then left as it is.
+fn agl_to_amsl(wp: &mut Waypoint, ground_m: Option<f32>) -> bool {
+    let Some(ground) = ground_m else { return false };
+    let amsl_m = ground as f64 + wp.altitude as f64 / 100.0;
+    wp.altitude = (amsl_m * 100.0).round() as i32;
+    wp.p3 |= P3_ALT_TYPE as i16;
+    wp.alt_mode = ALT_MODE_AMSL;
+    true
+}
+
+/// Error marker of `mission_resolve_agl`, followed by the waypoint number as the planner shows it.
+const NO_TERRAIN_ERROR: &str = "no-terrain:";
+
+/// The waypoints as they go to the FC — AGL resolved to AMSL — for the library's content hash. Fails
+/// where terrain data is missing: a hash over a half-resolved mission would name another mission.
+#[tauri::command]
+pub async fn mission_resolve_agl(
+    waypoints: Vec<Waypoint>,
+    terrain: State<'_, TerrainProvider>,
+) -> Result<Vec<Waypoint>, String> {
+    let mut out = waypoints;
+    let mut shown = 0;
+    for wp in out.iter_mut() {
+        if !matches!(wp.action, WpAction::Jump | WpAction::Rth | WpAction::SetHead) {
+            shown += 1;
+        }
+        if wp.alt_mode != ALT_MODE_AGL || !wp.action.has_location() {
+            continue;
+        }
+        // The closing fly-by-home of a combined set carries no position any more.
+        if wp.lat == 0 && wp.lon == 0 {
+            continue;
+        }
+        let ground = terrain.elevation(wp.lat_deg(), wp.lon_deg()).await;
+        if !agl_to_amsl(wp, ground) {
+            return Err(format!("{NO_TERRAIN_ERROR}{shown}"));
+        }
+    }
+    Ok(out)
 }
 
 /// Export mission as MW XML string (AGL waypoints resolved to AMSL).
@@ -387,7 +435,7 @@ pub async fn mission_export_xml(
     terrain: State<'_, TerrainProvider>,
 ) -> Result<String, String> {
     let mission = store.snapshot();
-    let mut resolved = resolve_agl(&mission, &terrain).await;
+    let mut resolved = resolve_agl(&mission, &terrain).await?;
     if let Some((lat, lon)) = home {
         resolved.home = Some(HomePt { lat, lon });
     }
@@ -405,10 +453,9 @@ pub async fn mission_save_file_from_json(
     let waypoints: Vec<Waypoint> = serde_json::from_str(&waypoints_json)
         .map_err(|e| format!("Invalid mission JSON: {e}"))?;
     let mission = Mission { waypoints, info: MissionInfo::default(), dirty: false, home: None };
-    let resolved = resolve_agl(&mission, &terrain).await;
+    let resolved = resolve_agl(&mission, &terrain).await?;
     let xml = mission_to_xml(&resolved);
-    std::fs::write(&path, xml).map_err(|e| format!("Failed to save: {e}"))?;
-    Ok(())
+    crate::user_file::with_write_path(&path, |p| std::fs::write(p, &xml).map_err(|e| format!("Failed to save: {e}")))
 }
 
 /// Import mission from MW XML string
@@ -429,7 +476,7 @@ pub async fn mission_save_file(
     terrain: State<'_, TerrainProvider>,
 ) -> Result<(), String> {
     let mission = store.snapshot();
-    let mut resolved = resolve_agl(&mission, &terrain).await;
+    let mut resolved = resolve_agl(&mission, &terrain).await?;
     if let Some((lat, lon)) = home {
         resolved.home = Some(HomePt { lat, lon });
     }
@@ -553,21 +600,40 @@ mod tests {
     }
 
     #[test]
-    fn assemble_multi_mission_preserves_fbh_last_and_skips_empty() {
-        // An empty mission is skipped; a fly-by-home last WP keeps its 0x48 terminator; a stray
-        // mid-segment terminator is forced back to NORMAL so it doesn't split the segment.
+    fn assemble_multi_mission_fbh_and_empty() {
+        let mut fbh_last = Waypoint::new(0, WpAction::Land, 501234567, 81234567, 0);
+        fbh_last.flag = WP_FLAG_FBH;
         let m1 = vec![
-            wp(WpAction::Waypoint, WP_FLAG_LAST), // mid-segment stray terminator → must clear
-            wp(WpAction::Land, WP_FLAG_FBH),      // last, FBH → keep 0x48
+            wp(WpAction::Waypoint, WP_FLAG_LAST), // stray terminator inside → cleared
+            wp(WpAction::Waypoint, WP_FLAG_FBH),  // fly-by-home inside → kept
+            fbh_last,                             // fly-by-home last → 0xA5 at lat/lon 0
         ];
         let empty: Vec<Waypoint> = vec![];
-        let m2 = vec![wp(WpAction::Waypoint, WP_FLAG_NORMAL)]; // single WP → becomes last (0xA5)
+        let m2 = vec![wp(WpAction::Waypoint, WP_FLAG_NORMAL)];
         let out = assemble_multi_mission(&[m1, empty, m2]);
 
-        assert_eq!(out.len(), 3);
-        assert_eq!(out[0].flag, WP_FLAG_NORMAL); // stray mid terminator cleared
-        assert_eq!(out[1].flag, WP_FLAG_FBH); // FBH preserved
-        assert_eq!(out[2].flag, WP_FLAG_LAST); // single WP of m2 terminates it
-        assert_eq!(out.iter().map(|w| w.number).collect::<Vec<_>>(), vec![1, 2, 3]);
+        assert_eq!(out.len(), 4);
+        assert_eq!(out[0].flag, WP_FLAG_NORMAL);
+        assert_eq!(out[1].flag, WP_FLAG_FBH);
+        assert_eq!((out[2].flag, out[2].lat, out[2].lon), (WP_FLAG_LAST, 0, 0));
+        assert_eq!(out[3].flag, WP_FLAG_LAST);
+        assert_eq!(out.iter().map(|w| w.number).collect::<Vec<_>>(), vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn agl_waypoint_becomes_amsl_over_the_terrain() {
+        let mut w = Waypoint::new(3, WpAction::Waypoint, 0, 0, 3000);
+        w.alt_mode = ALT_MODE_AGL;
+        assert!(agl_to_amsl(&mut w, Some(50.0)));
+        assert_eq!((w.altitude, w.alt_mode), (8000, ALT_MODE_AMSL));
+        assert_ne!(w.p3 & P3_ALT_TYPE as i16, 0);
+    }
+
+    #[test]
+    fn agl_waypoint_without_terrain_is_refused_untouched() {
+        let mut w = Waypoint::new(3, WpAction::Waypoint, 0, 0, 3000);
+        w.alt_mode = ALT_MODE_AGL;
+        assert!(!agl_to_amsl(&mut w, None));
+        assert_eq!((w.altitude, w.alt_mode, w.p3 & P3_ALT_TYPE as i16), (3000, ALT_MODE_AGL, 0));
     }
 }

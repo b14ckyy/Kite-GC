@@ -7,11 +7,12 @@ Kite can save/export it.
 
 | Format | Extension | R/W | Notes |
 |---|---|---|---|
+| **Kite mission** | `.kmission` | R / W | One entry of the mission library as it is: waypoints, name, notes, target system, planned home, vehicle class — an INAV entry with several missions included. For moving missions between Kite installs: an older Kite keeps data of a newer one it cannot use yet and has it after the update. Exported and imported in the Mission Manager. |
 | **INAV mission** | `.mission` | R / W | MultiWii XML, compatible with the INAV Configurator and MWPTools. |
 | **ArduPilot / PX4 mission** | `.waypoints` | R / W | QGroundControl-compatible plain text. |
-| **QGroundControl plan** | `.plan` | R | QGC's JSON plan — the format QGC saves (PX4 workflows). Mission waypoints only: QGC pattern items (Survey, Corridor Scan, …) are refused with a clear message, and the plan's geofence/rally sections are ignored — manage those in Kite's own Airspace tools. |
+| **QGroundControl plan** | `.plan` | R | QGC's JSON plan — the format QGC saves (PX4 workflows). A Survey is imported as the waypoints QGC generated for it — the pattern itself (area, spacing, camera) is not kept, so it cannot be re-edited as a pattern in Kite. A pattern item that stores no waypoints is refused with a message. The plan's geofence/rally sections are ignored — manage those in Kite's own Airspace tools. |
 
-You can also drag a mission file straight onto the map. See **[Missions](../guides/missions.md)**.
+You can also drag a mission file straight onto the map; a `.kmission` goes into the library (and onto the map if that is empty). See **[Missions](../guides/missions.md)**.
 
 ## Flights & logs
 
@@ -55,11 +56,14 @@ See **[Flight logbook](../guides/logbook.md)**.
 ## Where your data lives
 
 - **Flight database** — your logbook (flights, vehicles, batteries, saved missions) is one local SQLite
-  database; its location is configurable in **[Settings → Data](settings.md)**.
+  database; on Windows, Linux and macOS its location is configurable in **[Settings → Data](settings.md)**.
 - **Next to the database** — `flights.pre-migration-backup.db`, the full backup Kite writes before an
-  update upgrades the database format (only the latest is kept), and a `hires-cache/` folder that holds
-  the temporary decode of a flight in **HI-RES** replay and is emptied when you close the flight. See
+  update upgrades the database format (only the latest is kept). See
   **[Flight logbook](../guides/logbook.md#the-database-updates-and-the-automatic-backup)**.
+- **Work files** — always in Kite's own data folder, whatever database folder is set: the temporary
+  files of a running recording (`sessions/`), the decode of a flight in **HI-RES** replay
+  (`hires-cache/`, emptied when you close the flight) and logs opened without importing them
+  (`scratch/`).
 - **Caches** — 2D map tiles and terrain are cached on disk (under Settings → Map → Cache); these are the
   files that make the 2D map usable offline.
 - **Custom maps** (desktop) — your own map tiles in the custom map location, one `Z/X/Y` folder per

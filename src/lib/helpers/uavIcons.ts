@@ -15,7 +15,7 @@ export const PLATFORM_TRICOPTER  = 3;
 export const PLATFORM_ROVER      = 4;
 export const PLATFORM_BOAT       = 5;
 export const PLATFORM_OTHER      = 6;
-export const PLATFORM_VTOL       = 7; // not an INAV-parsed type — manual override only (quadplane)
+export const PLATFORM_VTOL       = 7; // not an INAV-parsed type — MAVLink VTOL types and ArduPilot QuadPlanes (Q_ENABLE)
 export const PLATFORM_GENERIC    = 255; // no FC identity (passive telemetry) → generic arrow marker
 
 export type PlatformType = number;

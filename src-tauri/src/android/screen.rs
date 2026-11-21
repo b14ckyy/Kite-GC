@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-//! JNI shim in front of `ScreenLock.kt` — the display-on flag while a link is active. Same boundary
+//! JNI shim in front of `ScreenLock.kt` — the display-on flag (`link_presence` holds the rule). Same boundary
 //! contract as the other bridges (a primitive across, the Kotlin side owns the window).
 
 use jni::objects::JValue;

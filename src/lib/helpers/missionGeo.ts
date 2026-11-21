@@ -7,6 +7,7 @@
 // See docs/02-design/features/fleet-mission.design.md §2.3.
 
 import type { ArduWaypoint } from '$lib/stores/missionArdupilot';
+import { wrapLng } from '$lib/utils/geo';
 import { cmdHasLocation } from '$lib/helpers/arduCommandCatalog';
 
 const EARTH_R_M = 6_371_000;
@@ -43,6 +44,6 @@ export function translateWaypoints(wps: readonly ArduWaypoint[], dLat1e7: number
   return wps.map((w, i) => {
     if (only && !only.has(i)) return { ...w };
     if (!cmdHasLocation(w.command) || (w.lat === 0 && w.lon === 0)) return { ...w };
-    return { ...w, lat: w.lat + dLat1e7, lon: w.lon + dLon1e7 };
+    return { ...w, lat: w.lat + dLat1e7, lon: Math.round(wrapLng((w.lon + dLon1e7) / 1e7) * 1e7) };
   });
 }

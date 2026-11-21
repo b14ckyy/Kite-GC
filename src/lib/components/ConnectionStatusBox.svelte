@@ -4,39 +4,17 @@
 -->
 
 <script lang="ts">
-  // Connection status box (shown when connected, left of the Disconnect button).
-  //  • Line 1: the primary protocol (MSP / MAVLink / SmartPort / CRSF / LTM).
-  //  • Line 2 (optional): a secondary protocol tunneled inside it (ArduPilot passthrough → MAVLink,
-  //    later MSP-over-telemetry → MSP).
-  //  • A dot reflects data flow — green while valid parser data arrives, red after >5 s without any,
-  //    grey until the first data. This is protocol-agnostic (any telemetry event bumps lastUpdate) and
-  //    only asks "is ANY valid data reaching the parser", not whether every field is present.
+  // Connection status box (shown when connected, left of the Disconnect button): the primary protocol, a
+  // protocol tunnelled inside it (ArduPilot passthrough → MAVLink) and a dot for the data flow.
   import { t } from 'svelte-i18n';
-  import { connection, connectionProtocol, fcLinkAlive } from '$lib/stores/connection';
+  import { connectionProtocol } from '$lib/stores/connection';
+  import { linkActivity } from '$lib/helpers/linkActivity.svelte';
   import type { TelemetryData } from '$lib/stores/telemetry';
 
   let { telem }: { telem: TelemetryData } = $props();
 
-  const STALE_MS = 5000;
-
-  // 1 Hz ticker so the dot flips to red after the stale window without new telemetry.
-  let now = $state(Date.now());
-  $effect(() => {
-    const id = setInterval(() => (now = Date.now()), 1000);
-    return () => clearInterval(id);
-  });
-
-  // "Any data" freshness — works for MSP/MAVLink (they only emit on real data). For passive telemetry
-  // the decoder re-emits cached state + the RX keeps sending RSSI, so this never goes stale there;
-  // instead the backend's fcLinkAlive tracks fresh FC-origin frames. Combine both.
-  const dataFresh = $derived(!!telem.lastUpdate && now - telem.lastUpdate < STALE_MS);
-  const isPassive = $derived($connection.protocolType === 'telemetry');
-  const fcOk = $derived(!isPassive || $fcLinkAlive);
-
-  const activity = $derived.by<'waiting' | 'live' | 'stale'>(() => {
-    if (!telem.lastUpdate) return 'waiting';
-    return dataFresh && fcOk ? 'live' : 'stale';
-  });
+  const flow = linkActivity(() => telem);
+  const activity = $derived(flow());
 
   const dotTitle = $derived(
     activity === 'live'

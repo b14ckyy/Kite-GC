@@ -4,7 +4,7 @@
 // All shared types and interfaces for the flight logbook system.
 // Imported by flightlog.ts (store), logbookController.ts, and UI components.
 
-import type { BatteryInstance } from './telemetry';
+import type { BatteryInstance, GpsReceiver } from './telemetry';
 
 /** A reusable mission in the DB library (mirrors Rust flightlog::types::Mission). */
 export interface LibraryMission {
@@ -29,6 +29,10 @@ export interface LibraryMission {
   /** Planned launch/home reference (degrees) — base for REL altitudes + 3D preview height. */
   home_lat: number | null;
   home_lon: number | null;
+  /** Vehicle class the mission was planned for (ArduPilot / PX4); null = not set. */
+  vehicle_class: string | null;
+  /** A JSON object this version may not understand (data of a newer Kite): handed on, never edited. */
+  extra_json: string | null;
 }
 
 /** Payload for saving a mission to the library (mirrors Rust flightlog::types::MissionInput). */
@@ -50,6 +54,34 @@ export interface LibraryMissionInput {
   notes: string | null;
   home_lat: number | null;
   home_lon: number | null;
+  vehicle_class?: string | null;
+  /** On an overwrite, leaving it out keeps what the entry holds. */
+  extra_json?: string | null;
+  /** Set by a `.kmission` import only: the entry comes from another library. */
+  created_at?: string | null;
+  location_name?: string | null;
+}
+
+/** A `.kmission` file (mirrors the Rust MissionFile): one library entry as it is, statistics excepted. */
+export interface MissionFile {
+  format: string;
+  version: number;
+  exported_at: string;
+  app_version: string;
+  mission: {
+    name: string;
+    format: string;
+    content_hash: string;
+    waypoints: unknown;
+    source_xml?: string | null;
+    home_lat?: number | null;
+    home_lon?: number | null;
+    notes?: string | null;
+    created_at?: string | null;
+    location_name?: string | null;
+    vehicle_class?: string | null;
+    extra?: unknown;
+  };
 }
 
 /** A battery pack in the library (mirrors the Rust BatteryPack). Identity = serial. */
@@ -121,7 +153,7 @@ export interface Vehicle {
   id: number;
   name: string;
   craft_name: string | null;
-  vehicle_type: string; // fixed_wing | flying_wing | vtol | multirotor | helicopter | rover | boat | other
+  vehicle_type: string; // fixed_wing | flying_wing | vtol | multirotor | tricopter | helicopter | rover | boat | other
   status: string; // active | storage | retired | damaged | crashed
   image: string | null; // base64 data URI
   notes: string | null;
@@ -318,6 +350,10 @@ export interface TelemetryRecord {
   nav_lat: number | null;
   nav_lon: number | null;
   nav_alt_m: number | null;
+  /** The FC's position target, recorded in every mode: a reader picks by flight mode (`guidedTargetOf`). */
+  target_lat: number | null;
+  target_lon: number | null;
+  target_alt_m: number | null;
   /** Canonical flight mode (protocol-agnostic, see flightModeRegistry). `mode_modifiers` is a
    *  comma-separated list of modifier ids (null when none). */
   mode_primary: string | null;
@@ -329,6 +365,28 @@ export interface TelemetryRecord {
   /** Per-instance batteries for this timestamp (multi-battery). Attached on the frontend after loading
    *  the track (joined from battery_records by timestamp); absent for single-battery flights. */
   batteries?: BatteryInstance[];
+  /** The GPS receivers as they stood at this timestamp. Attached on the frontend after loading the
+   *  track (from gps_records); absent for flights without raw receiver samples. */
+  gpsReceivers?: GpsReceiver[];
+}
+
+/** A raw GPS receiver sample row (`gps_records`), as returned by `flightlog_get_gps_records`. */
+export interface GpsRecord {
+  timestamp_ms: number;
+  instance: number;
+  fix_type: number | null;
+  fix_raw: number | null;
+  num_sat: number | null;
+  hdop: number | null;
+  lat: number | null;
+  lon: number | null;
+  alt_msl: number | null;
+  vdop: number | null;
+  h_acc_m: number | null;
+  v_acc_m: number | null;
+  speed_ms: number | null;
+  course_deg: number | null;
+  yaw_deg: number | null;
 }
 
 /** A per-instance battery sample row (`battery_records`), as returned by flightlogGetBatteryRecords. */
@@ -413,4 +471,8 @@ export interface KflightImportResult {
   imported: number;
   skipped: number;
   errors: string[];
+  /** Written by a newer Kite: what this version knows was imported, the rest was left out. */
+  newer_format: boolean;
+  /** The new flights' ids in this database. */
+  imported_ids: number[];
 }

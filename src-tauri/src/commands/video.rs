@@ -1,13 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-//! Video commands — the MediaMTX RTSP→WebRTC engine + its ffmpeg fallback dependency.
-//! See docs/active/RTSP_VIDEO.md.
-//!
-//! **Threading:** every command here that spawns a helper process, waits on one, or tears one down is
-//! marked `#[tauri::command(async)]`. Tauri runs plain `fn` commands on the **main thread**, so a
-//! device enumeration behind a wedged capture driver (or a `--version` call on a binary Gatekeeper /
-//! Defender is still scanning) would freeze the whole UI. Only trivially-cheap commands stay sync.
+//! Video commands (docs/active/RTSP_VIDEO.md). Every command that spawns, waits on or tears down a
+//! helper process is `#[tauri::command(async)]`: plain `fn` commands run on the MAIN thread, where a
+//! wedged capture driver or a binary still being virus-scanned would freeze the whole UI.
 
 use tauri::{AppHandle, Emitter, State};
 
@@ -17,18 +13,11 @@ use crate::video::mediamtx::StreamSpec;
 use crate::video::mjpeg_server::{EndedHook, MjpegSource, RtspTranscode};
 use crate::video::{ffmpeg, mediamtx, native, MediaMtx};
 
-/// Emitted when a running feed's source dies (ffmpeg exited, read error) — never on our own stop.
-///
-/// The `<img>` sink cannot report this itself on WebKit: measured on 2.52.5, a multipart `<img>`
-/// fires one `load` for the whole stream and then **no** `error` and no `abort` when the server
-/// closes mid-stream, leaving the element on a dead `src` with `complete` still true. That is the
-/// whole reconnect trigger for the image path, so it comes from the backend instead, where the fact
-/// is known for certain and identically on every platform.
+/// Emitted when a running feed's source dies — never on our own stop. WebKit's multipart `<img>` never
+/// fires `error` when the server closes mid-stream, so this is the image path's only reconnect trigger.
 pub const MJPEG_ENDED_EVENT: &str = "video-mjpeg-ended";
 
-/// Turn the MJPEG server's runtime-agnostic "the source died" callback into that event. The server
-/// deliberately knows nothing about Tauri — see `EndedHook` for why that module has to stay linkable
-/// without the window runtime.
+/// The MJPEG server's runtime-agnostic "source died" callback → that event (see `EndedHook`).
 fn ended_hook(app: &AppHandle) -> EndedHook {
     let app = app.clone();
     Arc::new(move || {
@@ -43,11 +32,9 @@ pub fn video_ffmpeg_status() -> Option<String> {
     ffmpeg::version()
 }
 
-/// Whether the ffmpeg MJPEG transcode of an RTSP source would run on hardware on this machine (V4L2
-/// M2M decode on Pi-class boards, VAAPI on a desktop GPU; Linux only). Decides whether the Video panel
-/// shows "Disable hardware acceleration" at all. Answers `false` without probing while ffmpeg is
-/// missing: the probes cache their verdict for the process, and "no ffmpeg yet" must not become
-/// "no hardware" for an ffmpeg installed a minute later.
+/// Whether the ffmpeg MJPEG transcode of an RTSP source would run on hardware (Linux only). Answers
+/// `false` without probing while ffmpeg is missing: the probes cache their verdict for the process, and
+/// "no ffmpeg yet" must not become "no hardware" for an ffmpeg installed a minute later.
 #[tauri::command(async)]
 pub fn video_hw_transcode_available() -> bool {
     if ffmpeg::version().is_none() {
@@ -56,9 +43,8 @@ pub fn video_hw_transcode_available() -> bool {
     ffmpeg::v4l2_h264_decode_available() || ffmpeg::vaapi_render_node().is_some()
 }
 
-/// Download ffmpeg into the app-data `bin/` dir (Windows). Emits `ffmpeg-download-progress`
-/// (`{ pct, msg }`). Returns the installed path. The fallback reader resolves ffmpeg per stream
-/// start, so a fresh download is picked up without restarting anything.
+/// Download ffmpeg into the app-data `bin/` dir (Windows), emitting `ffmpeg-download-progress`. The
+/// fallback reader resolves ffmpeg per stream start, so no restart is needed.
 #[tauri::command]
 pub async fn video_ffmpeg_download(app_handle: AppHandle) -> Result<String, String> {
     let report = |pct: u8, msg: &str| {
@@ -70,8 +56,6 @@ pub async fn video_ffmpeg_download(app_handle: AppHandle) -> Result<String, Stri
     let path = ffmpeg::download(report).await?;
     Ok(path.to_string_lossy().to_string())
 }
-
-// ── MediaMTX / WebRTC (the live RTSP path) ───────────────────────────
 
 /// Engine presence string (version/installed), or null if not installed yet.
 #[tauri::command(async)]
@@ -93,18 +77,9 @@ pub async fn video_engine_download(app_handle: AppHandle) -> Result<String, Stri
     Ok(path.to_string_lossy().to_string())
 }
 
-/// Start (or refresh) the RTSP→WebRTC stream for `url`: MediaMTX pulls the source itself and the
-/// browser then negotiates WHEP via `video_webrtc_offer`. Returns once the source is actually
-/// connected and its tracks are known — "the source is unreachable" surfaces here, distinct from a
-/// WebRTC failure.
-///
-/// `transport`: `udp` | `tcp` | `auto` — how MediaMTX' native RTSP client pulls the source (the Pi
-/// is UDP-only; `auto` lets MediaMTX negotiate).
-///
-/// `use_ffmpeg`: read the source with our ffmpeg (no forced transport — the only mode quirky
-/// servers like obs-rtspserver accept) and publish it into MediaMTX over RTSP/UDP. The automatic
-/// fallback when the native pull fails; never the default, because the extra hop costs ~22 ms
-/// (measured) and the publish leg is the part that ever went wrong historically.
+/// Start (or refresh) the RTSP→WebRTC stream; returns once the source is connected, so "unreachable" is
+/// told apart from a WebRTC failure. `use_ffmpeg`: read with our ffmpeg and publish into MediaMTX — the
+/// fallback for quirky servers, never the default (an extra hop of ~22 ms).
 #[tauri::command]
 pub async fn video_webrtc_start(
     url: String,
@@ -121,9 +96,8 @@ pub async fn video_webrtc_start(
         },
         use_ffmpeg,
     };
-    // `start` spawns processes and polls readiness (up to ~11 s worst case) — keep it off the async
-    // runtime's threads. The state is managed as an `Arc` precisely so it can cross into
-    // `spawn_blocking`; only the verdict comes back.
+    // `start` spawns processes and polls readiness (up to ~11 s) — keep it off the async runtime's
+    // threads; the state is an `Arc` so it can cross into `spawn_blocking`.
     let engine = Arc::clone(engine.inner());
     tauri::async_runtime::spawn_blocking(move || engine.start(spec))
         .await
@@ -137,9 +111,7 @@ pub async fn video_webrtc_offer(sdp: String, engine: State<'_, Arc<MediaMtx>>) -
     let port = engine
         .whep_port()
         .ok_or("the video engine is not running — start the stream first")?;
-    // Bounded: never let a wedged engine freeze the frontend's reconnect loop. The source is
-    // already connected by the time this runs (video_webrtc_start waits for readiness), so this
-    // only covers the WHEP negotiation itself.
+    // Bounded: a wedged engine must never freeze the frontend's reconnect loop.
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
         .build()
@@ -172,11 +144,7 @@ pub fn video_webrtc_stop(engine: State<'_, Arc<MediaMtx>>) -> Result<(), String>
     Ok(())
 }
 
-// ── Native capture (V4L2 / DirectShow / AVFoundation) ─────────────────
-
-/// Enumerate native capture devices (USB/HDMI dongles etc.) for the "Advanced" source. Uses the OS
-/// hardware layer via ffmpeg (Linux V4L2, Windows DirectShow, macOS AVFoundation). Empty on
-/// unsupported platforms / when ffmpeg is missing.
+/// Enumerate native capture devices via ffmpeg (V4L2 / DirectShow / AVFoundation); empty without ffmpeg.
 #[tauri::command(async)]
 pub fn video_list_native_devices() -> Vec<native::NativeDevice> {
     native::list_devices()
@@ -190,16 +158,9 @@ pub fn video_probe_device(id: String) -> Vec<native::CaptureMode> {
     native::probe(&id)
 }
 
-/// Start the embedded MJPEG HTTP server capturing from a native device with the chosen mode
-/// (codec/resolution/framerate). MJPEG input is stream-copied; anything else is transcoded. Returns
-/// the local URL plus the transcode mode actually used, killing any previous server first.
-///
-/// The mode is reported rather than inferred in the UI: "can this host do hardware" and "is this
-/// stream using it" are different questions, and showing the first as if it were the second told the
-/// user "Hardware" for a feed that was in fact a plain stream copy.
-///
-/// Only returns `Ok` once the capture actually produced its first bytes — a device that rejects the
-/// requested mode used to leave the UI showing "live" over a black frame (see `MjpegServer::start`).
+/// Start the embedded MJPEG server on a native device; returns the URL and the transcode mode actually
+/// used (reported, not inferred: "can do hardware" ≠ "uses it"). `Ok` only once the capture produced
+/// its first bytes — a rejected mode must not show "live" over a black frame.
 #[tauri::command(async)]
 pub fn video_native_mjpeg_start(
     app: AppHandle,
@@ -211,25 +172,16 @@ pub fn video_native_mjpeg_start(
     mjpeg: State<'_, crate::video::MjpegServer>,
 ) -> Result<serde_json::Value, String> {
     let spec = native::CaptureSpec { id, codec, width, height, fps };
-    // Native capture has no hardware transcode path: an MJPEG camera is stream-copied (nothing left
-    // to accelerate) and the raw-input case measured only ~21 % better on VAAPI because the upload
-    // eats most of the gain, so it stays in software.
+    // No hardware transcode for native capture: MJPEG is stream-copied, and raw input gained only ~21 %
+    // on VAAPI (the upload eats the gain).
     let transcode = if native::needs_transcode(&spec.codec) { "software" } else { "copy" };
     let port = mjpeg.start(ended_hook(&app), &MjpegSource::Device(&spec))?;
     Ok(serde_json::json!({ "url": format!("http://127.0.0.1:{port}/"), "transcode": transcode }))
 }
 
-/// Start the embedded MJPEG server on an RTSP source — the image path, **without the engine**.
-///
-/// The old go2rtc chain republished an already-MJPEG stream as RTP/JPEG over loopback RTSP/TCP and
-/// back; measured over the same 120 s against a UAV-Link, the source had **zero** arrival gaps above
-/// 200 ms and the engine's output had **69**, each ~338 ms — the TCP-publish stall, and the cause of
-/// the freezes testers reported. Reading the source once and broadcasting `-f mpjpeg` measures as
-/// clean as the source itself. RFC 2435 also only carries baseline JPEG at 4:2:0/4:2:2, so this path
-/// additionally reaches MJPEG sources a republish would reject outright.
-///
-/// `require_copy` is the caller's way of saying "only take this path if the source really is MJPEG":
-/// after a failed WebRTC negotiation, settling for a transcode would be a permanent downgrade.
+/// Start the embedded MJPEG server on an RTSP source — the image path, WITHOUT the engine, whose loopback
+/// republish stalled ~338 ms at a time (and RFC 2435 cannot carry every MJPEG). `require_copy`: only if
+/// the source really is MJPEG — after a failed WebRTC negotiation a transcode is a permanent downgrade.
 #[tauri::command(async)]
 pub fn video_rtsp_mjpeg_start(
     app: AppHandle,
@@ -242,10 +194,8 @@ pub fn video_rtsp_mjpeg_start(
         serde_json::json!({ "url": format!("http://127.0.0.1:{port}/"), "transcode": t.label() })
     };
 
-    // Try the stream copy first. A source that already sends MJPEG is cheaper by a wide margin
-    // (measured on this very stream: 7.4 % of a core against 47.6 % for a transcode), and trying is
-    // the only way to know — the mpjpeg muxer rejects anything that isn't MJPEG, so the attempt costs
-    // a failed spawn rather than a probe.
+    // Try the stream copy first: far cheaper for an MJPEG source, and the mpjpeg muxer rejects anything
+    // else, so trying costs one failed spawn rather than a probe.
     let copy = MjpegSource::Rtsp { url: &url, transcode: RtspTranscode::Copy };
     match mjpeg.start(ended_hook(&app), &copy) {
         Ok(port) => {
@@ -281,14 +231,9 @@ pub fn video_native_mjpeg_stop(mjpeg: State<'_, crate::video::MjpegServer>) -> R
     Ok(())
 }
 
-// ── Native RTSP client (Kite's own, in-process — MOBILE_RTSP.md P1) ───────────
-
-/// Start the in-process native RTSP client on `url` — no MediaMTX, no ffmpeg. An MJPEG
-/// source is served over the local multipart MJPEG port (`mode: "mjpeg"` + `url`); an
-/// H264/HEVC source decodes natively into the hole-punch sink on Windows (`mode: "sink"`
-/// + `codec`, no URL — the frontend cuts the CSS hole and syncs the rect via the sink
-/// commands below). `transport`: udp | tcp | auto (UDP first, automatic TCP-interleaved
-/// fallback when no RTP arrives).
+/// Start the in-process native RTSP client: an MJPEG source is served over the local MJPEG port
+/// (`mode: "mjpeg"`), H264/HEVC decodes natively into the hole-punch sink on Windows (`mode: "sink"`).
+/// `transport` auto = UDP first, TCP-interleaved when no RTP arrives.
 #[tauri::command(async)]
 pub fn video_rtsp_native_start(
     app: AppHandle,
@@ -322,15 +267,9 @@ pub fn video_rtsp_native_start(
     }
 }
 
-/// Publish the calling window's video surfaces to the native decode sink: every DOM hole it wants
-/// the picture in, with the surface's FULL box `x/y/w/h` (the video's aspect-fit layout) and its
-/// VISIBLE box `cx/cy/cw/ch` (what is left after the DOM's clipping ancestors — the sink CUTS the
-/// picture there instead of shrinking it). All in PHYSICAL px of that window's client area.
-///
-/// The list REPLACES what this window published before, so visibility is implicit: a surface that
-/// stops being listed is gone, and an empty list means this window shows nothing. Tauri hands us
-/// the calling window, so a second window (the detached video window) can never overwrite the main
-/// window's holes. Cheap; a no-op while no sink runs.
+/// Publish the calling window's video surfaces to the native sink: per hole the FULL box and the VISIBLE
+/// box (the sink cuts, never shrinks), in PHYSICAL px. The list REPLACES this window's earlier one (empty
+/// = shows nothing); keyed by the calling window, so two windows cannot overwrite each other.
 #[tauri::command]
 pub fn video_rtsp_native_sink_surfaces(
     surfaces: Vec<crate::video::surface::SurfaceRect>,
@@ -362,11 +301,8 @@ pub fn video_rtsp_native_sink_orient(
     native_rtsp.sink_orient(mirror, rotate180);
 }
 
-/// Live counters of the running native RTSP stream: client side (transport, RTP
-/// received/lost/reordered/late, frames/dropped, bytes) plus the decode sink's numbers
-/// (`sink: {presented, width, height, error, codec}`) when that route is active.
-/// `{active: false}` while nothing runs. Polled 1 Hz by the frontend for the Debug
-/// Monitor, the fps readout, aspect ratio and sink stall detection.
+/// Live counters of the native RTSP stream plus the decode sink's (`sink: {…}`); `{active: false}`
+/// while nothing runs. Polled at 1 Hz (Debug Monitor, fps, aspect, sink stall detection).
 #[tauri::command]
 pub fn video_rtsp_native_stats(
     native_rtsp: State<'_, crate::video::rtsp_native::NativeRtsp>,
@@ -402,8 +338,6 @@ pub fn video_linux_hole_spike(on: bool) -> Result<(), String> {
     }
 }
 
-// ── Detached video window (VIDEO_MULTISINK_WINDOW.md PR B) ────────────
-
 #[cfg(desktop)]
 /// Label of the detached video window. The surface router in that window publishes its holes under
 /// this label, so the sink can tell them apart from the main window's.
@@ -420,13 +354,9 @@ const READY_POLL_MS: u64 = 50;
 /// Alt+F4, or our `video_detached_close`. The frontend docks the picture back in (D6).
 pub const DETACHED_CLOSED_EVENT: &str = "video-detached-closed";
 
-/// Spawn the detached video window: a transparent, undecorated, always-on-top window (D4, D8, D12)
-/// running the `/video` route, which draws the same glass frame as the in-app floating window and
-/// registers ONE hole for the native decode sink.
-///
-/// Geometry is ours, not the window-state plugin's (see §5.5 — the plugin restores a size onto a
-/// monitor that may be gone): `x/y` and `w/h` are PHYSICAL px, already validated against the
-/// available monitors by the caller. Opening it twice just focuses the existing window.
+/// Spawn the detached video window (transparent, undecorated, always on top) on the `/video` route.
+/// Geometry is ours, not the window-state plugin's (it restores sizes onto vanished monitors): PHYSICAL
+/// px, validated by the caller. Opening it twice focuses the existing window.
 #[tauri::command(async)]
 pub fn video_detached_open(
     app: AppHandle,
@@ -436,9 +366,8 @@ pub fn video_detached_open(
     h: u32,
     fullscreen: bool,
 ) -> Result<(), String> {
-    // Desktop only — a second window is a desktop idea, and half the window API this needs
-    // (`title` on the builder, `set_focus`, `destroy`) does not exist on mobile. The phone shows
-    // the docked window or the widget, never both (D10), and never a second window.
+    // Desktop only: half the window API this needs does not exist on mobile, and the phone never shows a
+    // second window.
     #[cfg(desktop)]
     {
         use tauri::{Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindowBuilder};
@@ -459,11 +388,9 @@ pub fn video_detached_open(
             .visible(false)
             .inner_size(640.0, 360.0)
             .min_inner_size(200.0, 120.0);
-        // Every WebView2 in a process shares ONE environment, and asking for a second one with different
-        // browser arguments fails with ERROR_INVALID_STATE (0x8007139F) — the webview is then never
-        // created while the window creation still reports success. The main window sets its own
-        // arguments in tauri.windows.conf.json, so this window has to ask for exactly the same ones;
-        // read from the config rather than repeated here, so the two cannot drift apart.
+        // All WebView2s of a process share ONE environment; a second one with other browser arguments fails
+        // (0x8007139F) while the window creation still reports success. So this window reads exactly the main
+        // window's arguments from the config.
         #[cfg(windows)]
         if let Some(args) = app
             .config()
@@ -477,10 +404,8 @@ pub fn video_detached_open(
         let win = builder
             .build()
             .map_err(|e| format!("detached video window: {e}"))?;
-        // `create_window` hands the event loop a closure and returns: the window is built a moment
-        // later on the main thread, and a failure THERE is only logged, never returned. So wait until
-        // the window answers before reporting success — otherwise a window that was never created looks
-        // exactly like a working one from here (which is how the WebView2 mismatch above stayed hidden).
+        // `create_window` builds the window later on the main thread and only logs a failure there — wait until
+        // it answers, or a window that was never created looks like a working one.
         let mut ready = false;
         for _ in 0..READY_POLLS {
             if win.is_visible().is_ok() {
@@ -542,11 +467,9 @@ pub fn video_detached_open(
     }
 }
 
-/// Put the detached video window back above the others. Needed after every fullscreen toggle:
-/// tao ends its borderless-fullscreen mode by setting `NSNormalWindowLevel` unconditionally, so a
-/// window that was pinned comes back out of fullscreen at the normal level and sinks behind
-/// whatever the user clicks next (Marc, macOS, 2026-09-08). The viewer calls this itself, because
-/// it is the only side that knows a toggle happened.
+/// Put the detached video window back on top — needed after every fullscreen toggle: tao leaves
+/// borderless fullscreen at `NSNormalWindowLevel`, so a pinned window sinks behind the next click.
+/// The viewer calls this, as only it knows a toggle happened.
 #[tauri::command(async)]
 pub fn video_detached_pin_top(app: AppHandle) -> Result<(), String> {
     #[cfg(desktop)]
@@ -576,10 +499,8 @@ pub fn video_detached_close(app: AppHandle) -> Result<(), String> {
     {
         use tauri::Manager;
 
-        // Surfaces first, window second. On Linux that window owns a GStreamer pipeline rendering
-        // into a widget INSIDE it, and withdrawing the surfaces is what stops that pipeline. The
-        // last frames may still be in flight when the window goes — a stopping pipeline's
-        // complaints are swallowed rather than ending the stream (see `linux_sink`'s bus loop).
+        // Surfaces first, window second: on Linux withdrawing the surfaces stops the pipeline rendering INSIDE
+        // that window (late frames' complaints are swallowed, see `linux_sink`).
         app.state::<crate::video::rtsp_native::NativeRtsp>()
             .forget_window(DETACHED_LABEL);
         if let Some(win) = app.get_webview_window(DETACHED_LABEL) {
@@ -598,10 +519,8 @@ pub fn video_detached_close(app: AppHandle) -> Result<(), String> {
     }
 }
 
-/// What the detached window's page handles itself: the rects of its overlay buttons (while they
-/// are on screen) and of its resize corner, in CSS px, plus whether dragging the picture may move
-/// the window at all. Linux reads them from the GTK press handler — see `video::linux_drag`, which
-/// also explains why the move cannot go through `startDragging()` there. A no-op elsewhere.
+/// What the detached window's page handles itself (button rects, resize corner, whether a drag may move
+/// the window), in CSS px. Read by Linux's GTK press handler (`video::linux_drag`); a no-op elsewhere.
 #[tauri::command]
 pub fn video_detached_chrome(zones: DetachedChrome) {
     #[cfg(target_os = "linux")]
@@ -610,14 +529,9 @@ pub fn video_detached_chrome(zones: DetachedChrome) {
     let _ = zones;
 }
 
-/// Hold the detached window to the picture's shape while the user drags its corner. The page can
-/// only put the size right AFTER a drag — inside the OS's resize loop every correction it makes is
-/// overwritten by the next mouse move, which is what made the frame snap into shape when the
-/// pointer stopped. Each platform enforces it where its resize actually happens: a `WM_SIZING`
-/// subclass on Windows, GTK's geometry hints on Linux, AppKit's content aspect ratio on macOS.
-///
-/// `aspect` is the picture's width/height and `ring` the page's chrome around it in physical px;
-/// `aspect <= 0` releases the window, which is what fullscreen wants.
+/// Hold the detached window to the picture's shape while its corner is dragged — inside the OS resize
+/// loop the page cannot correct the size. Per platform: `WM_SIZING`, GTK geometry hints, AppKit aspect.
+/// `aspect` = width/height, `ring` = the page's chrome in physical px; `aspect <= 0` releases it.
 #[tauri::command]
 pub fn video_detached_aspect(app: AppHandle, aspect: f64, ring: f64) {
     #[cfg(target_os = "windows")]
@@ -636,21 +550,9 @@ pub fn video_detached_aspect(app: AppHandle, aspect: f64, ring: f64) {
     let _ = (app, aspect, ring);
 }
 
-/// Shake the detached window's size once, so its WebView gets a fresh framebuffer.
-///
-/// WebKitGTK's DMABUF renderer paints garbage into the first buffer the Pi's v3d driver hands it —
-/// scanline corruption over the whole page, reproduced on that hardware for months (the Jarvis
-/// dashboard carries the same workaround). It is not permanent: ANY change of the draw area's size
-/// forces the buffer to be built again and the picture is clean from then on. Kite's main window
-/// never shows it because it repaints constantly and clears the buffer by itself; the detached
-/// window's page is static and almost entirely transparent, so nothing ever forces a new buffer and
-/// the corruption stays for the life of the window (Marc, Pi 5, 2026-09-08).
-///
-/// Windowed, two pixels wider and back: the aspect lock pulls the height along, so one axis is
-/// enough and the window lands exactly where it started. Fullscreen, the compositor owns the size —
-/// the only size change left to a client is leaving fullscreen and going back in.
-///
-/// ARM Linux only: no other platform has this driver.
+/// Shake the detached window's size once so its WebView gets a fresh framebuffer: WebKitGTK's DMABUF
+/// renderer paints garbage into the first buffer of the Pi's v3d driver, and only a size change
+/// rebuilds it (the static detached page never forces one). ARM Linux only.
 #[tauri::command]
 pub fn video_detached_nudge(app: AppHandle) {
     #[cfg(target_os = "linux")]
@@ -667,13 +569,9 @@ pub fn video_detached_nudge(app: AppHandle) {
         std::thread::spawn(move || {
             let settle = std::time::Duration::from_millis(200);
             if win.is_fullscreen().unwrap_or(false) {
-                // Leaving fullscreen is not necessarily a SIZE change, and only a size change
-                // rebuilds the buffer. A window that was CREATED fullscreen — Kite restarted with
-                // the picture detached and full screen — has no windowed size to fall back to and
-                // comes out of fullscreen exactly as large as it went in, so the garbage stayed
-                // until Marc resized the window by hand (Pi 5, 2026-09-08). Force the change, then
-                // put the size back before returning to fullscreen: what the window remembers as
-                // its windowed box must not shrink just because we shook it.
+                // Leaving fullscreen is not necessarily a size change (a window CREATED fullscreen has no windowed
+                // size), so force one — then restore the size before going back, so the remembered windowed box does
+                // not shrink.
                 let _ = win.set_fullscreen(false);
                 std::thread::sleep(settle);
                 if let Ok(size) = win.inner_size() {
@@ -710,4 +608,149 @@ pub struct DetachedChrome {
     pub grip: Option<[f64; 4]>,
     /// Rects the page wants the press for.
     pub chrome: Vec<[f64; 4]>,
+}
+
+/// `<Videos>/KiteGC` — where recordings go unless the user chose a folder.
+fn default_record_dir() -> std::path::PathBuf {
+    dirs::video_dir().or_else(dirs::home_dir).unwrap_or_default().join("KiteGC")
+}
+
+#[tauri::command]
+pub fn video_record_default_dir() -> String {
+    default_record_dir().to_string_lossy().to_string()
+}
+
+/// The video folder: the user's choice, else the default. Recordings are written into it and looked
+/// for below it.
+pub(crate) fn record_dir(chosen: Option<&str>) -> std::path::PathBuf {
+    match chosen.map(str::trim) {
+        Some(d) if !d.is_empty() => std::path::PathBuf::from(d),
+        _ => default_record_dir(),
+    }
+}
+
+/// Recording switched on in the settings: keep the pre-roll so a recording can start at a keyframe.
+#[tauri::command]
+pub fn video_record_enable(on: bool, native_rtsp: State<'_, crate::video::rtsp_native::NativeRtsp>) {
+    native_rtsp.recorder().set_enabled(on);
+}
+
+fn file_name_part(vehicle: &str) -> String {
+    let cleaned: String = vehicle.trim().chars().map(|c| if c.is_alphanumeric() || c == '-' { c } else { '_' }).collect();
+    let cleaned = cleaned.trim_matches('_');
+    if cleaned.is_empty() { "Video".to_string() } else { cleaned.chars().take(40).collect() }
+}
+
+/// The flight database of the running recording: an app exit while armed has no frontend to name it.
+static RECORD_DB: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mutex::new(None);
+
+fn flight_db_file(db_path: Option<String>) -> std::path::PathBuf {
+    crate::flightlog::db::resolve_db_path(&db_path.unwrap_or_default(), crate::commands::flightlog::portable_mode())
+}
+
+/// App exit: close a running recording and leave it waiting, so the flight resumed at the next start
+/// still gets it.
+pub fn finish_recording_at_exit(native_rtsp: &crate::video::rtsp_native::NativeRtsp) {
+    let files = native_rtsp.recorder().stop();
+    if let Some(db_file) = RECORD_DB.lock().unwrap_or_else(|e| e.into_inner()).take() {
+        crate::flightlog::video_link::add_waiting(&db_file, &files);
+    }
+}
+
+/// Start recording into `dir` (empty = the default folder). The file is named `<vehicle>_<local time>`.
+#[tauri::command(async)]
+pub fn video_record_start(
+    dir: Option<String>,
+    vehicle: Option<String>,
+    db_path: Option<String>,
+    native_rtsp: State<'_, crate::video::rtsp_native::NativeRtsp>,
+) -> Result<(), String> {
+    let db_file = flight_db_file(db_path);
+    *RECORD_DB.lock().unwrap_or_else(|e| e.into_inner()) = Some(db_file.clone());
+    let dir = record_dir(dir.as_deref());
+    let name = format!(
+        "{}_{}",
+        file_name_part(vehicle.as_deref().unwrap_or_default()),
+        chrono::Local::now().format("%Y-%m-%d_%H-%M-%S")
+    );
+    // Announced at once: a part that is never closed (a crash) still finds its flight, by its time.
+    let announce = move |part: &crate::video::record::RecordedVideo| {
+        crate::flightlog::video_link::add_waiting(&db_file, std::slice::from_ref(part));
+    };
+    native_rtsp.recorder().start(&dir, &name, Box::new(announce))
+}
+
+/// Stop, close the file(s) and leave them waiting for the flight they belong to (`flightlog::video_link`).
+#[tauri::command(async)]
+pub fn video_record_stop(
+    db_path: Option<String>,
+    native_rtsp: State<'_, crate::video::rtsp_native::NativeRtsp>,
+) -> Vec<crate::video::record::RecordedVideo> {
+    let files = native_rtsp.recorder().stop();
+    RECORD_DB.lock().unwrap_or_else(|e| e.into_inner()).take();
+    let db_file = flight_db_file(db_path);
+    crate::flightlog::video_link::add_waiting(&db_file, &files);
+    match crate::flightlog::db::open_database(&db_file) {
+        Ok(conn) => crate::flightlog::video_link::attach_to_saved_flights(&conn, &db_file),
+        Err(e) => log::warn!("[video] recording stays unattached, flight DB not opened: {e}"),
+    }
+    files
+}
+
+#[tauri::command]
+pub fn video_record_status(native_rtsp: State<'_, crate::video::rtsp_native::NativeRtsp>) -> crate::video::record::RecordingStatus {
+    native_rtsp.recorder().status()
+}
+
+/// Open the recordings of `flight_id` on the decode sink; a live stream ends. Fails when the flight has
+/// no recording below the video folder.
+#[tauri::command(async)]
+pub fn video_replay_open(
+    app: AppHandle,
+    flight_id: i64,
+    db_path: Option<String>,
+    video_dir: Option<String>,
+    native_rtsp: State<'_, crate::video::rtsp_native::NativeRtsp>,
+) -> Result<serde_json::Value, String> {
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+    {
+        let db_file = flight_db_file(db_path);
+        let conn = crate::flightlog::db::open_database(&db_file).map_err(|e| format!("Database error: {e}"))?;
+        let parts = crate::flightlog::video_link::replay_parts(&conn, flight_id, &record_dir(video_dir.as_deref()))
+            .map_err(|e| format!("Database error: {e}"))?;
+        if parts.is_empty() {
+            return Err("the flight has no recording on disk".into());
+        }
+        #[cfg(target_os = "windows")]
+        let parent = {
+            use tauri::Manager;
+            app.get_webview_window("main").and_then(|w| w.hwnd().ok()).map(|h| h.0 as isize)
+        };
+        #[cfg(not(target_os = "windows"))]
+        let parent: Option<isize> = {
+            let _ = &app;
+            None
+        };
+        let (codec, width, height) = native_rtsp.replay_open(parts, parent)?;
+        Ok(serde_json::json!({ "codec": codec, "width": width, "height": height }))
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+    {
+        let _ = (&app, flight_id, &db_path, &video_dir, &native_rtsp);
+        Err("not available on this platform".into())
+    }
+}
+
+/// The replay's position: flight time (ms from the flight's start), running or not, speed. Returns whether
+/// a recording covers it and whether its picture was handed to the sink; `null` while none is open.
+#[tauri::command]
+pub fn video_replay_sync(
+    flight_ms: f64,
+    playing: bool,
+    rate: f64,
+    native_rtsp: State<'_, crate::video::rtsp_native::NativeRtsp>,
+) -> Option<serde_json::Value> {
+    native_rtsp
+        .replay_sync(flight_ms, playing, rate)
+        .map(|(covered, ready)| serde_json::json!({ "covered": covered, "ready": ready }))
 }

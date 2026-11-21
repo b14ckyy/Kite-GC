@@ -1,22 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-//! Reading and writing the `content://` URIs Android's file pickers hand back.
-//!
-//! Tauri's dialog plugin opens the Storage Access Framework on Android — `ACTION_CREATE_DOCUMENT`
-//! for save, `ACTION_OPEN_DOCUMENT` for open — and returns the chosen document as a `content://`
-//! URI string, not a filesystem path. Nothing in `std::fs` can open one: scoped storage means the
-//! file may live in another app's provider, on a SD card, or in Drive, and is reachable only through
-//! the `ContentResolver`.
-//!
-//! That is why every export was failing on mobile. The app could write perfectly good bytes and had
-//! nowhere to put them — and since app-private storage is wiped on uninstall, "export" could not get
-//! a flight log off the device at all.
-//!
-//! These two functions bridge the gap over JNI, using the plumbing in `android/jvm.rs`. Callers do
-//! not use them directly; `user_file.rs` decides when a path is really a URI and routes accordingly.
+//! `content://` URIs from Android's file pickers, reached over JNI through the `ContentResolver`
+//! (`std::fs` cannot open them). `user_file.rs` routes reads and writes here.
 
-use jni::objects::{JByteArray, JObject, JValue};
+use jni::objects::{JByteArray, JObject, JString, JValue};
 
 use super::jvm;
 
@@ -65,6 +53,62 @@ fn parse_uri<'l>(env: &mut jni::JNIEnv<'l>, uri: &str) -> Result<JObject<'l>, St
         )
         .and_then(|v| v.l());
     jvm::check(env, r, "Uri.parse")
+}
+
+/// The file name the provider shows for document `uri` (`OpenableColumns.DISPLAY_NAME`); the URI
+/// itself need not contain it. `None` when the provider gives none.
+pub fn display_name(uri: &str) -> Result<Option<String>, String> {
+    let mut env = jvm::env()?;
+    let resolver = resolver(&mut env)?;
+    let juri = parse_uri(&mut env, uri)?;
+
+    let r = env.new_string("_display_name");
+    let column = jvm::check(&mut env, r, "building the column name")?;
+    let r = env.new_object_array(1, "java/lang/String", &column);
+    let projection = jvm::check(&mut env, r, "building the projection")?;
+    let none = JObject::null();
+    let r = env
+        .call_method(
+            &resolver,
+            "query",
+            "(Landroid/net/Uri;[Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;)Landroid/database/Cursor;",
+            &[
+                JValue::Object(&juri),
+                JValue::Object(&projection),
+                JValue::Object(&none),
+                JValue::Object(&none),
+                JValue::Object(&none),
+            ],
+        )
+        .and_then(|v| v.l());
+    let cursor = jvm::check(&mut env, r, "ContentResolver.query")?;
+    if cursor.is_null() {
+        return Ok(None);
+    }
+
+    let r = env.call_method(&cursor, "moveToFirst", "()Z", &[]).and_then(|v| v.z());
+    let name = match jvm::check(&mut env, r, "Cursor.moveToFirst") {
+        Ok(true) => {
+            let r = env
+                .call_method(&cursor, "getString", "(I)Ljava/lang/String;", &[JValue::Int(0)])
+                .and_then(|v| v.l());
+            match jvm::check(&mut env, r, "Cursor.getString") {
+                Ok(obj) if !obj.is_null() => {
+                    let jname = JString::from(obj);
+                    let r = env.get_string(&jname).map(String::from);
+                    jvm::check(&mut env, r, "reading the display name").map(Some)
+                }
+                Ok(_) => Ok(None),
+                Err(e) => Err(e),
+            }
+        }
+        Ok(false) => Ok(None),
+        Err(e) => Err(e),
+    };
+    // An unclosed cursor leaks its window in the provider's process.
+    let r = env.call_method(&cursor, "close", "()V", &[]).map(|_| ());
+    let closed = jvm::check(&mut env, r, "Cursor.close");
+    name.and_then(|n| closed.map(|_| n))
 }
 
 /// Copy the file at `src` into the document `uri`, replacing its contents.
@@ -122,6 +166,9 @@ pub fn write_uri(uri: &str, src: &std::path::Path) -> Result<(), String> {
                 &[JValue::Object(&chunk), JValue::Int(0), JValue::Int(n as i32)],
             )
             .map(|_| ());
+        // A local reference lives until this native call returns: without the release every chunk of
+        // the export stays pinned in the Java heap.
+        let _ = env.delete_local_ref(chunk);
         if let Err(e) = jvm::check(&mut env, r, "OutputStream.write") {
             result = Err(e);
             break;

@@ -22,10 +22,8 @@
     interfaceSettings?: InterfaceSettings;
   } = $props();
 
-  // Airspeed is the primary readout when available (it's what matters for flight); ground speed then
-  // drops to the secondary line. Without airspeed, ground speed stays primary. Disabling airspeed in
-  // Settings forces ground speed as the primary source even when airspeed data is still flowing (e.g. a
-  // passive/MAVLink link) — the data pipeline is untouched, only this widget's readout preference.
+  // Airspeed is the primary readout when available (ground speed then secondary); disabling airspeed in Settings
+  // forces ground speed primary even with airspeed data flowing — only this widget's preference.
   let hasAir = $derived($settings.airspeedEnabled && telem.lastUpdate && telem.airspeed > 0);
   let gsConv = $derived(convertSpeed(telem.groundSpeed, interfaceSettings.speedUnit));
   let asConv = $derived(convertSpeed(telem.airspeed, interfaceSettings.speedUnit));
@@ -43,17 +41,9 @@
   // Throttle bar fill, 0–100% (FC output via MSP2_INAV_MISC2 / VFR_HUD).
   let thrPct = $derived(Math.max(0, Math.min(100, telem.lastUpdate ? telem.throttle : 0)));
 
-  // ── Derived longitudinal acceleration (m/s²) ──────────────────────────────
-  // No FC field for it — we estimate it from the speed we display (airspeed when present, else ground
-  // speed). The raw speed is quantized (it only changes by ~1 km/h every few frames), so an
-  // instantaneous derivative spikes on the one frame the value steps and reads ~0 on every frame in
-  // between — the bar flicks up then drops to zero. Instead we fit a least-squares line to the speed
-  // samples in a sliding time window (ACC_WINDOW_MS) and take its slope: the estimate stays steady as
-  // long as the speed is trending across the window (it doesn't collapse to 0 between quantization
-  // steps) and only fades to 0 once the speed is genuinely flat over the whole window. Robust to slow /
-  // irregular update rates. A small deadband reads sub-threshold drift as "level". Scale ±4 m/s².
-  // `samples` is a plain (non-reactive) var; the $effect only writes `accel` ($state) — never reads the
-  // state it writes (that read+write-same-state pattern freezes the main thread — see other widgets).
+  // ── Derived longitudinal acceleration (m/s²) ── slope of a least-squares line over the displayed speed in a
+  // sliding window (ACC_WINDOW_MS): the speed is quantized, so a frame-to-frame derivative spikes and drops to 0.
+  // `samples` is non-reactive and the $effect never reads the `accel` it writes (that freezes the main thread).
   const ACC_SCALE = 4;          // m/s² at full deflection (small range — long-range craft change gently)
   const ACC_WINDOW_MS = 1500;   // sliding regression window — wider = steadier/laggier, narrower = livelier
   const ACC_DEADBAND = 0.05;    // m/s² — suppress sub-threshold drift around zero
@@ -236,10 +226,8 @@
   .vbar-fill.acc {
     transition: height 0.15s ease, bottom 0.15s ease, top 0.15s ease;
   }
-  /* Low-power mode: drop the bar smoothing. These transitions animate layout properties, so each
-     frame costs a reflow + repaint — and in flight the values change continuously, which makes the
-     transitions overlap into a permanent reflow at display rate. Snapping to the value is free and
-     the reading is identical. */
+  /* Low-power mode: no bar smoothing — layout transitions that overlap in flight become a permanent reflow at
+     display rate; snapping is free. */
   :global(html.kite-low-power) .vbar-fill.thr,
   :global(html.kite-low-power) .vbar-fill.acc {
     transition: none;

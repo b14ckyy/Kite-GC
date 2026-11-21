@@ -4,14 +4,9 @@
 -->
 
 <script lang="ts">
-  // Batch-edit popup for a multi-selection of ArduPilot/PX4 waypoints — the cross-autopilot counterpart
-  // of BatchEditPopup (INAV). One APPLY button (no live-apply → undo/redo-friendly). A field shows
-  // "---" (empty) when the selected location WPs differ. Mirrors the INAV mapping:
-  //   • Altitude (absolute, metres) + Relative Change (delta) — matches the metres-based Ardu editor
-  //   • Frame toggle (REL/AMSL/TRN) — clicking unifies all selected to one frame; mixed blocks the
-  //     absolute-alt field (the number means different things per frame), like INAV's alt-mode rule
-  //   • Add action — appends a DO_ command to every selected waypoint (the cross-stack equivalent of
-  //     INAV's User-Action bits; "just like single edit's Add modifier")
+  // Batch-edit popup for selected ArduPilot/PX4 waypoints — counterpart of BatchEditPopup (INAV): one APPLY (undo-
+  // friendly), "---" where values differ. Altitude + relative change, frame toggle (mixed frames block the absolute
+  // field), and Add action (a DO_ command appended to every selected WP).
   import { t } from 'svelte-i18n';
   import { get } from 'svelte/store';
   import {

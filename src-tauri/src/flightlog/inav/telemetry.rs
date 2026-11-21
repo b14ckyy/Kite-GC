@@ -1,35 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-//! Kite's frame sink on the ported decoder core: one log of an INAV Blackbox file → the rows the
-//! importer stores ([`ParsedRow`]), mapped to `TelemetryRecord` by the same code as the
-//! blackbox_decode CSV path (`blackbox::build_telemetry_record_indexed` through [`CellReader`]).
-//!
-//! The sink rebuilds the CSV `blackbox_decode --merge-gps --datetime --unit-height m
-//! --unit-gps-speed mps --stdout` would print — not as text, but as a header of the same column
-//! names plus a description of each cell, so the importer's column resolution runs unchanged and
-//! every cell yields the `f64` Kite's CSV parser reads from the tool's text. Source of the rules:
-//! blackbox-tools v9.0.0 (`1918a75`), `src/blackbox_decode.c` (BD) and `src/parser.c` (P); details
-//! in Dev-Docs reference/BLACKBOX_DECODE_OUTPUT.md.
-//!
-//! The equality holds for what the importer reads, not for every column of the tool's CSV: where the
-//! decoder core deliberately departs from the header (`accVib` is written as a delta although the
-//! header declares AVERAGE_2, the extra motor byte of 7.x–8.0, the INAV 10 terrain field order — see
-//! `schema.rs`) its values are the firmware's, and the tool's are not. The importer maps none of
-//! those fields.
-//!
-//! [`Compat::BlackboxDecode`] also reproduces which frames the tool drops: it does not know INAV's
-//! events 30 (FLIGHTMODE) and 40 (IMU_FAILURE) nor INAV's `LOG_END` text, and after such an event
-//! its main stream stays invalid until the next I frame (P frames dropped, a home frame in that
-//! window does not validate the GPS home, and the window's G frames take their time from the last
-//! main frame the tool accepted, so they attach to its row). [`Compat::Native`] keeps every frame
-//! the decoder accepts.
-//!
-//! Known limit of the emulation: the sink is not told whether a main frame was an I or a P frame
-//! and takes "`loopIteration` is a multiple of the I interval" for I. Real logs carry the odd P
-//! frame at such an iteration (one whose I frame is missing); one inside an emulated window would
-//! end the window a frame interval early. `DecodedLog::i_frames_by_rule` vs. `i_frames_decoded`
-//! shows whether a log has any.
+//! Kite's frame sink on the ported decoder core: one INAV Blackbox log → the importer's rows, each cell
+//! the `f64` Kite's CSV parser would read from blackbox_decode's output (blackbox-tools v9.0.0 `1918a75`;
+//! BD = `src/blackbox_decode.c`, P = `src/parser.c`; Dev-Docs reference/BLACKBOX_DECODE_OUTPUT.md).
 
 use std::ops::Range;
 
@@ -188,10 +162,9 @@ const PREDICTOR_MOTOR0: i32 = 5;
 /// INAV derives the I interval from a 16-bit rate denominator (next power of two).
 const MAX_I_INTERVAL: u32 = 65_536;
 
-/// Two damaged-header cases the decoder core does not reject itself (INAV writes neither; noted for
-/// the core in Dev-Docs reference/DECODER_SYNC.md): a GPS or home field predicted from `motor[0]` —
-/// the core checks that predictor for main frames only and would index past the GPS frame — and an
-/// absurd I interval, which makes its skipped-frame arithmetic run for minutes.
+/// Two damaged-header cases the decoder core does not reject itself (see DECODER_SYNC.md): a GPS or
+/// home field predicted from `motor[0]` (would index past the GPS frame) and an absurd I interval
+/// (its skipped-frame arithmetic would run for minutes).
 fn check_header(header: &InavHeader) -> Result<(), String> {
     if header.g.predictor.contains(&PREDICTOR_MOTOR0) || header.h.predictor.contains(&PREDICTOR_MOTOR0) {
         return Err("Damaged Blackbox header: a GPS or home field predicts from motor[0]".into());
@@ -688,10 +661,8 @@ impl NativeRow<'_> {
 
 impl CellReader for NativeRow<'_> {
     fn f64_at(&self, index: usize) -> Option<f64> {
-        // Each arm is the value of `parse_loose_f64(&self.text(index))` (checked by the tests):
-        // integers below 2^53 print and parse exactly; `%.Nf` of `n / 10^N` prints the exact decimal
-        // (the double's error is far below half a unit of the last printed digit), which parses back
-        // to the correctly rounded `n as f64 / 10^N` — the same double the division yields.
+        // Each arm equals `parse_loose_f64(&self.text(index))` (checked by the tests): integers below
+        // 2^53 are exact, and `%.Nf` of `n / 10^N` parses back to the same double `n as f64 / 10^N` yields.
         Some(match self.cells.get(index)? {
             Cell::Time => self.time as f64,
             Cell::DateTime => return None,

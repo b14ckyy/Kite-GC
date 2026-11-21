@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
+import { isRelativeAltitudeProtocol } from '$lib/helpers/altReference';
 import {
   listFlights,
   getFlight,
@@ -23,6 +24,7 @@ import {
   unlinkFlight as unlinkFlightStore,
   exportFlights,
   exportBlackboxFile,
+  flightAltRelative,
   blackboxFileInfo as blackboxFileInfoStore,
   deleteBlackboxFile as deleteBlackboxFileStore,
   compactDatabase as compactDatabaseStore,
@@ -48,6 +50,9 @@ export interface FlightSelection {
   weatherWindDir: string;
   weatherDesc: string;
   hasGpsData: boolean;
+  /** The track's altitude is relative to the arming point: the stored `flights.alt_relative`, or the
+   *  protocol label rule for a flight without one. */
+  altRelative: boolean;
 }
 
 /** Load the flight summary list. */
@@ -55,10 +60,7 @@ export async function loadFlights(dbPath: string): Promise<FlightSummary[]> {
   return listFlights(dbPath);
 }
 
-/**
- * Fetch flight details, track, and lazily enrich metadata (geocode + weather).
- * Returns everything needed to populate the page state in one call.
- */
+/** Flight details + track, lazily enriching metadata (geocode + weather) — all the page needs, in one call. */
 export async function selectFlightData(
   flightId: number,
   dbPath: string,
@@ -66,6 +68,10 @@ export async function selectFlightData(
 ): Promise<FlightSelection> {
   let flight = await getFlight(flightId, dbPath);
   const track = await getFlightTrack(flightId, dbPath);
+  const storedAltRelative = await flightAltRelative(flightId, dbPath).catch((e) => {
+    console.warn('[logbook] altitude reference not read:', e);
+    return null;
+  });
   const hasGpsData = track.some((p) => isValidGpsCoordinate(p.lat, p.lon));
 
   // Lazy geocode
@@ -95,6 +101,7 @@ export async function selectFlightData(
     flight,
     track,
     trackCount: track.length,
+    altRelative: storedAltRelative ?? isRelativeAltitudeProtocol(flight?.protocol),
     notes: flight?.notes ?? '',
     weatherTempC: flight?.weather_temp_c != null ? String(flight.weather_temp_c) : '',
     weatherWindMs: flight?.weather_wind_ms != null ? String(flight.weather_wind_ms) : '',
@@ -178,10 +185,7 @@ export async function getPartnerTrack(
   return getFlightTrack(flightId, dbPath);
 }
 
-/**
- * Import a blackbox log file. Returns the raw result from the backend
- * (may be 'success' or 'duplicate' — caller handles the UI confirmation).
- */
+/** Import a blackbox log; returns the raw backend result ('success' or 'duplicate' — the caller confirms). */
 export async function importBlackbox(
   filePath: string,
   dbPath: string,
@@ -197,9 +201,7 @@ export async function countBlackboxLogs(filePath: string) {
   return blackboxLogCount(filePath);
 }
 
-/**
- * Import an ArduPilot DataFlash .bin file.
- */
+/** Import an ArduPilot DataFlash .bin file. */
 export async function importArdupilot(
   filePath: string,
   dbPath: string,
@@ -209,9 +211,7 @@ export async function importArdupilot(
   return importArdupilotLog(filePath, dbPath, forceImport, locale);
 }
 
-/**
- * Import a PX4 ULog .ulg file.
- */
+/** Import a PX4 ULog .ulg file. */
 export async function importUlog(
   filePath: string,
   dbPath: string,

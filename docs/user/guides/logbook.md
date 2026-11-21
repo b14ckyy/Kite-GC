@@ -33,7 +33,7 @@ The post-flight summary — save or discard, link the battery (one or several se
 Flights are grouped into a collapsible tree you can re-organise with the **sort** selector — by
 **aircraft**, **location** and **date** in the order you prefer — and narrow with the **search** box
 (it looks in the aircraft name, location, date and notes; a flight number such as `#170` finds exactly
-that flight).
+that flight). The chosen order is kept across restarts.
 Each entry shows the essentials (date, aircraft, location, duration, distance); pick one to open its
 details.
 
@@ -52,7 +52,10 @@ The detail panel shows everything about the selected flight:
 - **Mission** — the linked mission, openable in the Mission Manager.
 - **Weather**, **notes** and **pilot** — editable.
 - **Source & stored log** — where the flight came from (live recording or an import) and, when an
-  onboard log file was kept, an inline control to export or delete it.
+  onboard log file was kept, an inline control to export or delete it. Behind the source stands
+  what the flight takes in the database: **≈ size** is an estimate of its recorded data, and
+  **File size** is the stored original log on top of that. A linked pair shows the live recording
+  and the imported log each with its own size.
 
 ![The flight list and the selected flight's details](../assets/guides/logbook/logbook_detail.png)
 /// caption
@@ -79,6 +82,8 @@ into the area the full player occupies (or tap it on a touch screen) and it unfo
 open, so changing the speed, the track colouring or scrubbing never fights a folding panel. A map
 drag that ends in that area doesn't unfold it — only releasing the button there does. Clicking or
 tapping anywhere outside the Logbook panel collapses it to its info card, giving the map the room.
+On a small screen, where even the info card would lie over the replay player, the panel parks itself
+completely at that moment; its icon brings the info card back, and it then stays until you park it.
 
 ### High-resolution replay
 
@@ -90,9 +95,9 @@ it — updates then run at your screen's refresh rate instead of 10 Hz. Combined
 **slow-motion speeds** (0.25× / 0.5×) this is the way to study a manoeuvre frame by frame.
 
 The first switch to HI-RES shows a short **preparation popup** (re-decoding a big log can take a
-moment on slower machines). The decoded file lives in a `hires-cache` folder next to the flight
-database, is reused while the flight stays open, and is **deleted automatically** when you close
-the flight — nothing accumulates. The map track and timeline stay at 10 Hz by design; high-res
+moment on slower machines). The decoded file lives in a `hires-cache` folder in Kite's own data
+folder (not in a database folder you chose), is reused while the flight stays open, and is
+**deleted automatically** when you close the flight — nothing accumulates. The map track and timeline stay at 10 Hz by design; high-res
 feeds the live values.
 
 ### Opening logs without importing them
@@ -145,15 +150,57 @@ PX4 ULog note: PX4 doesn't log a throttle *output*, so a replayed `.ulg` flight 
     flight, its track and its records, but not the stored original), so **HI-RES** replay and the
     original-log export are desktop features, and so is the **Open** button.
 
+## Selecting several flights
+
+Press **Select** next to the search field. The panel shows only the list, and every flight and every
+group in it gets a tick box: a tap on a flight ticks it instead of opening it, the box of a group
+ticks all its flights. **All** ticks everything the search currently shows, **None** clears the
+ticks. They stay when you change the search, so you can collect flights over several searches.
+**Done** leaves the mode and drops the ticks. A long press on a flight (touch) or **Ctrl/⌘-click**
+(desktop) starts the same mode with that flight ticked.
+
+- **.kflight** exports the ticked flights into one file. A linked partner flight goes with its
+  flight, ticked or not.
+- **Delete** removes the ticked flights after a confirmation — exactly those: a linked partner
+  that is not ticked stays. The confirmation offers to add the battery usage of the deleted
+  flights to the lifetime totals of their batteries first. When the flights have video recordings
+  that no other flight uses, Kite then asks whether to delete those files too (desktop); they go
+  to the recycle bin / trash where there is one, after the flights are deleted. The same question
+  follows the delete button of a single flight — except when only the live half of a linked pair
+  is deleted, because the flight stays.
+
 ## Exporting
 
-- **`.kflight`** — export selected flights (multi-select supported) as Kite's portable flight file, to
-  move them to another install.
+- **`.kflight`** — export the open flight, or several at once (see
+  [Selecting several flights](#selecting-several-flights)), as Kite's portable flight file, to
+  move them to another install. The file carries the mission a flight is linked to and the weather
+  recorded with it; on import the mission is added to the Mission Manager's library, or the flight
+  is linked to the entry that is already there. A file written by a **newer** Kite version is still
+  imported: Kite takes over what it knows and tells you that not all data could be imported.
+
+    **Video recordings** are not inside the file. When an exported flight has recordings in the
+    recording folder, Kite asks after the export whether to copy them as well; they go into a folder
+    named after the file with `_video` added (`Flights_3.kflight` → `Flights_3_video`), next to it.
+    Keep the two together. When you import such a file, Kite looks into that folder and asks whether
+    to import the recordings of the flights in your logbook into your own recording folder; with
+    them there the replay shows the video. A recording that is in your recording folder already is
+    linked again by itself, and the import says so. Both questions can be declined, and both are
+    desktop only.
 - **Original log file** — re-export the onboard log stored with the flight: an INAV Blackbox
   (`.bbl` / `.txt`), ArduPilot Dataflash (`.bin`) or PX4 ULog (`.ulg`). For a flight that came out of a multi-flight
   `.bbl`, this is that flight's own log, not the whole download. Imported `.tlog` / `.rawmsp` telemetry is parsed
   straight in (not kept as a file), so there's nothing to re-export for those.
 - **Track** — export a flight's path as **KMZ / KML** (Google Earth), **GPX** or **CSV**.
+
+The proposed file name of a single flight is its vehicle name and location where known, followed by the
+flight's date and local time — `Flight_<number>` stands in when neither is known.
+
+!!! note "On Android"
+    An export opens the system **share sheet** instead of a save dialog: send the file to another
+    device or person, a cloud drive, or a file manager. The file keeps the proposed name. From
+    Android 14 the sheet also offers **Save to device**, which opens the system's save dialog. On
+    older versions, share to a file manager app to keep the file on the device — the system's own
+    Files app is not offered as a share target on every device.
 
 ## The database, updates and the automatic backup
 
@@ -164,9 +211,78 @@ the **latest** backup is kept (with blackbox logs the file can be several GB), a
 with its size and a **Delete** button once it exists. To keep a copy permanently, move the file
 somewhere else yourself.
 
+While the backup and the upgrade run, Kite shows a notice — with a large database that takes several
+minutes; do not close Kite during it. It happens once, at the first start of the new version.
+
+After an upgrade Kite **asks what to do with the backup** and names its size: **Delete now**, **Keep**
+(it is not asked about again) or **Remind me in 14 days** (the question comes back at the first start
+after that). On Windows, Linux and macOS *Delete* moves the file to the recycle bin / trash where the
+drive has one; on a drive without (USB flash drives, on Linux every drive other than the one with your
+home folder) it is deleted right away. Kite never removes the backup on its own; only the next upgrade
+replaces it with a new one.
+
+### Changing the database folder
+
+**Settings → Data → Database Folder** (Windows, Linux, macOS — on Android and iOS the database always
+lives in the app's own storage) asks what to do with the database when you pick another folder or go
+back to the default one:
+
+- **The new folder holds no database:** **Move** takes the current database and its backup along;
+  **Start new** begins an empty database there and leaves the current one where it is.
+- **The new folder already holds a database:** Kite names the flights and the size of both.
+  **Open** uses the one in the folder (**Upgrade and open** when it is in an older format — it is
+  backed up and upgraded first). **Overwrite** moves the database currently in use there in its
+  place, after a second confirmation; the replaced one goes to the recycle bin / trash where the
+  drive has one. A database written by a newer Kite, or a file Kite cannot read as a database,
+  cannot be opened, only overwritten.
+- **After opening another database** Kite asks about the previous one: **Backup** writes a copy
+  named `flights.backup-<date>-<time>.db` into the new folder and then deletes the previous
+  database and its pre-update backup for good, **Keep** leaves it where it is, **Delete** removes
+  it (recycle bin / trash where there is one).
+
+A move or backup writes a checked copy first and removes the original only afterwards; with a large
+database this takes minutes, and Kite shows a notice meanwhile. **Cancel** in any of these dialogs
+leaves the folder setting as it was. Two databases are never merged — to bring flights from one
+into another, export them as `.kflight` and import them.
+
+Only the database and its backups live in the folder you choose. Kite's work files — the temporary
+files of a running recording, the HI-RES replay cache and logs opened without importing them — always
+stay in Kite's own data folder: a recording is not written to a removable or network drive while it
+runs (the flight is stored in the database when it ends), and the space is freed again.
+
+The folder cannot be changed while a log import is running.
+
+The folder cannot be changed while a vehicle is connected. Changing it closes the flight that is
+open in the logbook and forgets which library mission the map mission came from.
+
 If you ever **downgrade** Kite after such an upgrade, the older version refuses to touch the newer
 database: the logbook shows a notice (and the database stays untouched) until you either install the
 newer Kite again or restore a matching backup.
+
+### Exporting and importing the whole database
+
+**Settings → Data** has two exports that go straight to a place you pick in the system's save
+dialog:
+
+- **Export database** saves a copy of the whole flight database — flights, vehicles, batteries and
+  missions — as one `.db` file. This is the backup to take before you reinstall Kite or move to
+  another device. On Android and iOS the file is written directly from the database, so it needs no
+  extra free space in the app.
+- **Export all flights** writes every flight into one `.kflight` file, so you do not have to select
+  them one by one to bring them into another Kite. Vehicles, batteries and missions that belong to no
+  flight are not part of it. Kite shows the progress and, at the end, how many flights were written;
+  it refuses to start when less space is free than the database is large. On the desktop it then asks
+  whether to copy the video recordings of those flights next to the file (see
+  [Exporting](#exporting)).
+
+**Import database** (Android and iOS) replaces the database in the app with a `.db` file exported
+this way: Kite names the flights in the file and in the app and asks before it replaces anything —
+the database in the app is deleted, it is not merged. A file in an older format is upgraded after
+the import; a file from a newer Kite is refused. On Windows, Linux and macOS you open an exported
+database by putting it into a folder as `flights.db` and choosing that folder as the
+[database folder](#changing-the-database-folder).
+
+**Export database** and **Import database** are not available while a vehicle is connected.
 
 ## Vehicles & batteries
 

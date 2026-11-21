@@ -11,6 +11,7 @@
      device/FC — the user manages the matching FC config themselves. -->
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
+  import { escapeKey } from '$lib/actions/escapeKey';
   import { get } from 'svelte/store';
   import { untrack } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
@@ -24,6 +25,7 @@
   import ChannelStates from '$lib/components/control/ChannelStates.svelte';
   import ManualConfig from '$lib/components/control/ManualConfig.svelte';
   import ManualStates from '$lib/components/control/ManualStates.svelte';
+  import RcTrainerRadio from '$lib/components/control/RcTrainerRadio.svelte';
   import { settings } from '$lib/stores/settings';
   import { activeVehicleId } from '$lib/stores/vehicles';
   import {
@@ -66,6 +68,7 @@
 
   // ── Device selection ────────────────────────────────────────────────────
   let selectedId = $state<number | null>(null);
+  let trainerOpen = $state(false);
   const selectedDevice = $derived(
     $hidDevices.find((d) => d.id === selectedId) ?? $hidDevices[0] ?? null,
   );
@@ -79,13 +82,14 @@
     if (selectedId != null && list.some((d) => d.id === selectedId)) return;
     const savedUuid = $settings.rcControl.selectedUuid;
     const match = savedUuid ? list.find((d) => d.uuid === savedUuid) : null;
-    void pickDevice(match ?? list[0]);
+    void pickDevice(match ?? list[0], !!match || !savedUuid);
   });
 
-  async function pickDevice(dev: HidDevice): Promise<void> {
+  /** `remember` false for a fallback pick: the saved device comes back and must be chosen again. */
+  async function pickDevice(dev: HidDevice, remember = true): Promise<void> {
     selectedId = dev.id;
     await selectHidDevice(dev.id);
-    settings.patch({ rcControl: { ...$settings.rcControl, selectedUuid: dev.uuid } });
+    if (remember) settings.patch({ rcControl: { ...$settings.rcControl, selectedUuid: dev.uuid } });
   }
 
   function onDevicePick(e: Event): void {
@@ -392,6 +396,15 @@
           {/each}
         </select>
       {/if}
+      <button
+        class="rc-bt"
+        class:on={trainerOpen || !!$settings.rcControl.trainerRadios?.length}
+        onclick={() => (trainerOpen = !trainerOpen)}
+        title={$t('rc.trainer.title')}
+        aria-label={$t('rc.trainer.title')}
+      >
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7l10 10-5 5V2l5 5L7 17" /></svg>
+      </button>
       <label class="rc-dev-label" for="rc-platform">{$t('rc.platform')}</label>
       <select
         id="rc-platform"
@@ -406,6 +419,9 @@
         {/each}
       </select>
     </div>
+    {#if trainerOpen}
+      <RcTrainerRadio disabled={armedLock} />
+    {/if}
   {/snippet}
 
   <!-- Left (compact) stage: the live control surface — current channel outputs. -->
@@ -458,7 +474,7 @@
           <HoldToConfirm
             variant={$rcEngaged.on ? 'danger' : 'standard'}
             duration={LONG_PRESS_MS}
-            disabled={!$rcEngaged.on && safety.locked}
+            disabled={!$rcEngaged.on && (safety.locked || !selectedDevice)}
             title={$rcEngaged.on ? $t('rc.disengageBtn') : $t('rc.engageBtn')}
             onconfirm={toggleEngage}
           >
@@ -600,7 +616,7 @@
 
 {#if newOpen}
   <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
-  <div class="rc-modal-backdrop" onclick={() => (newOpen = false)} onkeydown={(e) => { if (e.key === 'Escape') newOpen = false; }}>
+  <div class="rc-modal-backdrop" use:escapeKey={() => (newOpen = false)}>
     <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
     <div class="rc-modal" onclick={(e) => e.stopPropagation()}>
       <div class="rc-modal-title">{$t('rc.newTitle')}</div>
@@ -636,6 +652,11 @@
     background: #2a2a2a; color: #e0e0e0; border: 1px solid #444; border-radius: 4px;
   }
   .rc-nodev { color: #949494; font-size: 12px; font-style: italic; }
+  .rc-bt {
+    display: flex; align-items: center; padding: 4px 5px; cursor: pointer;
+    background: #2a2a2a; color: #949494; border: 1px solid #444; border-radius: 4px;
+  }
+  .rc-bt:hover, .rc-bt.on { border-color: #37a8db; color: #37a8db; }
   .rc-platform {
     padding: 4px 6px; font-size: 12px;
     background: #2a2a2a; color: #e0e0e0; border: 1px solid #444; border-radius: 4px;
@@ -745,14 +766,13 @@
   .rc-dir { font-size: 10px; color: #6f6f6f; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .rc-dir-path { color: #888; }
 
-  /* New-profile modal */
   .rc-modal-backdrop {
     position: fixed; inset: 0; z-index: 9999; background: rgba(0, 0, 0, 0.55);
     display: flex; align-items: center; justify-content: center;
   }
   .rc-modal {
     background: #2e2e2e; border: 1px solid rgba(55, 168, 219, 0.45); border-radius: 8px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5); padding: 20px 24px 16px; min-width: 340px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5); padding: 20px 24px 16px; min-width: min(390px, 100%);
   }
   .rc-modal-title { font-size: 14px; font-weight: 700; color: #e0e0e0; margin-bottom: 12px; }
   .rc-modal-label { display: block; font-size: 11px; color: #949494; margin-bottom: 5px; }

@@ -4,15 +4,9 @@
 -->
 
 <script lang="ts">
-  // Terrain Radar widget (1×1) — a simple top-down, track-up terrain-awareness
-  // display (EGPWS-style). A 120° forward fan is sampled as a polar grid and
-  // coloured by clearance against a reference altitude:
-  //   clearance = referenceAlt(dist) − terrain
-  //     static     → referenceAlt = current MSL          (flat)
-  //     predictive → referenceAlt = MSL + slope·dist      (sink-angle, FC vario)
-  // Range scaling (300/900/1800/3600 m) + hysteresis are shared with the Live
-  // AGL widget. The fan is fixed pointing up; terrain is sampled relative to the
-  // heading, so it appears track-up. UAV marker (ring+dot) sits at the apex.
+  // Terrain Radar widget (1×1) — top-down, track-up terrain awareness (EGPWS-style): a 120° forward fan sampled
+  // as a polar grid, coloured by clearance = referenceAlt(dist) − terrain (static: current MSL; predictive: MSL +
+  // slope·dist from the FC vario). Range steps + hysteresis shared with the Live AGL widget.
   import { untrack } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import type { TelemetryData } from '$lib/stores/telemetry';
@@ -173,10 +167,8 @@
     void telem.groundSpeed;
     void telem.altMsl;
     void telem.lastUpdate;
-    // runUpdate writes state it also reads (e.g. `range = nextStep(speed, range)`).
-    // Run it untracked so those self-reads don't become effect dependencies —
-    // otherwise the read+write loop trips Svelte's effect_update_depth_exceeded
-    // guard and hard-freezes the main thread.
+    // runUpdate writes state it also reads (e.g. `range = nextStep(speed, range)`): untracked, or the read+write
+    // loop trips effect_update_depth_exceeded and hard-freezes the main thread.
     untrack(() => void runUpdate());
   });
 
@@ -241,10 +233,7 @@
     return `rgb(${Math.round(a[0] + (b[0] - a[0]) * f)},${Math.round(a[1] + (b[1] - a[1]) * f)},${Math.round(a[2] + (b[2] - a[2]) * f)})`;
   }
 
-  /**
-   * Continuous clearance colour over the total `radarScale` (null = unpainted = bg):
-   * a smooth red→green ramp from 0…scale (clearance < 0 clamps to red), off above.
-   */
+  /** Continuous clearance colour over `radarScale` (null = unpainted): red→green from 0…scale, <0 red, off above. */
   function colorFor(elev: number | null, dist: number): string | null {
     if (elev == null) return null;
     const ref = predictive ? curAltMsl + slope * dist : curAltMsl;

@@ -24,5 +24,5 @@ pub mod vehicle;
 pub mod debug;
 
 pub use handler::MavlinkHandle;
-pub use handshake::perform_handshake;
+pub use handshake::{perform_handshake, Handshake};
 pub use mission::ArduWaypoint;

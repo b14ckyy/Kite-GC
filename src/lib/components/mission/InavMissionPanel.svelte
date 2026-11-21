@@ -17,12 +17,13 @@
     missionDownload, missionUpload,
     missionSaveFile, missionLoadFile,
     activeMissionIndex, missionCount,
-    switchMission, addMission, removeMission, getTotalWpCount,
+    switchMission, addMission, removeMission, getTotalWpCount, totalWpCount,
     canUndo, canRedo, undo, redo,
     MAX_MISSIONS, MAX_WAYPOINTS_TOTAL,
     type Waypoint, type Mission, WpAction, WP_ACTION_KEYS,
-    hasLocation, isModifier, missionFlags, missionModified,
-    loadedMissionId, markMissionSynced,
+    hasLocation, isModifier, missionFlags, missionModified, toDeg,
+    loadedMissionId, markMissionSynced, markAllMissionsSynced,
+    filledMissionCount, combinedMissionWaypoints, missionSetSize,
     onMissionDownloadProgress, onMissionUploadProgress,
   } from '$lib/stores/mission';
   import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
@@ -35,12 +36,16 @@
   import Button from '$lib/components/panel/Button.svelte';
   import AutopilotSelect from '$lib/components/mission/AutopilotSelect.svelte';
   import { missionManagerOpen } from '$lib/stores/missionManager';
-  import { buildMissionInput, computeMissionStats } from '$lib/helpers/missionLibrary';
+  import { aglTerrainGaps, aglTerrainGapsActive } from '$lib/stores/missionTerrain';
+  import { buildMissionInput, missionContentHash, computeMissionStats } from '$lib/helpers/missionLibrary';
   import { missionDbSave, missionDbUpdate, missionDbGet, missionDbFindByHash, missionDbGeocode } from '$lib/stores/flightlog';
   import { locale } from 'svelte-i18n';
-  import { isFlyByHome } from '$lib/helpers/missionGeometry';
+  import { isFlyByHome, findPreviousGeoWp } from '$lib/helpers/missionGeometry';
+  import { focusWaypointOnMap } from '$lib/stores/mapCamera';
   import { anyCase } from '$lib/helpers/fileFilters';
+  import { exportFile } from '$lib/helpers/exportFile';
   import { contextMenu } from '$lib/actions/contextMenu';
+  import { requestMapAccess } from '$lib/stores/panelYield';
   import { buildWaypointMenu } from '$lib/helpers/waypointMenu';
   import { connection, hasMsp } from '$lib/stores/connection';
   import { telemetry, type TelemetryData } from '$lib/stores/telemetry';
@@ -49,7 +54,7 @@
   import type { InterfaceSettings } from '$lib/stores/settings';
   import { convertAltitude, convertSpeed, convertDistance, formatConverted } from '$lib/utils/units';
   import { inavWpDetailLines } from '$lib/helpers/missionWpDetails';
-  import { save, open } from '@tauri-apps/plugin-dialog';
+  import { open } from '@tauri-apps/plugin-dialog';
   import { t } from 'svelte-i18n';
   // Helper: untyped $t wrapper for dynamic params (svelte-i18n types are too strict)
   function _t(id: string, params?: Record<string, string>): string {
@@ -107,6 +112,15 @@
 
   let downloadLoading = $state(false);
   let uploadLoading = $state(false);
+
+  // An AGL waypoint without terrain data cannot be converted for the FC or a `.mission` file.
+  const terrainLocked = $derived($aglTerrainGaps.length > 0);
+  const terrainLockText = $derived.by(() => {
+    const g = $aglTerrainGaps[0];
+    if (!g) return '';
+    const where = $missionCount > 1 ? `${$t('mission.missionN', { values: { index: String(g.mission) } })}: ` : '';
+    return `${where}${$t('mission.noTerrainWp', { values: { number: String(g.shown) } })}\n${$t('mission.noTerrainLock')}`;
+  });
   let eepromSaveLoading = $state(false);
   let eepromLoadLoading = $state(false);
   let statusMessage = $state('');
@@ -173,8 +187,8 @@
     uploadLoading = true; statusMessage = $t('mission.uploading');
     const un = await listenUploadProgress();
     try {
-      const m = await missionUpload(false);
-      statusMessage = $t('mission.uploaded', { values: { count: m.waypoints.length } });
+      await missionUpload(false);
+      statusMessage = $t('mission.uploaded', { values: { count: getTotalWpCount() } });
     } catch (e) {
       statusMessage = $t('mission.uploadFailed', { values: { error: String(e) } });
     } finally { un(); uploadLoading = false; }
@@ -186,8 +200,8 @@
     eepromSaveLoading = true; statusMessage = $t('mission.uploading');
     const un = await listenUploadProgress();
     try {
-      const m = await missionUpload(true);
-      statusMessage = $t('mission.eepromSaved', { values: { count: m.waypoints.length } });
+      await missionUpload(true);
+      statusMessage = $t('mission.eepromSaved', { values: { count: getTotalWpCount() } });
     } catch (e) {
       statusMessage = $t('mission.eepromSaveFailed', { values: { error: String(e) } });
     } finally { un(); eepromSaveLoading = false; }
@@ -208,9 +222,13 @@
 
   async function handleSaveFile() {
     try {
-      const path = await save({ title: $t('mission.saveMissionTitle'), defaultPath: 'mission.mission', filters: [{ name: 'Mission', extensions: ['mission'] }] });
+      const path = await exportFile({
+        title: $t('mission.saveMissionTitle'),
+        name: 'mission.mission',
+        filters: [{ name: 'Mission', extensions: ['mission'] }],
+        write: (p) => missionSaveFile(p),
+      });
       if (!path) return;
-      await missionSaveFile(path);
       statusMessage = $t('mission.missionSaved');
     } catch (e) {
       statusMessage = $t('mission.saveFailed', { values: { error: String(e) } });
@@ -224,15 +242,76 @@
     return `New Mission - ${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
   }
 
-  /** Save the current map mission to the DB library (dedup by content hash). */
-  async function handleSaveToLibrary() {
-    const wps = currentMission.waypoints;
-    if (wps.length === 0) return;
+  async function saveSetToLibrary(loadedSetId: number | null) {
     const dbPath = get(settings).flightLogDbPath;
     const lang = get(locale) ?? 'en';
-    const id = get(loadedMissionId);
+    const wps = combinedMissionWaypoints();
+    const same = await missionDbFindByHash(await missionContentHash(wps), dbPath);
+    if (same) {
+      loadedMissionId.set(same.id);
+      markAllMissionsSynced('db');
+      statusMessage = $t('mission.saveLibAlready');
+      return;
+    }
+    if (loadedSetId != null) {
+      const ans = await confirmDialog.show({
+        title: $t('mission.saveLibUpdateTitle'),
+        message: $t('mission.saveLibUpdateMsg'),
+        buttons: [
+          { label: $t('mission.saveLibNew'), value: 'new' },
+          { label: $t('mission.saveLibOverwrite'), value: 'overwrite', primary: true },
+        ],
+      });
+      if (ans == null) return;
+      if (ans === 'overwrite') {
+        const existing = await missionDbGet(loadedSetId, dbPath);
+        const input = await buildMissionInput(wps, { name: existing?.name ?? autoMissionName(), notes: existing?.notes ?? '' });
+        await missionDbUpdate(loadedSetId, input, dbPath);
+        markAllMissionsSynced('db');
+        void missionDbGeocode(loadedSetId, lang, dbPath).catch(() => {});
+        statusMessage = $t('mission.saveLibUpdated');
+        return;
+      }
+    }
+    const res = await missionSaveDialog.show({ defaultName: autoMissionName() });
+    if (!res) return;
+    const input = await buildMissionInput(wps, { name: res.name || autoMissionName(), notes: res.notes });
+    const newId = await missionDbSave(input, dbPath);
+    loadedMissionId.set(newId);
+    markAllMissionsSynced('db');
+    void missionDbGeocode(newId, lang, dbPath).catch(() => {});
+    statusMessage = $t('mission.saveLibSaved');
+  }
+
+  /** Dedup by content hash; with several filled tabs the user picks this tab or the whole set. */
+  async function handleSaveToLibrary() {
+    const wps = currentMission.waypoints;
+    const filled = filledMissionCount();
+    if (filled === 0) return;
+    const dbPath = get(settings).flightLogDbPath;
+    const lang = get(locale) ?? 'en';
+    let id = get(loadedMissionId);
     const flags = get(missionFlags);
     try {
+      // A loaded set is one entry over all slots: a single slot must never overwrite it.
+      const loaded = id != null ? await missionDbGet(id, dbPath) : null;
+      const loadedIsSet = loaded != null && missionSetSize(JSON.parse(loaded.waypoints_json)) > 1;
+      if (filled > 1) {
+        const ans = await confirmDialog.show({
+          title: $t('mission.saveLibTitle'),
+          message: $t('mission.saveLibScopeMsg', { values: { count: String(filled), index: String(currentMissionIdx) } }),
+          buttons: [
+            ...(wps.length > 0 ? [{ label: $t('mission.saveLibScopeOne', { values: { index: String(currentMissionIdx) } }), value: 'one' }] : []),
+            { label: $t('mission.saveLibScopeAll', { values: { count: String(filled) } }), value: 'all', primary: true },
+          ],
+        });
+        if (ans == null) return;
+        if (ans === 'all') { await saveSetToLibrary(loadedIsSet ? id : null); return; }
+      }
+      if (wps.length === 0) return;
+      // A tab's DB badge can stem from another entry than the loaded one (a set, or a mission loaded later).
+      if (loadedIsSet || (flags.db && loaded?.content_hash !== await missionContentHash(wps))) id = null;
+
       if (id != null && flags.db) { statusMessage = $t('mission.saveLibAlready'); return; }
 
       if (id != null && !flags.db) {
@@ -277,12 +356,20 @@
     }
   }
 
+  /** A file with several missions replaces every tab: ask when other tabs hold waypoints. */
+  const confirmReplaceAll = async (count: number) => (await confirmDialog.show({
+    title: $t('missionMgr.replaceTitle'),
+    message: $t('missionMgr.replaceSetMsg', { values: { count: String(count) } }),
+    buttons: [{ label: $t('missionMgr.replaceYes'), value: 'replace', primary: true }],
+  })) === 'replace';
+
   async function handleOpenFile() {
     try {
       const path = await open({ title: $t('mission.openMissionTitle'), multiple: false, filters: [{ name: 'Mission', extensions: anyCase(['mission']) }] });
       if (!path) return;
-      const m = await missionLoadFile(typeof path === 'string' ? path : path);
-      statusMessage = $t('mission.loaded', { values: { count: m.waypoints.length } });
+      const wps = await missionLoadFile(path, confirmReplaceAll);
+      if (!wps) return;
+      statusMessage = $t('mission.loaded', { values: { count: wps.length } });
     } catch (e) {
       statusMessage = $t('mission.openFailed', { values: { error: String(e) } });
     }
@@ -309,7 +396,7 @@
     if (showPatternPanel) {
       import('$lib/stores/surveyPattern.svelte').then(m => { m.exitPatternMode(); showPatternPanel = false; });
     } else {
-      import('$lib/stores/surveyPattern.svelte').then(m => { m.enterPatternMode('rectangle'); showPatternPanel = true; });
+      import('$lib/stores/surveyPattern.svelte').then(m => { m.enterPatternMode('rectangle'); showPatternPanel = true; requestMapAccess(); });
     }
   }
 
@@ -326,13 +413,22 @@
     } else {
       selectWpSingle(i);
       selAnchor = i;
+      // The waypoint's editor opens at its marker and brings it into view itself.
+      if (currentEditing) requestMapAccess();
+      else focusRowOnMap(i);
     }
+  }
+  /** A row without a position of its own (modifier) stands for the waypoint it belongs to. */
+  function focusRowOnMap(i: number) {
+    const wps = currentMission.waypoints;
+    const wp = wps[i] && hasLocation(wps[i].action) ? wps[i] : findPreviousGeoWp(wps, i);
+    if (wp && (wp.lat !== 0 || wp.lon !== 0)) focusWaypointOnMap(toDeg(wp.lat), toDeg(wp.lon), 'list');
   }
   function onBadgeClick(e: MouseEvent, i: number) {
     e.stopPropagation();
     if (currentEditing) toggleWpSelection(i);
     else if (currentSelIdx === i) clearWpSelection();
-    else selectWpSingle(i);
+    else { selectWpSingle(i); focusRowOnMap(i); }
     selAnchor = i;
   }
   function wpMenuFor(i: number) {
@@ -513,7 +609,7 @@
                 <!-- svelte-ignore a11y_no_static_element_interactions -->
                 <td class="col-num"><span class="wp-num-badge fbh-num" onclick={(e) => onBadgeClick(e, i)}>{displayNums.get(i) ?? ''}</span></td>
                 <td class="col-type mod-indent">↳ {$t('mission.flagFbh')}</td>
-                <td class="col-alt">{formatAltShort(wp)}</td>
+                <td class="col-alt" class:no-terrain={$aglTerrainGapsActive.has(i + 1)}>{formatAltShort(wp)}</td>
                 <td class="col-param">→ {$t('mission.home')}</td>
               </tr>
             {:else if isModifier(wp.action)}
@@ -529,7 +625,7 @@
                 <!-- svelte-ignore a11y_no_static_element_interactions -->
                 <td class="col-num"><span class="wp-num-badge" onclick={(e) => onBadgeClick(e, i)}>{displayNums.get(i) ?? ''}</span></td>
                 <td class="col-type">{shortType(wp.action)}</td>
-                <td class="col-alt">{hasLocation(wp.action) ? formatAltShort(wp) : '—'}</td>
+                <td class="col-alt" class:no-terrain={$aglTerrainGapsActive.has(i + 1)}>{hasLocation(wp.action) ? formatAltShort(wp) : '—'}</td>
                 <td class="col-param">{formatParam(wp)}</td>
               </tr>
             {/if}
@@ -557,19 +653,20 @@
     {#if !showPatternPanel}
       <div class="ctrl-row">
         <Button variant="data" icon="download" full disabled={downloadLoading} onclick={handleDownload}>{$t('mission.fcDownload')}</Button>
-        <Button variant="data" icon="upload" full disabled={uploadLoading} onclick={handleUpload}>{$t('mission.fcUpload')}</Button>
+        <Button variant="data" icon="upload" full disabled={uploadLoading || terrainLocked} title={terrainLockText} onclick={handleUpload}>{$t('mission.fcUpload')}</Button>
       </div>
       <div class="ctrl-row">
         <Button variant="warning" icon="download" full disabled={eepromLoadLoading} onclick={handleEepromLoad}>{$t('mission.eepromLoad')}</Button>
-        <Button variant="warning" icon="save" full disabled={eepromSaveLoading || isArmed()} title={isArmed() ? $t('mission.eepromSaveArmed') : $t('mission.eepromSaveTooltip')} onclick={handleEepromSave}>{$t('mission.eepromSave')}</Button>
+        <Button variant="warning" icon="save" full disabled={eepromSaveLoading || isArmed() || terrainLocked} title={terrainLocked ? terrainLockText : isArmed() ? $t('mission.eepromSaveArmed') : $t('mission.eepromSaveTooltip')} onclick={handleEepromSave}>{$t('mission.eepromSave')}</Button>
       </div>
       <div class="ctrl-row">
-        <Button variant="data" icon="library" full disabled={currentMission.waypoints.length === 0} onclick={handleSaveToLibrary}>{$t('mission.saveToLibrary')}</Button>
+        <Button variant="data" icon="library" full disabled={$totalWpCount === 0} onclick={handleSaveToLibrary}>{$t('mission.saveToLibrary')}</Button>
       </div>
       <div class="ctrl-row">
         <Button variant="standard" icon="folder" full onclick={handleOpenFile}>{$t('mission.open')}</Button>
-        <Button variant="standard" icon="save" full onclick={handleSaveFile}>{$t('mission.save')}</Button>
+        <Button variant="standard" icon="save" full disabled={$aglTerrainGapsActive.size > 0} title={$aglTerrainGapsActive.size > 0 ? terrainLockText : ''} onclick={handleSaveFile}>{$t('mission.save')}</Button>
       </div>
+      {#if terrainLocked}<div class="terrain-lock">{terrainLockText}</div>{/if}
     {/if}
 
     {#if statusMessage}<div class="mission-status">{statusMessage}</div>{/if}
@@ -588,7 +685,7 @@
     {#if currentMission.waypoints.length > 0}
       <div class="mission-summary">
         {#if currentMissionCount > 1}
-          M{currentMissionIdx}: {currentMission.waypoints.length} WPs | Total: {getTotalWpCount()}/{MAX_WAYPOINTS_TOTAL}
+          M{currentMissionIdx}: {currentMission.waypoints.length} WPs | Total: {$totalWpCount}/{MAX_WAYPOINTS_TOTAL}
         {:else}
           {currentMission.waypoints.length}/{MAX_WAYPOINTS_TOTAL} WPs
         {/if}
@@ -669,6 +766,8 @@
   .detail-hint { color: #37a8db; font-size: 11px; text-align: center; margin-top: 4px; font-style: italic; }
   .ctrl-row { display: flex; gap: 4px; }
   .mission-status { padding: 3px 6px; font-size: 11px; color: #f39c12; text-align: center; }
+  .terrain-lock { padding: 3px 6px; font-size: 11px; color: #f39c12; text-align: center; white-space: pre-line; }
+  .col-alt.no-terrain { color: #f39c12; font-weight: 600; }
   .mission-summary { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 3px; font-size: 12px; color: #888; flex-wrap: wrap; }
   .mission-stats { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 4px 3px 0; font-size: 12px; color: #9ad0e8; flex-wrap: wrap; font-variant-numeric: tabular-nums; }
   .mission-stats .stat { white-space: nowrap; cursor: default; }

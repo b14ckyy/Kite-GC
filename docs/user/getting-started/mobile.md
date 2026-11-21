@@ -37,23 +37,35 @@ A fresh install starts on **MAVLink** over **UDP** port `14550`, the usual Wi-Fi
 remembers your last connection from then on, as on the desktop. Details:
 **[Connecting](../guides/connecting.md)**.
 
+**The screen stays on while the aircraft is armed.** Connected but disarmed, the normal screen
+timeout of the device applies. Two things keep the screen on for the whole connection: a continuous
+raw recording (**Settings → Data → Flight Logbook → Continuous Raw Logging**) and a telemetry feed
+that does not report whether the aircraft is armed. **Settings → Interface → UI → Stay awake without
+connection** keeps it on whenever Kite is open, connected or not. While Kite holds the screen it
+stays at its normal brightness — the system offers an app no "dim, but stay on". Kite does not switch a screen back on that has already gone dark: wake the device before take-off,
+or use that setting.
+
 **Android only:**
 
 - **The link keeps running in the background.** While connected, a notification shows the aircraft,
   battery, flight mode and distance to home, and telemetry, recording and the track continue while
   Kite is minimised. See the Android note in **[Connecting](../guides/connecting.md)**.
-- **The screen stays on** while a link is active; after you disconnect, the normal screen timeout
-  applies again.
 
 ## Logbook and logs
 
 - **Import** takes **`.kflight`**, **`.tlog`** and **`.rawmsp`** files. Onboard logs — INAV Blackbox,
   ArduPilot Dataflash, PX4 ULog — are imported on a desktop install and moved over as `.kflight`.
 - The mobile database keeps **no original log files**, so **HI-RES** replay, the original-log export
-  and the **Open** button (replay without importing) are desktop features.
-- **Android:** the database and raw logs live in the app's private storage. **Settings → Data** can
-  point them at a folder of your own; Kite copies them there, and that copy survives uninstalling the
-  app.
+  and the **Open** button (replay without importing) are desktop features. The exception is a
+  database imported from a desktop install with **Import database**: it arrives complete, original
+  log files included. **Settings → Data → Original log files** then shows their size, and **Remove**
+  deletes them to free the space — the flights, their tracks and telemetry stay.
+- The **flight database** lives in the app's private storage and goes away with the app when you
+  uninstall it. **Settings → Data → Export database** saves it as one file before that, and **Import
+  database** brings it back; **Export all flights** writes every flight into one `.kflight` for a
+  desktop install. See [Logbook](../guides/logbook.md#exporting-and-importing-the-whole-database).
+- **Android:** **Settings → Data → Raw Log Folder** can name a folder of your own (an SD card, for
+  example). Raw logs are then moved there when the vehicle disconnects, and stay when the app is uninstalled.
 
 See **[Flight logbook](../guides/logbook.md)**.
 
@@ -84,8 +96,13 @@ See **[Video](../guides/video.md)**, especially its platform notes.
 ## Updates and diagnostics
 
 - **Updates:** Android tells you about a new version at start-up like the desktop, but has no in-app
-  install — the notice offers the release page instead of *Update and Restart*. On iPhone and iPad the
+  install. Installed from Google Play, the notice offers the Play Store and the setting is an on/off
+  switch; installed from the `.apk`, the notice offers the release page. On iPhone and iPad the
   update check is switched off. See **[Settings → Updates](../reference/settings.md#updates)**.
+- **Exports on Android** (flights, tracks, missions, vehicles, batteries) open the system **share sheet**
+  instead of a save dialog — an export on a mobile device is mostly a hand-over to another device or
+  person. From Android 14 the sheet has a **Save to device** action; on older versions share to a file
+  manager app to keep the file locally. iPhone and iPad still use the save dialog.
 - **Diagnostic log on Android:** the log folder is app-private, so **Settings → Diagnostics → Share log
   file** replaces *Open Folder* — pick the day and hand it to mail or a messenger. See
   **[Reporting a problem](../troubleshooting/reporting-issues.md)**.

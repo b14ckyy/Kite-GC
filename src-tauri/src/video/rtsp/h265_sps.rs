@@ -168,7 +168,7 @@ fn bit(data: &[u8], i: usize) -> u8 {
     (data[i / 8] >> (7 - i % 8)) & 1
 }
 
-fn profile_tier_level(r: &mut BitReader, max_sub_layers_minus1: usize) -> Option<()> {
+pub(crate) fn profile_tier_level(r: &mut BitReader, max_sub_layers_minus1: usize) -> Option<()> {
     r.skip(88 + 8)?; // general profile + general_level_idc
     let mut profile_present = [false; 8];
     let mut level_present = [false; 8];
@@ -191,7 +191,7 @@ fn profile_tier_level(r: &mut BitReader, max_sub_layers_minus1: usize) -> Option
 }
 
 /// Emulation-prevention removal: `00 00 03` → `00 00`.
-fn strip_emulation(data: &[u8]) -> Vec<u8> {
+pub(crate) fn strip_emulation(data: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(data.len());
     let mut zeros = 0usize;
     for &b in data {
@@ -220,17 +220,17 @@ fn add_emulation(data: &[u8]) -> Vec<u8> {
     out
 }
 
-struct BitReader<'a> {
+pub(crate) struct BitReader<'a> {
     data: &'a [u8],
     pos: usize,
 }
 
 impl<'a> BitReader<'a> {
-    fn new(data: &'a [u8]) -> Self {
+    pub(crate) fn new(data: &'a [u8]) -> Self {
         Self { data, pos: 0 }
     }
 
-    fn bits(&mut self, n: usize) -> Option<u32> {
+    pub(crate) fn bits(&mut self, n: usize) -> Option<u32> {
         let mut v = 0u32;
         for _ in 0..n {
             let byte = *self.data.get(self.pos / 8)?;
@@ -240,7 +240,7 @@ impl<'a> BitReader<'a> {
         Some(v)
     }
 
-    fn skip(&mut self, n: usize) -> Option<()> {
+    pub(crate) fn skip(&mut self, n: usize) -> Option<()> {
         if self.pos + n > self.data.len() * 8 {
             return None;
         }
@@ -249,7 +249,7 @@ impl<'a> BitReader<'a> {
     }
 
     /// Exp-Golomb `ue(v)`.
-    fn ue(&mut self) -> Option<u32> {
+    pub(crate) fn ue(&mut self) -> Option<u32> {
         let mut zeros = 0;
         while self.bits(1)? == 0 {
             zeros += 1;

@@ -1,24 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Application file logger.
-//
-// The codebase already logs liberally through the `log` facade (`log::info!`/`warn!`/`error!`/
-// `debug!`), but until now no logger was installed — so every one of those calls was a silent no-op.
-// This module installs a simple file logger so connection / handshake problems (e.g. a user who
-// can't connect to a PX4 board) leave a diagnostic trail the user can hand back.
-//
-// Design:
-// - One TXT file per day in the app data folder (`<AppData>/kite-gc/kite-gc-YYYY-MM-DD.log`, or
-//   `data/` in portable mode; app-private storage on Android), sessions appended under a header
-//   block, files older than `LOG_RETENTION_DAYS` pruned on start. Bounded, easy to find, easy to send
-//   — on Android through the share sheet, which is why `log_files` lists the day-files.
-// - A size limit per file as an emergency brake: a full day-file is kept and the log continues in
-//   one overflow file that starts over when it is full too (`CappedLog`).
-// - The level is user-configurable at runtime via Settings (OFF / Error / Warning / Debug). We rely
-//   on `log::set_max_level` as the gate, so `set_level` is a single atomic store with no relocking.
-// - Every record is flushed immediately: this is a low-volume diagnostic log, and flushing means a
-//   crash mid-connect still leaves the last lines on disk.
+// Application file logger: one file per day (`kite-gc-YYYY-MM-DD.log` in the app data folder), sessions
+// appended, old days pruned, size-capped (`CappedLog`). Every record is flushed at once, so a crash still
+// leaves the last lines; the level gate is `log::set_max_level` (Settings).
 
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
@@ -30,15 +15,9 @@ use log::{Level, LevelFilter, Log, Metadata, Record};
 /// Size limit of one log file. A day's log is at most two files of this size (see `CappedLog`).
 const MAX_LOG_FILE_BYTES: u64 = 50 * 1024 * 1024;
 
-/// The day's log as at most two size-limited files — an emergency brake, not a rotation scheme. A
-/// fault that logs on every pass of a loop once wrote 7 GB within minutes.
-///
-/// - The day-file (`kite-gc-YYYY-MM-DD.log`) is written up to `max` bytes and then left alone: it
-///   holds the start of the day, and with it whatever set a flood off.
-/// - From there the log continues in the overflow file (`kite-gc-YYYY-MM-DD-2.log`). When that is
-///   full too it is emptied and written again, as often as needed: it always holds the latest lines.
-///
-/// A line is never split; a file may fall short of `max` by less than one line.
+/// The day's log as at most two size-limited files — an emergency brake against a logging loop, not a
+/// rotation: the full day-file is left alone (it holds whatever set a flood off), the overflow file
+/// starts over whenever it is full (it holds the latest lines). A line is never split.
 struct CappedLog {
     writer: BufWriter<File>,
     /// The file being written: the day-file, or the overflow file once the day-file is full.
@@ -56,10 +35,8 @@ fn overflow_path_of(day_file: &Path) -> PathBuf {
     day_file.with_file_name(format!("{stem}-2.log"))
 }
 
-/// Open the overflow file for appending, emptied first unless `keep`. Always an append handle, like
-/// the day-file's: a second Kite instance writing the same file then adds its lines at the end instead
-/// of writing over ours. (Emptied through a handle of its own — an append handle cannot truncate on
-/// Windows.)
+/// Open the overflow file for appending (so a second Kite instance adds at the end), emptied first
+/// unless `keep` — through a handle of its own, as an append handle cannot truncate on Windows.
 fn open_overflow(path: &Path, keep: bool) -> std::io::Result<File> {
     if !keep {
         File::create(path)?;
@@ -151,10 +128,8 @@ struct FileLogger {
     state: Mutex<LoggerState>,
 }
 
-/// Third-party crates whose Debug/Info output would bury ours. `reqwest`/`hyper` emit a line per HTTP
-/// connection, and Kite polls ADS-B, tiles and the video API continuously — a Debug-level log was
-/// ~90 % "starting new connection" noise, which is precisely the level a tester is asked to switch to.
-/// They stay fully visible from **Warn** upwards, so a real failure is never hidden.
+/// Third-party crates whose Debug/Info output buries ours (`reqwest`/`hyper`: a line per connection,
+/// ~90 % of a Debug log). From Warn upwards they stay visible.
 const NOISY_TARGETS: &[&str] = &[
     "reqwest", "hyper", "hyper_util", "h2", "rustls", "tokio_util", "want", "mio",
     "tao", "wry", "zbus", "tracing", "globset", "cranelift", "sqlx",
@@ -284,13 +259,8 @@ fn resolve_log_dir(portable: bool) -> PathBuf {
 /// Keep at most this many days of log files (older `kite-gc-*.log` are pruned on startup).
 const LOG_RETENTION_DAYS: u64 = 30;
 
-/// Install the file logger. Call once, as early as possible in `run()` so startup is captured.
-///
-/// `level` is the initial filter (the frontend re-applies the persisted user choice on startup).
-/// MWPTools-style scheme: **one file per day** (`kite-gc-YYYY-MM-DD.log`), **appended** across
-/// sessions on the same day, each session prefaced with a header block (time / version+build /
-/// platform / level). Files older than `LOG_RETENTION_DAYS` are pruned. Logger-init failures are
-/// printed to stderr and otherwise ignored — the app must still run without a log file.
+/// Install the file logger, as early as possible in `run()`. `level` is the initial filter (the frontend
+/// re-applies the user's choice). Init failures go to stderr — the app must run without a log file.
 pub fn init(level: LevelFilter, portable: bool) {
     let dir = resolve_log_dir(portable);
     if let Err(e) = std::fs::create_dir_all(&dir) {
@@ -341,10 +311,8 @@ fn write_session_header(level: LevelFilter, portable: bool) {
         std::env::consts::ARCH,
         portable,
     ));
-    // Running format + resolved paths — one glance tells a bug report's install story: where the
-    // binary actually runs from (.dmg-installed app vs a stray .app, portable dir, translocation)
-    // and where on-demand helpers (blackbox_decode) land. A relative helper dir here is an
-    // immediate red flag (the macOS Beta 3 "cannot write bin/blackbox_decode" case, issue #20).
+    // Running format + resolved paths: where the binary runs from (installed, stray .app, portable,
+    // translocation) and where helpers land — a relative helper dir is an immediate red flag.
     if let Ok(exe) = std::env::current_exe() {
         write_raw(&format!("Exe: {}", exe.display()));
     }
@@ -425,21 +393,14 @@ pub struct LogFileInfo {
     pub active: bool,
 }
 
-/// Is `name` a day-file of the current scheme (`kite-gc-YYYY-MM-DD.log`, or the same with `-2` for
-/// the overflow file of a day that hit the size limit)? Deliberately narrower than
-/// the `prune_old_logs` match, which must also sweep the legacy `kite-gc.log`/`.prev` pair — the
-/// picker has no date to show for those.
+/// Is `name` a day-file of the current scheme (incl. its `-2` overflow file)? Narrower than
+/// `prune_old_logs`, which also sweeps the legacy `kite-gc.log`/`.prev` (no date to show in the picker).
 fn is_day_file(name: &str) -> bool {
     name.starts_with("kite-gc-") && name.ends_with(".log")
 }
 
-/// The day-files next to the active log, newest first; empty when logging is not installed.
-///
-/// On Android the log folder is app-private — no file manager and no MTP connection can reach it —
-/// so the share sheet in Settings is the only way a log leaves the device, and after a restart the
-/// file a tester needs is yesterday's, not the active one. This lists what is there so the frontend
-/// can offer a choice. Newest first falls out of sorting by name: the zero-padded date is in it.
-/// Best-effort: an unreadable entry is skipped, an unreadable folder yields an empty list.
+/// The day-files, newest first (empty without a logger). On Android the share sheet is the only way a
+/// log leaves the app-private folder, and the needed file is often yesterday's. Unreadable entries skip.
 pub fn log_files() -> Vec<LogFileInfo> {
     let active = match log_path() {
         Some(p) => p,

@@ -44,6 +44,7 @@ export const THIRD_PARTY_LICENSES: LicenseGroup[] = [
       { name: 'Map tiles — © OpenStreetMap contributors & tile providers', license: 'ODbL / provider terms' },
       { name: 'Aeronautical data — © OpenAIP contributors', license: 'OpenAIP terms' },
       { name: 'Terrain — Copernicus GLO-30 DEM / Cesium World Terrain', license: 'Copernicus / Cesium terms' },
+      { name: 'Weather — Open-Meteo.com (logbook weather, Weather widget)', license: 'CC BY 4.0' },
       { name: 'Timezone boundaries — © OpenStreetMap contributors (timezone-boundary-builder)', license: 'ODbL' },
     ],
   },

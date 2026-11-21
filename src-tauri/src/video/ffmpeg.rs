@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-//! On-demand ffmpeg — the RTSP video bridge's external runtime dependency. Mirrors the
-//! `blackbox_decode` model (`flightlog::decoder`): not bundled in the installer, discovered next to
-//! the app / on PATH / in the writable app-data `bin/` dir, and fetched on demand from
-//! BtbN/FFmpeg-Builds. Windows ships a self-contained `.zip` we unpack here; other OSes install
-//! manually for now (the error points at the releases page), exactly like the decoder.
+//! On-demand ffmpeg, the RTSP bridge's runtime dependency: not bundled, found next to the app / on PATH /
+//! in the app-data `bin/`, downloaded from BtbN/FFmpeg-Builds (Windows; other OSes install manually).
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -79,21 +76,9 @@ pub fn version() -> Option<String> {
         .map(|l| l.trim().to_string())
 }
 
-/// Whether this host decodes H.264 through the kernel's V4L2 M2M interface — i.e. in hardware.
-/// True on a Raspberry Pi 3/4 and similar SoCs; false on a Pi 5, which has no H.264 decode block at
-/// all.
-///
-/// It matters only for the MJPEG fallback, and there it matters a lot: that path decodes **every**
-/// frame of the source before re-encoding it, and a board that needs hardware for 720p60 cannot do it
-/// any other way. No engine arranges this for us, so we select the decoder ourselves on the ffmpeg
-/// command line.
-///
-/// Probed by actually decoding a one-second clip, because the codec being listed proves nothing: every
-/// Linux ffmpeg build compiles `h264_v4l2m2m` in, device or no device. Cached for the process and
-/// logged once, so a tester's log states the verdict.
-/// ARM-only: V4L2 M2M is the SoC (Raspberry Pi class) interface. Desktop GPUs expose VAAPI instead —
-/// see `vaapi_mjpeg_transcode_available` — so probing this on x86 spawns two ffmpeg processes to
-/// answer a question whose answer is already known.
+/// Whether H.264 decodes in hardware via V4L2 M2M (Pi 3/4; not a Pi 5, which has no H.264 block) — vital
+/// for the MJPEG fallback, which decodes every frame. Probed by decoding a clip (every Linux build lists
+/// `h264_v4l2m2m`), cached and logged once. ARM only; desktop GPUs use VAAPI.
 #[cfg(all(target_os = "linux", any(target_arch = "aarch64", target_arch = "arm")))]
 pub fn v4l2_h264_decode_available() -> bool {
     static AVAILABLE: OnceLock<bool> = OnceLock::new();
@@ -116,23 +101,9 @@ pub fn v4l2_h264_decode_available() -> bool {
     false
 }
 
-/// The DRM render node VAAPI runs on, if hardware H.264-decode **and** MJPEG-encode both work there.
-///
-/// Both halves are required together and that is the whole point: a half-hardware chain is *slower*
-/// than staying in software, because every decoded frame has to be copied back out of GPU memory for
-/// the software encoder. Measured on an 8th-gen Intel iGPU, 300 frames, CPU time:
-///
-/// | chain                        | 720p60 | 1080p60 |
-/// |------------------------------|--------|---------|
-/// | software decode + encode     | 5.52 s | 7.83 s  |
-/// | **VAAPI decode + encode**    | 0.79 s | 1.00 s  |
-/// | VAAPI decode + sw encode     | 6.47 s | 11.63 s |
-///
-/// So the readback penalty grows with frame size, and the answer is end-to-end or not at all.
-///
-/// Probed by actually transcoding a clip, because the encoder being listed proves nothing (every
-/// Linux ffmpeg build compiles `mjpeg_vaapi` in, GPU or no GPU). Cached for the process and logged
-/// once, so a tester's log states the verdict.
+/// The DRM render node where VAAPI does BOTH H.264 decode and MJPEG encode — end to end or not at all: a
+/// half-hardware chain is slower than software (GPU readback; 1080p60, 300 frames: 11.6 s vs 7.8 s sw vs
+/// 1.0 s full HW). Probed by transcoding a clip (every build lists `mjpeg_vaapi`), cached, logged once.
 #[cfg(target_os = "linux")]
 pub fn vaapi_render_node() -> Option<&'static str> {
     static NODE: OnceLock<Option<String>> = OnceLock::new();
@@ -156,23 +127,14 @@ pub fn vaapi_render_node() -> Option<&'static str> {
     None
 }
 
-/// How long a single probe step may take before it is declared a failure and killed.
-///
-/// Generous on purpose — a cold static ffmpeg off an SD card needs a second or two just to start —
-/// but a hard ceiling, because the alternative is unbounded (see `run_probe`).
+/// Ceiling of one probe step: generous (a cold static ffmpeg off an SD card needs seconds to start) but
+/// hard, see `run_probe`.
 #[cfg(target_os = "linux")]
 const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Run one probe step to completion, or kill it at `PROBE_TIMEOUT` and call it a failure.
-///
-/// Load-bearing: `Command::status()` waits forever, and these probes drive kernel media devices.
-/// `h264_v4l2m2m` parks in `VIDIOC_DQBUF` when the decoder is busy or wedged — a documented Pi
-/// failure mode — and VAAPI on a render node without a matching driver can stall in the DRM ioctl.
-/// A single such stall used to park the `OnceLock` initialiser below *and*, because
-/// `get_or_init` blocks every concurrent caller, every later start attempt with it: the stream stayed
-/// in "starting" forever and no Stop could reach the ffmpeg behind it, because nothing owns these
-/// children once `status()` is waiting on them. Bounded, a bad device costs one slow first start and
-/// then reads as "software", which is exactly what it is.
+/// Run one probe step, or kill it at `PROBE_TIMEOUT` and call it a failure. Load-bearing: `status()` waits
+/// forever, `h264_v4l2m2m` can park in `VIDIOC_DQBUF` and VAAPI in a DRM ioctl — one stall would block the
+/// `OnceLock` initialiser and every later stream start with it.
 #[cfg(target_os = "linux")]
 fn run_probe(ff: &Path, args: &[&str]) -> bool {
     let mut cmd = Command::new(ff);
@@ -257,10 +219,8 @@ fn probe_v4l2_h264_decode() -> bool {
     let clip = std::env::temp_dir().join("kite-hwdecode-probe.h264");
     let clip_arg = clip.to_string_lossy().to_string();
     let run = |args: &[&str]| -> bool { run_probe(&ff, args) };
-    // `-pix_fmt yuv420p` is load-bearing, not tidiness: `testsrc` emits rgb24 and libx264 then picks
-    // **yuv444p / High 4:4:4 Predictive**, which no hardware H.264 block decodes — the Pi's does 4:2:0
-    // only. Without it the probe failed on a Pi 4 whose decoder works perfectly for real streams, and
-    // the transcode silently stayed in software. The VAAPI probe hit the identical trap.
+    // `-pix_fmt yuv420p` is load-bearing: from rgb24 `testsrc` libx264 picks 4:4:4, which no hardware H.264
+    // block decodes — the probe would fail on a working Pi 4 decoder (and the VAAPI probe likewise).
     let made = run(&[
         "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
         "testsrc=size=320x240:rate=10:duration=1", "-pix_fmt", "yuv420p", "-c:v", "libx264", "-f",
@@ -314,14 +274,9 @@ pub async fn download<F: FnMut(u8, &str)>(mut report: F) -> Result<PathBuf, Stri
     }
     let (want_substr, want_ext) = asset_match().ok_or_else(manual_install_msg)?;
 
-    // Self-contained static GPL build for this platform, NOT the -shared variant (needs separate
-    // libs). Pinned to the STABLE RELEASE BRANCH, not `master`: the old `ffmpeg-master-latest-…`
-    // names handed every user whatever nightly happened to be current that day, so no two installs
-    // ran the same build and no field report was reproducible. The `n9.0-latest` assets track the
-    // release/9.0 branch instead — today that is 9.0.1, and later downloads pick up 9.0.x patch
-    // fixes only, never a new major. BtbN's names are fixed across releases, so this still resolves
-    // through the CDN path instead of the rate-limited REST API (which 403s for everyone behind a
-    // shared IP — see `crate::github_release`). Bump `FFMPEG_BRANCH` deliberately, with a re-test.
+    // Self-contained static GPL build, pinned to the STABLE release branch (`n9.0-latest`: patch fixes only,
+    // never a new major) so installs are reproducible. Fixed asset names resolve via the CDN, not the
+    // rate-limited REST API. Bump `FFMPEG_BRANCH` deliberately, with a re-test.
     let asset_name = format!("ffmpeg-n{FFMPEG_BRANCH}-latest-{want_substr}-gpl-{FFMPEG_BRANCH}{want_ext}");
     let url = crate::github_release::latest_asset_url(REPO, &asset_name);
 

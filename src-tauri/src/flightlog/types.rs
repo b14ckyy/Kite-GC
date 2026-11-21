@@ -6,26 +6,55 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-/// Settings controlling flight recording behavior.
-/// Passed from frontend on connect.
+/// Settings controlling flight recording, passed from the frontend on connect.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(Default)]
 pub struct FlightLogSettings {
-    /// Whether flight recording is enabled
     pub enabled: bool,
-    /// Whether to write flights/telemetry to the database
     pub db_enabled: bool,
     /// Custom database directory (empty string = default AppData)
     pub db_path: String,
     /// Custom raw-log directory (empty string = default Documents/KiteGC). Separate from `db_path`.
     pub raw_log_path: String,
-    /// Whether to also write raw text log files
     pub raw_enabled: bool,
     /// Continuous raw logging: start recording on connect, not just on arm.
     /// Raw logs include pre-arm data; DB still only records armed segments.
     pub raw_always: bool,
 }
 
+
+/// One answer of the weather service as stored with a flight (row in `weather_records`).
+#[derive(Debug, Clone, Serialize)]
+pub struct WeatherRecord {
+    /// Session time the answer reached the recorder.
+    pub timestamp_ms: i64,
+    pub lat: Option<f64>,
+    pub lon: Option<f64>,
+    pub source: Option<String>,
+    /// The widget's `WindAloft`, as JSON text.
+    pub data_json: String,
+}
+
+/// One raw sample of one GPS receiver as stored with a flight (row in `gps_records`).
+#[derive(Debug, Clone, Serialize)]
+pub struct GpsRecord {
+    pub timestamp_ms: i64,
+    /// 0 = GPS_RAW_INT, 1 = GPS2_RAW.
+    pub instance: i64,
+    pub fix_type: Option<i64>,
+    pub fix_raw: Option<i64>,
+    pub num_sat: Option<i64>,
+    pub hdop: Option<f64>,
+    pub lat: Option<f64>,
+    pub lon: Option<f64>,
+    pub alt_msl: Option<f64>,
+    pub vdop: Option<f64>,
+    pub h_acc_m: Option<f64>,
+    pub v_acc_m: Option<f64>,
+    pub speed_ms: Option<f64>,
+    pub course_deg: Option<f64>,
+    pub yaw_deg: Option<f64>,
+}
 
 /// A single recorded flight (row in `flights` table)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,29 +71,24 @@ pub struct Flight {
     pub platform_type: u8,
     /// Protocol used (e.g. "MSP")
     pub protocol: String,
-    /// Start position
     pub start_lat: Option<f64>,
     pub start_lon: Option<f64>,
-    /// Reverse-geocoded location name
     pub location_name: Option<String>,
-    /// Weather at flight start
     pub weather_temp_c: Option<f64>,
     pub weather_wind_ms: Option<f64>,
     pub weather_wind_deg: Option<i32>,
     pub weather_desc: Option<String>,
-    /// Flight statistics
     pub max_alt_m: Option<f64>,
     pub max_speed_ms: Option<f64>,
     pub max_distance_m: Option<f64>,
     pub total_distance_m: Option<f64>,
     pub battery_used_mah: Option<u32>,
-    /// User notes
     pub notes: Option<String>,
     /// ID of the linked flight (e.g. live ↔ blackbox association)
     pub linked_flight_id: Option<i64>,
-    /// Pilot / operator name (manually editable; future login system can prefill)
+    /// Pilot / operator name (manually editable)
     pub pilot_name: Option<String>,
-    /// Pilot / operator ID (manually editable; future login system can prefill)
+    /// Pilot / operator ID (manually editable)
     pub pilot_id: Option<String>,
     /// Serial of the battery pack flown (soft link — resolved to a `battery_packs` row by
     /// serial match at read time; may reference a serial with no pack row → "not in library")
@@ -82,9 +106,8 @@ pub struct Flight {
     /// flight. Changeable (unlink / relink); the group id itself never changes.
     #[serde(default)]
     pub group_id: Option<String>,
-    /// Library vehicle the flight belongs to (`vehicles.id`, schema v20; `ON DELETE SET NULL`). Resolved
-    /// when the flight is stored (`db::resolve_vehicle_id`: `fc_uid` first, craft name as fallback)
-    /// unless set explicitly; changeable afterwards. `None` = not in the library.
+    /// Library vehicle of the flight (`vehicles.id`, `ON DELETE SET NULL`), resolved on store unless set
+    /// explicitly (`db::resolve_vehicle_id`); changeable afterwards. `None` = not in the library.
     #[serde(default)]
     pub vehicle_id: Option<i64>,
 }
@@ -137,10 +160,8 @@ pub struct FlightEvent {
     pub source: Option<String>,
 }
 
-/// A reusable mission stored in the library (row in `missions` table).
-/// Identity is `content_hash` (the same hash the frontend provenance uses), so the
-/// same mission is stored once and shared across any number of flights.
-/// All geometry metadata is computed by the frontend at save time.
+/// A reusable mission in the library (row in `missions`). Identity is `content_hash` (the frontend's
+/// provenance hash), so a mission is stored once; geometry metadata is computed by the frontend.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Mission {
     pub id: i64,
@@ -170,9 +191,14 @@ pub struct Mission {
     /// 3D mission preview's height. Mirrors the `.mission` `<mwp>` meta written on file export.
     pub home_lat: Option<f64>,
     pub home_lon: Option<f64>,
+    /// Vehicle class the mission was planned for (ArduPilot / PX4: `plane`, `copter`, …); None = not set.
+    pub vehicle_class: Option<String>,
+    /// A JSON object of data this version may not know. Never parsed here: stored and handed on as it
+    /// came, or a newer version's data would be lost.
+    pub extra_json: Option<String>,
 }
 
-/// Payload for saving a mission to the library (no `id` / `created_at` — assigned by the DB).
+/// Payload for saving a mission to the library (no `id` — assigned by the DB).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MissionInput {
     pub content_hash: String,
@@ -192,13 +218,22 @@ pub struct MissionInput {
     pub notes: Option<String>,
     pub home_lat: Option<f64>,
     pub home_lon: Option<f64>,
+    #[serde(default)]
+    pub vehicle_class: Option<String>,
+    /// See `Mission::extra_json`. On an overwrite `None` keeps what the row holds.
+    #[serde(default)]
+    pub extra_json: Option<String>,
+    /// Only an import from another library (`.kmission`, `.kflight`) sets these two; else the DB's own
+    /// time and the geocoder fill them.
+    #[serde(default)]
+    pub created_at: Option<String>,
+    #[serde(default)]
+    pub location_name: Option<String>,
 }
 
-/// A reusable battery pack stored in the library (row in `battery_packs` table).
-/// Identity is the user-defined `serial`. Flights soft-link by serial (no FK).
-/// The `base_*` fields are a persistent consumption baseline that is never auto-updated —
-/// only ever *added to* (manual usage editor / flight-deletion transfer). The displayed
-/// lifetime = baseline + Σ(linked flights), computed on read (see BATTERY_MANAGEMENT.md).
+/// A battery pack in the library (row in `battery_packs`), identified by the user's `serial`; flights
+/// soft-link by serial. `base_*` is a persistent baseline, never auto-updated, only added to; lifetime =
+/// baseline + Σ(linked flights), computed on read (BATTERY_MANAGEMENT.md).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BatteryPack {
     pub id: i64,
@@ -274,13 +309,9 @@ pub struct BatteryAggregate {
     pub last_used: Option<String>,
 }
 
-// ── Vehicle library ─────────────────────────────────────────────────
-
-/// A vehicle/aircraft stored in the library (row in `vehicles` table). Flights link by
-/// `flights.vehicle_id` (schema v20), resolved when a flight is stored from its `fc_uid`, else its
-/// craft name; ArduPilot/PX4 without a matching UID are linked manually post-flight.
-/// Records (max flight time / distance / altitude) are NOT stored here — they are derived live
-/// from the linked flights (see `VehicleAggregate`), so they stay correct after relink/delete.
+/// A vehicle/aircraft stored in the library (row in `vehicles` table); flights link by
+/// `flights.vehicle_id`. Records (max flight time / distance / altitude) are NOT stored here — they
+/// are derived live from the linked flights (`VehicleAggregate`), so they stay correct after relink/delete.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Vehicle {
     pub id: i64,
@@ -288,14 +319,13 @@ pub struct Vehicle {
     /// Fallback resolution key against `flights.craft_name` (trimmed; case-insensitive match) for
     /// flights without a matching `fc_uid`. May differ from `name`.
     pub craft_name: Option<String>,
-    /// `fixed_wing` | `flying_wing` | `vtol` | `multirotor` | `helicopter` | `rover` | `boat` | `other`
+    /// `fixed_wing` | `flying_wing` | `vtol` | `multirotor` | `tricopter` | `helicopter` | `rover` | `boat` | `other`
     pub vehicle_type: String,
     /// `active` | `storage` | `retired` | `damaged` | `crashed`
     pub status: String,
     /// Optional image as a base64 data URI (self-contained → travels with `.kvehicle` export).
     pub image: Option<String>,
     pub notes: Option<String>,
-    // Airframe
     pub model: Option<String>,
     pub wingspan_mm: Option<i64>,
     pub length_mm: Option<i64>,
@@ -327,9 +357,8 @@ pub struct Vehicle {
     pub fc_firmware: Option<String>,
     pub fc_firmware_version: Option<String>,
     pub blackbox_available: bool,
-    /// FC hardware id (see `Flight::fc_uid`) — prefilled when the vehicle is created from the connected
-    /// FC, freely editable (an FC swap = a new UID here). The first key when a flight is resolved to
-    /// its vehicle.
+    /// FC hardware id (see `Flight::fc_uid`) — prefilled from the connected FC, freely editable (an FC swap
+    /// = a new UID). The first key when a flight is resolved to its vehicle.
     pub fc_uid: Option<String>,
     // Persistent lifetime baseline (adopted on request from the INAV FC `stats` feature). Additive to
     // the logged flights — the displayed lifetime = baseline + Σ(linked flights). Never auto-updated.
@@ -470,11 +499,9 @@ pub struct TelemetryRecord {
     pub roll: Option<f64>,
     pub pitch: Option<f64>,
     pub yaw: Option<f64>, // FC fused heading (degrees, decimals preserved)
-    /// GPS fix, stored as received. Live recordings use the unified scale of `GpsData::fix_type`
-    /// (`scheduler::telemetry::FIX_*`: 0 none / 1 2D / 2 3D / 3 DGPS-RTK) — except passive-link
-    /// (LTM/CRSF/SmartPort) recordings made before that scale was unified, which hold 0 none / 2 2D /
-    /// 3 3D. `.tlog` and `.rawmsp` imports map to the unified scale; ArduPilot DataFlash and ULog keep
-    /// the raw GPS status and the INAV blackbox importer writes 3 whenever sats are logged.
+    /// GPS fix as received: live recordings use `GpsData::fix_type`'s scale (0 none / 1 2D / 2 3D / 3 RTK),
+    /// except older passive-link recordings (0 / 2 2D / 3 3D); DataFlash and ULog keep the raw status, the
+    /// INAV blackbox importer writes 3 whenever sats are logged.
     pub fix_type: Option<u8>,
     pub num_sat: Option<u8>,
     pub cpu_load: Option<u16>,
@@ -482,17 +509,14 @@ pub struct TelemetryRecord {
     pub link_quality: Option<u8>,
     /// Barometric altitude in meters (`BaroAlt`)
     pub baro_alt_m: Option<f64>,
-    /// GPS quality/accuracy metrics
     pub gps_hdop: Option<f64>,
     pub gps_eph: Option<f64>,
     pub gps_epv: Option<f64>,
-    /// Mission/navigation context
     pub active_wp_number: Option<i32>,
     pub active_flight_mode_flags: Option<i64>,
     pub state_flags: Option<i64>,
     pub nav_state: Option<i32>,
     pub nav_flags: Option<i64>,
-    /// RX / hardware health context
     pub rx_signal_received: Option<u8>,
     pub hw_health_status: Option<i64>,
     pub baro_temperature: Option<f64>,
@@ -503,12 +527,16 @@ pub struct TelemetryRecord {
     /// Raw/processed RC channel arrays encoded as JSON
     pub rc_data_json: Option<String>,
     pub rc_command_json: Option<String>,
-    /// INAV navigation filter fused position (navPos[0..2])
-    /// These provide sensor-fused lat/lon/alt from the EKF,
-    /// smoother than raw GPS, used for track display & export.
+    /// INAV nav-filter fused position (navPos) — smoother than raw GPS, for track display & export.
     pub nav_lat: Option<f64>,
     pub nav_lon: Option<f64>,
     pub nav_alt_m: Option<f64>,
+    /// The FC's position target (MAVLink POSITION_TARGET_GLOBAL_INT): the Fly-Here point in the guided
+    /// mode, the mission item or home in others — a reader picks by flight mode. The altitude is stored as
+    /// reported; its frame is not recorded.
+    pub target_lat: Option<f64>,
+    pub target_lon: Option<f64>,
+    pub target_alt_m: Option<f64>,
     /// Canonical flight mode (protocol-agnostic, see docs/active/FLIGHT_MODE_UNIFIED.md):
     /// `mode_primary` = canonical primary id; `mode_modifiers` = comma-separated modifier ids
     /// (None when none). The raw `active_flight_mode_flags` stays as a forensic field.
@@ -524,10 +552,9 @@ pub struct TelemetryRecord {
     pub wall_ms: Option<i64>,
 }
 
-/// A single per-instance battery sample (row in `battery_records`). ArduPilot/PX4 can run several
-/// battery monitors at once (e.g. a forward fixed-wing pack + a VTOL lift pack); each is identified by
-/// `instance` (0..9). INAV is single-battery and uses the denormalised columns on `telemetry_records`
-/// instead, so it produces no rows here. See docs/active/MULTI_BATTERY.md.
+/// A per-instance battery sample (row in `battery_records`): ArduPilot/PX4 can run several monitors
+/// (`instance` 0..9). INAV is single-battery and uses the columns on `telemetry_records` instead
+/// (docs/active/MULTI_BATTERY.md).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BatteryRecord {
     pub id: i64,
@@ -574,7 +601,6 @@ pub struct FlightSummary {
 // DuplicateDetected carries a full Flight; boxing would ripple through all match/construction sites
 #[allow(clippy::large_enum_variant)]
 pub enum BlackboxImportStatus {
-    /// Import successful
     #[serde(rename = "success")]
     Success {
         flight_id: i64,
@@ -606,3 +632,46 @@ pub struct BlackboxImportProgress {
     pub message: String,
 }
 
+/// A library mission exported to a `.kmission` file (one mission, or one INAV mission set, per file):
+/// the row as it is, so another library rebuilds it — statistics excepted, the importer computes them.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MissionFile {
+    /// Always "kmission" (validated on import).
+    pub format: String,
+    pub version: u32,
+    #[serde(default)]
+    pub exported_at: String,
+    #[serde(default)]
+    pub app_version: String,
+    pub mission: MissionFileBody,
+}
+
+/// `waypoints` and `extra` stay raw JSON text: parsed into a `Value` and written again, a float can come
+/// back one bit off — a new content hash for an ArduPilot / PX4 mission, changed data of a newer Kite.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MissionFileBody {
+    pub name: String,
+    /// `inav` | `ardupilot` | `px4`
+    pub format: String,
+    /// Informational: the importer derives the identity from the waypoints.
+    #[serde(default)]
+    pub content_hash: String,
+    pub waypoints: Box<serde_json::value::RawValue>,
+    #[serde(default)]
+    pub source_xml: Option<String>,
+    #[serde(default)]
+    pub home_lat: Option<f64>,
+    #[serde(default)]
+    pub home_lon: Option<f64>,
+    #[serde(default)]
+    pub notes: Option<String>,
+    #[serde(default)]
+    pub created_at: Option<String>,
+    #[serde(default)]
+    pub location_name: Option<String>,
+    #[serde(default)]
+    pub vehicle_class: Option<String>,
+    /// `Mission::extra_json`, embedded.
+    #[serde(default)]
+    pub extra: Option<Box<serde_json::value::RawValue>>,
+}

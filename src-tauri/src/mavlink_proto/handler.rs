@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// MAVLink Handler
-// Dedicated thread that owns the ByteTransport and handles MAVLink communication.
-// Unlike MSP (poll-based), MAVLink is push-based: the FC streams telemetry,
-// the GCS sends heartbeats and occasional commands.
+// MAVLink handler: the dedicated thread owning the ByteTransport (push telemetry, GCS heartbeats, commands).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
@@ -22,7 +19,7 @@ use crate::msp::FcInfo;
 use crate::scheduler::rc_tx::{self, RcTxHandle};
 use crate::scheduler::telemetry::{
     AttitudeData, GpsData, AltitudeData, AnalogData, StatusData,
-    SensorStatusData, AirspeedData, WindData, Misc2Data, BatteryInstanceData,
+    SensorStatusData, AirspeedData, WindData, Misc2Data, BatteryInstanceData, GpsReceiverData,
 };
 use crate::transport::ByteTransport;
 
@@ -96,6 +93,8 @@ pub enum MavlinkCommand {
     /// the connect path once the MSP-tunnel probe has ruled out INAV, which reports an ArduPilot identity
     /// in its HEARTBEAT. Ignored for a non-ArduPilot vehicle.
     StartModeList,
+    /// Send the handshake vehicle's connect requests (`configure_primary`) — a tunnel candidate's after the probe.
+    ConfigurePrimary,
 }
 
 /// Handle for interacting with the running MAVLink handler
@@ -273,11 +272,8 @@ impl VehicleCtx {
     }
 }
 
-/// Build the unattended recorder for a vehicle discovered on a shared link. Its flights land in the
-/// logbook under "<variant> #<sysid>" and commit by themselves (see `FlightRecorder::set_auto_commit`)
-/// until the group coordinator takes secondaries over (Dev-Docs active/GROUP_FLIGHTS.md step 6; member
-/// mode switches auto-commit off). It emits through the vehicle's own emitter and is registered in
-/// app-state under its vehicle key.
+/// The unattended recorder of a vehicle discovered on a shared link: flights under "<variant> #<sysid>",
+/// auto-committed until member mode; registered in app-state under its vehicle key.
 fn secondary_recorder(cfg: &SecondaryRecording, sysid: u8, fc_variant: &str, platform_type: u8, mav_type: u8, emitter: &VehicleEmitter) -> Option<FlightRecorderHandle> {
     if !cfg.settings.enabled || !cfg.settings.db_enabled {
         return None;
@@ -346,6 +342,17 @@ fn configure_new_vehicle(transport: &mut dyn ByteTransport, sysid: u8, fc_varian
     }
 }
 
+/// The handshake vehicle's connect requests: `configure_new_vehicle` plus the logging-backend parameter
+/// behind the vehicle library's "blackbox available" flag (ArduPilot LOG_BACKEND_TYPE, PX4 SDLOG_MODE).
+pub fn configure_primary(transport: &mut dyn ByteTransport, sysid: u8, fc_variant: &str, rates: &StreamRateConfig) {
+    configure_new_vehicle(transport, sysid, fc_variant, rates);
+    if fc_variant.starts_with("Ardu") {
+        super::params::request_param(transport, sysid, "LOG_BACKEND_TYPE");
+    } else if fc_variant.contains("PX4") {
+        super::params::request_param(transport, sysid, "SDLOG_MODE");
+    }
+}
+
 /// Start the MAVLink handler on a dedicated thread
 pub fn start(
     transport: Box<dyn ByteTransport>,
@@ -397,10 +404,8 @@ fn handler_loop(
     let mut seq = MavSequence::new();
     let mut buf = [0u8; 1024];
     let mut last_heartbeat = Instant::now() - HEARTBEAT_INTERVAL; // Send immediately
-    // Stall watchdog (ADR-042 counterpart of "peer loss is not link loss"): the transport may stay open
-    // while the vehicle goes quiet — radio dropout, SITL paused, a UDP peer gone. Nothing is torn down;
-    // the status bar is told the FC is not being heard (`telemetry-fc-link`, the same signal the MSP
-    // scheduler emits) and told again when frames resume. Same threshold as MSP's STALL_WARN_AFTER.
+    // Stall watchdog: the transport may stay open while the vehicle goes quiet — nothing is torn down, the
+    // status bar gets `telemetry-fc-link` (as from MSP) and again when frames resume. MSP's threshold.
     const STALL_WARN_AFTER: Duration = Duration::from_secs(3);
     // A silence at least this long may have been an FC reboot → its mode list is read again on recovery.
     const MODE_REREAD_AFTER_SILENCE: Duration = Duration::from_secs(5);
@@ -420,10 +425,8 @@ fn handler_loop(
     primary_ctx.identity_done = true; // the handshake asked it already
     vehicles.insert(fc_sysid, primary_ctx);
     let mut last_sweep = Instant::now();
-    // Decoded telemetry feeds the PRIMARY vehicle's recorder (the link's; it also owns the raw .tlog of
-    // every frame). Secondary vehicles get their own unattended DB recorder on discovery: their flights
-    // auto-commit (until the group coordinator takes them over), so their arm/disarm never drives the
-    // primary's session or the End-Flight dialog.
+    // Decoded telemetry feeds the PRIMARY vehicle's recorder (it also owns the raw .tlog); secondaries get
+    // their own unattended recorder, so their arm/disarm never drives the primary's End-Flight dialog.
 
     // Active mission operation receiver — when set, that vehicle's MISSION_* messages are forwarded
     // here instead of being dispatched as telemetry events.
@@ -435,11 +438,12 @@ fn handler_loop(
     let mut param_fwd: Option<(u8, mpsc::Sender<MavMessage>)> = None;
     // MSP-over-MAVLink tunnel receiver (INAV 10.0+): payloads of TUNNEL frames addressed to Kite.
     let mut tunnel_fwd: Option<mpsc::Sender<Vec<u8>>> = None;
+    // When the receiver was released — a reply after that came too late for whoever asked.
+    let mut tunnel_released: Option<Instant> = None;
+    let mut tunnel_late_warned = false;
 
-    // QuadPlane detection robustness: a QuadPlane reports MAV_TYPE_FIXED_WING, so the only reliable
-    // signal is the Q_ENABLE parameter. The single pre-handler PARAM_REQUEST_READ can be lost on a
-    // noisy link (then a QuadPlane is mistaken for a plain plane until reconnect), so we re-request it
-    // a few times here until the FC answers. Bounded so a plain plane (no/zero Q_ENABLE) stops soon.
+    // QuadPlane detection: it reports MAV_TYPE_FIXED_WING, so only Q_ENABLE tells. The connect request can be
+    // lost on a noisy link — re-request a few times; bounded, so a plain plane stops soon.
     let is_ardupilot = fc_variant.starts_with("Ardu");
     // PX4 takes RC over MANUAL_CONTROL (#69); everything else (ArduPilot) over RC_CHANNELS_OVERRIDE (#70).
     let is_px4 = fc_variant == "PX4";
@@ -450,10 +454,8 @@ fn handler_loop(
 
     let gcs_header = codec::gcs_header();
 
-    // RC override streaming (ArduPilot, docs/active/MAVLINK_RC_CONTROL.md §3). We stream
-    // RC_CHANNELS_OVERRIDE from the shared RcTxState while engaged + the frontend heartbeat is fresh,
-    // at the user-selected rate. `rc_override_last` paces it. On disengage we deliberately do NOT send a
-    // release frame (see the streaming block). PX4 (MANUAL_CONTROL) is not handled here yet.
+    // RC override streaming (ArduPilot, docs/active/MAVLINK_RC_CONTROL.md §3) while engaged and the frontend
+    // heartbeat is fresh; no release frame on disengage (see below). PX4 (MANUAL_CONTROL) not handled yet.
     let mut rc_override_last = Instant::now();
     // Tracks whether the read timeout is currently in fast (streaming) mode, so we only re-set it on a
     // transition rather than every loop.
@@ -558,11 +560,19 @@ fn handler_loop(
             Ok(MavlinkCommand::RegisterTunnelReceiver(tx)) => {
                 log::debug!("MAVLink tunnel receiver registered");
                 tunnel_fwd = Some(tx);
+                tunnel_released = None;
                 continue;
             }
             Ok(MavlinkCommand::UnregisterTunnelReceiver) => {
                 log::debug!("MAVLink tunnel receiver unregistered");
                 tunnel_fwd = None;
+                tunnel_released = Some(Instant::now());
+                continue;
+            }
+            Ok(MavlinkCommand::ConfigurePrimary) => {
+                if let Some(ctx) = vehicles.get(&fc_sysid) {
+                    configure_primary(&mut *transport, fc_sysid, &ctx.fc_variant, &rates);
+                }
                 continue;
             }
             Err(mpsc::TryRecvError::Empty) => {}
@@ -617,10 +627,8 @@ fn handler_loop(
                 Err(_) => (false, None, rc_tx::RC_RAW_DEFAULT_INTERVAL),
             };
 
-            // Shorten the read timeout while streaming so the send cadence isn't capped by the 50 ms idle
-            // read; restore it on disengage. Only toggled on transition — which is also the moment worth a
-            // log line: "did the RC stream actually start / why did it stop" is the first question when
-            // sticks don't move a vehicle.
+            // Shorter read timeout while streaming, so the 50 ms idle read does not cap the send cadence. Logged
+            // on each transition — "did the RC stream start / why did it stop" is the first question.
             if alive != rc_fast_read {
                 transport.set_read_timeout(if alive { RC_READ_TIMEOUT_FAST } else { RC_READ_TIMEOUT_IDLE });
                 rc_fast_read = alive;
@@ -754,6 +762,16 @@ fn handler_loop(
                                 if tx.send(tunnel.payload).is_err() {
                                     tunnel_fwd = None; // tunnel transport dropped
                                 }
+                            } else if let Some(released) = tunnel_released
+                                .filter(|r| !tunnel_late_warned && r.elapsed() >= Duration::from_secs(1))
+                            {
+                                // Once per link at the default level: a reply that outlived the connect
+                                // probe. Under 1 s it is the tail of a transaction cut by a disconnect.
+                                tunnel_late_warned = true;
+                                log::warn!(
+                                    "MAVLink TUNNEL (MSP) reply arrived {:.1} s after the tunnel was closed — dropped (the link answers slower than Kite waited)",
+                                    released.elapsed().as_secs_f64()
+                                );
                             } else {
                                 log::debug!("MAVLink TUNNEL (MSP) with no tunnel receiver — dropped");
                             }
@@ -800,11 +818,9 @@ fn handler_loop(
                     let primary = sysid == fc_sysid;
 
                     msg_count += 1;
-                    // Only the autopilot component feeds the stall watchdog: peripherals on the FC's
-                    // sysid (a SIYI air unit, a gimbal, CAN nodes) keep heartbeating while the FC
-                    // itself may be gone — see the HEARTBEAT component gate below. Only the primary
-                    // (handshake) vehicle feeds it: a second vehicle on a shared link must not mask the
-                    // primary's silence (secondaries time out via the sweep in 3c).
+                    // Only the autopilot component of the PRIMARY vehicle feeds the stall watchdog: peripherals on the FC's
+                    // sysid (SIYI air unit, gimbal, CAN nodes) keep heartbeating while the FC may be gone, and a second
+                    // vehicle must not mask the primary's silence.
                     if primary && frame.header.component_id == fc_compid {
                         let silent_for = last_fc_rx.elapsed();
                         last_fc_rx = Instant::now();
@@ -812,10 +828,9 @@ fn handler_loop(
                             stall_warned = false;
                             log::warn!("Link recovered — MAVLink frames from the FC resumed");
                             let _ = app_handle.emit("telemetry-fc-link", FcLinkAlive { alive: true });
-                            // The FC may have rebooted with another mode set (Q_ENABLE, Lua modes,
-                            // GCSBLOCK), and no MONITOR says so on a link that stayed open — read it
-                            // again. Only after a silence long enough for a reboot: a link flapping
-                            // around the stall threshold must not trigger a full read on every recovery.
+                            // The FC may have rebooted with another mode set and no MONITOR says so —
+                            // re-read, but only after a silence long enough for a reboot, not on every
+                            // recovery of a link flapping around the stall threshold.
                             if silent_for >= MODE_REREAD_AFTER_SILENCE
                                 && ctx.modes.as_mut().is_some_and(|e| e.restart(Instant::now()))
                             {
@@ -899,13 +914,9 @@ fn handler_loop(
                         _ => {}
                     }
 
-                    // Only the autopilot component drives mode + armed. Peripherals sharing the FC's
-                    // system_id (gimbal, companion, CAN nodes — e.g. a SIYI air unit) also emit ~1 Hz
-                    // HEARTBEATs with custom_mode=0/0xFFFF and no armed bit; dispatching those flipped
-                    // the mode to ARDU_MODE_<n> and flapped armed true/false (a spurious 1 Hz disarm →
-                    // End-Flight-popup loop). Their frames are still recorded to the tlog above; they're
-                    // just not treated as telemetry. Non-HEARTBEAT messages are unaffected (ADS-B,
-                    // gimbal feedback, etc. legitimately come from other components on the same sysid).
+                    // Only the autopilot component drives mode + armed: peripherals on the FC's sysid (gimbal, companion,
+                    // CAN nodes) send HEARTBEATs with custom_mode 0/0xFFFF and no armed bit, which flapped mode and armed.
+                    // Their frames still go to the tlog, and non-HEARTBEAT messages from them are unaffected.
                     if matches!(frame.message, MavMessage::HEARTBEAT(_)) && frame.header.component_id != ctx.compid {
                         continue;
                     }
@@ -937,10 +948,8 @@ fn handler_loop(
             }
             Err(crate::transport::TransportError::Timeout) => {}
             Err(crate::transport::TransportError::Disconnected) => {
-                // Real transport loss (serial unplugged, socket closed): the same `connection-lost` the
-                // MSP scheduler emits — the frontend tears the connection state down on it and shows
-                // "disconnected" instead of sitting on a dead "connected" state until the user clicks
-                // Disconnect. `shutdown_lost` offers the recording-recovery prompt (ADR-042) like MSP.
+                // Real transport loss: the same `connection-lost` as the MSP scheduler (the frontend tears down), and
+                // `shutdown_lost` offers the recording-recovery prompt (ADR-042).
                 log::warn!("MAVLink transport disconnected — tearing down");
                 if let Some(ref rec) = recorder {
                     if let Ok(mut r) = rec.lock() { r.shutdown_lost(); }
@@ -1053,11 +1062,8 @@ fn send_mav_frame(
     }
 }
 
-/// Returns true for MAVLink messages that belong to the mission microprotocol.
-/// MISSION_CURRENT → the displayed 1-based WP number (0 = none). ArduPilot/PX4: our displayed waypoints
-/// are seq 1..N (home slot 0 dropped), so `seq` is the number as is. INAV over an MSP-over-MAVLink link:
-/// INAV packs `seq = active WP − 1` (0-based, no home slot) and flags a running mission with
-/// `mission_mode == 1` — anything else means no active mission WP.
+/// MISSION_CURRENT → the displayed 1-based WP number (0 = none). ArduPilot/PX4: `seq` as is (home slot 0
+/// dropped). INAV over the MSP tunnel: `seq = active WP − 1`, and `mission_mode == 1` for a running mission.
 fn active_wp_from_mission_current(seq: u16, mission_mode: u8, inav: bool) -> u16 {
     if !inav {
         seq
@@ -1103,11 +1109,9 @@ struct HomeEvent {
     alt: f64,
 }
 
-/// The FC's active navigation target (`guided-target` event), from POSITION_TARGET_GLOBAL_INT —
-/// GCS_Common fills it from the vehicle's `get_target_location()` (ArduPlane: `next_WP_loc`, Copter:
-/// `flightmode->get_wp`). Only meaningful as the *guided* target while the FC is in its guided mode;
-/// in AUTO/RTL the same message carries the current mission WP / home, so the frontend gates on the
-/// active mode. `alt` is AMSL (GCS_Common sends frame GLOBAL).
+/// The FC's active navigation target (`guided-target`) from POSITION_TARGET_GLOBAL_INT. The GUIDED target
+/// only in guided mode — in AUTO/RTL it carries the mission WP / home, so the frontend gates on the mode.
+/// `alt` is AMSL (frame GLOBAL).
 #[derive(serde::Serialize)]
 struct GuidedTargetEvent {
     lat: f64,
@@ -1142,18 +1146,26 @@ impl AnalogState {
     }
 }
 
-/// Shared GPS cache that splits the two overlapping ArduPilot GPS messages into single owners.
-///
-/// Position: GLOBAL_POSITION_INT carries the **fused** EKF solution; GPS_RAW_INT carries the raw
-/// receiver position — noisier and lagging. Both carry lat/lon, so naively emitting both interleaves
-/// two offset streams and the track zig-zags (sawtooth). GLOBAL_POSITION_INT owns position; GPS_RAW_INT
-/// reuses the cached fused fix instead of its own raw lat/lon.
-///
-/// Fix type + sat count: only GPS_RAW_INT has them; GLOBAL_POSITION_INT does not. So GPS_RAW_INT owns
-/// `fix_type`/`num_sat` and GLOBAL_POSITION_INT reuses the cached values — otherwise the two messages
-/// would emit conflicting fix/sats (GLOBAL_POSITION_INT sending 0 sats) and the UI would flash.
+/// One receiver as GPS_RAW_INT / GPS2_RAW last reported it. Speed and course are kept only for a link
+/// that never sends GLOBAL_POSITION_INT.
+#[derive(Clone, Copy)]
+struct RawGps {
+    data: GpsReceiverData,
+    ground_speed: f64,
+    course: f64,
+    at: std::time::Instant,
+}
+
+/// A receiver whose message stopped coming counts as lost; its stream is requested at 1 Hz.
+const GPS_RECEIVER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Splits the overlapping ArduPilot GPS messages into single owners: GLOBAL_POSITION_INT (fused) owns the
+/// position — emitting a receiver's raw lat/lon too zig-zags the track — and the receivers own fix type
+/// and sats, which GLOBAL_POSITION_INT lacks (else the UI flashes 0 sats).
 #[derive(Default, Clone, Copy)]
 struct FusedPos {
+    /// Index = receiver id. A port is listed once it reported more than "no receiver" and then stays.
+    receivers: [Option<RawGps>; 2],
     valid: bool,
     lat: f64,
     lon: f64,
@@ -1162,12 +1174,108 @@ struct FusedPos {
     course: f64,
     fix_type: u8,
     num_sat: u8,
+    /// A receiver reported (GPS_RAW_INT / GPS2_RAW): its fix type stands from then on, "no fix" included.
+    raw_seen: bool,
 }
 
-/// Dispatch a received MAVLink message to the same Tauri events as the MSP scheduler.
-/// This ensures widgets/store work identically regardless of protocol.
-/// `primary`: the link's handshake vehicle. Only it feeds the process-global OS link status (Android
-/// notification / track backfill) — secondary vehicles on a shared link would otherwise flap it.
+fn unified_fix(raw: ::mavlink::ardupilotmega::GpsFixType) -> u8 {
+    use ::mavlink::ardupilotmega::GpsFixType::*;
+    match raw {
+        GPS_FIX_TYPE_NO_GPS | GPS_FIX_TYPE_NO_FIX => 0,
+        GPS_FIX_TYPE_2D_FIX => 1,
+        GPS_FIX_TYPE_3D_FIX => 2,
+        GPS_FIX_TYPE_DGPS | GPS_FIX_TYPE_RTK_FLOAT | GPS_FIX_TYPE_RTK_FIXED | GPS_FIX_TYPE_STATIC
+        | GPS_FIX_TYPE_PPP => 3,
+    }
+}
+
+/// `yaw` of GPS_RAW_INT / GPS2_RAW in cdeg: 0 = not provided, u16::MAX = configured but not available,
+/// 36000 = north.
+fn gps_yaw_deg(raw: u16) -> Option<f64> {
+    (1..=36000).contains(&raw).then(|| (raw % 36000) as f64 / 100.0)
+}
+
+/// One GPS_RAW_INT (id 0) or GPS2_RAW (id 1). The FC does not report which receiver it navigates on, so
+/// fix type, sat count and HDOP of `telemetry-gps` come from the better one: higher fix, then more sats.
+fn on_gps_receiver(rx: RawGps, fused: &mut FusedPos, app_handle: &VehicleEmitter, recorder: &Option<FlightRecorderHandle>) {
+    if let Some(slot) = fused.receivers.get_mut(rx.data.id as usize) {
+        if slot.is_some() || rx.data.fix_raw > 0 {
+            *slot = Some(rx);
+        }
+    }
+    // A receiver that went silent would otherwise keep winning with its last fix.
+    for r in fused.receivers.iter_mut().flatten() {
+        if rx.at.duration_since(r.at) > GPS_RECEIVER_TIMEOUT {
+            r.data.fix_raw = 0;
+            r.data.fix_type = 0;
+            r.data.num_sat = 0;
+            r.data.hdop = None;
+        }
+    }
+    // STATIC (7) and PPP (8) sit above RTK fixed (6) in the enum but are not the better fix.
+    let rank = |raw: u8| if raw > 6 { 4 } else { raw };
+    let best = fused
+        .receivers
+        .iter()
+        .flatten()
+        .max_by_key(|r| (rank(r.data.fix_raw), r.data.num_sat, std::cmp::Reverse(r.data.id)))
+        .copied()
+        .unwrap_or(rx);
+    fused.fix_type = best.data.fix_type;
+    fused.num_sat = best.data.num_sat;
+    fused.raw_seen = true;
+
+    let list: Vec<GpsReceiverData> = fused.receivers.iter().flatten().map(|r| r.data).collect();
+    if !list.is_empty() {
+        let _ = app_handle.emit("telemetry-gps-receivers", &list);
+    }
+
+    // Position from the fused GLOBAL_POSITION_INT; until the first one arrives from ONE receiver, the
+    // first that has a fix — two raw streams taken in turn sawtooth the track.
+    let data = if fused.valid {
+        GpsData {
+            fix_type: fused.fix_type,
+            num_sat: fused.num_sat,
+            lat: fused.lat,
+            lon: fused.lon,
+            alt_msl: fused.alt_msl,
+            ground_speed: fused.ground_speed,
+            course: fused.course,
+        }
+    } else {
+        let src = fused.receivers.iter().flatten().find(|r| r.data.fix_type > 0).copied().unwrap_or(rx);
+        GpsData {
+            fix_type: fused.fix_type,
+            num_sat: fused.num_sat,
+            lat: src.data.lat,
+            lon: src.data.lon,
+            alt_msl: src.data.alt_msl,
+            ground_speed: src.ground_speed,
+            course: src.course,
+        }
+    };
+    let _ = app_handle.emit("telemetry-gps", &data);
+
+    // Same stats event INAV uses (MSP_GPSSTATISTICS), so the HDOP readout is one path for both protocols.
+    if let Some(hdop) = best.data.hdop {
+        let _ = app_handle.emit("telemetry-gps-stats", serde_json::json!({ "hdop": hdop }));
+    }
+
+    // A port that never had a receiver (GPS2_RAW with "no GPS") is not listed and not recorded.
+    let listed = fused.receivers.get(rx.data.id as usize).is_some_and(|r| r.is_some());
+    if let Some(ref rec) = recorder {
+        if let Ok(mut r) = rec.lock() {
+            // `on_gps` first: the first fix can be what starts the session.
+            r.on_gps(&data);
+            if listed {
+                r.on_gps_receiver(&rx.data);
+            }
+        }
+    }
+}
+
+/// Dispatch a MAVLink message to the same Tauri events as the MSP scheduler. Only the `primary` vehicle
+/// feeds the process-global OS link status — secondaries would flap it.
 #[allow(clippy::too_many_arguments)] // per-vehicle decode context, split out of VehicleCtx for borrowck
 fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, app_handle: &VehicleEmitter, analog: &mut AnalogState, batteries: &mut std::collections::BTreeMap<u8, BatteryInstanceData>, fused: &mut FusedPos, quadplane_seen: &mut bool, recorder: &Option<FlightRecorderHandle>, primary: bool, inav_tunnel: bool) {
     match message {
@@ -1204,6 +1312,13 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
                     r.on_flightmode(&fm);
                 }
             }
+            // MAV_STATE: ArduPlane / ArduCopter report ACTIVE only while flying, PX4 while armed.
+            let _ = app_handle.emit("vehicle-flight-state", serde_json::json!({ "system_status": hb.system_status as u8 }));
+        }
+
+        // ── EXTENDED_SYS_STATE → vehicle-flight-state (MAV_LANDED_STATE) ─
+        MavMessage::EXTENDED_SYS_STATE(st) => {
+            let _ = app_handle.emit("vehicle-flight-state", serde_json::json!({ "landed_state": st.landed_state as u8 }));
         }
 
         // ── HOME_POSITION → home-position ───────────────────────────
@@ -1229,6 +1344,11 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
                 alt: pt.alt as f64, // m AMSL
             };
             let _ = app_handle.emit("guided-target", &data);
+            if let Some(ref rec) = recorder {
+                if let Ok(mut r) = rec.lock() {
+                    r.on_nav_target(crate::flightlog::nav_target(pt.lat_int, pt.lon_int, pt.alt));
+                }
+            }
         }
 
         // ── MISSION_CURRENT → telemetry-nav-status (active waypoint) ─
@@ -1239,6 +1359,9 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
             let _ = app_handle.emit("telemetry-nav-status", serde_json::json!({
                 "active_wp_number": active_wp_from_mission_current(mc.seq, mc.mission_mode, inav_tunnel),
                 "nav_state": 0u8, // ArduPilot has no INAV nav_state; mission detection uses flight mode
+                // Items without the home slot. 0 = field not filled (ArduPilot also sends it for an empty
+                // mission), 65535 = no mission: both say nothing to offer.
+                "mission_total": Some(mc.total).filter(|t| (1..u16::MAX).contains(t)),
             }));
         }
 
@@ -1257,24 +1380,22 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
 
         // ── GLOBAL_POSITION_INT → telemetry-gps + telemetry-altitude
         MavMessage::GLOBAL_POSITION_INT(gpi) => {
-            // Update the shared cache's position (fix_type/num_sat are owned by GPS_RAW_INT — leave them).
+            // fix_type / num_sat belong to the receiver messages — leave them.
             fused.valid = true;
             fused.lat = gpi.lat as f64 / 1e7;
             fused.lon = gpi.lon as f64 / 1e7;
             fused.alt_msl = gpi.alt as f64 / 1000.0; // mm → m
             fused.ground_speed = ((gpi.vx as f64).powi(2) + (gpi.vy as f64).powi(2)).sqrt() / 100.0; // cm/s → m/s
-            // Course over ground from the fused horizontal velocity (vx=North, vy=East). NOTE: `gpi.hdg`
-            // is the vehicle HEADING (yaw), not COG — heading is sourced from ATTITUDE.yaw, so don't
-            // conflate it into `course` here. Below a walking pace COG is just atan2 of velocity noise,
-            // so hold the previous value.
+            // COG from the fused velocity (vx North, vy East) — `gpi.hdg` is the HEADING, which comes from ATTITUDE.
+            // Below walking pace COG is velocity noise: hold the previous value.
             if fused.ground_speed > 0.5 {
                 fused.course = (gpi.vy as f64).atan2(gpi.vx as f64).to_degrees().rem_euclid(360.0);
             }
 
             let gps = GpsData {
-                // Fix/sat come from GPS_RAW_INT (cached). Before the first GPS_RAW_INT, GLOBAL_POSITION_INT
-                // already implies at least a 3D fix, so fall back to 2 rather than reporting "no fix".
-                fix_type: if fused.fix_type > 0 { fused.fix_type } else { 2 },
+                // ArduPilot sends GLOBAL_POSITION_INT without a fix too (position 0/0), so only a real
+                // position on a link that never carried a receiver message is taken as a 3D fix.
+                fix_type: if fused.raw_seen || (gpi.lat == 0 && gpi.lon == 0) { fused.fix_type } else { 2 },
                 num_sat: fused.num_sat,
                 lat: fused.lat,
                 lon: fused.lon,
@@ -1299,66 +1420,53 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
             }
         }
 
-        // ── GPS_RAW_INT → telemetry-gps (fix, sats, hdop) ──────────
+        // ── GPS_RAW_INT / GPS2_RAW → telemetry-gps (fix, sats, hdop) + telemetry-gps-receivers ──
+        // `eph` is HDOP × 100 (u16::MAX = unknown). Sensor health stays with SYS_STATUS.
         MavMessage::GPS_RAW_INT(gps) => {
-            let fix_type = match gps.fix_type {
-                ::mavlink::ardupilotmega::GpsFixType::GPS_FIX_TYPE_NO_GPS
-                | ::mavlink::ardupilotmega::GpsFixType::GPS_FIX_TYPE_NO_FIX => 0,
-                ::mavlink::ardupilotmega::GpsFixType::GPS_FIX_TYPE_2D_FIX => 1,
-                ::mavlink::ardupilotmega::GpsFixType::GPS_FIX_TYPE_3D_FIX => 2,
-                ::mavlink::ardupilotmega::GpsFixType::GPS_FIX_TYPE_DGPS
-                | ::mavlink::ardupilotmega::GpsFixType::GPS_FIX_TYPE_RTK_FLOAT
-                | ::mavlink::ardupilotmega::GpsFixType::GPS_FIX_TYPE_RTK_FIXED
-                | ::mavlink::ardupilotmega::GpsFixType::GPS_FIX_TYPE_STATIC
-                | ::mavlink::ardupilotmega::GpsFixType::GPS_FIX_TYPE_PPP => 3,
-            };
-
-            // GPS_RAW_INT owns fix type + sat count — cache them so GLOBAL_POSITION_INT reuses the same
-            // values instead of emitting a conflicting fix/0-sats (which made the UI flash).
-            fused.fix_type = fix_type;
-            fused.num_sat = gps.satellites_visible;
-
-            // Position comes from the fused GLOBAL_POSITION_INT solution (cached in `fused`) — emitting
-            // GPS_RAW_INT's own raw lat/lon here would interleave two offset position streams and
-            // sawtooth the track. Before the first GLOBAL_POSITION_INT (no fused fix yet) fall back to
-            // the raw value.
-            let data = if fused.valid {
-                GpsData {
-                    fix_type,
+            on_gps_receiver(RawGps {
+                data: GpsReceiverData {
+                    id: 0,
+                    fix_type: unified_fix(gps.fix_type),
+                    fix_raw: gps.fix_type as u8,
                     num_sat: gps.satellites_visible,
-                    lat: fused.lat,
-                    lon: fused.lon,
-                    alt_msl: fused.alt_msl,
-                    ground_speed: fused.ground_speed,
-                    course: fused.course,
-                }
-            } else {
-                GpsData {
-                    fix_type,
-                    num_sat: gps.satellites_visible,
+                    hdop: (gps.eph != u16::MAX).then(|| gps.eph as f64 / 100.0),
                     lat: gps.lat as f64 / 1e7,
                     lon: gps.lon as f64 / 1e7,
                     alt_msl: gps.alt as f64 / 1000.0, // mm → m
-                    ground_speed: gps.vel as f64 / 100.0, // cm/s → m/s
-                    course: gps.cog as f64 / 100.0, // cdeg → deg
-                }
-            };
-            let _ = app_handle.emit("telemetry-gps", &data);
-
-            // HDOP — GPS_RAW_INT.eph is HDOP × 100 (u16::MAX = unknown). Reuse the same stats event INAV
-            // uses (MSP_GPSSTATISTICS), so the frontend HDOP readout works identically for both protocols.
-            if gps.eph != u16::MAX {
-                let _ = app_handle.emit("telemetry-gps-stats", serde_json::json!({
-                    "hdop": gps.eph as f64 / 100.0,
-                }));
-            }
-
-            // Per-sensor hardware health is owned by SYS_STATUS (real present/health bitmasks); the
-            // GPS fix nuance (amber on <3D) is layered on top frontend-side from this message's fix.
-
-            if let Some(ref rec) = recorder {
-                if let Ok(mut r) = rec.lock() { r.on_gps(&data); }
-            }
+                    vdop: (gps.epv != u16::MAX).then(|| gps.epv as f64 / 100.0),
+                    h_acc_m: (gps.h_acc > 0).then(|| gps.h_acc as f64 / 1000.0),
+                    v_acc_m: (gps.v_acc > 0).then(|| gps.v_acc as f64 / 1000.0),
+                    speed_ms: (gps.vel != u16::MAX).then(|| gps.vel as f64 / 100.0),
+                    course_deg: (gps.cog != u16::MAX).then(|| gps.cog as f64 / 100.0),
+                    yaw_deg: gps_yaw_deg(gps.yaw),
+                },
+                ground_speed: gps.vel as f64 / 100.0, // cm/s → m/s
+                course: gps.cog as f64 / 100.0,       // cdeg → deg
+                at: std::time::Instant::now(),
+            }, fused, app_handle, recorder);
+        }
+        MavMessage::GPS2_RAW(gps) => {
+            on_gps_receiver(RawGps {
+                data: GpsReceiverData {
+                    id: 1,
+                    fix_type: unified_fix(gps.fix_type),
+                    fix_raw: gps.fix_type as u8,
+                    num_sat: gps.satellites_visible,
+                    hdop: (gps.eph != u16::MAX).then(|| gps.eph as f64 / 100.0),
+                    lat: gps.lat as f64 / 1e7,
+                    lon: gps.lon as f64 / 1e7,
+                    alt_msl: gps.alt as f64 / 1000.0,
+                    vdop: (gps.epv != u16::MAX).then(|| gps.epv as f64 / 100.0),
+                    h_acc_m: (gps.h_acc > 0).then(|| gps.h_acc as f64 / 1000.0),
+                    v_acc_m: (gps.v_acc > 0).then(|| gps.v_acc as f64 / 1000.0),
+                    speed_ms: (gps.vel != u16::MAX).then(|| gps.vel as f64 / 100.0),
+                    course_deg: (gps.cog != u16::MAX).then(|| gps.cog as f64 / 100.0),
+                    yaw_deg: gps_yaw_deg(gps.yaw),
+                },
+                ground_speed: gps.vel as f64 / 100.0,
+                course: gps.cog as f64 / 100.0,
+                at: std::time::Instant::now(),
+            }, fused, app_handle, recorder);
         }
 
         // ── SYS_STATUS → telemetry-analog (battery) ────────────────
@@ -1394,10 +1502,8 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
             let s3 = |bit: Sns| -> u8 {
                 if !present.contains(bit) { 0 } else if health.contains(bit) { 1 } else { 3 }
             };
-            // Pre-arm readiness: ArduPilot/PX4 publish the prearm-check result via the PREARM_CHECK bit
-            // (enabled = checks active, health = all passed) — the same signal QGC/MP use for "Ready to
-            // Fly". 0=unknown (bit absent), 1=ready, 2=blocked. Authoritative + 1 Hz, unlike the periodic
-            // "PreArm: …" STATUSTEXT (which we keep only for the human-readable tooltip detail).
+            // Pre-arm readiness from the PREARM_CHECK bit (enabled = checks active, health = all passed), as QGC/MP
+            // do: 0 unknown, 1 ready, 2 blocked. Authoritative at 1 Hz; "PreArm: …" STATUSTEXT only adds detail.
             let enabled = sys.onboard_control_sensors_enabled;
             let prearm = {
                 let bit = Sns::MAV_SYS_STATUS_PREARM_CHECK;
@@ -1602,9 +1708,8 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
             }));
         }
 
-        // ── PARAM_VALUE → telemetry-ekf-type (AHRS_EKF_TYPE only) ───
-        // Reply to the one-shot AHRS_EKF_TYPE read issued on connect (see params.rs). 2 = EKF2,
-        // 3 = EKF3; anything else is shown as a generic "EKF" label frontend-side.
+        // ── PARAM_VALUE → the one-shot answers of connect (see params.rs) ───
+        // AHRS_EKF_TYPE: 2 = EKF2, 3 = EKF3; anything else shows as a generic "EKF".
         MavMessage::PARAM_VALUE(pv) => {
             let end = pv.param_id.iter().position(|&c| c == 0).unwrap_or(pv.param_id.len());
             let name: String = pv.param_id[..end].iter().map(|&c| c as char).collect();
@@ -1620,16 +1725,26 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
                 *quadplane_seen = true; // got the answer → the loop stops re-probing
                 let quadplane = pv.param_value as i32 >= 1;
                 eprintln!("[MAVLINK-PARAM] Q_ENABLE = {} (quadplane={})", pv.param_value, quadplane);
-                let _ = app_handle.emit("telemetry-vehicle", serde_json::json!({
-                    "quadplane": quadplane,
-                }));
-                // Annotate the recorded fc_variant so replay/logbook show "QuadPlane" (it reports
-                // MAV_TYPE_FIXED_WING, so the recorded variant would otherwise read plain ArduPlane).
+                // A QuadPlane reports MAV_TYPE_FIXED_WING: the recorder stores it as VTOL.
                 if quadplane {
                     if let Some(ref rec) = recorder {
                         if let Ok(mut r) = rec.lock() { r.set_quadplane(); }
                     }
+                    // The link's stored FcInfo follows (primary only, once registered) while it still says Airplane.
+                    if primary {
+                        if let Ok(mut reg) = tauri::Manager::state::<crate::state::AppState>(app_handle.app()).links.lock() {
+                            if let Some(entry) = reg.get_mut(app_handle.link_id()) {
+                                if entry.fc_info.platform_type == super::vehicle::platform::AIRPLANE {
+                                    entry.fc_info.platform_type = super::vehicle::platform::VTOL;
+                                }
+                            }
+                        }
+                    }
                 }
+                // After the raise: the frontend answers this event with a platform type of its own.
+                let _ = app_handle.emit("telemetry-vehicle", serde_json::json!({
+                    "quadplane": quadplane,
+                }));
             } else if name == "LOG_BACKEND_TYPE" || name == "SDLOG_MODE" {
                 // Logging backend (requested in connect_mavlink): ArduPilot bitmask 0 = none, PX4 mode
                 // -1 = disabled. Lands in the stored FcInfo (the UAV Info panel's "Save to vehicle
@@ -1659,7 +1774,17 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
 
 #[cfg(test)]
 mod tests {
-    use super::active_wp_from_mission_current;
+    use super::{active_wp_from_mission_current, gps_yaw_deg};
+
+    #[test]
+    fn gps_yaw_sentinels() {
+        assert_eq!(gps_yaw_deg(0), None, "not provided");
+        assert_eq!(gps_yaw_deg(u16::MAX), None, "configured but not available");
+        assert_eq!(gps_yaw_deg(36001), None);
+        assert_eq!(gps_yaw_deg(1), Some(0.01));
+        assert_eq!(gps_yaw_deg(27150), Some(271.5));
+        assert_eq!(gps_yaw_deg(36000), Some(0.0), "north");
+    }
 
     #[test]
     fn mission_current_numbering_per_autopilot() {

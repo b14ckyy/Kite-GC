@@ -3,29 +3,28 @@
 
 package com.kitegc.app
 
+import android.app.PendingIntent
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.graphics.drawable.Icon
+import android.os.Build
+import android.service.chooser.ChooserAction
 import android.net.Uri
 import android.provider.DocumentsContract
 import androidx.activity.result.ActivityResultLauncher
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 /**
- * User-chosen storage folders (Settings → Flight Logbook) for the Android build.
- *
- * The Rust side (`android/storage.rs`) calls the static methods here over JNI — same contract as
- * [UsbSerial]: primitives and Strings only, no callbacks back into Rust, one error string to fetch
- * after a failure.
- *
- * The model is scoped storage, deliberately: the user grants **one folder** through the system tree
- * picker ([pickFolder]), Kite takes a persistable grant on exactly that folder, and no storage
- * permission appears in the manifest. Because a SAF grant provides `content://` documents rather
- * than POSIX paths, nothing *lives* in the folder — the SQLite database and the raw-log writers
- * need real paths and stay app-private — instead the session-end mirror ([syncDirToTree]) copies
- * the artefacts into it through the ContentResolver. That copy is what survives an uninstall,
- * which is the reason a user picks a folder at all.
+ * The user-chosen raw-log folder (Settings → Data) for the Android build, called from
+ * `android/storage.rs` over JNI — Strings only, no callbacks. A SAF grant gives `content://`
+ * documents, not paths: the raw writers stay app-private and closed files are moved in
+ * ([moveFilesToTree]).
  */
 object StorageAccess {
     /** How long [pickFolder] waits for the user to finish with the system picker. Generous on
@@ -46,8 +45,8 @@ object StorageAccess {
         this.launcher = launcher
     }
 
-    /** The picker's result callback (runs on the main thread). Take the persistable grant — the
-     *  whole point: it outlives this process, so the mirror still has access next session. */
+    /** The picker's result callback (main thread). The persistable grant keeps the folder writable
+     *  in later sessions. */
     fun onFolderPicked(uri: Uri?) {
         if (uri == null) {
             pickedUri = null // cancelled — not an error
@@ -59,8 +58,8 @@ object StorageAccess {
                 )
                 pickedUri = uri.toString()
             } catch (e: SecurityException) {
-                // A provider that refuses persistable grants is useless as a mirror target: the
-                // grant would die with this process and every later sync would fail confusingly.
+                // A provider without persistable grants loses access with this process; every later
+                // move would fail.
                 lastError = "That location does not allow a lasting grant — pick a folder on the " +
                     "device storage or SD card (${e.message})"
             }
@@ -101,14 +100,27 @@ object StorageAccess {
     @JvmStatic
     fun getLastError(): String? = lastError
 
-    /**
-     * Hand [path] to the system share sheet (mail, messengers, "save to Files", a text editor…).
-     * The file travels as a FileProvider URI — app-private paths are meaningless to other apps, and
-     * since API 24 a raw file:// URI in an intent throws outright. Returns null on success, the
-     * error message otherwise.
-     */
+    private const val ACTION_SAVE_TO_DEVICE = "com.kitegc.app.EXPORT_SAVE_TO_DEVICE"
+
+    /** The file of the share sheet that is open, and the one whose "save to device" action was tapped. */
+    @Volatile private var sharedPath: String? = null
+    @Volatile private var saveRequest: String? = null
+    private var saveReceiver: BroadcastReceiver? = null
+
+    /** The path the user asked to save to the device from the share sheet, once; null when none. Polled
+     *  by the Rust side — no callbacks into Rust (see the class note). */
     @JvmStatic
-    fun shareFile(path: String, mime: String): String? {
+    fun takeSaveRequest(): String? {
+        val r = saveRequest
+        saveRequest = null
+        return r
+    }
+
+    /** Hand [path] to the share sheet as a FileProvider URI (a raw file:// URI throws since API 24). A
+     *  non-empty [saveLabel] adds a "save to device" action (API 34+), fetched via [takeSaveRequest].
+     *  Returns null on success, the error message otherwise. */
+    @JvmStatic
+    fun shareFile(path: String, mime: String, saveLabel: String): String? {
         return try {
             val f = File(path)
             if (!f.isFile) return "file not found: $path"
@@ -118,8 +130,14 @@ object StorageAccess {
                 putExtra(Intent.EXTRA_STREAM, uri)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
+            val chooser = Intent.createChooser(send, f.name)
+            if (saveLabel.isNotEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                addSaveAction(chooser, saveLabel)
+            }
+            saveRequest = null
+            sharedPath = path
             activity.runOnUiThread {
-                activity.startActivity(Intent.createChooser(send, f.name))
+                activity.startActivity(chooser)
             }
             null
         } catch (e: Exception) {
@@ -127,17 +145,40 @@ object StorageAccess {
         }
     }
 
+    private fun addSaveAction(chooser: Intent, label: String) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return
+        if (saveReceiver == null) {
+            val receiver = object : BroadcastReceiver() {
+                override fun onReceive(context: Context?, intent: Intent?) {
+                    saveRequest = sharedPath
+                }
+            }
+            // On the application context: a receiver of the activity dies with it when Android
+            // recreates the activity, and this one is registered once per process.
+            ContextCompat.registerReceiver(
+                activity.applicationContext, receiver, IntentFilter(ACTION_SAVE_TO_DEVICE),
+                ContextCompat.RECEIVER_NOT_EXPORTED
+            )
+            saveReceiver = receiver
+        }
+        val tap = PendingIntent.getBroadcast(
+            activity, 0,
+            Intent(ACTION_SAVE_TO_DEVICE).setPackage(activity.packageName),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val action = ChooserAction.Builder(
+            Icon.createWithResource(activity, android.R.drawable.ic_menu_save), label, tap
+        ).build()
+        chooser.putExtra(Intent.EXTRA_CHOOSER_CUSTOM_ACTIONS, arrayOf(action))
+    }
+
     /**
-     * Mirror every regular file in [srcDir] into the granted tree at [treeUri]. A file already
-     * present with the same size is skipped (raw logs never change after close; the DB snapshot is
-     * freshly written when it differs), anything else is created or rewritten. Flat on purpose —
-     * the two source dirs (raw-log staging, DB snapshot) hold no subdirectories.
-     *
-     * Returns null on success, the error message otherwise (the Rust side turns that into a
-     * `Result::Err` and logs it — a failed mirror must never take the session teardown down).
+     * Move the files in [paths] (one per line) flat into the tree [treeUri]: write, read the size
+     * back, then delete the local file; one already there with the same size counts as written.
+     * Returns null on success, else the last error; a file that failed stays in the app.
      */
     @JvmStatic
-    fun syncDirToTree(treeUri: String, srcDir: String): String? {
+    fun moveFilesToTree(treeUri: String, paths: String): String? {
         return try {
             val tree = Uri.parse(treeUri)
             val resolver = activity.contentResolver
@@ -165,27 +206,45 @@ object StorageAccess {
                 }
             }
 
-            var copied = 0
-            val files = File(srcDir).listFiles() ?: return null // nothing staged yet — fine
-            for (f in files) {
+            var moved = 0
+            var failed: String? = null
+            for (path in paths.split('\n')) {
+                val f = File(path)
                 if (!f.isFile) continue
                 val existing = children[f.name]
-                if (existing != null && existing.second == f.length()) continue
-                val dest = existing?.first ?: DocumentsContract.createDocument(
-                    resolver, parentUri, "application/octet-stream", f.name
-                ) ?: return "could not create ${f.name} in the shared folder"
-                // "wt" = write-truncate: a rewritten file must not keep a longer stale tail.
-                resolver.openOutputStream(dest, "wt")?.use { out ->
-                    f.inputStream().use { it.copyTo(out) }
-                } ?: return "could not open ${f.name} in the shared folder for writing"
-                copied++
+                if (existing == null || existing.second != f.length()) {
+                    val dest = existing?.first ?: DocumentsContract.createDocument(
+                        resolver, parentUri, "application/octet-stream", f.name
+                    )
+                    if (dest == null) {
+                        failed = "could not create ${f.name} in the shared folder"
+                        continue
+                    }
+                    // "wt" = write-truncate: a rewritten file must not keep a longer stale tail.
+                    val opened = resolver.openOutputStream(dest, "wt")?.use { out ->
+                        f.inputStream().use { it.copyTo(out) }
+                    }
+                    if (opened == null) {
+                        failed = "could not open ${f.name} in the shared folder for writing"
+                        continue
+                    }
+                    val written = resolver.query(
+                        dest, arrayOf(DocumentsContract.Document.COLUMN_SIZE), null, null, null
+                    )?.use { c -> if (c.moveToFirst() && !c.isNull(0)) c.getLong(0) else -1L } ?: -1L
+                    // A provider that reports no size cannot confirm the copy: the file stays here.
+                    if (written != f.length()) {
+                        failed = "${f.name} arrived with $written of ${f.length()} bytes — kept in the app"
+                        continue
+                    }
+                }
+                if (f.delete()) moved++
             }
-            android.util.Log.i("StorageAccess", "mirror: $copied file(s) from $srcDir into $treeDocId")
-            null
+            android.util.Log.i("StorageAccess", "moved $moved file(s) into $treeDocId")
+            failed
         } catch (e: SecurityException) {
             "the folder grant is gone (revoked or the folder was deleted) — pick the folder again: ${e.message}"
         } catch (e: Exception) {
-            "mirror failed: ${e.message}"
+            "move failed: ${e.message}"
         }
     }
 }

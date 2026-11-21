@@ -1,24 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-//! Old path (blackbox_decode + Kite's CSV parser) vs. the native decoder on real logs — the
-//! acceptance test of the native decoder (Dev-Docs active/NATIVE_BLACKBOX_DECODER.md).
-//!
-//! Opt-in: `cargo test --release --manifest-path src-tauri/Cargo.toml --lib inav_compare -- --ignored --nocapture`
-//! - `KITE_INAV_TEST_LOGS=<folder>`: every `*.TXT` / `*.bbl` / `*.bfl` (any case) below it, every
-//!   log in each file (blackbox_decode `--index`).
-//! - `KITE_TEST_DB=<flights.db>`: additionally the archived logs of its INAV flights
-//!   (`blackbox_files` of `protocol = 'BLACKBOX'`), opened read-only and immutable; each blob is
-//!   decoded without an index, as the hi-res parse does.
-//! - `KITE_BLACKBOX_DECODE=<binary>`: the oracle (default: the app's own lookup, `find_decoder`).
-//! - `KITE_COMPARE_SCRATCH=<dir>`: where a blob is spilled for the external decoder (default: the
-//!   temp dir); the spill is removed after each log.
-//!
-//! Per log: full rate (the hi-res shape) — rows matched by their `time`, every `TelemetryRecord`
-//! field equal (floats bit-equal); 10 Hz (the importer shape) — the same rows kept, equal. Compat
-//! mode must match exactly (the test fails otherwise); native mode is summarised: its extra rows
-//! must all be ones the compat emulation drops. Also prints the old path's digest per log (to show
-//! the shared mapping left the old path unchanged) and the decode times of both paths.
+//! Old path (blackbox_decode + CSV parser) vs. the native decoder on real logs (NATIVE_BLACKBOX_DECODER.md).
+//! Opt-in: `cargo test --release --manifest-path src-tauri/Cargo.toml --lib inav_compare -- --ignored
+//! --nocapture` with `KITE_INAV_TEST_LOGS=<folder>` and/or `KITE_TEST_DB=<flights.db>`; oracle override
+//! `KITE_BLACKBOX_DECODE`, spill dir `KITE_COMPARE_SCRATCH`. Compat mode must match bit for bit.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -191,7 +177,8 @@ fn compare_record(a: &TelemetryRecord, b: &TelemetryRecord, mut diff: impl FnMut
         num_sat, cpu_load, link_quality, baro_alt_m, gps_hdop, gps_eph, gps_epv, active_wp_number,
         active_flight_mode_flags, state_flags, nav_state, nav_flags, rx_signal_received, hw_health_status,
         baro_temperature, wind_n_ms, wind_e_ms, wind_d_ms, rc_data_json, rc_command_json, nav_lat, nav_lon,
-        nav_alt_m, mode_primary, mode_modifiers, link_snr, link_rssi_dbm, wall_ms,
+        nav_alt_m, mode_primary, mode_modifiers, link_snr, link_rssi_dbm, wall_ms, target_lat, target_lon,
+        target_alt_m,
     ]);
 }
 

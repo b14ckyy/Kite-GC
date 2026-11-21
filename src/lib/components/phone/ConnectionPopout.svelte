@@ -14,6 +14,7 @@
   import RelayPanel from '$lib/components/RelayPanel.svelte';
   import type { PortInfo, BleDeviceInfo, TransportType, ProtocolType } from '$lib/stores/connection';
   import type { TelemetryData } from '$lib/stores/telemetry';
+  import { linkActivity } from '$lib/helpers/linkActivity.svelte';
 
   let {
     telem,
@@ -57,6 +58,7 @@
   let open = $state(false);
   let relayOpen = $state(false);
   let rootEl = $state<HTMLDivElement>();
+  const flow = linkActivity(() => telem);
 
   // Tap anywhere outside → close (capture phase, so a surface that stops propagation still counts).
   $effect(() => {
@@ -82,12 +84,11 @@
     aria-label={$t('connection.panelTitle')}
     aria-expanded={open}
   >
-    <!-- chain link -->
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="M10 13a5 5 0 0 0 7.1 0l2.8-2.8a5 5 0 0 0-7.1-7.1L11 4.9" />
       <path d="M14 11a5 5 0 0 0-7.1 0l-2.8 2.8a5 5 0 0 0 7.1 7.1L13 19.1" />
     </svg>
-    <span class="cp-dot" class:connected={connStatus === 'connected'}></span>
+    <span class="cp-dot" class:connected={connStatus === 'connected'} class:quiet={connStatus === 'connected' && flow() !== 'live'}></span>
   </button>
 
   {#if open}
@@ -177,6 +178,10 @@
   }
   .cp-dot.connected {
     background: #59aa29;
+  }
+  /* Connected, but no data arrives (red means not connected). */
+  .cp-dot.quiet {
+    background: #f5a623;
   }
 
   .cp-panel {

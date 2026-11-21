@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// "Jump somewhere" requests for the map views — the custom map's "Show map area" (Settings) and the
-// map search. Both map components subscribe (`onMapFocus`) and carry the request out themselves: the
-// 2D map fits / centres, the 3D map flies there. An explicit jump takes the camera from a follow mode
-// first, or the follow's next frame would undo it a second later.
+// "Jump somewhere" requests for the map views (custom map "Show map area", map search); both maps subscribe
+// (`onMapFocus`) and carry them out. A jump takes the camera from a follow mode first, or the next follow frame
+// undoes it.
 
 import { writable, get } from 'svelte/store';
 import type { GeoBounds } from '$lib/stores/customMaps';

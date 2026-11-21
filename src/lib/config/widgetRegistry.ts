@@ -35,6 +35,7 @@ const ALL_WIDGET_DEFS: WidgetDef[] = [
   { id: 'flightMode',   label: 'Flight Mode',    labelKey: 'widgets.flightMode',   shape: 'square', defaultSize: 'S' },
   { id: 'liveAgl',      label: 'Live AGL',       labelKey: 'widgets.liveAgl',      shape: 'wide',   defaultSize: 'W' },
   { id: 'terrainRadar', label: 'Terrain Radar',  labelKey: 'widgets.terrainRadar', shape: 'square', defaultSize: 'L' },
+  { id: 'weather',      label: 'Weather',        labelKey: 'widgets.weather',      shape: 'wide',   defaultSize: 'L' },
   { id: 'videoFeed',    label: 'Video',          labelKey: 'widgets.video',        shape: 'wide',   defaultSize: 'W' },
 ];
 

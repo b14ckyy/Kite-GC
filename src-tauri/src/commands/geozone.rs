@@ -221,6 +221,11 @@ fn write_all(config: &GeozoneConfig, handle: &MspRequester) -> Result<GeozoneWri
     if !handle.is_tunnel() {
         return Ok(GeozoneWriteResult { reboot_confirmed: true });
     }
+    // The restart watch works with 500 ms probes; on a slow tunnel every one of them would lapse.
+    if handle.is_slow_tunnel() {
+        log::info!("Geozones: slow MSP over MAVLink link — restart not watched (reboot request answered: {})", ack);
+        return Ok(GeozoneWriteResult { reboot_confirmed: ack });
+    }
     let reboot_confirmed = confirm_tunnel_reboot(handle, started, ack);
     if reboot_confirmed {
         log::info!("Geozones: FC restart confirmed over MSP over MAVLink ({} ms)", started.elapsed().as_millis());

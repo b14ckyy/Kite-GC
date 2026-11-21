@@ -62,7 +62,8 @@ enum Decoded {
     Gps { lat: f64, lon: f64, gs_ms: f64, course: f64, alt_m: i32, sats: u8 },
     Vario { vspeed_ms: f64 },
     Battery { volts: f64, amps: f64, mah: u32, pct: u8 },
-    BaroAlt { alt_m: f64, raw: u16 },
+    /// `vspeed_ms` only in the 3-byte frame (see `State::gps_alt_msl`).
+    BaroAlt { alt_m: f64, raw: u16, vspeed_ms: Option<f64> },
     Airspeed { aspd_ms: f64 },
     Attitude { pitch: f64, roll: f64, yaw: f64 },
     FlightMode { text: String },
@@ -99,7 +100,12 @@ fn decode_frame(ty: u8, p: &[u8]) -> Decoded {
             } else {
                 (raw as f64 - 10000.0) / 10.0
             };
-            Decoded::BaroAlt { alt_m, raw }
+            // TBS's logarithmic vertical speed: v = sign * (e^(|x| * 0.026) - 1) m/s.
+            let vspeed_ms = p.get(2).map(|&b| {
+                let x = b as i8 as f64;
+                x.signum() * ((x.abs() * 0.026).exp() - 1.0)
+            });
+            Decoded::BaroAlt { alt_m, raw, vspeed_ms }
         }
         FT_AIRSPEED if p.len() >= 2 => Decoded::Airspeed { aspd_ms: be_u16(&p[0..2]) as f64 / 36.0 },
         FT_ATTITUDE if p.len() >= 6 => {
@@ -236,6 +242,9 @@ struct State {
     /// VARIO keeps triggering altitude events — issue #30. Publish falls back to the GPS altitude
     /// until the first real baro frame; a genuine baro reading of 0.0 is left untouched.
     seen_baro: bool,
+    /// A 3-byte BARO_ALT was seen: INAV's layout with `crsf_use_legacy_baro_packet` off, in which the
+    /// GPS frame carries MSL and no 0x07 comes. The older layout sends 0x09 with 2 bytes, or not at all.
+    gps_alt_msl: bool,
 
     voltage: f64,
     current: f64,
@@ -383,9 +392,13 @@ impl CrsfDecoder {
                 s.seen_analog = true;
                 s.fresh_analog = true;
             }
-            Decoded::BaroAlt { alt_m, .. } => {
+            Decoded::BaroAlt { alt_m, vspeed_ms, .. } => {
                 s.baro_alt = *alt_m;
                 s.seen_baro = true;
+                if let Some(v) = vspeed_ms {
+                    s.vario = *v;
+                    s.gps_alt_msl = true;
+                }
                 s.seen_altitude = true;
                 s.fresh_altitude = true;
             }
@@ -432,7 +445,10 @@ impl CrsfDecoder {
             Decoded::Battery { volts, amps, mah, pct } => {
                 format!("volt={:.1}V curr={:.1}A mah={} pct={}", volts, amps, mah, pct)
             }
-            Decoded::BaroAlt { alt_m, raw } => format!("alt={:.1}m (raw={:#06x})", alt_m, raw),
+            Decoded::BaroAlt { alt_m, raw, vspeed_ms } => match vspeed_ms {
+                Some(v) => format!("alt={:.1}m (raw={:#06x}) vspeed={:.2}m/s", alt_m, raw, v),
+                None => format!("alt={:.1}m (raw={:#06x})", alt_m, raw),
+            },
             Decoded::Airspeed { aspd_ms } => format!("aspd={:.2}m/s", aspd_ms),
             Decoded::Attitude { pitch, roll, yaw } => {
                 format!("pitch={:.1} roll={:.1} yaw={:.1}", pitch, roll, yaw)
@@ -581,6 +597,11 @@ impl CrsfDecoder {
         }
     }
 
+    /// The GPS frame's altitude is MSL (see `State::gps_alt_msl`) — false until the stream has shown it.
+    pub fn gps_alt_is_msl(&self) -> bool {
+        self.state.gps_alt_msl
+    }
+
     pub fn frames(&self) -> u64 {
         self.frames
     }
@@ -605,5 +626,31 @@ impl CrsfDecoder {
 impl Drop for CrsfDecoder {
     fn drop(&mut self) {
         self.flush();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn baro_altitude_frame_in_both_lengths() {
+        // 2 bytes: altitude only (decimetres + 10000).
+        match decode_frame(FT_BARO_ALT, &[0x2A, 0xF8]) {
+            Decoded::BaroAlt { alt_m, vspeed_ms, .. } => assert_eq!((alt_m, vspeed_ms), (100.0, None)),
+            _ => panic!("not a baro altitude"),
+        }
+        // 3 bytes: metres with the top bit set, then the packed vertical speed (27 = 1 m/s, as INAV packs it).
+        match decode_frame(FT_BARO_ALT, &[0x8B, 0xB8, 27]) {
+            Decoded::BaroAlt { alt_m, vspeed_ms, .. } => {
+                assert_eq!(alt_m, 3000.0);
+                assert!((vspeed_ms.unwrap() - 1.0).abs() < 0.03);
+            }
+            _ => panic!("not a baro altitude"),
+        }
+        match decode_frame(FT_BARO_ALT, &[0x27, 0x10, (-27i8) as u8]) {
+            Decoded::BaroAlt { vspeed_ms, .. } => assert!((vspeed_ms.unwrap() + 1.0).abs() < 0.03),
+            _ => panic!("not a baro altitude"),
+        }
     }
 }

@@ -48,15 +48,12 @@ class MainActivity : TauriActivity() {
     LinkService.init(this, notificationPermission)
     NativeVideo.init(this)
     NetInfo.init(this)
+    InstallSource.init(this)
 
     enableEdgeToEdge()
 
-    // Let the window extend into the display cutout region. `enableEdgeToEdge()` alone does not do
-    // this: in landscape the default cutout mode makes the system letterbox the window away from the
-    // notch entirely, which on a centre-punch-hole phone costs a black bar down the whole leading
-    // edge. SHORT_EDGES lets us have those pixels; the `env(safe-area-inset-*)` rules in app.html
-    // then keep the actual UI clear of the hole, so the map gains the area and no control hides
-    // behind the camera.
+    // Extend into the display cutout: in landscape the default mode letterboxes the window away from
+    // the notch (a black bar on punch-hole phones); app.html's safe-area rules keep the UI off the hole.
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
       window.attributes = window.attributes.apply {
         layoutInDisplayCutoutMode =
@@ -68,13 +65,9 @@ class MainActivity : TauriActivity() {
 
     hideSystemBars()
 
-    // The bars are hidden, but Android 9 (the RadioMaster AX12, the API 28 emulator) keeps reporting
-    // them as system-window insets - 40 px top, 80 px right in landscape - and the WebView turns those
-    // into `env(safe-area-inset-*)`: the phone chrome then pads itself off the screen (widget column
-    // cut at the right edge, rail and buttons pushed down) while the page itself fills the display.
-    // Strip the system-bar insets before the view tree sees them; the display cutout stays, which is
-    // the one thing the safe-area rules exist for. Android 14 already reports 0 here, so this is a
-    // no-op on current devices.
+    // Android 9 keeps reporting the hidden bars as insets, which the WebView turns into
+    // env(safe-area-inset-*) and the phone chrome pads itself off the screen. Strip the system-bar
+    // insets; the display cutout stays (that is what the safe-area rules are for).
     ViewCompat.setOnApplyWindowInsetsListener(window.decorView) { v, insets ->
       val stripped = WindowInsetsCompat.Builder(insets)
         .setInsets(WindowInsetsCompat.Type.systemBars(), Insets.NONE)
@@ -83,13 +76,10 @@ class MainActivity : TauriActivity() {
       ViewCompat.onApplyWindowInsets(v, stripped)
     }
 
-    // The display stays on only while a telemetry link is active — nav-app behaviour, driven from
-    // Rust through ScreenLock on connect / disconnect / lost link. Unconnected, the normal screen
-    // timeout applies.
+    // The keep-screen-on rule lives in link_presence.rs (driven through ScreenLock).
 
-    // Require a deliberate double-press to leave. The default back behaviour finishes the activity
-    // immediately, which on a gesture-navigation device means an edge swipe — easy to trigger by
-    // accident while panning the map — tears down the telemetry link with no confirmation.
+    // Require a deliberate double-press to leave: an accidental edge swipe while panning the map would
+    // otherwise tear down the telemetry link without confirmation.
     onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
       override fun handleOnBackPressed() {
         val now = System.currentTimeMillis()
@@ -107,12 +97,17 @@ class MainActivity : TauriActivity() {
    *  video layer below it is visible (see NativeVideo). */
   override fun onWebViewCreate(webView: android.webkit.WebView) {
     NativeVideo.attachWebView(webView)
+    // Before the first navigation (wry calls this hook before it loads the URL): the frontend reads
+    // the device profile from the user-agent at module load, so the token must already be there.
+    DeviceProfile.tagUserAgent(webView)
+    // A WebView scales text by the system font size, but not the boxes around it: labels overflow
+    // their buttons. The app has its own UI scale.
+    webView.settings.textZoom = 100
   }
 
   /**
-   * Android reveals the system bars again after various events — a permission dialog, the keyboard,
-   * returning from another app — and leaves them up. Re-hiding on focus gain is what keeps the app
-   * full-screen for a whole flight rather than only until the first interruption.
+   * Android reveals the system bars again after dialogs, the keyboard or another app; re-hiding on
+   * focus gain keeps the app full-screen for a whole flight.
    */
   override fun onWindowFocusChanged(hasFocus: Boolean) {
     super.onWindowFocusChanged(hasFocus)
@@ -120,13 +115,8 @@ class MainActivity : TauriActivity() {
   }
 
   /**
-   * Full immersive: no status bar, no navigation bar.
-   *
-   * A ground station is a full-screen instrument held in landscape — the clock and the nav buttons
-   * are pure loss, and on a 3-button device the navigation bar eats a strip down the entire trailing
-   * edge. Bars come back on a swipe from the edge (BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE) and hide
-   * themselves again, so nothing is unreachable; the back gesture still works and still goes through
-   * the press-twice-to-exit guard above.
+   * Full immersive: a ground station is a full-screen landscape instrument. The bars come back on an
+   * edge swipe and hide again; the back gesture still goes through the press-twice-to-exit guard.
    */
   private fun hideSystemBars() {
     WindowCompat.getInsetsController(window, window.decorView).apply {

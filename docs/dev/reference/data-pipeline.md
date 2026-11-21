@@ -89,7 +89,7 @@ Emitted by all live protocols where applicable (NULL/absent where a protocol doe
 | `telemetry-rc-channels` | current RC channel µs | RC-control engage seed |
 | `home-position` | lat, lon, alt | authoritative FC home |
 | `telemetry-protocol` / `telemetry-fc-link` | sub-protocol name / FC-origin liveness | passive telemetry / every live protocol |
-| `telemetry-disconnected` / `connection-lost` | — | teardown signals |
+| `connection-lost` | vehicleId, linkId | teardown signal of every link type |
 
 `stores/telemetry.ts` listens to these and merges them into one reactive `TelemetryData` object;
 `+page.svelte` subscribes and passes it to widgets as a prop.

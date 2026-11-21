@@ -21,6 +21,10 @@ What it does
   manager's own UDP monitor channel (each instance: --serial5 udpclient → the manager). The manager
   announces itself as sysid 254, not 255, so its heartbeats do not mask a lost Kite link for the GCS
   failsafe.
+- Second GPS receiver (GPS2_TYPE + SIM_GPS2_ENABLE as boot defaults) and GPS faults at runtime for the
+  selected vehicles, per receiver: OK, Off, Jam (SIM_GPSn_ENABLE / SIM_GPSn_JAM over PARAM_SET, names of
+  ArduPilot 4.6+). As the FC reports them: GPS1 off = no fix with the last position, GPS2 off = no
+  receiver after ~5 s, back ~7 s after OK; jam = the fix comes and goes and the position wanders.
 - Watchdog: an instance that exits is restarted (on Windows the Cygwin binaries die the moment a TCP
   client disconnects — a Kite disconnect would otherwise leave a dead port).
 - Fleet changes at runtime: stop / start / restart / remove the selected vehicles and add one — a vehicle
@@ -175,6 +179,7 @@ DEFAULTS = {
     "vehicle": "Plane", "frame": "plane", "count": 1, "sysidBase": 1, "speedup": 1.0, "wipe": False,
     "preset": "CMAC (ArduPilot default)", "formation": "line", "spacingM": 12,
     "layout": "tcp", "udpPort": 14550, "udpHost": "127.0.0.1", "monitorPort": 14650, "autoRestart": True,
+    "dualGps": False,
     "extraParams": "",
     "binSource": "auto", "channel": next(iter(CHANNELS)), "buildDir": "",
     "presets": [{"name": "CMAC (ArduPilot default)", "lat": -35.363261, "lon": 149.165230, "alt": 584, "hdg": 353}],
@@ -383,6 +388,8 @@ class Instance:
     throttle: int = 0
     fix_type: int = 0
     sats: int = 0
+    fix_type2: int = -1  # -1 = no GPS2_RAW seen
+    sats2: int = 0
     voltage: float = 0.0
     current: float = 0.0
     batt_pct: int = -1
@@ -551,6 +558,8 @@ class Manager:
         # params are also pushed over MAVLink after boot). SERIAL5/6 default to "no protocol".
         lines = ["SERIAL0_PROTOCOL=2", "SERIAL1_PROTOCOL=2", "SERIAL2_PROTOCOL=2", "SERIAL5_PROTOCOL=2", "SERIAL6_PROTOCOL=2",
                  "SIM_TERRAIN=0", "TERRAIN_ENABLE=0", "SIM_DRIFT_SPEED=0", "SIM_DRIFT_TIME=0"]
+        if SETTINGS["dualGps"]:
+            lines += ["GPS2_TYPE=1", "SIM_GPS2_ENABLE=1"]
         lines += [f"{n}={v:g}" for n, v in self.extra_params()]
         (inst.dir / "identity.parm").write_text("\n".join(lines) + "\n", encoding="ascii")
 
@@ -582,6 +591,16 @@ class Manager:
         inst.intervals_requested = inst.params_applied = False
         inst.pending_params, inst.param_tries, inst.last_param_send = {}, 0, 0.0
         inst.param_note = ""
+        inst.fix_type2 = -1
+
+    def gps_fault(self, inst: Instance, receiver: int, fault: str) -> None:
+        """`fault`: ok / off / jam. Goes through the extra-parameter queue, so an unknown name is reported."""
+        if not inst.params_applied:
+            raise RuntimeError(f"sysid {inst.sysid}: a parameter write is still pending — try again in a moment")
+        inst.pending_params = {f"SIM_GPS{receiver}_ENABLE": 0.0 if fault == "off" else 1.0,
+                               f"SIM_GPS{receiver}_JAM": 1.0 if fault == "jam" else 0.0}
+        inst.param_tries, inst.last_param_send, inst.param_note = 1, 0.0, ""
+        inst.params_applied = False
 
     @staticmethod
     def stop_instance(inst: Instance) -> None:
@@ -751,7 +770,7 @@ class Manager:
             if hb_due:
                 self.send_to(inst, mav_heartbeat())
             if inst.last_hb and not inst.intervals_requested:
-                for msgid, hz in ((33, 3), (74, 3), (24, 1), (1, 1)):
+                for msgid, hz in ((33, 3), (74, 3), (24, 1), (124, 1), (1, 1)):
                     self.send_to(inst, mav_message_interval(inst.sysid, msgid, hz))
                 inst.intervals_requested = True
             # Extra params: PARAM_SET each, confirmed by the PARAM_VALUE echo; unanswered ones go again
@@ -797,6 +816,9 @@ class Manager:
         elif msgid == 24:  # GPS_RAW_INT: fix_type u8 @28, satellites_visible u8 @29
             p = pad(pl, 30)
             inst.fix_type, inst.sats = p[28], p[29]
+        elif msgid == 124:  # GPS2_RAW: fix_type u8 @32, satellites_visible u8 @33
+            p = pad(pl, 35)
+            inst.fix_type2, inst.sats2 = p[32], p[33]
         elif msgid == 33:  # GLOBAL_POSITION_INT: lat i32 @4, lon i32 @8, relative_alt i32 @16, hdg u16 @26
             p = pad(pl, 28)
             inst.lat = struct.unpack_from("<i", p, 4)[0] / 1e7
@@ -856,6 +878,8 @@ def row_values(inst: Instance) -> tuple:
     state = inst.state + (f" (×{inst.restarts})" if inst.restarts else "")
     live = bool(inst.last_hb)
     gps = f"{FIX_NAMES[min(inst.fix_type, 6)]} {inst.sats}" if live else ""
+    if live and inst.fix_type2 >= 0:
+        gps += f" · {FIX_NAMES[min(inst.fix_type2, 6)]} {inst.sats2}"
     batt = f"{inst.voltage:.1f} V" + (f" {inst.batt_pct} %" if inst.batt_pct >= 0 else "") if live and inst.voltage > 0 else ""
     return (inst.sysid, inst.frame, link, inst.proc.pid if inst.alive else "", state, inst.mode,
             ("ARMED" if inst.armed else "disarmed") if live else "",
@@ -914,6 +938,7 @@ def run_ui(mgr: Manager, auto_start: bool) -> None:
     g_veh.grid(row=0, column=0, sticky="nsew", padx=4, pady=2)
     v_vehicle, v_frame = tk.StringVar(), tk.StringVar()
     v_count, v_sysid, v_speed, v_wipe = tk.IntVar(), tk.IntVar(), tk.DoubleVar(), tk.BooleanVar()
+    v_dual_gps = tk.BooleanVar()
     ttk.Label(g_veh, text="Type").grid(row=0, column=0, sticky="w", **pad_)
     cb_vehicle = ttk.Combobox(g_veh, textvariable=v_vehicle, values=VEHICLES, state="readonly", width=10)
     cb_vehicle.grid(row=0, column=1, **pad_)
@@ -927,6 +952,7 @@ def run_ui(mgr: Manager, auto_start: bool) -> None:
     ttk.Label(g_veh, text="Speedup").grid(row=2, column=0, sticky="w", **pad_)
     ttk.Spinbox(g_veh, from_=1, to=20, increment=0.5, textvariable=v_speed, width=6).grid(row=2, column=1, sticky="w", **pad_)
     ttk.Checkbutton(g_veh, text="Wipe EEPROM (fresh params)", variable=v_wipe).grid(row=2, column=2, columnspan=2, sticky="w", **pad_)
+    ttk.Checkbutton(g_veh, text="Second GPS receiver", variable=v_dual_gps).grid(row=3, column=2, columnspan=2, sticky="w", **pad_)
 
     # Start position
     g_pos = ttk.LabelFrame(top, text="Start position", padding=6)
@@ -1006,6 +1032,13 @@ def run_ui(mgr: Manager, auto_start: bool) -> None:
         ttk.Button(act, text=text, width=16, command=lambda a=action: on_selected(a)).pack(side="left", padx=4)
     ttk.Separator(act, orient="vertical").pack(side="left", fill="y", padx=8)
     ttk.Button(act, text="Add instance", width=14, command=lambda: on_add()).pack(side="left", padx=4)
+    gps_row = ttk.Frame(root, padding=(10, 0))
+    gps_row.pack(fill="x")
+    ttk.Label(gps_row, text="GPS fault, selected vehicles:").pack(side="left", padx=4)
+    for receiver in (1, 2):
+        ttk.Label(gps_row, text=f"GPS{receiver}").pack(side="left", padx=(10, 2))
+        for text, fault in (("OK", "ok"), ("Off", "off"), ("Jam", "jam")):
+            ttk.Button(gps_row, text=text, width=5, command=lambda r=receiver, f=fault: on_gps_fault(r, f)).pack(side="left", padx=1)
     lbl_connect = ttk.Label(root, text="", font=("Consolas" if IS_WINDOWS else "Menlo", 10), padding=(14, 0, 10, 2))
     lbl_connect.pack(fill="x")
 
@@ -1066,6 +1099,7 @@ def run_ui(mgr: Manager, auto_start: bool) -> None:
                         speedup=float(v_speed.get()), wipe=bool(v_wipe.get()), preset=v_preset.get(),
                         formation=v_formation.get(), spacingM=int(v_spacing.get()), layout=v_layout.get(),
                         udpHost=v_udp_host.get().strip() or "127.0.0.1", udpPort=int(v_udp_port.get()), autoRestart=bool(v_restart.get()),
+                        dualGps=bool(v_dual_gps.get()),
                         extraParams=txt_params.get("1.0", "end").strip(),
                         binSource=next((s for s in sources if source_labels[s] == v_source.get()), "auto"),
                         channel=v_channel.get(), buildDir=v_build.get().strip())
@@ -1079,6 +1113,7 @@ def run_ui(mgr: Manager, auto_start: bool) -> None:
         v_sysid.set(int(SETTINGS["sysidBase"]))
         v_speed.set(float(SETTINGS["speedup"]))
         v_wipe.set(bool(SETTINGS["wipe"]))
+        v_dual_gps.set(bool(SETTINGS["dualGps"]))
         fill_presets()
         show_preset()
         v_formation.set(SETTINGS["formation"])
@@ -1264,6 +1299,18 @@ def run_ui(mgr: Manager, auto_start: bool) -> None:
             cut = sorted({d.sysid for i in insts for d in mgr.chain_dialers(i) if d not in insts}) if mgr.layout == "chain" else []
             v_status.set(f"{action}: sysid {', '.join(done)}" + (f" — chain: sysid {', '.join(map(str, cut))} dialled it and does "
                                                                   "not reconnect, the vehicles behind stay unreachable" if cut else ""))
+
+    def on_gps_fault(receiver: int, fault: str):
+        insts = [i for i in selected_instances() if i.last_hb]
+        if not insts:
+            v_status.set("select a running vehicle row first")
+            return
+        try:
+            for inst in insts:
+                mgr.gps_fault(inst, receiver, fault)
+            v_status.set(f"GPS{receiver} {fault}: sysid {', '.join(str(i.sysid) for i in insts)}")
+        except RuntimeError as e:
+            v_status.set(str(e))
 
     def on_add():
         try:

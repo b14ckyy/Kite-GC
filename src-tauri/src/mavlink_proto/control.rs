@@ -59,6 +59,29 @@ pub fn send_command_long(
     result
 }
 
+/// Send a `COMMAND_LONG` without waiting for its `COMMAND_ACK`. For housekeeping the pilot did not ask
+/// for: the link has ONE ack receiver, and a wait here would take the ack of a command they just sent.
+pub fn send_command_long_no_ack(
+    cmd_tx: &mpsc::Sender<MavlinkCommand>,
+    fc_sysid: u8,
+    command: MavCmd,
+    params: [f32; 7],
+) -> Result<(), String> {
+    send(cmd_tx, MavMessage::COMMAND_LONG(COMMAND_LONG_DATA {
+        target_system: fc_sysid,
+        target_component: AUTOPILOT_COMPONENT,
+        command,
+        confirmation: 0,
+        param1: params[0],
+        param2: params[1],
+        param3: params[2],
+        param4: params[3],
+        param5: params[4],
+        param6: params[5],
+        param7: params[6],
+    }))
+}
+
 /// Send a `COMMAND_INT` and wait for its `COMMAND_ACK`. Used for commands carrying a global
 /// position (lat/lon as int32 × 1e7) — `DO_REPOSITION` — where COMMAND_LONG's f32 params would
 /// lose coordinate precision. `params` are param1..param4; `x`/`y` are lat/lon × 1e7; `z` is alt (m).

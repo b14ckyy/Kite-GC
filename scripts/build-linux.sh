@@ -1,7 +1,7 @@
 #!/bin/bash
 # ============================================================
 # Kite Ground Control — Linux Build Script
-# Builds standalone Linux packages (.deb, .AppImage, .rpm)
+# Builds the Linux packages (.deb, .rpm) and the portable ZIP
 #
 # Recommended: Use "just build-linux" or "just build" instead
 # ============================================================
@@ -68,5 +68,5 @@ npm run tauri build
 
 echo "[4/4] Build completed successfully!"
 
-# Gather the standalone binary + packages into <repo>/release/ (git-ignored).
+# Gather the packages + the portable ZIP into <repo>/release/ (git-ignored).
 bash "$(dirname "$0")/collect-release.sh"

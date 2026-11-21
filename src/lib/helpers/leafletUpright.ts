@@ -1,27 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 /**
- * Upright overlays on a rotated map (heading-up mode).
- *
- * The 2D map rotates as a whole — the `.map` container carries `transform: rotate(var(--map-rotation))`
- * — so everything Leaflet draws into it turns with the tiles: marker icons, popups, tooltips. Vector
- * geometry (tracks, zones) should, but a waypoint teardrop, a callsign label or the "Fly here"
- * popup must stay readable: bound to its geographic anchor, drawn upright.
- *
- * Leaflet positions those elements with an inline `transform: translate3d(...)` that it rewrites on
- * every move (`DomUtil.setPosition`), so a CSS rule cannot add the counter-rotation. This module
- * patches the few prototype methods that write that transform and appends
- * `rotate(var(--kite-upright, 0deg))`, pivoting on the element's anchor point:
- *   - `L.Marker._setPos`        — the icon's anchor sits at (-marginLeft, -marginTop) of its box;
- *   - `L.Draggable._updatePosition` — a dragged icon is moved by the Draggable, not by `_setPos`;
- *   - `L.Popup._updatePosition` / `_animateZoom` — the popup box hangs above the anchor by
- *     `margin-bottom` plus the popup offset (see `_updatePosition` in Leaflet's DivOverlay);
- *   - `L.Tooltip._setPosition` — the box is placed by `direction` (top/bottom/left/right/center)
- *     minus offset and anchor.
- * The angle itself is a CSS custom property set by Map.svelte on the `.map` element
- * (`--kite-upright: calc(-1 * var(--map-rotation))` while heading-up, unset = 0deg otherwise), so a
- * heading change is one variable write, not a walk over every marker. Elements whose orientation IS
- * geographic (the UAV model, radar silhouettes) opt out by redefining the variable to 0deg.
+ * Keeps markers, popups and tooltips upright on the heading-up map: the Leaflet methods that write their
+ * inline transform append `rotate(var(--kite-upright, 0deg))`, pivoting on the element's anchor.
+ * Map.svelte sets the angle per pane; an element with a geographic orientation redefines it to 0deg.
  */
 import L from 'leaflet';
 

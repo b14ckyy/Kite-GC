@@ -1,15 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Multi-vehicle ("fleet") feature gate — the backend's `fleet_mode.rs`: on in a debug build, off in a
-// release build unless launched with `--fleet` / `KITE_FLEET` (Dev-Docs active/GROUP_FLIGHTS.md §5e: no
-// setting, a launch flag). Off: the single-vehicle UI — no link manager, Fleet tab, group commands, fleet
-// map layers or per-vehicle STATUSTEXT tags. Loaded once at startup (`loadFleetMode`); the Debug Monitor
-// can switch it for the running session in a debug build (`setFleetMode`).
-//
-// Group recording (temporary, until the group end screen exists): without the KITE_FLEET_RECORDING
-// developer opt-in a fleet session records only the first vehicle's flights — said once per app run
-// when a second vehicle appears (controllers/fleetRecordingNotice).
+// Multi-vehicle ("fleet") feature gate (backend `fleet_mode.rs`): on in debug builds, else only with `--fleet` /
+// `KITE_FLEET` (Dev-Docs active/GROUP_FLIGHTS.md §5e). Loaded once (`loadFleetMode`); switchable per session in
+// a debug build. Without KITE_FLEET_RECORDING only the first vehicle is recorded (controllers/fleetRecordingNotice).
 
 import { writable } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';

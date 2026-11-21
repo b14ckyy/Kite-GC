@@ -58,6 +58,8 @@ export interface DetachedState {
   nativeSink: boolean;
   reconnecting: boolean;
   reconnectAttempt: number;
+  /** A replayed flight has no recording for the current time. */
+  replayGap: boolean;
 }
 
 let unlisteners: UnlistenFn[] = [];
@@ -213,6 +215,7 @@ function pushState(s: VideoState, force = false): void {
     nativeSink: s.nativeSink,
     reconnecting: s.reconnecting,
     reconnectAttempt: s.reconnectAttempt,
+    replayGap: s.replay && s.replayGap,
   };
   const key = JSON.stringify(payload);
   if (!force && key === lastPushed) return;

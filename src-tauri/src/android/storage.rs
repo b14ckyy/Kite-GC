@@ -8,8 +8,8 @@
 //!
 //! The model is scoped storage: the user grants ONE folder through the system tree picker, the app
 //! holds a persistable grant on it, and no storage permission exists anywhere. Because a SAF grant
-//! provides no POSIX path, nothing *lives* in that folder — the session-end mirror
-//! (`user_file::mirror_session`) copies artefacts into it through the ContentResolver.
+//! provides no POSIX path, nothing *lives* in that folder — finished raw logs are moved into it
+//! through the ContentResolver (`user_file::move_raw_logs`).
 
 use jni::objects::JString;
 
@@ -48,9 +48,10 @@ pub fn pick_folder() -> Result<Option<String>, String> {
     Ok(Some(path))
 }
 
-/// Hand a file to the system share sheet (mail, messengers, a text editor…). Fire-and-forget —
-/// the sheet is the user's from there on.
-pub fn share_file(path: &str, mime: &str) -> Result<(), String> {
+/// Hand a file to the system share sheet (mail, messengers, a file manager…). Fire-and-forget — the
+/// sheet is the user's from there on. A non-empty `save_label` adds a "save to device" action to the
+/// sheet where Android has such actions (14+); a tap on it is fetched with `take_save_request`.
+pub fn share_file(path: &str, mime: &str, save_label: &str) -> Result<(), String> {
     let mut env = jvm::env()?;
     let class = jvm::app_class(&mut env, BRIDGE)?;
     let j_path = env
@@ -59,12 +60,15 @@ pub fn share_file(path: &str, mime: &str) -> Result<(), String> {
     let j_mime = env
         .new_string(mime)
         .map_err(|e| format!("building the mime string: {e}"))?;
+    let j_label = env
+        .new_string(save_label)
+        .map_err(|e| format!("building the label string: {e}"))?;
     let r = env
         .call_static_method(
             &class,
             "shareFile",
-            "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
-            &[(&j_path).into(), (&j_mime).into()],
+            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+            &[(&j_path).into(), (&j_mime).into(), (&j_label).into()],
         )
         .and_then(|v| v.l());
     let err = jvm::check(&mut env, r, "StorageAccess.shareFile")?;
@@ -78,34 +82,49 @@ pub fn share_file(path: &str, mime: &str) -> Result<(), String> {
     Err(msg)
 }
 
-/// Mirror every regular file in `src_dir` into the granted tree at `tree_uri` — files already
-/// present with the same size are skipped, everything else is created or rewritten through the
-/// ContentResolver. Flat (no subdirectories), which matches the raw-log staging dir and the DB
-/// snapshot dir.
-pub fn sync_dir_to_tree(tree_uri: &str, src_dir: &str) -> Result<(), String> {
+/// The shared file the user asked to save to the device (the sheet's own action), once.
+pub fn take_save_request() -> Result<Option<String>, String> {
     let mut env = jvm::env()?;
     let class = jvm::app_class(&mut env, BRIDGE)?;
+    let r = env
+        .call_static_method(&class, "takeSaveRequest", "()Ljava/lang/String;", &[])
+        .and_then(|v| v.l());
+    let value = jvm::check(&mut env, r, "StorageAccess.takeSaveRequest")?;
+    if value.is_null() {
+        return Ok(None);
+    }
+    env.get_string(&JString::from(value))
+        .map(|s| Some(String::from(s)))
+        .map_err(|e| format!("reading the save request: {e}"))
+}
+
+/// Move `files` into the granted tree at `tree_uri` (flat): each is written through the
+/// ContentResolver, its size read back, and only then deleted here.
+pub fn move_files_to_tree(tree_uri: &str, files: &[std::path::PathBuf]) -> Result<(), String> {
+    let mut env = jvm::env()?;
+    let class = jvm::app_class(&mut env, BRIDGE)?;
+    let paths: Vec<String> = files.iter().map(|f| f.to_string_lossy().into_owned()).collect();
     let j_uri = env
         .new_string(tree_uri)
         .map_err(|e| format!("building the tree-uri string: {e}"))?;
-    let j_dir = env
-        .new_string(src_dir)
-        .map_err(|e| format!("building the src-dir string: {e}"))?;
+    let j_paths = env
+        .new_string(paths.join("\n"))
+        .map_err(|e| format!("building the file list: {e}"))?;
     let r = env
         .call_static_method(
             &class,
-            "syncDirToTree",
+            "moveFilesToTree",
             "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
-            &[(&j_uri).into(), (&j_dir).into()],
+            &[(&j_uri).into(), (&j_paths).into()],
         )
         .and_then(|v| v.l());
-    let err = jvm::check(&mut env, r, "StorageAccess.syncDirToTree")?;
+    let err = jvm::check(&mut env, r, "StorageAccess.moveFilesToTree")?;
     if err.is_null() {
         return Ok(());
     }
     let msg = env
         .get_string(&JString::from(err))
         .map(String::from)
-        .map_err(|e| format!("reading the sync error: {e}"))?;
+        .map_err(|e| format!("reading the move error: {e}"))?;
     Err(msg)
 }

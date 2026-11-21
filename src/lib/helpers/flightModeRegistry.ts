@@ -1,16 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-/**
- * Flight-mode output registry — the single presentation source for the unified, protocol-agnostic
- * flight-mode model (see docs/active/FLIGHT_MODE_UNIFIED.md).
- *
- * Protocol input adapters (backend) classify raw mode data into a canonical `FlightModeState`
- * (string ids). This registry maps each id → a display label + a semantic **category**. The category
- * is the shared colour axis (drives the widget badge colour + track-coloring); the label stays exact
- * per mode, so nothing is lost. Adding a protocol = a new adapter + a few ids here — no widget/pipeline
- * changes. Mode names are intentionally kept in English (universal pilot terminology — FBW-A, RTL, …).
- */
+/** Flight-mode output registry — the single presentation source for the unified flight-mode model
+ *  (docs/active/FLIGHT_MODE_UNIFIED.md): canonical id (from the backend adapters) → display label + semantic
+ *  category (the shared colour axis). Mode names stay English (pilot terminology). */
 
 /** Canonical, protocol-agnostic flight mode (mirrors the backend struct). */
 export interface FlightModeState {
@@ -46,10 +39,7 @@ interface ModeDef {
   short?: string;         // compact label for modifier chips (INAV stacking)
 }
 
-/**
- * Canonical id → definition. Ids come 1:1 from the protocol adapters; cross-protocol-identical modes
- * (acro/manual/poshold/althold/autotune/cruise) share one entry.
- */
+/** Canonical id → definition; cross-protocol-identical modes (acro/manual/poshold/…) share one entry. */
 export const MODE_REGISTRY: Record<string, ModeDef> = {
   // ── INAV primary ──
   failsafe_rth: { label: 'Failsafe RTH', category: 'failsafe' },
@@ -147,6 +137,17 @@ const UNKNOWN: ModeDef = { label: 'N/A', category: 'other' };
 function def(id: string | null | undefined): ModeDef {
   if (!id) return UNKNOWN;
   return MODE_REGISTRY[id] ?? { label: id, category: 'other' };
+}
+
+/** The canonical modes in which the FC's position target is the guided ("Fly Here") point — the modes
+ *  the live Guided toggle stands for (`MavMode.guided`). In any other mode the same record field holds
+ *  the mission item or home. */
+const GUIDED_TARGET_MODES = new Set(['guided', 'px4_hold']);
+
+/** The guided target a recorded sample shows, or null. */
+export function guidedTargetOf(r: { mode_primary: string | null; target_lat: number | null; target_lon: number | null }): { lat: number; lon: number } | null {
+  if (r.target_lat == null || r.target_lon == null || !GUIDED_TARGET_MODES.has(r.mode_primary ?? '')) return null;
+  return { lat: r.target_lat, lon: r.target_lon };
 }
 
 /** Display label for a canonical mode id (primary badge). */

@@ -14,13 +14,16 @@
 #         scripts/make-update-manifest.sh [tag]        # tag defaults to v<package.json version>
 #     gh release create <tag> --notes-file … release/*
 #
+# "Latest" on GitHub is what the stable update channel reads, and GitHub gives it to the release
+# published last. It must stay with the newest release of the NEWEST line: a pre-release gets
+# `--prerelease`, a patch for an older line `--latest=false` once a newer feature release exists.
+#
 # A `*_playstore.aab` in release/ belongs to the Play Console, not to the GitHub release — move it
 # out before the `gh release create` line above.
 #
 # What it does:
-#   1. Signs every updater artifact that has no `.sig` beside it. Nothing is signed at build time —
-#      not on CI, not on Sebastian's macOS machine — so the private key never leaves the
-#      maintainer's machines (it lives in the private Dev-Docs repository).
+#   1. Signs every updater artifact that has no `.sig` beside it. Nothing is signed at build time (not
+#      on CI, not on another machine), so the private key never leaves the maintainer's machines.
 #   2. Writes release/latest.json — one entry per platform key the plugin looks up
 #      (`<os>-<arch>[-<installer>]`). Missing artifacts are reported and skipped, so a release with
 #      fewer platforms still gets a valid manifest.
@@ -49,10 +52,8 @@ PLATFORMS=(
     "darwin-x86_64       KiteGC_macOS_universal_${VERSION}_update.tar.gz"
     "linux-x86_64-deb    KiteGC_Linux_x64_${VERSION}_installer.deb"
     "linux-x86_64-rpm    KiteGC_Linux_x64_${VERSION}_installer.rpm"
-    "linux-x86_64        KiteGC_Linux_x64_${VERSION}_standalone.AppImage"
     "linux-aarch64-deb   KiteGC_Linux_arm64_${VERSION}_installer.deb"
     "linux-aarch64-rpm   KiteGC_Linux_arm64_${VERSION}_installer.rpm"
-    "linux-aarch64       KiteGC_Linux_arm64_${VERSION}_standalone.AppImage"
 )
 
 # 0. CI builds an unsigned macOS archive under the same name. Installed by the updater it replaces a

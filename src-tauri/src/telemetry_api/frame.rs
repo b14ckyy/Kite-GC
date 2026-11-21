@@ -15,7 +15,7 @@
 use serde::Serialize;
 
 use super::state::{
-    AltRef, ApiState, Attitude, BatteryInstance, FlightMode, Gcs, Link, PassiveProtocol, Sensors,
+    AltRef, ApiState, Attitude, BatteryInstance, FlightMode, Gcs, GpsReceiver, Link, PassiveProtocol, Sensors,
     Vehicle, Wind,
 };
 
@@ -65,6 +65,8 @@ pub struct Frame<'a> {
 #[serde(rename_all = "camelCase")]
 pub struct Telemetry<'a> {
     pub gps: Option<GpsOut>,
+    /// MAVLink only: each physical receiver's own raw values (`gps` carries the fused position).
+    pub gps_receivers: Option<&'a Vec<GpsReceiver>>,
     pub attitude: Option<&'a Attitude>,
     pub altitude: Option<AltitudeOut>,
     pub alt_ref: Option<&'a AltRef>,
@@ -234,6 +236,7 @@ impl<'a> Frame<'a> {
             fc_variant: link.fc_variant.as_deref(),
             telemetry: Telemetry {
                 gps,
+                gps_receivers: state.gps_receivers.as_ref(),
                 attitude: state.attitude.as_ref(),
                 altitude,
                 alt_ref: state.alt_ref.as_ref(),
@@ -269,7 +272,7 @@ pub struct Hello {
 }
 
 pub const GROUPS: &[&str] = &[
-    "gps", "attitude", "altitude", "altRef", "wind", "battery", "batteries", "link", "status", "sensors",
+    "gps", "gpsReceivers", "attitude", "altitude", "altRef", "wind", "battery", "batteries", "link", "status", "sensors",
     "flightMode", "nav", "ekf", "misc", "vehicle", "passiveProtocol", "lastUpdate",
 ];
 

@@ -31,7 +31,7 @@ tauri = { version = "2", features = ["macos-private-api"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde_json = { version = "1", features = ["raw_value"] }  # raw_value: .kmission carries JSON text unparsed
 serde_repr = "0.1"
 log = "0.4"
 rusqlite = { version = "0.31", features = ["bundled"] }
@@ -52,23 +52,17 @@ mavlink = { version = "0.17", default-features = false, features = ["std", "ardu
 num-traits = "0.2"  # FromPrimitive for lossless MavCmd/MavFrame <-> int (mission codec round-trip)
 tiff = "0.9"  # decode Copernicus GLO-30 GeoTIFF DEM tiles (Float32, DEFLATE, predictor 3)
 
-# Desktop-only dependencies — each mobile target swaps in its own implementation behind the
-# transport/ seam (transport/mod.rs) or a platform stand-in:
-#   serialport                — no backend on iOS at all; on Android an unrooted app may not open
-#                               /dev/tty*, so USB serial goes through the USB Host API instead
-#                               (UsbSerial.kt + transport/serial_android.rs).
-#   btleplug                  — no iOS backend (CoreBluetooth via objc2 instead); its Android backend
-#                               needs the droidplug Java companion the Gradle project does not ship.
-#   starship-battery          — no mobile targets; iOS reports always-on-battery, Android reads the
-#                               power-supply class from sysfs (commands/system.rs).
-#   tauri-plugin-window-state — desktop window geometry; mobile is a single full-screen surface.
-# On every desktop target this cfg is true, so Windows/Linux/macOS resolve these exactly as before.
+# Desktop-only: no mobile backend (btleplug, starship-battery; keepawake does not compile off
+# Windows/Linux/macOS; serialport is Android's tty backend only, see below) or no mobile meaning (window-state, updater). Mobile swaps in its own
+# implementation behind transport/ (transport/mod.rs) or a platform stand-in.
 [target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
 serialport = "4"
 btleplug = "0.11"
 starship-battery = "0.10"  # cross-platform AC/battery state (Windows + Linux + macOS) for the low-power 3D auto mode
 tauri-plugin-window-state = "2"
 tauri-plugin-updater = "2"  # "Update and Restart" for installed copies (commands/updater.rs); mobile links to the store
+keepawake = "0.6"  # display / system sleep inhibit behind the screen-awake rule (link_presence.rs)
+trash = "5"  # recycle bin / trash for the database backup the user removes (commands/flightlog.rs)
 
 # USB serial on Android runs through the platform's USB Host API, which only exists in Java — the
 # driver is `UsbSerial.kt` in the Android app module and `transport/serial_android.rs` is the JNI shim
@@ -77,6 +71,9 @@ tauri-plugin-updater = "2"  # "Update and Restart" for installed copies (command
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.21"
 ndk-context = "0.1"
+# Posix tty backend for built-in UARTs of Android RC transmitters (/dev/ttyS1); USB stays on the USB
+# Host API. No udev on Android, hence no default features.
+serialport = { version = "4", default-features = false }
 # MediaCodec hardware video decode + ANativeWindow for the native RTSP sink (MOBILE_RTSP P2.2):
 # the safe wrappers over the NDK's AMediaCodec/AMediaFormat C API (video/android_sink.rs).
 ndk = { version = "0.9", default-features = false, features = ["media", "api-level-30"] }
@@ -97,10 +94,16 @@ version = "0.61"
 features = [
     "Gaming_Input",
     "Foundation_Collections",
+    # PIN pairing of BLE modules that demand it on connect (transport/ble_pairing.rs).
+    "Foundation",
+    "Devices_Bluetooth",
+    "Devices_Enumeration",
     # XInput fallback for Xbox-class pads that Windows.Gaming.Input lists but never reads (hid/windows.rs).
     "Win32_UI_Input_XboxController",
     # Hole-punch spike / native video sink (P2.1): raw child windows under the WebView.
     "Win32_Foundation",
+    # Free space of a volume before a large export (user_file.rs).
+    "Win32_Storage_FileSystem",
     "Win32_Graphics_Gdi",
     "Win32_UI_WindowsAndMessaging",
     "Win32_System_LibraryLoader",
@@ -114,6 +117,9 @@ features = [
 
 [target.'cfg(target_os = "linux")'.dependencies]
 evdev = "0.13"
+# BlueZ pairing agent for BLE modules that demand a passkey (transport/ble_pairing.rs); the crate is
+# already in the tree through keepawake and tauri-plugin-opener.
+zbus = "5"
 # TIOCGSERIAL probe to hide phantom 8250 /dev/ttyS* stubs from the port list (serial.rs).
 libc = "0.2"
 # Access the underlying WebKitGTK WebView to pin its page zoom at 1.0 (lib.rs setup). On Linux the
@@ -134,7 +140,9 @@ gst_app = { package = "gstreamer-app", version = "0.21" }
 # bindings (a Rust CBCentralManager/CBPeripheral delegate). Keeps the BLE transport in-crate - no
 # Swift, no Tauri plugin - so it survives `cargo tauri ios init` regeneration.
 [target.'cfg(target_os = "ios")'.dependencies]
+libc = "0.2"
 objc2 = "0.6"
+block2 = "0.6"  # the (absent) completion block of the share sheet presentation (commands/storage.rs); already in the tree
 objc2-foundation = { version = "0.3", features = ["NSArray", "NSData", "NSDictionary", "NSString", "NSValue", "NSEnumerator", "NSObject"] }
 objc2-core-bluetooth = { version = "0.3", features = ["CBCentralManager", "CBPeripheral", "CBService", "CBCharacteristic", "CBAttribute", "CBPeer", "CBAdvertisementData", "CBManager", "CBError", "CBUUID"] }
 # Native RTSP decode on iPad: the macOS sink (video/apple_sink.rs) under a UIKit host (video/ios_host.rs).
@@ -154,6 +162,7 @@ objc2-core-graphics = { version = "0.3", features = ["CGColor", "CGGeometry"] }
 tauri-plugin-geolocation = "2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2"
 # HID / joystick input backend (hid/macos.rs) reads RAW IOKit HID elements — axes/buttons/hat by
 # usage page/usage, no gamepad projection — matching the Windows (WGI) / Linux (evdev) backends. We
 # talk to the IOKit HID Manager C API directly (declared in macos.rs, linked to the IOKit framework);

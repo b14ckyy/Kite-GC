@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Phone widget layout — pure config operations over `PhoneWidgetsConfig` (persisted in settings,
-// separate from the desktop PanelConfig; Dev-Docs active/PHONE_UI.md D13). The packer
-// (helpers/phoneGridPacker.ts) turns the config into slot placements; this module keeps the
-// config consistent: registry-sanitised, overflowed widgets deactivated, sizes valid for the shape.
+// Phone widget layout — pure config operations over `PhoneWidgetsConfig` (Dev-Docs active/PHONE_UI.md D13),
+// kept consistent: registry-sanitised, overflow deactivated, sizes valid for the shape. The packer
+// (helpers/phoneGridPacker.ts) turns it into placements.
 
 import { WIDGET_MAP, effectiveWidgetSize, nextWidgetSize, type WidgetSize } from '$lib/config/widgetRegistry';
 import { PHONE_GRID_MAX_COLS, PHONE_GRID_PAGES, PHONE_GRID_ROWS } from '$lib/config/phoneGrid';
 import {
   canActivate,
   packPhoneGrid,
+  packPhoneMove,
   type PackResult,
   type PhoneGridGeometry,
   type PhoneWidgetEntry,
@@ -51,7 +51,7 @@ export const PHONE_GEOMETRY: PhoneGridGeometry = {
   pages: PHONE_GRID_PAGES,
 };
 
-/** Marc's default layout (PHONE_UI.md §6): page 1 AHI (L), Home · Altitude, GPS · Compass;
+/** Default layout (PHONE_UI.md §6): page 1 AHI (L), Home · Altitude, GPS · Compass;
  *  page 2 Live AGL (W), Terrain Radar (L), Flight Mode · Battery. Speed, RC Link, Battery 2 off. */
 export const DEFAULT_PHONE_WIDGETS: PhoneWidgetsConfig = {
   entries: [
@@ -169,9 +169,8 @@ export function cyclePhoneWidgetSize(cfg: PhoneWidgetsConfig, id: string): Phone
   return normalizePhoneWidgets({ ...cfg, entries: cfg.entries.map((e) => (e.id === id ? { ...e, size: next } : e)) });
 }
 
-/** Put a widget at a position (page, row, col — the user's drop) in the COLUMN; the packer settles
- *  it. A widget coming out of a bottom slot frees the slot and is activated at the drop. Refused
- *  (returns null) when the column has no room for it. */
+/** Put a widget at a COLUMN position (the drop); the packer settles it (`packPhoneMove`: the dropped widget gets
+ *  its row). A widget from a bottom slot frees the slot and is activated. Null when the column has no room. */
 export function movePhoneWidget(cfg: PhoneWidgetsConfig, id: string, page: number, row: number, col: number): PhoneWidgetsConfig | null {
   const cur = cfg.entries.find((e) => e.id === id);
   if (!cur) return cfg;
@@ -179,17 +178,12 @@ export function movePhoneWidget(cfg: PhoneWidgetsConfig, id: string, page: numbe
   const bottom = slot ? { ...(cfg.bottom ?? EMPTY_BOTTOM), [slot]: null } : cfg.bottom;
   const c = col === 1 ? 1 : 0;
   if (slot && !canActivate(cfg.entries.filter((e) => e.id !== id), id, cur.size, c, PHONE_GEOMETRY)) return null;
-  return normalizePhoneWidgets({
-    ...cfg,
-    entries: cfg.entries.map((e) => (e.id === id ? { ...e, active: true, page, row, col: c } : e)),
-    bottom,
-  });
+  return normalizePhoneWidgets({ ...cfg, entries: packPhoneMove(cfg.entries, PHONE_GEOMETRY, id, page, row, c), bottom });
 }
 
-/** Put a widget into a bottom slot (B6). Coming from the column it is deactivated there (its
- *  position is kept for the way back); coming from another slot the slots swap; a widget already
- *  in the target slot goes back to where the moved one came from — the column, at the end of the
- *  order (the next free slot), or its own old slot. */
+/** Put a widget into a bottom slot (B6): from the column it is deactivated (position kept for the way back);
+ *  from another slot the slots swap; a displaced widget goes back where the moved one came from (column end
+ *  or its old slot). */
 export function movePhoneWidgetToBottom(cfg: PhoneWidgetsConfig, id: string, slot: PhoneBottomSlot): PhoneWidgetsConfig | null {
   if (!canGoToBottom(id) || !cfg.entries.some((e) => e.id === id)) return cfg;
   const b = { ...(cfg.bottom ?? EMPTY_BOTTOM) };

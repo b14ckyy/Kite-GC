@@ -34,4 +34,5 @@ mod sdp;
 #[cfg(target_os = "linux")]
 pub use h265_sps::{probe_au, strip_window, SpsProbe, Window};
 
+pub(crate) use h265_sps::{profile_tier_level, strip_emulation, BitReader};
 pub use client::{run_rtsp, LiveRtspStats, RtspConfig, RtspTransport, VideoCodec};

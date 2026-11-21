@@ -3,11 +3,9 @@
   Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 -->
 
-<!-- UpdateDialog.svelte — one-shot "new version available" prompt driven by the update-check controller.
-     Shows the release notes (GitHub's release body, rendered from markdown) above the choices: skip this
-     version, remind me later, open the release page, or "Update and Restart" — which downloads + installs
-     in place with a progress bar and relaunches (mobile builds link to their store instead). Styled like
-     ConfirmDialog. -->
+<!-- UpdateDialog.svelte — one-shot "new version available" prompt with the release notes: skip, remind me
+     later, open the release page, or "Update and Restart" (installs in place, then relaunches). Mobile
+     cannot install: a store installation links to its listing, an Android APK to the release page. -->
 <script lang="ts">
   import { t } from 'svelte-i18n';
   import { marked } from 'marked';
@@ -21,11 +19,16 @@
   const info = $derived($pendingUpdate);
   const busy = $derived($installState.phase === 'download' || $installState.phase === 'install');
 
+  /** Release-body sections on installing the packages by hand (headings of Dev-Docs `releases/TEMPLATE.md`),
+   *  cut for a store installation, which must not be walked through installing an APK. */
+  const INSTALL_SECTIONS = /^## +(?:Before you install|Installation)[^\n]*\n[\s\S]*?(?=^## |(?![\s\S]))/gim;
+
   /** Release body → sanitised HTML. The centred banner block at the top of every release is dropped (it is
    *  the page header, not notes), and GitHub's `> [!NOTE]`-style alerts become classed blockquotes. */
   const notesHtml = $derived.by(() => {
     if (!info?.body) return '';
-    const md = info.body.replace(/^\s*<p align="center">[\s\S]*?<\/p>\s*/i, '');
+    let md = info.body.replace(/^\s*<p align="center">[\s\S]*?<\/p>\s*/i, '');
+    if ($updateKind === 'store') md = md.replace(/\r\n/g, '\n').replace(INSTALL_SECTIONS, '');
     const html = marked.parse(md, { async: false, gfm: true });
     const alerts = html.replace(
       /<blockquote>\s*<p>\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*(?:<br\s*\/?>)?\s*/gi,
@@ -36,13 +39,14 @@
 
   /** Primary button label per update kind. */
   const primaryLabel = $derived.by(() => {
-    if ($updateKind !== 'mobile') return $t('update.install');
-    if (!storeUrl()) return $t('update.openPage');
+    if ($updateKind === 'installer' || $updateKind === 'portable') return $t('update.install');
+    if ($updateKind === 'sideload' || !storeUrl()) return $t('update.openPage');
     return isAndroid ? $t('update.playStore') : $t('update.appStore');
   });
 
   function onPrimary() {
-    if ($updateKind === 'mobile') void openStore();
+    if ($updateKind === 'store') void openStore();
+    else if ($updateKind === 'sideload') void openReleasePage();
     else void installUpdate();
   }
 
@@ -62,12 +66,9 @@
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="dialog-box" onclick={(e) => e.stopPropagation()}>
       <div class="dialog-title">{$t('update.title')}</div>
-      <div class="dialog-message">
-        {$t('update.body')}
-        <div class="upd-versions">
-          <div><span class="upd-k">{$t('update.latest')}</span> <span class="upd-v">{info.version}</span>{#if info.prerelease} <span class="upd-pre">{$t('update.prerelease')}</span>{/if}</div>
-          <div><span class="upd-k">{$t('update.current')}</span> <span class="upd-v">{currentVersion}</span></div>
-        </div>
+      <div class="dialog-message upd-versions">
+        <span><span class="upd-k">{$t('update.latest')}</span> <span class="upd-v">{info.version}</span>{#if info.prerelease}<span class="upd-pre">{$t('update.prerelease')}</span>{/if}</span>
+        <span><span class="upd-k">{$t('update.current')}</span> <span class="upd-v">{currentVersion}</span></span>
       </div>
 
       {#if notesHtml}
@@ -98,7 +99,7 @@
         <div class="dialog-buttons">
           <button class="dialog-btn dialog-btn-cancel" onclick={skipVersion}>{$t('update.skip')}</button>
           <button class="dialog-btn" onclick={remindLater}>{$t('update.later')}</button>
-          {#if $updateKind !== 'mobile' || storeUrl()}
+          {#if $updateKind === 'installer' || $updateKind === 'portable'}
             <button class="dialog-btn" onclick={openReleasePage}>{$t('update.openPage')}</button>
           {/if}
           <button class="dialog-btn dialog-btn-primary" onclick={onPrimary}>{primaryLabel}</button>
@@ -117,7 +118,6 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 16px;
   }
 
   .dialog-box {
@@ -126,8 +126,7 @@
     border-radius: 8px;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
     padding: 20px 24px 16px;
-    width: min(640px, 100%);
-    max-height: 90vh;
+    width: min(690px, 100%);
     display: flex;
     flex-direction: column;
     min-height: 0;
@@ -148,14 +147,13 @@
   }
 
   .upd-versions {
-    margin-top: 12px;
     display: flex;
-    flex-direction: column;
-    gap: 4px;
+    flex-wrap: wrap;
+    gap: 4px 24px;
   }
   .upd-k { color: #949494; }
   .upd-v { color: #e0e0e0; font-weight: 600; }
-  .upd-pre { color: #f5a623; font-size: 11px; }
+  .upd-pre { color: #f5a623; font-size: 11px; margin-left: 6px; }
 
   /* ── Release notes ─────────────────────────────────────────────────────── */
   .upd-notes-head {
@@ -212,7 +210,7 @@
     overflow-x: auto;
   }
   .upd-notes :global(pre code) { background: none; padding: 0; }
-  .upd-notes :global(table) { border-collapse: collapse; margin: 0 0 8px; }
+  .upd-notes :global(table) { border-collapse: collapse; margin: 0 0 8px; display: block; max-width: 100%; overflow-x: auto; }
   .upd-notes :global(th), .upd-notes :global(td) { border: 1px solid #3a3a3a; padding: 3px 8px; text-align: left; }
   .upd-notes :global(th) { color: #e0e0e0; background: #2a2a2a; }
   .upd-notes :global(hr) { border: 0; border-top: 1px solid #333; margin: 10px 0; }

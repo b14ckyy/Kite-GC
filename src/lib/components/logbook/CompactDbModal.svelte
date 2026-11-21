@@ -3,12 +3,9 @@
   Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 -->
 
-<!-- "Compact Database" popup: shown while the full VACUUM runs (minutes on a hard disk or an SD card).
-     Deliberately modal and self-dismissing like the hi-res parse popup — no buttons, no Escape, no
-     outside click: the compact cannot be cancelled, and the user must see that the wait is expected.
-     SQLite reports no progress for a VACUUM, so the bar is indeterminate; the elapsed time shows that
-     it is still alive. The page makes everything else `inert` meanwhile (no Tab / Enter behind it),
-     so this component must stay outside those subtrees (+page.svelte, panels layer). -->
+<!-- "Compact Database" popup while the full VACUUM runs (minutes on HDD/SD): modal and self-dismissing (no
+     buttons/Escape — it can't be cancelled); indeterminate bar, since SQLite reports no VACUUM progress. The page
+     makes everything else `inert`, so this must stay outside those subtrees (+page.svelte, panels layer). -->
 <script lang="ts">
   import { t } from 'svelte-i18n';
 

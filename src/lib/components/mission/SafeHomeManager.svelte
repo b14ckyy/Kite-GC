@@ -30,6 +30,7 @@
   import Toggle from '$lib/components/panel/Toggle.svelte';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
   import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+  import { requestMapAccess } from '$lib/stores/panelYield';
 
   let { onBack }: { onBack: () => void } = $props();
 
@@ -280,7 +281,7 @@
             <Toggle checked={shw.enabled} id={`sh-en-${i}`} disabled={!canEdit} onchange={(c) => setSafehomeEnabled(i, c)} />
             <input class="sh-coord" type="number" step="0.0000001" disabled={!canEdit} placeholder={$t('safehome.lat')} value={empty ? '' : (shw.lat / 1e7).toFixed(7)} onchange={(e) => onCoordInput(i, 'lat', e.currentTarget.value)} />
             <input class="sh-coord" type="number" step="0.0000001" disabled={!canEdit} placeholder={$t('safehome.lon')} value={empty ? '' : (shw.lon / 1e7).toFixed(7)} onchange={(e) => onCoordInput(i, 'lon', e.currentTarget.value)} />
-            <Button variant="standard" icon="add" disabled={!canEdit} title={$t('safehome.setHere')} onclick={() => setFromMapCenter(i)} />
+            <Button variant="standard" icon="add" disabled={!canEdit} title={$t('safehome.setHere')} onclick={() => { setFromMapCenter(i); requestMapAccess(); }} />
             <Button variant="standard" icon="delete" disabled={!canEdit || empty} title={$t('safehome.clean')} onclick={() => onClean(i)} />
           </div>
           {#if expanded.has(i)}

@@ -17,16 +17,15 @@ pub fn is_debug_mode() -> bool {
     crate::debug_mode::enabled()
 }
 
-/// True when the multi-vehicle (fleet) features are on — default in a debug build, else the `--fleet` /
-/// `KITE_FLEET` launch flag; in a debug build the Debug Monitor can toggle it. The frontend loads it once at startup (`stores/fleetMode`).
+/// True when the multi-vehicle (fleet) features are on (see `fleet_mode`); loaded once at startup
+/// (`stores/fleetMode`).
 #[tauri::command]
 pub fn is_fleet_mode() -> bool {
     crate::fleet_mode::enabled()
 }
 
-/// True when the fleet session records every vehicle and forms group flights (the KITE_FLEET_RECORDING
-/// developer opt-in). Off with fleet mode on, only the first vehicle is recorded — the frontend says so
-/// once a second vehicle appears.
+/// True when a fleet session records every vehicle (KITE_FLEET_RECORDING); otherwise only the first
+/// vehicle is recorded and the frontend says so once a second one appears.
 #[tauri::command]
 pub fn is_fleet_group_recording() -> bool {
     crate::fleet_mode::group_recording()

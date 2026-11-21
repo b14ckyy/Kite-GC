@@ -21,7 +21,6 @@ struct CurrentWeather {
     weathercode: i32,
 }
 
-/// Weather snapshot at a location
 #[derive(Debug, Clone)]
 pub struct WeatherData {
     pub temp_c: f64,
@@ -30,9 +29,11 @@ pub struct WeatherData {
     pub description: String,
 }
 
-/// Fetch current weather for a GPS position.
-/// Returns None on error — never blocks the recorder.
+/// Current weather for a GPS position; `None` on error or with the setting off — never blocks the recorder.
 pub async fn fetch_weather(lat: f64, lon: f64) -> Option<WeatherData> {
+    if !crate::weather::records_with_flights() {
+        return None;
+    }
     let client = reqwest::Client::builder()
         .user_agent(crate::user_agent::user_agent("weather"))
         // Callers await the result inline (flight selection, the recorder before its geocode).
@@ -43,8 +44,8 @@ pub async fn fetch_weather(lat: f64, lon: f64) -> Option<WeatherData> {
     let resp = client
         .get(OPEN_METEO_URL)
         .query(&[
-            ("latitude", lat.to_string()),
-            ("longitude", lon.to_string()),
+            ("latitude", format!("{:.2}", crate::weather::coarse(lat))),
+            ("longitude", format!("{:.2}", crate::weather::coarse(lon))),
             ("current_weather", "true".to_string()),
             ("windspeed_unit", "ms".to_string()),
         ])

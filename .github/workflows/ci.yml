@@ -112,16 +112,13 @@ jobs:
         run: cargo test --verbose
 
   # --- Android target check ---
-  # The Android counterpart of the iOS lane above: the per-PR signal that shared-code changes keep
-  # compiling for the mobile crate. Its own job because it needs the NDK, which only the Linux runner
-  # sets up cheaply; the full APK build stays in android.yml (manual / Android-file-triggered) — this
-  # only type-checks, needing neither Gradle nor a device.
+  # The per-PR signal that shared code still compiles for the mobile crate. Type-check only: the APK
+  # itself is built by release.yml.
   check-android:
     name: Check (android)
     runs-on: ubuntu-latest
     env:
-      # Same pin as android.yml: the NDK is the C toolchain the cross-build links against, and a bump
-      # should be a visible commit, not a silent difference between runs.
+      # Pinned: an NDK bump should be a visible commit. Same pin as release.yml.
       NDK_VERSION: '27.2.12479018'
     steps:
       - name: Checkout repository

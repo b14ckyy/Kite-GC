@@ -20,17 +20,19 @@ export const vehicleManagerOpen = writable<boolean>(false);
 /** The vehicle selected in the Manager (persists across close/reopen). */
 export const vehicleManagerSelectedId = writable<number | null>(null);
 
-/** What a "create vehicle from this flight" pre-fills: the flight's craft name and FC id, and the flight
- *  itself, which is linked to the new vehicle once it is saved. */
+/** What a "create vehicle from this flight" pre-fills: the flight's craft name, FC id and platform type, and
+ *  the flight itself, which is linked to the new vehicle once it is saved. */
 export interface VehicleCreatePrefill {
   craftName: string;
   fcUid: string | null;
   flightId: number | null;
+  /** Unknown → the vehicle starts as "other": its type decides the live platform type on connect. */
+  platformType?: number | null;
 }
 
 /** One-shot signal: open the Manager straight into the create form pre-filled from a flight that
  *  belongs to no vehicle (End-Flight, flight detail). The Manager consumes it (starts a create, fills
- *  name + craft name + FC id) and resets it to null. */
+ *  name + craft name + FC id + type) and resets it to null. */
 export const vehicleManagerCreatePrefill = writable<VehicleCreatePrefill | null>(null);
 
 /** Search query for the vehicle list (name / craft name / model / type / notes). */

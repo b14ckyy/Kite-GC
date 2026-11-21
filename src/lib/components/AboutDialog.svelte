@@ -13,8 +13,46 @@
     DISCORD_URL,
   } from '$lib/buildInfo';
   import { THIRD_PARTY_LICENSES, SUPPORTED_FIRMWARE } from '$lib/config/thirdPartyLicenses';
+  import { deviceProfile } from '$lib/platform';
 
   let { open = $bindable(false) }: { open?: boolean } = $props();
+
+  // Runtime line: facts a layout report from an unknown device needs (engine, css viewport @dpr,
+  // root font size, safe-area insets, profile). Read by whoever debugs, so the values stay untranslated.
+  function engineLabel(): string {
+    const ua = navigator.userAgent;
+    const chrome = /Chrome\/(\d+)/.exec(ua);
+    if (chrome) return `${/Android/.test(ua) ? 'Android WebView' : 'Chromium'} ${chrome[1]}`;
+    const webkit = /AppleWebKit\/([\d.]+)/.exec(ua);
+    if (webkit) return `WebKit ${webkit[1]}`;
+    return 'unknown engine';
+  }
+  /** `env(safe-area-inset-*)` cannot be read back as a number from a custom property — the computed
+   *  value of `--safe-top` is the literal `env(…)` text — so a hidden probe box wears the insets as
+   *  padding and is measured. Same order as CSS shorthands: top / right / bottom / left. */
+  function safeInsets(): string {
+    const probe = document.createElement('div');
+    probe.style.cssText =
+      'position:fixed;visibility:hidden;pointer-events:none;width:0;height:0;' +
+      'padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) ' +
+      'env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)';
+    document.body.appendChild(probe);
+    const cs = getComputedStyle(probe);
+    const px = (v: string) => Math.round(parseFloat(v) || 0);
+    const out = `${px(cs.paddingTop)}/${px(cs.paddingRight)}/${px(cs.paddingBottom)}/${px(cs.paddingLeft)}`;
+    probe.remove();
+    return out;
+  }
+  function runtimeLine(): string {
+    const w = window.innerWidth, h = window.innerHeight;
+    const dpr = Math.round(window.devicePixelRatio * 100) / 100;
+    const rem = Math.round(parseFloat(getComputedStyle(document.documentElement).fontSize) * 10) / 10;
+    const parts = [engineLabel(), `${w}×${h} @${dpr}`, `${rem}px`, `insets ${safeInsets()}`];
+    if (deviceProfile) parts.push(deviceProfile);
+    return parts.join(' · ');
+  }
+  // Re-read each time the dialog opens (a rotate between two openings changes the viewport).
+  const runtime = $derived(open ? runtimeLine() : '');
 
   function close() { open = false; }
   function onKeydown(e: KeyboardEvent) { if (e.key === 'Escape') close(); }
@@ -53,6 +91,10 @@
         <div class="about-row">
           <span class="about-k">{$t('about.community')}</span>
           <button class="about-link" onclick={() => openExt(DISCORD_URL)}>{DISCORD_URL}</button>
+        </div>
+        <div class="about-row">
+          <span class="about-k">{$t('about.runtime')}</span>
+          <span class="about-v about-mono">{runtime}</span>
         </div>
       </div>
 
@@ -104,7 +146,7 @@
     border-radius: 10px;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
     padding: 22px 24px 16px;
-    width: 460px; max-width: calc(100vw - 32px);
+    width: 510px;
     color: #e0e0e0;
     font-family: 'Segoe UI', Tahoma, sans-serif;
   }

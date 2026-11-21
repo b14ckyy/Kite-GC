@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Radar tracking store
-// Mirrors the consolidated `radar-vehicles` snapshot emitted by the Rust radar subsystem (foreign
-// vehicles: ADS-B / FormationFlight / radio telemetry). Independent of the main telemetry store.
-// See docs/active/RADAR_TRACKING_CORE.md / ...PANEL_AND_MAP.md.
+// Radar tracking store: mirrors the `radar-vehicles` snapshot of the Rust radar subsystem (ADS-B / FormationFlight /
+// radio telemetry), independent of the main telemetry store. See docs/active/RADAR_TRACKING_CORE.md.
 
 import { writable } from 'svelte/store';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
@@ -63,6 +61,8 @@ export interface AdsbProviderStatus {
   name: string;
   count: number;
   ok: boolean;
+  /** Online providers only: paused until the provider's rate limit resets. */
+  limited?: boolean;
 }
 export const radarAdsbStatus = writable<Record<string, AdsbProviderStatus>>({});
 
