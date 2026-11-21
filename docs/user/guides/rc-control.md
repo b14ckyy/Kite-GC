@@ -83,11 +83,11 @@ Things to know:
   radio already on the list switches over without asking).
 - **Older FrSky Bluetooth module.** The module of older FrSky radios, also retro-fitted to other
   transmitters, demands a pairing code and hangs up without one. On **Windows** Kite recognises this
-  module and pairs with its code `000000` by itself, without a system prompt. On Linux the module did
-  not show up in the Bluetooth scan in our test (Debian 13), and macOS gives an app no way to answer
-  the pairing, so count on this module with Windows only.
-- Tested with a FrSky X20RS on ETHOS 26.2 (Windows and Linux) and with a RadioMaster TX16S on EdgeTX
-  carrying the older FrSky module (Windows).
+  module and pairs with its code `000000` by itself, without a system prompt. The same is built for
+  **Linux** but not confirmed there yet. macOS gives an app no way to answer the pairing, so the
+  module is not usable there for now.
+- Tested on Windows with a FrSky X20RS on ETHOS 26.2 and with a RadioMaster TX16S on EdgeTX carrying
+  the older FrSky module. Linux is not confirmed yet: in a first test the link was unstable.
 
 ### Channel mapping
 
