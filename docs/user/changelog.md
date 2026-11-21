@@ -229,6 +229,12 @@ inside the box of the feature release they belong to, so the notes for one relea
 
     *Map*
 
+    - **RC control: a FrSky radio over Bluetooth (desktop)** — a radio in Bluetooth trainer mode
+      becomes an input device of RC control, without a cable. Kite remembers a list of radios,
+      connects to the one in trainer mode by itself and tells trainer data from telemetry in both
+      directions. On Windows the older FrSky Bluetooth module is paired with its code without a
+      prompt. Frame format taken from garfield2412's FrSky-Bluetooth-Trainer.
+      [#348]
     - **Map search** — a magnifier button jumps the 2D or 3D map to a place or to coordinates, and
       a location button next to it to your own position. See
       [Map search](guides/telemetry-and-display.md#map-search). [#263]
@@ -557,6 +563,9 @@ inside the box of the feature release they belong to, so the notes for one relea
 
     Every fix of 1.0.1 and 1.0.2 is part of 2.0. This list holds what is fixed in 2.0 only.
 
+    - **RC control: a second controller no longer takes over.** With two controllers connected,
+      losing the one in use let the stick stream continue from the other with the same mapping.
+      Control now ends when the controller it was started with disappears. [#348]
     - **Relay: LTM and CRSF carry the altitude above home.** The LTM output wrote the GPS altitude
       (above sea level) where LTM consumers expect the altitude above home, and the CRSF output had
       no altitude above home at all. A tracker or a second Kite behind the relay showed the sea-level

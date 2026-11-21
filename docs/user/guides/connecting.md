@@ -234,6 +234,12 @@ Because nothing is transmitted:
 Passive telemetry works over any transport. On **Serial**, set the **baud rate to match your telemetry
 source** (e.g. SmartPort and CRSF have their own rates) — it isn't auto-detected.
 
+!!! note "A FrSky radio in trainer mode"
+    A FrSky radio whose Bluetooth is set to **trainer** sends stick data, not telemetry. Kite
+    recognises that on a BLE link, closes the link and — on the desktop, with RC control enabled —
+    offers the radio as an input for **[RC control](rc-control.md#a-frsky-radio-over-bluetooth)**.
+    For telemetry, switch the radio's Bluetooth to telemetry.
+
 !!! tip "Recording works in passive mode"
     Flight logging still runs while passively connected — arm/disarm is derived from the decoded
     telemetry, so passively monitored flights land in your **[logbook](logbook.md)** like any other.
