@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/branding/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -1940,6 +1940,12 @@ Kite can save/export it.</p>
 </thead>
 <tbody>
 <tr>
+<td><strong>Kite mission</strong></td>
+<td><code>.kmission</code></td>
+<td>R / W</td>
+<td>One entry of the mission library as it is: waypoints, name, notes, target system, planned home, vehicle class — an INAV entry with several missions included. For moving missions between Kite installs: an older Kite keeps data of a newer one it cannot use yet and has it after the update. Exported and imported in the Mission Manager.</td>
+</tr>
+<tr>
 <td><strong>INAV mission</strong></td>
 <td><code>.mission</code></td>
 <td>R / W</td>
@@ -1955,11 +1961,11 @@ Kite can save/export it.</p>
 <td><strong>QGroundControl plan</strong></td>
 <td><code>.plan</code></td>
 <td>R</td>
-<td>QGC's JSON plan — the format QGC saves (PX4 workflows). Mission waypoints only: QGC pattern items (Survey, Corridor Scan, …) are refused with a clear message, and the plan's geofence/rally sections are ignored — manage those in Kite's own Airspace tools.</td>
+<td>QGC's JSON plan — the format QGC saves (PX4 workflows). A Survey is imported as the waypoints QGC generated for it — the pattern itself (area, spacing, camera) is not kept, so it cannot be re-edited as a pattern in Kite. A pattern item that stores no waypoints is refused with a message. The plan's geofence/rally sections are ignored — manage those in Kite's own Airspace tools.</td>
 </tr>
 </tbody>
 </table>
-<p>You can also drag a mission file straight onto the map. See <strong><a href="../../guides/missions/">Missions</a></strong>.</p>
+<p>You can also drag a mission file straight onto the map; a <code>.kmission</code> goes into the library (and onto the map if that is empty). See <strong><a href="../../guides/missions/">Missions</a></strong>.</p>
 <h2 id="flights-logs">Flights &amp; logs<a class="headerlink" href="#flights-logs" title="Permanent link">&para;</a></h2>
 <h3 id="import">Import<a class="headerlink" href="#import" title="Permanent link">&para;</a></h3>
 <table>
@@ -2078,11 +2084,14 @@ markers, the same as a live recording.</p>
 <h2 id="where-your-data-lives">Where your data lives<a class="headerlink" href="#where-your-data-lives" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Flight database</strong> — your logbook (flights, vehicles, batteries, saved missions) is one local SQLite
-  database; its location is configurable in <strong><a href="../settings/">Settings → Data</a></strong>.</li>
+  database; on Windows, Linux and macOS its location is configurable in <strong><a href="../settings/">Settings → Data</a></strong>.</li>
 <li><strong>Next to the database</strong> — <code>flights.pre-migration-backup.db</code>, the full backup Kite writes before an
-  update upgrades the database format (only the latest is kept), and a <code>hires-cache/</code> folder that holds
-  the temporary decode of a flight in <strong>HI-RES</strong> replay and is emptied when you close the flight. See
+  update upgrades the database format (only the latest is kept). See
   <strong><a href="../../guides/logbook/#the-database-updates-and-the-automatic-backup">Flight logbook</a></strong>.</li>
+<li><strong>Work files</strong> — always in Kite's own data folder, whatever database folder is set: the temporary
+  files of a running recording (<code>sessions/</code>), the decode of a flight in <strong>HI-RES</strong> replay
+  (<code>hires-cache/</code>, emptied when you close the flight) and logs opened without importing them
+  (<code>scratch/</code>).</li>
 <li><strong>Caches</strong> — 2D map tiles and terrain are cached on disk (under Settings → Map → Cache); these are the
   files that make the 2D map usable offline.</li>
 <li><strong>Custom maps</strong> (desktop) — your own map tiles in the custom map location, one <code>Z/X/Y</code> folder per

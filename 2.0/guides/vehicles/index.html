@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/branding/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -1937,8 +1937,11 @@ sheet; the toolbar also creates a new vehicle and imports one from a file. While
 <p>Each vehicle is a structured record you can fill in as much (or as little) as you like:</p>
 <ul>
 <li><strong>Identity</strong> — name, <strong>craft name</strong> (a link key — see below), <strong>type</strong> (fixed-wing, flying-wing,
-  VTOL, multirotor, helicopter, rover, boat, other) and <strong>status</strong> (active, storage, retired, damaged,
-  <strong>crashed</strong>), plus a header <strong>image</strong> and free-form notes.</li>
+  VTOL, multirotor, tricopter, helicopter, rover, boat, other) and <strong>status</strong> (active, storage,
+  retired, damaged, <strong>crashed</strong>), plus a header <strong>image</strong> and free-form notes. The type is more than
+  a label: when the vehicle carries the FC hardware ID of the connected flight controller, it sets
+  the <a href="../telemetry-and-display/">vehicle type</a> Kite uses on that link — <em>other</em> leaves it to the
+  detection.</li>
 <li><strong>Airframe</strong> — model, wingspan, length, all-up weight and dry weight.</li>
 <li><strong>Propulsion</strong> — motors, propellers, ESC, and a recommended battery (cells / capacity).</li>
 <li><strong>Radio, FPV &amp; datalink</strong> — receiver, video transmitter, camera, gimbal camera, datalink.</li>

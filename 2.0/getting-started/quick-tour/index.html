@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/branding/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -2016,7 +2016,12 @@ details here — each area has its own guide; this is just the map of the cockpi
 <strong>same icon again</strong> to <strong>park</strong> the panel: it slides out to the left and the map gets the whole screen,
 but nothing is lost — a mission you are editing stays in edit mode, a half-filled form keeps its values,
 and the next click brings the panel straight back (the icon shows a dashed frame while it is parked).
-Switching to another tool or closing the rail with its toggle closes the panel for real. Only one panel
+Switching to another tool or closing the rail with its toggle closes the panel for real. Where a panel
+covers a large part of the map — a small window, a tablet, a phone — it <strong>parks itself</strong> when you start
+something that goes on on the map: placing a waypoint or tapping one in the list while editing,
+starting a survey pattern, loading a library mission onto the map, adding a geozone, a fence or a rally
+point, switching their editing on or pressing <strong>Show on map</strong>, setting a safehome, or switching
+<strong>Guided</strong> on. It does not come back on its own; tap its icon when you need it again. Only one panel
 is open at a time, and the map stays live behind it. Some tools appear <strong>only when relevant</strong> (e.g.
 <em>Control</em> only on an ArduPilot/PX4 link), so the rail stays uncluttered.</p>
 <p>Each tool, at a glance — expand for a quick description and the link to its full guide:</p>
@@ -2099,7 +2104,7 @@ dock</strong> (3) down the side, and the <strong>bottom dock</strong> (4) along 
 to rearrange the dock or move it into the other one; click outside the docks or press <strong>Escape</strong> to
 finish. In edit mode every widget also shows a <strong>resize button</strong> in its corner: each tap
 steps it to its next size — square widgets toggle between small and large, the wide ones (Live AGL,
-Video) go wide → large square → small square. The aspect ratio never changes, and a dock shrinks to its
+Weather, Video) go wide → large square → small square. The aspect ratio never changes, and a dock shrinks to its
 largest widget. Choose which widgets appear in <strong>Settings → Interface</strong>. Widgets scale to fit the dock,
 and your layout (which dock each sits in and its size) is remembered between sessions. Every widget
 follows your global units and works the same <strong>live</strong> and in <strong><a href="../../guides/logbook/">replay</a></strong>.</p>
@@ -2185,8 +2190,8 @@ beside it. During a mission the badge also shows the FC's current target as <str
 </details>
 <details class="note">
 <summary>Live AGL</summary>
-<p>A forward-looking <strong>terrain-profile HUD</strong> (a wide widget). The left third shows the terrain you've
-flown over with the aircraft riding at its current height; the right two-thirds shows the
+<p>A forward-looking <strong>terrain-profile HUD</strong> (a wide widget). The left part (15 %) shows the terrain you've
+flown over with the aircraft riding at its current height; the rest shows the
 <strong>estimated</strong> terrain ahead along your heading, with a dashed <strong>projected flight line</strong> so you can see
 a climb, descent or ground intersection coming. Centre read-outs give <strong>AGL</strong> and <strong>minimum clearance
 ahead</strong> (red when it goes negative). Works live and in replay.</p>
@@ -2201,6 +2206,15 @@ independent ranges — the <strong>fan distance</strong> scales with speed, and 
 current altitude and a sink-rate-predicted one. Both buttons appear only while the dock is in
 <strong>edit mode</strong> (long-press a widget), so they don't clutter the display in flight.</p>
 <p><img alt="The Terrain Radar widget" src="../../assets/getting-started/widgets/terrainradar.png" /></p>
+</details>
+<details class="note">
+<summary>Weather</summary>
+<p>The <strong>forecast wind at your flight height</strong> from a weather model: a blue arrow shows where the wind
+blows relative to the aircraft's nose, an orange triangle on the rim points home. Wind speed, gusts
+near the ground and a weather icon sit above the rose; the scale on the left shows your height
+between the ground and 200 m. The wide size adds the wind for the next 30, 60 and 90 minutes.
+Needs internet. See <strong><a href="../../guides/telemetry-and-display/">Telemetry &amp; display</a></strong>.</p>
+<!-- SCREENSHOT: ../assets/getting-started/widgets/weather.png -->
 </details>
 <details class="note">
 <summary>Video</summary>
@@ -2237,17 +2251,22 @@ room for either the map or a widget, rarely both. Tablets keep the desktop layou
   <strong>sensor warning</strong> chip next to it that only appears while a sensor is amber or red.</li>
 <li><strong>Connecting</strong> happens in a pop-out: tap the <strong>🔗 chain-link</strong> button at the top-right of the map for
   protocol and transport on the first row, the port / host / device on the second, <strong>Connect</strong> — and
-  <strong>Relay</strong>, which extends the pop-out with the relay entries. Tap anywhere else to close it.</li>
+  <strong>Relay</strong>, which extends the pop-out with the relay entries. Tap anywhere else to close it. The
+  button's dot is <strong>green</strong> while data flows, <strong>amber</strong> while connected without data and <strong>red</strong> when
+  not connected.</li>
 <li><strong>Widgets</strong> live in a <strong>frosted-glass column</strong> on the right edge, on a grid of 4 rows and up to 2
   columns, with <strong>two pages</strong> — swipe up or down to switch. The map runs on underneath the glass. A
-  small widget takes one cell, a large one 2 × 2, the wide Live AGL 2 × 1; the column narrows to one
+  small widget takes one cell, a large one 2 × 2, a wide one (Live AGL, Weather, Video) 2 × 1; the column narrows to one
   cell when only small widgets are active. Widgets that no longer fit are switched off automatically,
   and <strong>Settings → HUD widgets</strong> tells you when the grid is full.</li>
 <li><strong>Rearranging widgets</strong>: <strong>long-press</strong> a widget to enter edit mode. Hold a widget briefly and drag
-  it to move it — the others shift live to show where they will settle; a quick flick still turns the
-  page. Tap the corner button to step through the sizes. Tap the map to leave edit mode.</li>
+  it to move it: it sits centred under your finger and takes the row you hold it over, and the others
+  shift live to show where they will settle. Nothing is stored before you let go — let go beside the
+  column and every widget is back where it was. Hold the widget at the column's top or bottom edge to
+  turn the page; a quick flick still turns it too. Tap the corner button to step through the sizes.
+  Tap the map to leave edit mode. The docked video window moves out of the way while edit mode is on.</li>
 <li><strong>Three widget slots on the bottom edge</strong> of the map, centred: a larger one in the middle (30 % of
-  the screen height, square — or 2:1 wide for Live AGL) and a smaller one on each side (20 %, square).
+  the screen height, square — or 2:1 wide for Live AGL and Weather) and a smaller one on each side (20 %, square).
   In edit mode the three slots show as dashed frames; drag a widget from the column into a slot, or
   drag it back. Outside edit mode only the widgets you placed are visible, with their normal card and
   no bar behind them — an empty middle slot takes no room, so two side widgets sit together in the
@@ -2275,6 +2294,12 @@ room for either the map or a widget, rarely both. Tablets keep the desktop layou
   The <strong>video widget</strong> works as on the desktop (double-tap swaps there too); while it is active, the
   docked window and its button stay hidden. Whatever is off-screen — a parked window, a widget on the
   other page — is not rendered, but the stream keeps running, so it is back instantly.</li>
+<li><strong>The screen stays on while the aircraft is armed</strong> (on a tablet too). Connected but disarmed, the
+  screen timeout of the device applies, so the phone can go dark while you wait on the ground. A
+  continuous raw recording, or a telemetry feed that does not report arming, keeps the screen on for
+  the whole connection. Arming does not switch a dark screen back on — wake the phone before
+  take-off, or keep the screen on whenever Kite is open with <strong>Settings → Interface → UI → Stay
+  awake without connection</strong>.</li>
 <li><strong>Not on the phone</strong>: the detached video window, the raw-telemetry popup, and the stick overlay
   beside the replay player.</li>
 </ul>

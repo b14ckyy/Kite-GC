@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/branding/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -2206,7 +2206,7 @@ clicked into ignores the wheel, so scrolling the panel never changes a value by 
 </tr>
 <tr>
 <td><strong>Power Saving</strong></td>
-<td>Cap the 3D frame rate to save battery — Off (60 fps) / On (20 fps) / Auto (20 fps on battery). While active it also drops the smooth bar animations in the speed and battery widgets, so those read the current value directly, and the frosted-glass blur behind panels and widgets. On phones and tablets the glass blur over the map is always off; only the panels keep it.</td>
+<td>Saves battery and graphics load — Off / On / Auto (on while running on battery). While active the map draws the moving aircraft at 20 instead of 60 frames per second, in the 2D and the 3D view; panels, scrolling and the widgets keep their pace. It also drops the smooth bar animations in the speed and battery widgets, so those read the current value directly, and the frosted-glass blur behind panels and widgets. On phones and tablets the glass blur over the map is always off; only the panels keep it.</td>
 <td>Auto</td>
 </tr>
 <tr>
@@ -2312,6 +2312,11 @@ Altitude and Compass sit in the bottom dock and Home, RC Link and GPS in the rig
 <td>100 %</td>
 </tr>
 <tr>
+<td><strong>Stay awake without connection</strong></td>
+<td>On: the screen stays on whenever Kite is open, connected or not. Off: Kite keeps the screen on only while the aircraft is armed — and for the whole connection during a continuous raw recording (<strong>Continuous Raw Logging</strong>, below) or when the telemetry feed does not report whether the aircraft is armed. Connected but disarmed, the screen timeout of the device applies, and arming does not switch a screen back on that has already gone dark. On a computer, keeping the screen on also keeps it from going to sleep by itself; closing the lid or choosing Sleep still works. On Linux this needs a desktop session that offers the freedesktop screen-saver inhibit (GNOME and KDE do).</td>
+<td>Off</td>
+</tr>
+<tr>
 <td><strong>Default Protocol</strong></td>
 <td>Which protocol the connection bar starts on. <strong>Last used</strong> restores whatever you connected with last time, which is what Kite has always done. Pin it to <strong>MSP</strong>, <strong>MAVLink</strong> or <strong>Telemetry</strong> and that choice wins on every launch, whatever the last session used. Kite still remembers the last-used protocol, so switching back to <strong>Last used</strong> picks up where you left off.</td>
 <td>Last used</td>
@@ -2330,8 +2335,8 @@ Altitude and Compass sit in the bottom dock and Home, RC Link and GPS in the rig
 <tbody>
 <tr>
 <td><strong>Check for updates</strong></td>
-<td>Whether Kite asks GitHub for a newer version when it starts — <strong>Disabled</strong>, <strong>Stable releases</strong>, <strong>Patch releases only</strong> (bug-fix releases of the version you run, e.g. 2.0.0 → 2.0.1, never 2.1.0), or <strong>Include pre-releases</strong> (betas and release candidates).</td>
-<td>Stable releases</td>
+<td>Whether Kite asks GitHub for a newer version when it starts — <strong>Disabled</strong>, <strong>Stable releases</strong>, <strong>Patch releases only</strong> (bug-fix releases of the version you run, e.g. 2.0.0 → 2.0.1, never 2.1.0), or <strong>Include pre-releases</strong> (betas and release candidates; Kite then compares against the highest version of any kind).</td>
+<td>Stable releases (from Google Play: on)</td>
 </tr>
 </tbody>
 </table>
@@ -2341,11 +2346,26 @@ version you have, the one that is available, and the release notes, plus four ch
 <li><strong>Update and Restart</strong> downloads the new version, installs it and restarts Kite. On Windows and
   Linux this runs the installer of the package you installed (a <code>.deb</code>/<code>.rpm</code> asks for your password);
   on macOS the app bundle is replaced in place. A <strong>portable</strong> copy replaces its own executable and
-  restarts. Android has no in-app install and no store listing yet, so the notice there offers only
-  the other three choices.</li>
+  restarts. Not on Android, see below.</li>
 <li><strong>Open Release Page</strong> shows the release on GitHub in your browser, with every download.</li>
 <li><strong>Remind me later</strong> asks again at the next start.</li>
 <li><strong>Skip this version</strong> suppresses the notice for that one version only.</li>
+</ul>
+<p><strong>Android</strong> has no in-app install, and what you get depends on where Kite was installed from:</p>
+<ul>
+<li>
+<p><strong>From Google Play:</strong> <em>Check for updates</em> is a plain on/off switch. Google Play delivers one
+  version and installs it by itself, so there is no channel to choose. The notice shows the release
+  notes and offers <strong>Open in Play Store</strong> in place of <em>Update and Restart</em> and <em>Open Release Page</em>.
+  A beta from the Play test track is told about newer betas as well.</p>
+<p>The notice gives you a choice only when <strong>automatic updates for Kite are switched off in the Play
+Store</strong> (Kite's store page → ⋮ → <em>Enable auto-update</em>). With them on, Google Play installs the
+new version by itself, usually before you have seen the notice.</p>
+<p>The notice can also arrive a little before Google Play offers the version. The store page then
+shows <em>Open</em> instead of <em>Update</em>; try again later.
+- <strong>From the <code>.apk</code>:</strong> the setting has all four choices, and the notice offers <strong>Open Release Page</strong>,
+  where the new <code>.apk</code> is, in place of <em>Update and Restart</em>.</p>
+</li>
 </ul>
 <p>On iPhone and iPad the update check is switched off and this section is hidden. TestFlight and the
 App Store tell you about new versions themselves, and GitHub releases have no iOS build.</p>
@@ -2559,13 +2579,48 @@ switch them off to save bandwidth on a slow over-the-air radio, and on when the 
 <td>Off</td>
 </tr>
 <tr>
-<td><strong>Database Folder</strong></td>
-<td>Where the logbook database lives — <strong>Choose</strong> a folder or <strong>Use Default</strong>.</td>
+<td><strong>Record Weather with Flights</strong></td>
+<td>While a flight is recorded, fetch the forecast wind by height every five minutes and store it with the flight; also fetch the current weather for a stored flight. The position is sent to Open-Meteo rounded to two decimals (about 1 km). With a <strong>Weather</strong> widget on screen the wind is fetched and recorded in any case.</td>
+<td>On</td>
+</tr>
+<tr>
+<td><strong>Auto-Detect Flight Location</strong></td>
+<td>Look up the place name of a flight's start point at OpenStreetMap Nominatim when a flight is stored, imported or opened without one. Off: a flight without a place name stays without one.</td>
+<td>On</td>
+</tr>
+<tr>
+<td><strong>Database Folder</strong> <em>(desktop only)</em></td>
+<td>Where the logbook database lives — <strong>Choose</strong> a folder or <strong>Use Default</strong>. Kite asks whether to move the database along, see <a href="../../guides/logbook/#changing-the-database-folder">Logbook</a>.</td>
 <td>default path</td>
+</tr>
+<tr>
+<td><strong>Export database</strong></td>
+<td>Saves a copy of the whole flight database (flights, vehicles, batteries, missions) as one file. Not while a vehicle is connected. See <a href="../../guides/logbook/#exporting-and-importing-the-whole-database">Logbook</a>.</td>
+<td>—</td>
+</tr>
+<tr>
+<td><strong>Import database</strong> <em>(Android, iOS)</em></td>
+<td>Replaces the flight database with a file from <strong>Export database</strong>, after a confirmation. Not while a vehicle is connected.</td>
+<td>—</td>
+</tr>
+<tr>
+<td><strong>Export all flights</strong></td>
+<td>Writes every flight into one <code>.kflight</code> file.</td>
+<td>—</td>
+</tr>
+<tr>
+<td><strong>Original log files</strong> <em>(Android, iOS)</em></td>
+<td>Shown only when the database holds original log files — one imported from a desktop install — with their size. <strong>Remove</strong> deletes them after a confirmation; flights, tracks and telemetry stay.</td>
+<td>—</td>
 </tr>
 <tr>
 <td><strong>Compact Database</strong> <em>(desktop only)</em></td>
 <td><strong>Compact now</strong> rebuilds the database file to reclaim space (rarely needed — deleting flights already frees space in the background). Kite shows a blocking notice until it is done; on a hard disk or an SD card this can take several minutes. If a flight is being recorded or an import is running, Kite refuses with a message. While it runs it needs free space: up to the size of the database next to the database file, and about the same again in the system's temporary folder. On Android and iOS the button is not shown: the database holds no original log files there, and deleting flights already gives the space back.</td>
+<td>—</td>
+</tr>
+<tr>
+<td><strong>Database size</strong></td>
+<td>The size of the flight database file. What a single flight takes is shown in its detail view in the logbook.</td>
 <td>—</td>
 </tr>
 <tr>
@@ -2575,7 +2630,7 @@ switch them off to save bandwidth on a slow over-the-air radio, and on when the 
 </tr>
 <tr>
 <td><strong>Raw Log Folder</strong></td>
-<td>Where raw <code>.rawmsp</code> / <code>.tlog</code> files are written.</td>
+<td>Where raw <code>.rawmsp</code> / <code>.tlog</code> files are written. On Android they are written in the app's storage and moved into the chosen folder when the vehicle disconnects.</td>
 <td>default path</td>
 </tr>
 </tbody>

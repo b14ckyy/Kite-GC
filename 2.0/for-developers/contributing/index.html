@@ -21,7 +21,7 @@
       
       
       <link rel="icon" href="../../assets/branding/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -2018,6 +2018,12 @@ in the release notes, so this one line saves the archaeology at release time.</p
 <ul>
 <li>Keep changes focused; propose unrelated refactors separately.</li>
 <li>Match the surrounding code's style and comment density.</li>
+<li><strong>Comments are short and say why</strong>: one to three lines on the constraint, invariant or pitfall the
+  code does not show by itself. This holds for module and file headers, doc comments and inline
+  comments alike.</li>
+<li><strong>No history in comments</strong>: how a bug was found, what the code used to do, test reports, names
+  and dates belong in the commit message and the pull request, not in the source.</li>
+<li>Don't restate what the code plainly does, and don't add comments to code you did not change.</li>
 </ul>
 <h2 id="internationalisation">Internationalisation<a class="headerlink" href="#internationalisation" title="Permanent link">&para;</a></h2>
 <p>Kite ships in English, German, French, Chinese, Bulgarian, Slovak and Spanish. For contributions:</p>

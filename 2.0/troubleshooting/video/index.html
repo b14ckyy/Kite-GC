@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/branding/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -1407,6 +1407,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#macos-an-h264-stream-freezes-and-reconnects-every-few-seconds" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        macOS: an H.264 stream freezes and reconnects every few seconds
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#the-picture-stutters-or-shows-frames-out-of-order" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1922,6 +1933,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#macos-an-h264-stream-freezes-and-reconnects-every-few-seconds" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        macOS: an H.264 stream freezes and reconnects every few seconds
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#the-picture-stutters-or-shows-frames-out-of-order" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2108,6 +2130,18 @@ you press Stop</strong>. If it never comes back: the source is down or unreachab
 the transport doesn't match the server (see above), or a firewall started blocking the media packets. A
 few reconnect cycles in a row are normal when a source restarts or the network path changes (e.g.
 switching between Wi-Fi and a cellular link).</p>
+<h2 id="macos-an-h264-stream-freezes-and-reconnects-every-few-seconds">macOS: an H.264 stream freezes and reconnects every few seconds<a class="headerlink" href="#macos-an-h264-stream-freezes-and-reconnects-every-few-seconds" title="Permanent link">&para;</a></h2>
+<p>Seen on the classic path (<strong>Native RTSP client</strong> switched off) with H.264 from <strong>OBS using a hardware
+encoder</strong> — NVENC and Quick Sync in our tests: the picture stops right after it starts, and Kite
+reconnects every few seconds, over and over. The same stream plays with the <strong>Native RTSP client</strong> on,
+and the same source plays on the classic path once OBS encodes in software (x264).</p>
+<ul>
+<li><strong>Turn the Native RTSP client on</strong> (Video panel → RTSP section; it is the default). That is the fix.</li>
+<li>If you need the classic path, switch the source to a software H.264 encoder.</li>
+</ul>
+<p>The cause is in the stream itself: the macOS browser engine's decoder refuses it, and the classic path
+hands the stream on unchanged. Other hardware encoders may behave the same; we have not seen it with
+a camera so far.</p>
 <h2 id="the-picture-stutters-or-shows-frames-out-of-order">The picture stutters or shows "frames out of order"<a class="headerlink" href="#the-picture-stutters-or-shows-frames-out-of-order" title="Permanent link">&para;</a></h2>
 <p>This is almost always the <strong>source encoder</strong>, not Kite. The classic direct path (Native RTSP client
 off) uses WebRTC, which tolerates <strong>B-frames</strong> poorly:</p>
@@ -2203,11 +2237,7 @@ the ones that actually help. <strong>1 or more</strong> — the engine can do it
 if any of <code>webrtcbin</code>, <code>ice(nice)</code>, <code>dtls</code>, <code>srtp</code> or <code>rtpbin</code> reads <code>false</code> in your log, install
 <code>gstreamer1.0-plugins-bad</code>, <code>gstreamer1.0-nice</code>, <code>gstreamer1.0-plugins-good</code>, plus
 <code>gstreamer1.0-libav</code> if the decoder list is empty (recent Kite <strong>.deb</strong> packages request these
-automatically on install).</p>
-<p>Either way, package installs only affect the <strong>system installation (.deb)</strong>: the <strong>AppImage</strong> brings
-its own browser engine and does not use the system's media packages at all. If video matters to you
-on Linux, prefer the <strong>.deb / system installation</strong> — it uses your distribution's engine and plugins,
-which you can at least influence.
+automatically on install).
 - <strong>Hardware conversion is used automatically where it exists.</strong> Kite tests the machine once, the first time it is needed, and writes the verdict to the log:
 - Desktop graphics (Intel and AMD, via VAAPI) can do <strong>both halves</strong> — decoding and re-encoding —
   with the frames never leaving the GPU. Look for <code>[ffmpeg] VAAPI hardware H.264-decode +

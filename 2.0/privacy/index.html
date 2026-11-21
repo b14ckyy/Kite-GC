@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../assets/branding/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -2069,7 +2069,7 @@ service by the app.</p>
 <tr>
 <td><strong>Replay caches</strong></td>
 <td>Temporary decodes of a stored onboard log for <strong>HI-RES</strong> replay (<code>hires-cache/</code>), and logs opened for replay without importing them (<code>scratch/</code>). Removed when you close the flight or the opened logs, and at the next app start</td>
-<td>Next to the flight log database</td>
+<td>App data folder of the OS</td>
 </tr>
 <tr>
 <td><strong>Missions, geozones, safe homes</strong></td>
@@ -2097,13 +2097,14 @@ service by the app.</p>
 <a href="../reference/file-formats/">Reference → File formats</a> and
 <a href="../troubleshooting/connection/#getting-a-diagnostic-log">Troubleshooting → Connection</a>.</p>
 <p>Deleting the app's data folder, or uninstalling the app on Android and iOS, removes all of it. One
-exception on Android: if you pointed the flight database or the raw logs at a folder of your own
-(Settings → Data), Kite copies them there, and that copy stays when the app is uninstalled.</p>
+exception on Android: if you pointed the raw logs at a folder of your own (Settings → Data), Kite
+moves them there, and they stay when the app is uninstalled. The same goes for every file you
+exported.</p>
 <h2 id="data-that-leaves-your-device-only-when-you-act">Data that leaves your device only when you act<a class="headerlink" href="#data-that-leaves-your-device-only-when-you-act" title="Permanent link">&para;</a></h2>
 <p>These transfers happen only because you trigger them, and you choose the recipient every time:</p>
 <ul>
 <li><strong>Exports</strong> — flight logs (<code>.kflight</code>), vehicle (<code>.kvehicle</code>) and battery (<code>.kbatt</code>) files, missions
-  (<code>.mission</code>, <code>.waypoints</code>, <code>.plan</code>). Kite writes the file where you tell it to; on Android and iOS it
+  (<code>.mission</code>, <code>.waypoints</code>). Kite writes the file where you tell it to; on Android and iOS it
   hands the file to the system share sheet.</li>
 <li><strong>Diagnostic log</strong> — Settings → Diagnostics → <em>Open Folder</em> shows you the log file, and on Android
   <em>Share log file</em> passes it to the app you pick (mail, messenger, cloud drive). Attaching it to a bug
@@ -2144,14 +2145,14 @@ Each provider handles the request under its own privacy policy, which we link be
 <tr>
 <td><strong>At every app start</strong></td>
 <td>GitHub Releases API (<a href="https://docs.github.com/site-policy/privacy-policies">GitHub privacy statement</a>)</td>
-<td>A request for the latest release (with <em>Patch releases only</em> or <em>Include pre-releases</em>: the list of recent releases), including its release notes. No data about you or your installation. Not on iPhone and iPad, where the update check is off</td>
-<td>Settings → Updates → <em>Check for updates: Disabled</em></td>
+<td>A request for the latest release (with <em>Patch releases only</em> or <em>Include pre-releases</em>, and for a beta installed from Google Play: the list of recent releases), including its release notes. No data about you or your installation. Not on iPhone and iPad, where the update check is off</td>
+<td>Settings → Updates → <em>Check for updates: Disabled</em> (a copy from Google Play: the switch off)</td>
 </tr>
 <tr>
 <td><strong>When a flight is recorded</strong> (the aircraft arms with a valid GPS fix)</td>
 <td>Open-Meteo (<a href="https://open-meteo.com/en/terms">privacy</a>) and OpenStreetMap Nominatim (<a href="https://osmfoundation.org/wiki/Privacy_Policy">privacy</a>)</td>
-<td>The take-off coordinates, to store the weather and the place name in the logbook entry</td>
-<td><em>(no setting yet — see the note below)</em></td>
+<td>The take-off coordinates — to Open-Meteo rounded to two decimals (about 1 km) — to store the weather and the place name in the logbook entry</td>
+<td>Settings → Data → Flight Logbook → <em>Record Weather with Flights</em> (Open-Meteo) and <em>Auto-Detect Flight Location</em> (Nominatim)</td>
 </tr>
 <tr>
 <td><strong>While the map is shown</strong></td>
@@ -2206,8 +2207,13 @@ Each provider handles the request under its own privacy policy, which we link be
 </tr>
 <tr>
 <td><strong>Radar / ADS-B traffic</strong></td>
-<td>adsb.lol, adsb.one, adsb.fi (community ADS-B aggregators; each publishes its own terms)</td>
+<td>adsb.fi, and any online service you add yourself (community ADS-B aggregators; each publishes its own terms)</td>
 <td>The query centre (the map viewport or your aircraft's position) and a search radius, polled while the radar is on</td>
+</tr>
+<tr>
+<td><strong>Weather widget</strong> (off by default), and <strong>while a flight is recorded</strong> unless <em>Record Weather with Flights</em> is off (Settings → Data → Flight Logbook) — never for a replay</td>
+<td>Open-Meteo (<a href="https://open-meteo.com/en/terms">privacy</a>)</td>
+<td>The aircraft's position <strong>rounded to two decimals (about 1 km)</strong> — with the widget also the home position while there is no GPS fix — every five minutes (every minute while a request fails), to get the forecast wind and weather for that place. The rounding is enough for the forecast model and too coarse to follow the aircraft. The answers that arrive during a recorded flight are stored with it in the flight log database</td>
 </tr>
 <tr>
 <td><strong>Airspace Manager</strong></td>
@@ -2219,8 +2225,9 @@ Each provider handles the request under its own privacy policy, which we link be
 <div class="admonition note">
 <p class="admonition-title">Weather and place-name lookup</p>
 <p>The logbook enrichment sends the take-off position to Open-Meteo and Nominatim automatically when
-a recorded flight starts. If you fly without internet, the lookup simply fails and the entry stays
-without weather and place name.</p>
+a recorded flight is stored or a log is imported, and again when you open a flight that still lacks the data. If you fly
+without internet, the lookup simply fails and the entry stays without weather and place name. Both
+lookups have their own switch under <strong>Settings → Data → Flight Logbook</strong>.</p>
 </div>
 <h2 id="device-permissions">Device permissions<a class="headerlink" href="#device-permissions" title="Permanent link">&para;</a></h2>
 <p>Kite asks for a permission only when the feature that needs it is used, and uses it only for that

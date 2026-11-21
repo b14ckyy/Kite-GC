@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../assets/branding/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -1988,6 +1988,13 @@ like every other version. With <strong>Check for updates</strong> set to <em>Sta
 tells you at start-up when a newer stable version exists (see <a href="../reference/settings/">Settings</a>).
 To stay on your release line, choose <em>Patch releases only</em> instead: Kite then offers only the patch
 releases of the version you run (2.0.0 → 2.0.1, never 2.1.0).</p>
+<p><strong>Google Play carries only the newest version.</strong> A copy installed from there has no
+<em>Patch releases only</em> choice, and once a new feature release is out, Google Play no longer delivers
+patch releases of the line before it. Those remain available as <code>.apk</code> on the GitHub releases page.
+The <code>.apk</code> is signed with the same key as the Play version, so it installs over it and keeps your
+data — as long as Google Play has not installed the new feature release yet; Android does not
+install an older version over a newer one. To stay on a release line, switch off automatic updates
+for Kite in the Play Store first (see <a href="../reference/settings/#updates">Settings → Updates</a>).</p>
 <p>Found a problem in a supported line? See <a href="../troubleshooting/reporting-issues/">Reporting a problem</a> —
 please mention the version you run, so the fix reaches your release line.</p>
 
