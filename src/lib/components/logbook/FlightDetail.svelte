@@ -5,6 +5,7 @@
 
 <script lang="ts">
   import { t } from 'svelte-i18n';
+  import { invoke } from '@tauri-apps/api/core';
   import { convertAltitude, convertDistance, convertSpeed, convertTemperature, formatConverted } from '$lib/utils/units';
   import { formatDurationSec, formatFlightDateTime, flightTzLabel, flightDataSizes, type FlightDataSize, flightVideos, type FlightVideo, missionDbForFlight, flightLoggedWpCount, flightLinkMission, flightUnlinkMission, missionDbSave, missionDbFindByHash, missionDbGeocode, flightSetBatterySerial, batteryDbFindBySerial, batteryDbList, vehicleDbList, flightSetVehicle, getFlight } from '$lib/stores/flightlog';
   import type { Flight, LibraryMission, BatteryPack, Vehicle } from '$lib/stores/flightlogTypes';
@@ -113,9 +114,13 @@
       .catch(() => {});
   });
 
+  // The second try opens the folder itself, for a desktop without a "reveal" service.
   function showVideoFolder() {
     const path = videos.find((v) => v.exists && v.path)?.path;
-    if (path) void revealItemInDir(path).catch((e) => console.warn('[logbook] revealItemInDir failed', e));
+    if (!path) return;
+    void revealItemInDir(path)
+      .catch(() => invoke('system_open_folder', { path }))
+      .catch((e) => console.warn('[logbook] folder not opened', e));
   }
 
   function videoInfo(v: FlightVideo): string {
