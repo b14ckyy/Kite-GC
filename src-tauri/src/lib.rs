@@ -88,7 +88,7 @@ use commands::flightlog::{flightlog_flight_videos,
 };
 use commands::aero::{aero_fetch, aero_cache_stats, aero_cache_clear};
 use commands::hid::{
-    hid_start, hid_stop, hid_select_device,
+    hid_start, hid_stop, hid_select_device, trainer_start, trainer_stop,
     hid_profiles_dir, hid_profile_list, hid_profile_save, hid_profile_delete,
 };
 use commands::rc::{
@@ -586,6 +586,7 @@ pub fn run() {
         .manage(TelemetryApi::new())
         .manage(weather::service::WeatherService::new())
         .manage(HidManager::new())
+        .manage(hid::frsky_trainer::TrainerManager::new())
         // As an `Arc` so the start command can hand it to a blocking task (process spawn +
         // readiness poll) without pinning an async runtime thread.
         .manage(std::sync::Arc::new(MediaMtx::new()))
@@ -867,6 +868,8 @@ pub fn run() {
             hid_start,
             hid_stop,
             hid_select_device,
+            trainer_start,
+            trainer_stop,
             hid_profiles_dir,
             hid_profile_list,
             hid_profile_save,
@@ -900,6 +903,9 @@ pub fn run() {
                 app.state::<MjpegServer>().stop();
                 app.state::<video::rtsp_native::NativeRtsp>().stop();
                 commands::video::finish_recording_at_exit(&app.state::<video::rtsp_native::NativeRtsp>());
+                // A bond left in the OS makes the older FrSky module drop every later connection.
+                #[cfg(not(any(target_os = "ios", target_os = "android")))]
+                transport::ble_pairing::release_all_blocking();
             }
             // The detached video window would keep the app alive alone (Tauri exits with the LAST window): close it
             // with — and after — the main window, so the main window's "docked back" handler cannot clear the

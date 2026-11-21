@@ -94,6 +94,10 @@ version = "0.61"
 features = [
     "Gaming_Input",
     "Foundation_Collections",
+    # PIN pairing of BLE modules that demand it on connect (transport/ble_pairing.rs).
+    "Foundation",
+    "Devices_Bluetooth",
+    "Devices_Enumeration",
     # XInput fallback for Xbox-class pads that Windows.Gaming.Input lists but never reads (hid/windows.rs).
     "Win32_UI_Input_XboxController",
     # Hole-punch spike / native video sink (P2.1): raw child windows under the WebView.
@@ -113,6 +117,9 @@ features = [
 
 [target.'cfg(target_os = "linux")'.dependencies]
 evdev = "0.13"
+# BlueZ pairing agent for BLE modules that demand a passkey (transport/ble_pairing.rs); the crate is
+# already in the tree through keepawake and tauri-plugin-opener.
+zbus = "5"
 # TIOCGSERIAL probe to hide phantom 8250 /dev/ttyS* stubs from the port list (serial.rs).
 libc = "0.2"
 # Access the underlying WebKitGTK WebView to pin its page zoom at 1.0 (lib.rs setup). On Linux the

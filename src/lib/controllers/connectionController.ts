@@ -12,6 +12,7 @@ import { PLATFORM_AIRPLANE, PLATFORM_VTOL } from '$lib/helpers/uavIcons';
 import { platformForVehicleType } from '$lib/helpers/vehicleTypes';
 import { vehicleDbFindByFcUid } from '$lib/stores/flightlog';
 import { settings } from '$lib/stores/settings';
+import { trainerRadioId } from '$lib/stores/trainer';
 import { isQuadplane } from '$lib/stores/missionArdupilot';
 import { startTelemetryListeners, stopTelemetryListeners, startConnectListeners, stopConnectListeners, blackboxOf, resetTelemetry, setFcVariant } from '$lib/stores/telemetry';
 import { startVehicleListeners, activeVehicleId, resetVehicles, refreshLinks, selectVehicle, links, vehicles, type VehicleSummary, type LinkSummary } from '$lib/stores/vehicles';
@@ -105,7 +106,9 @@ function flushBleDevices(): void {
   bleDevices.update((list) => {
     let changed = false;
     const next = [...list];
+    const trainer = trainerRadioId();
     for (const dev of incoming.values()) {
+      if (dev.id === trainer) continue;
       const i = next.findIndex((d) => d.id === dev.id);
       if (i < 0) {
         next.push(dev);

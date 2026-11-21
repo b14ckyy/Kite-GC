@@ -330,6 +330,13 @@ inside the box of the feature release they belong to, so the notes for one relea
 
     *Vehicles and control*
 
+    - **RC control: a radio over Bluetooth (desktop)** — a radio in FrSky's Bluetooth trainer mode
+      becomes an input device of RC control, without a cable. Kite remembers a list of radios,
+      connects to the one in trainer mode by itself and tells trainer data from telemetry in both
+      directions. The older FrSky Bluetooth module, also retro-fitted to EdgeTX radios, is paired
+      with its code without a prompt (confirmed on Windows). Frame format taken from garfield2412's
+      FrSky-Bluetooth-Trainer. See
+      [A FrSky radio over Bluetooth](guides/rc-control.md#a-frsky-radio-over-bluetooth). [#348]
     - **INAV over a MAVLink-only link (MSP/MAV)** — with INAV 10.0, missions, safe homes, geozones,
       craft name and flight statistics work over ELRS/mLRS in MAVLink mode, SiK radios and MAVLink
       Wi-Fi bridges. INAV versions before 10.0 connect over MAVLink on a best-effort basis and
@@ -557,6 +564,9 @@ inside the box of the feature release they belong to, so the notes for one relea
 
     Every fix of 1.0.1 and 1.0.2 is part of 2.0. This list holds what is fixed in 2.0 only.
 
+    - **RC control: a second controller no longer takes over.** With two controllers connected,
+      losing the one in use let the stick stream continue from the other with the same mapping.
+      Control now ends when the controller it was started with disappears. [#348]
     - **Relay: LTM and CRSF carry the altitude above home.** The LTM output wrote the GPS altitude
       (above sea level) where LTM consumers expect the altitude above home, and the CRSF output had
       no altitude above home at all. A tracker or a second Kite behind the relay showed the sea-level

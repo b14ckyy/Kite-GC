@@ -39,6 +39,7 @@
   import ConnectionPopout from "$lib/components/phone/ConnectionPopout.svelte";
   import PhoneWidgetPanel from "$lib/components/phone/PhoneWidgetPanel.svelte";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
+  import { initTrainerHandover } from "$lib/controllers/trainerHandover";
   import UpdateDialog from "$lib/components/UpdateDialog.svelte";
   import { runUpdateCheck, resolveUpdateKind } from "$lib/controllers/updateCheck";
   import { checkDbBackupPrompt, runPendingDbUpgrade, formatBackupSize, type DbSchemaState, type DbUpgradeOutcome } from "$lib/controllers/dbBackupPrompt";
@@ -3180,6 +3181,7 @@
 
   async function initPage() {
     await startBleDeviceListener(); // live BLE discovery → bleDevices store
+    void initTrainerHandover(showDialog);
     await loadInfo();
     // The `--fleet` launch flag → fleet UI on/off; then the once-per-run "only the first vehicle is
     // recorded" notice of a fleet session without group recording.

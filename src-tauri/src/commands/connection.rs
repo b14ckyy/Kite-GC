@@ -192,6 +192,7 @@ pub async fn connect(
     flight_log_raw: Option<bool>,
     flight_log_raw_always: Option<bool>,
     state: State<'_, AppState>,
+    trainer: State<'_, crate::hid::frsky_trainer::TrainerManager>,
     app_handle: AppHandle,
 ) -> Result<ConnectResult, String> {
     // Multi-vehicle: every connect opens an additional link. Reserve its id now (the handlers stamp
@@ -250,6 +251,9 @@ pub async fn connect(
         }
         TransportType::Ble => {
             let dev_id = ble_device_id.ok_or("BLE device ID required")?;
+            if trainer.holds(&dev_id) {
+                return Err("This radio is remembered as a Bluetooth trainer input; RC control is looking for it. Close the RC panel or remove the radio there".into());
+            }
             if proto == "telemetry" {
                 // Passive mode: no known profile required — auto-discover + subscribe to all
                 // Notify/Indicate characteristics and dump the GATT table to the Debug Monitor.
