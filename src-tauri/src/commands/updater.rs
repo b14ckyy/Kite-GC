@@ -92,6 +92,15 @@ fn emit_progress(app: &AppHandle, downloaded: u64, total: Option<u64>, phase: &'
     let _ = app.emit(PROGRESS_EVENT, UpdateProgress { downloaded, total, phase });
 }
 
+/// Relaunch, with the native video sink stopped from this thread first: the exit hook stops it on the
+/// main thread, and on Windows that hangs while the main window still exists (a restart, not a close).
+#[cfg(desktop)]
+fn restart(app: &AppHandle) -> ! {
+    use tauri::Manager;
+    app.state::<crate::video::rtsp_native::NativeRtsp>().stop();
+    app.restart()
+}
+
 /// Installed copy → the Tauri updater against the release's own manifest.
 #[cfg(desktop)]
 async fn install_bundle(app: &AppHandle, tag: &str) -> Result<(), String> {
@@ -132,7 +141,7 @@ async fn install_bundle(app: &AppHandle, tag: &str) -> Result<(), String> {
         .await
         .map_err(|e| format!("Update failed: {e}"))?;
     log::info!("Update: {tag} installed, restarting");
-    app.restart()
+    restart(app)
 }
 
 /// Portable copy → download the portable ZIP and swap the binary.
@@ -200,7 +209,7 @@ async fn install_portable(app: &AppHandle, tag: &str, version: &str) -> Result<(
     }
     std::fs::rename(&fresh, &exe).map_err(|e| format!("Cannot replace the executable: {e}"))?;
     log::info!("Update: portable {tag} in place, restarting");
-    app.restart()
+    restart(app)
 }
 
 /// `<exe>.old` — where the Windows portable swap parks the previous executable.
