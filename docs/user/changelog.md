@@ -565,6 +565,11 @@ inside the box of the feature release they belong to, so the notes for one relea
       vertical speed into the barometer-altitude frame. Kite showed no vertical speed on such a link
       and took the GPS altitude for a height above home, which left AGL and the 3D altitude without
       a reference. Kite now tells the two layouts apart by the frame itself, so both work. [#339]
+    - **ArduPilot and PX4: the mission on the aircraft is offered when you connect.** INAV
+      already asked whether to download the flight controller's mission; on ArduPilot and PX4
+      nothing happened and the mission had to be fetched by hand. Where the firmware reports
+      the mission size with the telemetry, Kite now asks once per connection, without an extra
+      request to the aircraft. [#344]
     - **Radar: adsb.lol is no longer a built-in source, a rate limit pauses a feed.** adsb.lol now
       allows 500 requests a day per address, which Kite's polling uses up in well under an hour;
       the feed then showed a source error for the rest of the day. **adsb.fi** is the built-in

@@ -157,6 +157,9 @@ export interface TelemetryData {
   navState: number;
   /** FC's current target waypoint (MSP_NAV_STATUS live / blackbox in replay). 0 = none. */
   activeWpNumber: number;
+  /** Size of the mission the FC holds, as a MAVLink FC reports it with the active item (without its home
+   *  slot). 0 = none or not told. */
+  fcMissionItems: number;
 
   /** Firmware variant of the connected FC ("INAV", "ArduPlane", "PX4", …): seeded from the handshake on
    *  connect (`setFcVariant`), set per sample in replay, empty when idle / on passive telemetry. */
@@ -181,7 +184,7 @@ const defaultTelemetry: TelemetryData = {
   sensorGyro: 0, sensorAcc: 0, sensorMag: 0, sensorBaro: 0,
   sensorGps: 0, sensorRangefinder: 0, sensorPitot: 0, sensorOpflow: 0, sensorRcReceiver: 0, prearmHealthy: 0,
   ekfStatus: 0, ekfType: 0,
-  flightMode: { primary: '', modifiers: [] }, navState: 0, activeWpNumber: 0,
+  flightMode: { primary: '', modifiers: [] }, navState: 0, activeWpNumber: 0, fcMissionItems: 0,
   fcVariant: '',
   lastUpdate: 0,
 };
@@ -628,11 +631,12 @@ async function startTelemetryListenersInner() {
   );
 
   fresh.push(
-    await listen<{ active_wp_number: number; nav_state: number }>('telemetry-nav-status', (event) => {
+    await listen<{ active_wp_number: number; nav_state: number; mission_total?: number | null }>('telemetry-nav-status', (event) => {
       upd(event.payload, (t) => ({
         ...t,
         activeWpNumber: event.payload.active_wp_number,
         navState: event.payload.nav_state,
+        fcMissionItems: event.payload.mission_total ?? 0,
         lastUpdate: Date.now(),
       }));
     })

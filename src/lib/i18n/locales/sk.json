@@ -1698,6 +1698,7 @@
     "connUpload": "Nahrať do FC",
     "connMsgFcHas": "Letový kontrolér obsahuje misiu (WP: {count}). Stiahnuť ju na mapu alebo nahrať aktuálnu misiu z mapy?",
     "connMsgUploadOnly": "Nahrať aktuálnu misiu z mapy do letového kontroléra?",
+    "connMsgDownloadOnly": "Letový kontrolér obsahuje misiu ({count} WPs). Stiahnuť ju na mapu?",
     "clickMarkerHint": "Kliknutím na značku na mape upravte parametre",
     "fcDownload": "Stiahnuť z FC",
     "fcUpload": "Nahrať do FC",

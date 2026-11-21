@@ -14,6 +14,10 @@
 #         scripts/make-update-manifest.sh [tag]        # tag defaults to v<package.json version>
 #     gh release create <tag> --notes-file … release/*
 #
+# "Latest" on GitHub is what the stable update channel reads, and GitHub gives it to the release
+# published last. It must stay with the newest release of the NEWEST line: a pre-release gets
+# `--prerelease`, a patch for an older line `--latest=false` once a newer feature release exists.
+#
 # A `*_playstore.aab` in release/ belongs to the Play Console, not to the GitHub release — move it
 # out before the `gh release create` line above.
 #

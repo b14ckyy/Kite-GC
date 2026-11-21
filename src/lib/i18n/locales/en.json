@@ -1702,6 +1702,7 @@
     "connUpload": "Upload to FC",
     "connMsgFcHas": "The flight controller has a mission ({count} WPs). Download it to the map, or upload the current map mission?",
     "connMsgUploadOnly": "Upload the current map mission to the flight controller?",
+    "connMsgDownloadOnly": "The flight controller has a mission ({count} WPs). Download it to the map?",
     "clickMarkerHint": "Click the marker on the map to edit parameters",
     "fcDownload": "FC Download",
     "fcUpload": "FC Upload",

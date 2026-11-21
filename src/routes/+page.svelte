@@ -145,7 +145,7 @@
   import TerrainAnalysisPanel from "$lib/components/terrain/TerrainAnalysisPanel.svelte";
   import { editMode, replayActive, mission, missionFlags, missionDownload, missionUpload, missionFcInfo, markMissionSynced, loadedMissionId, missionLoadLibrary, missionImportXml, applyMissionLaunchDefault, getTotalWpCount, launchPoint, hasLocation, toDeg, type Waypoint } from "$lib/stores/mission";
   import { pendingSystemSwitch, autopilotSystem, autopilotLocked, setAutopilotSystem, confirmSystemSwitch } from "$lib/stores/autopilotContext";
-  import { arduMission, arduSelectedWpIndex, arduLoadedMissionId, arduEditMode, parseWaypoints, parsePlanFile, planFirmwareTarget, planVehicleClass, loadArduMissionFromFile, arduVehicleClass, setArduVehicleClass, knownVehicleClass, arduClearUndoHistory, markArduMissionSynced, type ArduWaypoint } from "$lib/stores/missionArdupilot";
+  import { arduMission, arduSelectedWpIndex, arduLoadedMissionId, arduEditMode, parseWaypoints, parsePlanFile, planFirmwareTarget, planVehicleClass, loadArduMissionFromFile, arduVehicleClass, setArduVehicleClass, knownVehicleClass, arduClearUndoHistory, markArduMissionSynced, arduMissionFlags, downloadArduMissionFromFc, type ArduWaypoint } from "$lib/stores/missionArdupilot";
   import { frameMissionOnMap } from "$lib/stores/mapCamera";
   import { terrainAnalysis, patchTerrainAnalysis } from "$lib/stores/terrainAnalysis";
   import { DEFAULT_RADAR, DEFAULT_AIRSPACE, BUILTIN_ADSB_PROVIDERS } from "$lib/stores/settings";
@@ -3521,7 +3521,7 @@
   });
 
   async function onConnectMissionPrompt() {
-    // INAV/MSP only for now — direct or MSP over MAVLink (ArduPilot/MAVLink mission sync is a separate path).
+    // INAV over MSP, direct or tunnelled. ArduPilot / PX4 are asked by `onFcMissionReported`.
     if (!get(hasMsp)) return;
     let fcWpCount = 0;
     try { fcWpCount = (await missionFcInfo()).wp_count; } catch { /* FC may not answer — treat as none */ }
@@ -3540,6 +3540,35 @@
     try {
       if (ans === 'download') await missionDownload();
       else if (ans === 'upload') await missionUpload();
+    } catch (e) {
+      await showInfo($t('mission.connTitle'), String(e));
+    }
+  }
+
+  // ArduPilot / PX4 report the size of their mission with the telemetry: offered once per connection, when
+  // it shows, without a request of our own. Held back while the system switch still asks about the map's mission.
+  let fcMissionAsked = false;
+  const fcMissionItems = $derived(telem.fcMissionItems);
+  $effect(() => {
+    if (!isPrimaryConnected) {
+      fcMissionAsked = false;
+      return;
+    }
+    const count = fcMissionItems;
+    if (fcMissionAsked || count === 0 || $hasMsp || $autopilotSystem === 'inav' || $pendingSystemSwitch) return;
+    fcMissionAsked = true;
+    if (!get(arduMissionFlags).fc) void onFcMissionReported(count);
+  });
+
+  async function onFcMissionReported(count: number) {
+    const ans = await showDialog({
+      title: $t('mission.connTitle'),
+      message: $t('mission.connMsgDownloadOnly', { values: { count } }),
+      buttons: [{ label: $t('mission.connDownload'), value: 'download', primary: true }],
+    });
+    if (ans !== 'download') return;
+    try {
+      await downloadArduMissionFromFc();
     } catch (e) {
       await showInfo($t('mission.connTitle'), String(e));
     }

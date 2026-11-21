@@ -1698,6 +1698,7 @@
     "connUpload": "Subir a la FC",
     "connMsgFcHas": "La controladora de vuelo tiene una misión ({count} WP). ¿Descargarla al mapa o subir la misión actual del mapa?",
     "connMsgUploadOnly": "¿Subir la misión actual del mapa a la controladora de vuelo?",
+    "connMsgDownloadOnly": "La controladora de vuelo tiene una misión ({count} WPs). ¿Descargarla al mapa?",
     "clickMarkerHint": "Haz clic en el marcador del mapa para editar los parámetros",
     "fcDownload": "Descargar de la FC",
     "fcUpload": "Subir a la FC",

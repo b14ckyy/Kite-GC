@@ -124,6 +124,7 @@ export function toTelemetryData(r: TelemetryRecord, fcVariant = 'INAV'): Telemet
     },
     navState: r.nav_state ?? 0,
     activeWpNumber: r.active_wp_number ?? 0,
+    fcMissionItems: 0,
 
     // FC type
     fcVariant,
