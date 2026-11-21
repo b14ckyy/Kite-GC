@@ -82,13 +82,14 @@
     if (selectedId != null && list.some((d) => d.id === selectedId)) return;
     const savedUuid = $settings.rcControl.selectedUuid;
     const match = savedUuid ? list.find((d) => d.uuid === savedUuid) : null;
-    void pickDevice(match ?? list[0]);
+    void pickDevice(match ?? list[0], !!match || !savedUuid);
   });
 
-  async function pickDevice(dev: HidDevice): Promise<void> {
+  /** `remember` false for a fallback pick: the saved device comes back and must be chosen again. */
+  async function pickDevice(dev: HidDevice, remember = true): Promise<void> {
     selectedId = dev.id;
     await selectHidDevice(dev.id);
-    settings.patch({ rcControl: { ...$settings.rcControl, selectedUuid: dev.uuid } });
+    if (remember) settings.patch({ rcControl: { ...$settings.rcControl, selectedUuid: dev.uuid } });
   }
 
   function onDevicePick(e: Event): void {
@@ -473,7 +474,7 @@
           <HoldToConfirm
             variant={$rcEngaged.on ? 'danger' : 'standard'}
             duration={LONG_PRESS_MS}
-            disabled={!$rcEngaged.on && safety.locked}
+            disabled={!$rcEngaged.on && (safety.locked || !selectedDevice)}
             title={$rcEngaged.on ? $t('rc.disengageBtn') : $t('rc.engageBtn')}
             onconfirm={toggleEngage}
           >

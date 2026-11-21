@@ -59,17 +59,20 @@ export const hidActive = writable<boolean>(false);
 let unlistenDevices: UnlistenFn | null = null;
 let unlistenInput: UnlistenFn | null = null;
 
-/** Start the HID input thread and begin receiving device/input events. Safe to call repeatedly. */
+/** Idempotent; also starts the Bluetooth trainer task when radios are remembered. */
 export async function startHid(): Promise<void> {
   if (unlistenDevices) return; // already wired
-  unlistenDevices = await listen<HidDevice[]>('hid-devices', (e) => hidDevices.set(e.payload));
+  unlistenDevices = await listen<HidDevice[]>('hid-devices', (e) => {
+    hidDevices.set(e.payload);
+    // A device that left must not leave its last sticks behind for the next engage.
+    hidSnapshot.update((snap) => (snap && !e.payload.some((d) => d.id === snap.id) ? null : snap));
+  });
   unlistenInput = await listen<HidSnapshot>('hid-input', (e) => hidSnapshot.set(e.payload));
   await invoke('hid_start');
   hidActive.set(true);
   void startTrainer();
 }
 
-/** Stop the HID input thread and tear down listeners. */
 export async function stopHid(): Promise<void> {
   await stopTrainer();
   await invoke('hid_stop');

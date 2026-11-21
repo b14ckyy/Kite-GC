@@ -17,7 +17,7 @@
 
 import { writable, derived, get } from 'svelte/store';
 import { rcEngaged, disengage } from './rcEngage';
-import { startHid, stopHid, hidActive, hidDevices } from './hid';
+import { startHid, stopHid, hidActive, hidDevices, hidSnapshot } from './hid';
 import { connection } from './connection';
 import { rcFcConfig } from './rcFcConfig';
 import { currentChannels } from './rcProfiles';
@@ -49,13 +49,13 @@ async function reconcileHid(): Promise<void> {
 }
 hidWanted.subscribe(() => void reconcileHid());
 
-// ── Involuntary disengage: ONLY a genuine loss of control authority ends a background session ─────────
-// NOT app navigation. Holding a frozen-stick stream after a real loss is unsafe, so we stop and let the
-// FC's RC failsafe / RC_OVERRIDE_TIME grace window take over (no explicit release frame — same as before).
-/** Device the session was engaged with. */
+// ── Involuntary disengage: only a genuine loss of control authority ends a background session ──
+// Never app navigation. No release frame: the FC's RC failsafe / RC_OVERRIDE_TIME takes over.
 let engagedUuid: string | null = null;
 rcEngaged.subscribe((e) => {
-  engagedUuid = e.on ? (engagedUuid ?? get(settings).rcControl.selectedUuid) : null;
+  if (!e.on) engagedUuid = null;
+  // The device that actually streams; the saved selection may point at one that is gone.
+  else engagedUuid ??= get(hidDevices).find((d) => d.id === get(hidSnapshot)?.id)?.uuid ?? get(settings).rcControl.selectedUuid;
 });
 
 const authorityLost = derived(
