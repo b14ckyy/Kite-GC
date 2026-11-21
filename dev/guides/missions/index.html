@@ -2539,6 +2539,12 @@ the whole pattern. On INAV the 120-waypoint limit is checked, with the option to
 </tbody>
 </table>
 <p>Up- and downloads show an <strong>"x of n"</strong> progress counter as the waypoints transfer.</p>
+<p><strong>When you connect, Kite offers the mission the aircraft holds.</strong> On INAV it asks the flight
+controller right after connecting and offers to download its mission, or to upload the one on the
+map. On ArduPilot and PX4 Kite sends no request of its own: when the firmware reports the size of
+its mission with the telemetry (seen with ArduPlane 4.7), Kite asks once per connection whether to
+download it. A firmware that does not report the size is not asked about; use <strong>Download</strong> in the
+mission panel there.</p>
 <p>An INAV flight controller reached over a MAVLink-only radio link (<strong>MSP/MAV</strong>, INAV 10.0+) uses the
 INAV column: Kite carries the MSP transfer inside the MAVLink stream, EEPROM save and multi-mission
 included — see <strong><a href="../connecting/#inav-over-mavlink-mspmav">Connecting → INAV over MAVLink</a></strong>.</p>
