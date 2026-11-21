@@ -1359,6 +1359,9 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
             let _ = app_handle.emit("telemetry-nav-status", serde_json::json!({
                 "active_wp_number": active_wp_from_mission_current(mc.seq, mc.mission_mode, inav_tunnel),
                 "nav_state": 0u8, // ArduPilot has no INAV nav_state; mission detection uses flight mode
+                // Items without the home slot. 0 = field not filled (ArduPilot also sends it for an empty
+                // mission), 65535 = no mission: both say nothing to offer.
+                "mission_total": Some(mc.total).filter(|t| (1..u16::MAX).contains(t)),
             }));
         }
 

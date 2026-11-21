@@ -1702,6 +1702,7 @@
     "connUpload": "Auf FC hochladen",
     "connMsgFcHas": "Der Flight Controller hat eine Mission ({count} WPs). Auf die Karte laden, oder die aktuelle Karten-Mission hochladen?",
     "connMsgUploadOnly": "Die aktuelle Karten-Mission auf den Flight Controller hochladen?",
+    "connMsgDownloadOnly": "Der Flight Controller hat eine Mission ({count} WPs). Auf die Karte laden?",
     "clickMarkerHint": "Marker auf der Karte anklicken um Parameter zu bearbeiten",
     "fcDownload": "FC Download",
     "fcUpload": "FC Upload",

@@ -1698,6 +1698,7 @@
     "connUpload": "上传到飞控",
     "connMsgFcHas": "飞控有一个任务（{count} 航点）。下载到地图，还是上传当前地图任务？",
     "connMsgUploadOnly": "将当前地图任务上传到飞控？",
+    "connMsgDownloadOnly": "飞控中有一个任务（{count} 个航点）。下载到地图？",
     "clickMarkerHint": "点击地图上的标记编辑参数",
     "fcDownload": "飞控下载",
     "fcUpload": "飞控上传",

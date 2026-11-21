@@ -1698,6 +1698,7 @@
     "connUpload": "Téléverser vers le FC",
     "connMsgFcHas": "Le contrôleur de vol a une mission ({count} WP). La télécharger sur la carte, ou téléverser la mission actuelle de la carte ?",
     "connMsgUploadOnly": "Téléverser la mission actuelle de la carte vers le contrôleur de vol ?",
+    "connMsgDownloadOnly": "Le contrôleur de vol contient une mission ({count} WPs). La télécharger sur la carte ?",
     "clickMarkerHint": "Cliquez sur le marqueur de la carte pour modifier les paramètres",
     "fcDownload": "Téléch. FC",
     "fcUpload": "Télév. FC",
