@@ -276,6 +276,7 @@ mod link {
         sessions_with_frames: u32,
         stalled: bool,
         logged_rejects: u32,
+        pair_failures: u32,
         frames_out: Vec<Vec<u16>>,
     }
 
@@ -293,6 +294,7 @@ mod link {
                 sessions_with_frames: 0,
                 stalled: false,
                 logged_rejects: 0,
+                pair_failures: 0,
                 frames_out: Vec::new(),
             }
         }
@@ -401,6 +403,9 @@ mod link {
     /// Data without a single trainer frame for this long is something else (telemetry): release.
     const FOREIGN_AFTER: Duration = Duration::from_secs(2);
     const FOREIGN_NOTIFICATIONS: u64 = 10;
+    /// The pairing fails at random against the older module, and an unpaired link streams until
+    /// the module hangs up after ~25 s: pair again instead, unpaired only as the last resort.
+    const PAIR_ATTEMPTS: u32 = 4;
     /// The older FrSky module (TI CC254x profile) carries these beside FFF6; the radios with their
     /// own Bluetooth do not. That module demands a passkey and hangs up without one.
     const PIN_MODULE_MARKERS: [uuid::Uuid; 2] = [
@@ -568,8 +573,19 @@ mod link {
         if stats.status.pairing {
             set_state(app, stats, "connecting");
             match ble_pairing::pair(device_id, ble_pairing::FRSKY_PIN).await {
-                Ok(b) => *bond = Some(b),
-                Err(e) => log::warn!("[trainer] {e}; connecting unpaired"),
+                Ok(b) => {
+                    *bond = Some(b);
+                    stats.pair_failures = 0;
+                }
+                Err(e) if stats.pair_failures + 1 < PAIR_ATTEMPTS => {
+                    stats.pair_failures += 1;
+                    stats.status.state = "searching";
+                    return Err(format!("{e}; pairing again"));
+                }
+                Err(e) => {
+                    stats.pair_failures = 0;
+                    log::warn!("[trainer] {e}; connecting unpaired");
+                }
             }
         }
 
