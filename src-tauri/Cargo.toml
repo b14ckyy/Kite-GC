@@ -49,6 +49,7 @@ dirs = "5"
 tokio = { version = "1", features = ["time", "sync", "macros"] }
 futures = "0.3"
 mavlink = { version = "0.17", default-features = false, features = ["std", "ardupilotmega", "emit-extensions"] }
+mavlink-tlog = "0.1.2"  # .tlog record framing with CRC check and resync past damaged bytes
 num-traits = "0.2"  # FromPrimitive for lossless MavCmd/MavFrame <-> int (mission codec round-trip)
 tiff = "0.9"  # decode Copernicus GLO-30 GeoTIFF DEM tiles (Float32, DEFLATE, predictor 3)
 

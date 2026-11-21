@@ -298,30 +298,20 @@ fn decode_tlog(bytes: &[u8]) -> (Vec<Sample>, Identity) {
     let mut platform: u8 = 0;
     // The autopilot's (system, component) id, locked onto the first HEARTBEAT that identifies one.
     let mut fc_id: Option<(u8, u8)> = None;
-    let mut i = 0usize;
 
-    while i + 8 <= bytes.len() {
-        let ts_us = u64::from_be_bytes(bytes[i..i + 8].try_into().unwrap());
-        i += 8;
-        let t_ms = (ts_us / 1000) as i64;
-        // Feed bytes until exactly one frame completes (records are one frame each; well-formed logs
-        // pass CRC so `push` returns at the frame boundary). A guard prevents runaway on corruption.
-        let mut got = false;
-        let mut guard = 0;
-        while i < bytes.len() && !got && guard < 600 {
-            let b = bytes[i];
-            i += 1;
-            guard += 1;
+    // mavlink-tlog splits the log into CRC-checked records and resyncs past damaged bytes, so the
+    // parser below only ever sees one complete frame per record.
+    for rec in mavlink_tlog::TlogSlice::new(bytes) {
+        let t_ms = (rec.timestamp_us / 1000) as i64;
+        for &b in rec.frame.as_bytes() {
             let parsed = parser.push_any(b);
             // TUNNEL (#385) — Kite's own MSP-over-MAVLink traffic, recorded into every tlog of a tunnel
             // link. A complete record like any other (so the importer stays on the frame boundary), but
             // not telemetry: skipped.
             if matches!(parsed, Some(Parsed::Tunnel { .. })) {
-                got = true;
                 continue;
             }
             if let Some(Parsed::Msg(frame)) = parsed {
-                got = true;
                 // A tlog carries every component on the link, not just the autopilot. Peripherals that
                 // share the vehicle's system id — a camera on component 100, a gimbal on 154 — publish
                 // their own HEARTBEATs with their own `custom_mode`, so consuming all of them makes the
@@ -355,9 +345,6 @@ fn decode_tlog(bytes: &[u8]) -> (Vec<Sample>, Identity) {
                     samples.push(Sample { t_ms, rec: snap_to_record(&snap, t_ms), armed });
                 }
             }
-        }
-        if !got {
-            break;
         }
     }
     let fc_variant = if variant.is_empty() { None } else { Some(variant) };
@@ -808,6 +795,30 @@ mod tests {
         assert_eq!(identity.fc_variant.as_deref(), Some("ArduPlane"));
         assert_eq!(samples.len(), 1, "the ATTITUDE after the TUNNEL records must still be decoded");
         assert_eq!(samples[0].t_ms, 4000);
+    }
+
+    /// One damaged record (a truncated frame, as a logger leaves when a link drops mid-write) must
+    /// cost that record only: the import resyncs on the next timestamp instead of eating the intact
+    /// record after it.
+    #[test]
+    fn a_damaged_record_costs_only_that_record() {
+        let att = |roll: f32| MavMessage::ATTITUDE(ATTITUDE_DATA { roll, ..Default::default() });
+        let hb = heartbeat(MavType::MAV_TYPE_FIXED_WING, MavAutopilot::MAV_AUTOPILOT_ARDUPILOTMEGA, 15);
+        let mut log = tlog(vec![(1, 1, hb), (1, 1, att(0.1))]);
+        // A record cut short: the timestamp and the first half of an ATTITUDE frame.
+        let cut = tlog(vec![(1, 1, att(0.5))]);
+        log.extend_from_slice(&cut[..cut.len() / 2]);
+        let mut seq = MavSequence::new();
+        for n in 0..20u64 {
+            log.extend_from_slice(&((n + 10) * 1_000_000).to_be_bytes());
+            let header = MavHeader { system_id: 1, component_id: 1, sequence: 0 };
+            log.extend_from_slice(&serialize_v2(&header, &att(0.2), &mut seq));
+        }
+
+        let (samples, _) = decode_tlog(&log);
+        assert_eq!(samples.len(), 21, "every intact ATTITUDE after the damaged record is decoded");
+        assert_eq!(samples[1].t_ms, 10_000);
+        assert_eq!(samples.last().unwrap().t_ms, 29_000);
     }
 
     /// The `heading` column is course over ground, not the vehicle heading — `GLOBAL_POSITION_INT.hdg`

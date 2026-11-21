@@ -2590,6 +2590,7 @@ dependencies = [
  "libc",
  "log",
  "mavlink",
+ "mavlink-tlog",
  "md-5",
  "ndk",
  "ndk-context",
@@ -2880,6 +2881,12 @@ dependencies = [
  "byteorder",
  "crc-any",
 ]
+
+[[package]]
+name = "mavlink-tlog"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "da742b92f6820a5de512a96a83911a29b4621b61370a2cec0baff8651a48a07b"
 
 [[package]]
 name = "md-5"
