@@ -12,6 +12,7 @@
   import { t } from 'svelte-i18n';
   import Button from '$lib/components/panel/Button.svelte';
   import GroupConfirmDialog from '$lib/components/GroupConfirmDialog.svelte';
+  import { outOfPanel } from '$lib/helpers/outOfPanel';
   import { get } from 'svelte/store';
   import { vehicles } from '$lib/stores/vehicles';
   import { allTelemetry } from '$lib/stores/telemetry';
@@ -121,7 +122,7 @@
   </button>
 </div>
 
-<GroupConfirmDialog bind:this={dialog} />
+<div use:outOfPanel><GroupConfirmDialog bind:this={dialog} /></div>
 
 <style>
   .gcbtns {

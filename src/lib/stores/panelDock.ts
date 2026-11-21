@@ -9,3 +9,7 @@
 import { writable } from 'svelte/store';
 
 export const panelDockRight = writable(0);
+
+/** Level of the traffic alert whose banner lies behind the open panel, or null. The panel's title bar
+ *  takes the alert's colour then: the banner must not cover controls, and a device can be muted. */
+export const panelAlertLevel = writable<'warning' | 'caution' | null>(null);

@@ -4,10 +4,8 @@
 -->
 
 <script lang="ts">
-  // An FC hardware id (24–36 hex chars) shown shortened — the first 10 characters and an ellipsis,
-  // the full value in the tooltip — with an icon-only copy button. Used wherever the id appears (UAV
-  // Info panel, flight detail, vehicle build sheet): the copy exists so a swapped flight controller's
-  // id can be pasted into the existing vehicle entry.
+  // An FC hardware id shown shortened (first 10 chars, full in the tooltip) with a copy button — so a swapped
+  // FC's id can be pasted into the existing vehicle entry.
   import { t } from 'svelte-i18n';
   import { copyToClipboard } from '$lib/helpers/clipboard';
   import { shortFcUid } from '$lib/helpers/fcUid';

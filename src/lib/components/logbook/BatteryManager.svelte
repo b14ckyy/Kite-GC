@@ -11,9 +11,11 @@
 -->
 <script lang="ts">
   import { t } from 'svelte-i18n';
+  import { escapeKey } from '$lib/actions/escapeKey';
   import { get } from 'svelte/store';
   import { anyCase } from '$lib/helpers/fileFilters';
-  import { save, open as openFileDialog } from '@tauri-apps/plugin-dialog';
+  import { exportFile } from '$lib/helpers/exportFile';
+  import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
   import { settings } from '$lib/stores/settings';
   import {
     batteryDbList, batteryDbCreate, batteryDbUpdate, batteryDbDelete,
@@ -414,13 +416,13 @@
 
     const labelPart = b.label ? `_${sanitize(b.label)}` : '';
     try {
-      const path = await save({
+      const path = await exportFile({
         title: $t('batteryMgr.exportTitle'),
-        defaultPath: `battery_${sanitize(b.serial)}${labelPart}.kbatt`,
+        name: `battery_${sanitize(b.serial)}${labelPart}.kbatt`,
         filters: [{ name: 'Battery', extensions: ['kbatt'] }],
+        write: (p) => batteryFileWrite(p, file),
       });
       if (!path) return;
-      await batteryFileWrite(path, file);
       statusMessage = $t('batteryMgr.exported');
     } catch (e) {
       statusMessage = $t('batteryMgr.exportFailed', { values: { error: String(e) } });
@@ -733,7 +735,7 @@
 {#if editing}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="modal-backdrop" onclick={cancelEdit}>
+  <div class="modal-backdrop" use:escapeKey={cancelEdit}>
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="modal-card" onclick={(e) => e.stopPropagation()}>
@@ -746,7 +748,7 @@
 {#if showUsage}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="modal-backdrop" onclick={cancelUsage}>
+  <div class="modal-backdrop" use:escapeKey={cancelUsage}>
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="modal-card" onclick={(e) => e.stopPropagation()}>
@@ -759,7 +761,7 @@
 {#if importFile}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="modal-backdrop" onclick={cancelImport}>
+  <div class="modal-backdrop" use:escapeKey={cancelImport}>
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="modal-card" onclick={(e) => e.stopPropagation()}>
@@ -1007,7 +1009,7 @@
   .usage-hint { font-size: 11px; color: #949494; margin-bottom: 6px; }
 
   .modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55); display: flex; align-items: center; justify-content: center; z-index: 1000; }
-  .modal-card { box-sizing: border-box; background: #2e2e2e; border: 1px solid rgba(55, 168, 219, 0.35); border-radius: 8px; padding: 14px; width: min(540px, 92vw); max-height: 88vh; overflow-y: auto; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5); }
+  .modal-card { background: #2e2e2e; border: 1px solid rgba(55, 168, 219, 0.35); border-radius: 8px; padding: 14px; width: min(540px, 100%); box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5); }
 
   .bat-status { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); z-index: 1001; padding: 6px 12px; font-size: 11px; color: #f39c12; background: rgba(0, 0, 0, 0.8); border-radius: 6px; }
   /* Phone: centre on the map area — a screen-centred pill runs under the widget column. */

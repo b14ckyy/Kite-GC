@@ -1,7 +1,7 @@
 # RC control
 
 Kite can fly the aircraft from the ground station using a **USB joystick, gamepad or RC transmitter** (in
-USB / joystick mode): it reads your controller, maps the axes and buttons to RC channels, and streams
+USB / joystick mode, or a FrSky radio [over Bluetooth](#a-frsky-radio-over-bluetooth)): it reads your controller, maps the axes and buttons to RC channels, and streams
 them to the flight controller over the live link. This is a **safety-critical** feature — it's off until
 you explicitly **take control**, and it's deliberately gated behind a deadman so a frozen or disconnected
 GCS can never keep stale sticks flying.
@@ -47,6 +47,47 @@ The controller half works the same regardless of the stack:
 The RC panel: the device and live input monitor, the per-channel mapping, and the Take-control engage
 button.
 ///
+
+### A FrSky radio over Bluetooth
+
+A FrSky radio can be the controller without a cable: in its **Bluetooth trainer mode** it sends its
+channels to Kite, and Kite lists it in the **Device** dropdown like a joystick.
+
+1. On the radio, set the Bluetooth trainer link to **Slave** (ETHOS: **Model → Trainer → Bluetooth**)
+   and choose how many channels it sends.
+2. In the RC panel, click the **Bluetooth button** beside the **Device** dropdown, then **Search**. The
+   scan takes a few seconds and lists the Bluetooth LE devices in range.
+3. Click your radio. Kite remembers it and connects; the line beside its name shows *Receiving 8
+   channels* once data arrives.
+4. Pick **`<radio name>` (Bluetooth)** in the **Device** dropdown and map it like any other controller.
+   Every radio channel is one axis (**A1** = CH1, **A2** = CH2, …), with no centre deadband.
+
+Kite keeps a **list** of remembered radios and connects to the first one it finds in trainer mode.
+**Remove** takes a radio off the list. The Bluetooth link only runs while the RC panel is open or control
+is engaged.
+
+Things to know:
+
+- **Losing the radio ends control.** After half a second without data the radio disappears from the
+  device list. An engaged session stops streaming, and the flight controller does what its failsafe says —
+  exactly as with an unplugged joystick. Kite never centres the sticks for you.
+- **Latency.** The radio sends 50 to 90 frames per second, but Bluetooth delivers them in bursts: expect
+  30 to 60 ms between bursts, and single gaps of 0.1 to 0.2 s. That suits the 10–25 Hz stick stream of RC
+  control; it is not a low-latency link.
+- **Trainer or telemetry, not both.** The radio's Bluetooth does one job at a time. While the RC panel
+  is open or control is engaged, Kite looks for the remembered radios, and such a radio cannot be
+  connected as a **BLE** telemetry link. If a remembered radio
+  sends telemetry instead, its line reads *Sends telemetry, not trainer data*; Kite lets go of it and
+  looks again every 15 seconds. The other way round, a radio in trainer mode that you connect as a
+  **Telemetry** link over BLE is recognised: Kite closes that link and offers the radio for RC control (a
+  radio already on the list switches over without asking).
+- **Older FrSky Bluetooth module.** The module of older FrSky radios, also retro-fitted to other
+  transmitters, demands a pairing code and hangs up without one. On **Windows** Kite recognises this
+  module and pairs with its code `000000` by itself, without a system prompt. The same is built for
+  **Linux** but not confirmed there yet. macOS gives an app no way to answer the pairing, so the
+  module is not usable there for now.
+- Tested on Windows with a FrSky X20RS on ETHOS 26.2 and with a RadioMaster TX16S on EdgeTX carrying
+  the older FrSky module. Linux is not confirmed yet: in a first test the link was unstable.
 
 ### Channel mapping
 

@@ -53,6 +53,7 @@
     nativeSink: true,
     reconnecting: false,
     reconnectAttempt: 0,
+    replayGap: false,
   });
   let fullscreen = $state(false);
   /** Is [`fullscreen`] the window's real state yet? Until it is, NOTHING may set the aspect lock:
@@ -76,7 +77,8 @@
    *  also where fullscreen's bars come from on a screen whose shape is not the stream's. */
   let stage = $state({ w: 0, h: 0 });
 
-  const live = $derived(feed.status === 'live' && feed.nativeSink);
+  // In a gap the hole goes: the layer below still holds the last picture before it.
+  const live = $derived(feed.status === 'live' && feed.nativeSink && !feed.replayGap);
   const armed = $derived($activeNativeSurfaces.has('floating'));
 
   // The hardware layer only follows a hole while the router runs; it runs only while there is a
@@ -362,6 +364,8 @@
           {$t('video.reconnecting')}{feed.reconnectAttempt ? ` (${feed.reconnectAttempt})` : ''}
         {:else if feed.status === 'error'}
           ⚠ {feed.error}
+        {:else if feed.replayGap}
+          {$t('video.replayGap')}
         {:else}
           {$t('video.starting')}
         {/if}

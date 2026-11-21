@@ -7,34 +7,35 @@ use tauri::Emitter;
 
 use crate::flightlog::db;
 use crate::flightlog::exchange;
+use crate::flightlog::video_files;
 use crate::flightlog::types::{
     BatteryAggregate, BatteryFile, BatteryPack, BatteryPackInput, BlackboxImportProgress,
     BlackboxImportStatus, Flight, FlightSummary, Mission, MissionInput, TelemetryRecord, Vehicle,
-    VehicleAggregate, VehicleFile, VehicleInput, VehicleResolution,
+    MissionFile, MissionFileBody, VehicleAggregate, VehicleFile, VehicleInput, VehicleResolution,
 };
 
 /// Whether the app runs in portable mode (`.portable` marker next to the executable).
-fn portable_mode() -> bool {
+pub(crate) fn portable_mode() -> bool {
     std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|p| p.join(".portable").exists()))
         .unwrap_or(false)
 }
 
-/// Resolve the database path and open a connection.
-/// Uses the provided custom path, or falls back to defaults.
 fn open_db(custom_path: &str) -> Result<rusqlite::Connection, String> {
     let path = db::resolve_db_path(custom_path, portable_mode());
     db::open_database(&path).map_err(|e| format!("Database error: {}", e))
 }
 
-// ── Pre-migration backup (Settings → maintenance row; Dev-Docs active/DB_MIGRATIONS.md) ──
+// ── Pre-migration backup and start-up upgrade (Dev-Docs archive/DB_MIGRATIONS.md) ──
 
 /// Metadata of the single pre-migration backup file, or absent when none exists.
 #[derive(serde::Serialize)]
 pub struct DbBackupInfo {
     pub path: String,
     pub size_bytes: u64,
+    /// Modification time (Unix ms, 0 = unknown): tells one backup from the next for the prompt.
+    pub modified_ms: u64,
 }
 
 #[tauri::command]
@@ -42,15 +43,251 @@ pub fn flightlog_backup_info(db_path: Option<String>) -> Option<DbBackupInfo> {
     let backup =
         db::backup_path_for(&db::resolve_db_path(&db_path.unwrap_or_default(), portable_mode()));
     let meta = std::fs::metadata(&backup).ok()?;
-    Some(DbBackupInfo { path: backup.to_string_lossy().into_owned(), size_bytes: meta.len() })
+    let modified_ms = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0, |d| d.as_millis() as u64);
+    Some(DbBackupInfo { path: backup.to_string_lossy().into_owned(), size_bytes: meta.len(), modified_ms })
 }
 
-/// Delete the pre-migration backup (explicit user action — it can be multi-GB).
-#[tauri::command]
+/// Remove the pre-migration backup on the user's word: desktop moves it to the recycle bin / trash; if that
+/// fails (none on mobile, network or removable drives, file too large, permission) it is deleted.
+#[tauri::command(async)]
 pub fn flightlog_backup_delete(db_path: Option<String>) -> Result<(), String> {
-    let backup =
-        db::backup_path_for(&db::resolve_db_path(&db_path.unwrap_or_default(), portable_mode()));
-    std::fs::remove_file(&backup).map_err(|e| format!("could not delete {}: {e}", backup.display()))
+    trash_or_delete(&db::backup_path_for(&db::resolve_db_path(&db_path.unwrap_or_default(), portable_mode())))
+}
+
+fn trash_or_delete(file: &std::path::Path) -> Result<(), String> {
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    match move_to_trash(file) {
+        Ok(()) => return Ok(()),
+        Err(e) => log::warn!("[flightlog] {} not moved to the trash ({e}) — deleting it", file.display()),
+    }
+    std::fs::remove_file(file).map_err(|e| format!("could not delete {}: {e}", file.display()))
+}
+
+// ── Database export / import (flightlog/db_move.rs) and the export of every flight ──
+
+/// The database file cannot be copied or replaced under a running recording.
+fn transfer_refusal(state: &crate::state::AppState) -> Result<(), String> {
+    if state.sessions.has_live_session() {
+        return Err("a flight is being recorded — try again after the flight".into());
+    }
+    Ok(())
+}
+
+/// Save a copy of the whole flight database to `output_path` (a document URI on Android).
+#[tauri::command(async)]
+pub fn flightlog_export_database(
+    output_path: String,
+    db_path: Option<String>,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<(), String> {
+    transfer_refusal(&state)?;
+    let db_file = db::resolve_db_path(&db_path.unwrap_or_default(), portable_mode());
+    crate::flightlog::db_move::export_database(&db_file, &output_path)
+        .inspect_err(|e| log::warn!("[flightlog] database not exported: {e}"))
+}
+
+/// Fetch the database file the user picked and report what it holds; nothing is replaced yet.
+#[tauri::command(async)]
+pub fn flightlog_import_database_stage(
+    file_path: String,
+    db_path: Option<String>,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<crate::flightlog::db_move::FolderState, String> {
+    transfer_refusal(&state)?;
+    let db_file = db::resolve_db_path(&db_path.unwrap_or_default(), portable_mode());
+    crate::flightlog::db_move::stage_import(&file_path, &db_file)
+        .inspect_err(|e| log::warn!("[flightlog] database import refused: {e}"))
+}
+
+/// Replace the flight database with the staged one (`replace`), or drop the staged file.
+#[tauri::command(async)]
+pub fn flightlog_import_database_finish(
+    replace: bool,
+    db_path: Option<String>,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<(), String> {
+    let db_file = db::resolve_db_path(&db_path.unwrap_or_default(), portable_mode());
+    if !replace {
+        crate::flightlog::db_move::cancel_import(&db_file);
+        return Ok(());
+    }
+    transfer_refusal(&state)?;
+    crate::flightlog::db_move::commit_import(&db_file)
+        .inspect_err(|e| log::warn!("[flightlog] database not imported: {e}"))
+}
+
+#[derive(serde::Serialize)]
+pub struct OriginalLogsInfo {
+    pub count: i64,
+    pub size_bytes: i64,
+}
+
+/// The original log files a database carries (on mobile only one that came from a desktop).
+#[tauri::command(async)]
+pub fn flightlog_original_logs_info(db_path: Option<String>) -> Result<OriginalLogsInfo, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    let (count, size_bytes) = db::original_logs_total(&conn).map_err(|e| format!("Query error: {e}"))?;
+    Ok(OriginalLogsInfo { count, size_bytes })
+}
+
+/// Remove every original log file from the database; flights, tracks and telemetry stay.
+#[tauri::command(async)]
+pub fn flightlog_original_logs_remove(
+    db_path: Option<String>,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<usize, String> {
+    transfer_refusal(&state)?;
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::remove_original_logs(&conn).map_err(|e| format!("Delete error: {e}"))
+}
+
+/// `no-space:` is a STABLE marker the frontend matches on (`exportAllFlights` in dbTransfer.ts).
+const EXPORT_NO_SPACE_ERROR: &str = "no-space:";
+
+#[derive(serde::Serialize, Clone)]
+pub struct ExportAllResult {
+    pub exported: usize,
+    pub total: usize,
+}
+
+/// Export every flight into one `.kflight`. Needs as much free space as the database is large (the
+/// file is smaller: no vehicles, batteries or unlinked missions). Emits `flightlog-export-progress`.
+#[tauri::command(async)]
+pub fn flightlog_export_all(
+    output_path: String,
+    db_path: Option<String>,
+    app_handle: tauri::AppHandle,
+) -> Result<ExportAllResult, String> {
+    let custom = db_path.unwrap_or_default();
+    let need = std::fs::metadata(db::resolve_db_path(&custom, portable_mode())).map(|m| m.len()).unwrap_or(0);
+    if let Some(free) = crate::user_file::free_bytes(&crate::user_file::write_volume(&output_path)) {
+        if free < need {
+            return Err(format!("{EXPORT_NO_SPACE_ERROR}{need}:{free}"));
+        }
+    }
+    let conn = open_db(&custom)?;
+    let ids = db::all_flight_ids(&conn).map_err(|e| format!("Query error: {e}"))?;
+    let total = ids.len();
+    let exported = crate::user_file::with_write_path(&output_path, |p| {
+        exchange::export_flights_with(&conn, &ids, p, &mut export_progress(&app_handle))
+    })
+    .inspect_err(|e| log::warn!("[flightlog] export of all flights failed: {e}"))?;
+    Ok(ExportAllResult { exported, total })
+}
+
+/// Progress callback of a `.kflight` export: event `flightlog-export-progress`, one per percent.
+fn export_progress(app_handle: &tauri::AppHandle) -> impl FnMut(usize, usize) + '_ {
+    let mut last = usize::MAX;
+    move |done, total| {
+        let percent = done * 100 / total.max(1);
+        if percent != last || done == total {
+            last = percent;
+            let _ = app_handle.emit("flightlog-export-progress", ExportAllResult { exported: done, total });
+        }
+    }
+}
+
+// ── Moving the database with its folder (flightlog/db_move.rs) ──
+
+/// Read-only look at the database folder `db_path` (empty = the default folder).
+#[tauri::command(async)]
+pub fn flightlog_folder_state(db_path: Option<String>) -> crate::flightlog::db_move::FolderState {
+    crate::flightlog::db_move::folder_state(&db::resolve_db_path(&db_path.unwrap_or_default(), portable_mode()))
+}
+
+/// Move the database of folder `from` into folder `to`; one already there is replaced only with
+/// `overwrite` and goes to the trash where there is one.
+#[tauri::command(async)]
+pub fn flightlog_db_move(
+    from: String,
+    to: String,
+    overwrite: bool,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<crate::flightlog::db_move::MoveOutcome, String> {
+    compact_refusal(&state)?;
+    let portable = portable_mode();
+    crate::flightlog::db_move::move_database(
+        &db::resolve_db_path(&from, portable),
+        &db::resolve_db_path(&to, portable),
+        overwrite,
+        &trash_or_delete,
+    )
+    .inspect_err(|e| log::warn!("[flightlog] database not moved: {e}"))
+}
+
+/// Take the database of folder `old` out of use: with `keep_backup` a copy goes into folder `new`
+/// first (its path is returned), otherwise the old files go to the trash where there is one.
+#[tauri::command(async)]
+pub fn flightlog_db_retire(
+    old: String,
+    new: String,
+    keep_backup: bool,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<Option<String>, String> {
+    compact_refusal(&state)?;
+    let portable = portable_mode();
+    crate::flightlog::db_move::retire_database(
+        &db::resolve_db_path(&old, portable),
+        &db::resolve_db_path(&new, portable),
+        keep_backup,
+        &trash_or_delete,
+    )
+    .map(|copy| copy.map(|p| p.to_string_lossy().into_owned()))
+    .inspect_err(|e| log::warn!("[flightlog] previous database not retired: {e}"))
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+fn move_to_trash(path: &std::path::Path) -> Result<(), String> {
+    // Linux: off the home file system the crate may COPY the file into the home trash — minutes and
+    // gigabytes for nothing. Such a drive counts as having no trash.
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let device = |p: &std::path::Path| std::fs::metadata(p).map(|m| m.dev()).ok();
+        let home = dirs::home_dir().ok_or("no home directory")?;
+        if device(path) != device(&home) {
+            return Err("not on the home file system".into());
+        }
+    }
+    // macOS: the crate's default drives Finder by Apple events, which needs an automation permission
+    // Kite does not declare; NSFileManager moves the file without it.
+    #[cfg(target_os = "macos")]
+    {
+        use trash::macos::{DeleteMethod, TrashContextExtMacos};
+        let mut ctx = trash::TrashContext::default();
+        ctx.set_delete_method(DeleteMethod::NsFileManager);
+        ctx.delete(path).map_err(|e| e.to_string())
+    }
+    #[cfg(not(target_os = "macos"))]
+    trash::delete(path).map_err(|e| e.to_string())
+}
+
+/// An existing flight database whose schema is not this build's (`db::schema_mismatch`).
+#[derive(serde::Serialize)]
+pub struct DbSchemaState {
+    pub from_version: u32,
+    pub to_version: u32,
+    pub size_bytes: u64,
+}
+
+/// Read-only: `None` when there is no database at the path or it is at this build's schema.
+#[tauri::command(async)]
+pub fn flightlog_schema_state(db_path: Option<String>) -> Option<DbSchemaState> {
+    let path = db::resolve_db_path(&db_path.unwrap_or_default(), portable_mode());
+    let (from_version, to_version) = db::schema_mismatch(&path)?;
+    let size_bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+    Some(DbSchemaState { from_version, to_version, size_bytes })
+}
+
+/// Open the flight database once so a pending upgrade (backup, then migration) runs now. `(async)`:
+/// the backup of a large database takes minutes and must not sit on the main thread.
+#[tauri::command(async)]
+pub fn flightlog_upgrade_run(db_path: Option<String>) -> Result<(), String> {
+    open_db(&db_path.unwrap_or_default()).map(|_| ())
 }
 
 #[inline]
@@ -112,21 +349,18 @@ fn resolve_flight_coords(
     Ok(None)
 }
 
-/// List all flights (summaries) for the logbook
 #[tauri::command]
 pub fn flightlog_list(db_path: Option<String>) -> Result<Vec<FlightSummary>, String> {
     let conn = open_db(&db_path.unwrap_or_default())?;
     db::list_flights(&conn).map_err(|e| format!("Query error: {}", e))
 }
 
-/// Get a single flight with full details
 #[tauri::command]
 pub fn flightlog_get(flight_id: i64, db_path: Option<String>) -> Result<Option<Flight>, String> {
     let conn = open_db(&db_path.unwrap_or_default())?;
     db::get_flight(&conn, flight_id).map_err(|e| format!("Query error: {}", e))
 }
 
-/// Get the GPS track / telemetry data for a flight
 #[tauri::command]
 pub fn flightlog_get_track(
     flight_id: i64,
@@ -147,7 +381,25 @@ pub fn flightlog_get_battery_records(
     db::get_flight_battery_records(&conn, flight_id).map_err(|e| format!("Query error: {}", e))
 }
 
-// ── Mission library ─────────────────────────────────────────────────
+/// The weather answers recorded with a flight, oldest first. Empty for flights without any.
+#[tauri::command]
+pub fn flightlog_get_weather_records(
+    flight_id: i64,
+    db_path: Option<String>,
+) -> Result<Vec<crate::flightlog::types::WeatherRecord>, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::get_flight_weather_records(&conn, flight_id).map_err(|e| format!("Query error: {}", e))
+}
+
+/// The raw GPS receiver samples recorded with a flight, oldest first. Empty for flights without any.
+#[tauri::command]
+pub fn flightlog_get_gps_records(
+    flight_id: i64,
+    db_path: Option<String>,
+) -> Result<Vec<crate::flightlog::types::GpsRecord>, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::get_flight_gps_records(&conn, flight_id).map_err(|e| format!("Query error: {}", e))
+}
 
 /// Save a mission to the library (dedup by content hash). Returns the mission id.
 #[tauri::command]
@@ -156,7 +408,6 @@ pub fn mission_db_save(mission: MissionInput, db_path: Option<String>) -> Result
     db::upsert_mission(&conn, &mission).map_err(|e| format!("Save error: {}", e))
 }
 
-/// Fetch a library mission by id.
 #[tauri::command]
 pub fn mission_db_get(id: i64, db_path: Option<String>) -> Result<Option<Mission>, String> {
     let conn = open_db(&db_path.unwrap_or_default())?;
@@ -168,6 +419,14 @@ pub fn mission_db_get(id: i64, db_path: Option<String>) -> Result<Option<Mission
 pub fn mission_db_list(db_path: Option<String>) -> Result<Vec<Mission>, String> {
     let conn = open_db(&db_path.unwrap_or_default())?;
     db::list_missions(&conn).map_err(|e| format!("Query error: {}", e))
+}
+
+/// Replace a library mission's content hash (an entry hashed by an older rule); `false` = the entry
+/// changed meanwhile, or another entry holds that hash.
+#[tauri::command]
+pub fn mission_db_set_hash(id: i64, content_hash: String, old_hash: String, db_path: Option<String>) -> Result<bool, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::set_mission_hash(&conn, id, &content_hash, &old_hash).map_err(|e| format!("Update error: {}", e))
 }
 
 /// Update a mission's name + notes (Manager rename / notes edit).
@@ -250,6 +509,13 @@ pub fn mission_db_flights(
     db::list_flights_for_mission(&conn, mission_id).map_err(|e| format!("Query error: {}", e))
 }
 
+/// Whether a flight's altitude is relative to the arming point; `None` when the flight stores no value.
+#[tauri::command]
+pub fn flight_alt_relative(flight_id: i64, db_path: Option<String>) -> Result<Option<bool>, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::get_flight_alt_relative(&conn, flight_id).map_err(|e| format!("Query error: {}", e))
+}
+
 /// Read the Blackbox-header waypoint count for a flight (replay `WP N/X` fallback).
 #[tauri::command]
 pub fn flight_logged_wp_count(
@@ -259,8 +525,6 @@ pub fn flight_logged_wp_count(
     let conn = open_db(&db_path.unwrap_or_default())?;
     db::get_flight_logged_wp_count(&conn, flight_id).map_err(|e| format!("Query error: {}", e))
 }
-
-// ── Battery library ─────────────────────────────────────────────────
 
 /// Create a new battery pack (serial is UNIQUE; a duplicate surfaces as an error). Returns the id.
 #[tauri::command]
@@ -287,7 +551,6 @@ pub fn battery_db_list(db_path: Option<String>) -> Result<Vec<BatteryPack>, Stri
     db::list_batteries(&conn).map_err(|e| format!("Query error: {}", e))
 }
 
-/// Fetch a pack by id.
 #[tauri::command]
 pub fn battery_db_get(id: i64, db_path: Option<String>) -> Result<Option<BatteryPack>, String> {
     let conn = open_db(&db_path.unwrap_or_default())?;
@@ -393,16 +656,12 @@ pub fn battery_file_read(path: String) -> Result<BatteryFile, String> {
     Ok(file)
 }
 
-// ── Vehicle library ─────────────────────────────────────────────────
-
-/// Create a new vehicle. Returns the new id.
 #[tauri::command]
 pub fn vehicle_db_create(vehicle: VehicleInput, db_path: Option<String>) -> Result<i64, String> {
     let conn = open_db(&db_path.unwrap_or_default())?;
     db::create_vehicle(&conn, &vehicle).map_err(|e| format!("Create error: {}", e))
 }
 
-/// Update a vehicle's fields.
 #[tauri::command]
 pub fn vehicle_db_update(
     id: i64,
@@ -420,7 +679,6 @@ pub fn vehicle_db_list(db_path: Option<String>) -> Result<Vec<Vehicle>, String> 
     db::list_vehicles(&conn).map_err(|e| format!("Query error: {}", e))
 }
 
-/// Fetch a vehicle by id.
 #[tauri::command]
 pub fn vehicle_db_get(id: i64, db_path: Option<String>) -> Result<Option<Vehicle>, String> {
     let conn = open_db(&db_path.unwrap_or_default())?;
@@ -574,9 +832,161 @@ pub fn vehicle_file_read(path: String) -> Result<VehicleFile, String> {
     Ok(file)
 }
 
-/// Reverse-geocode a mission's location (bounding-box centroid) and store it, reusing the
-/// same Nominatim helper as the flight log. Skips the network call if the mission already has
-/// a location name (dedup means each mission is geocoded once). Returns the location name.
+/// Current `.kmission` layout. A file with a higher number has a layout this build does not know.
+const KMISSION_VERSION: u32 = 1;
+
+fn mission_to_file(m: Mission, app_version: String) -> Result<MissionFile, String> {
+    use serde_json::value::RawValue;
+    let raw = |what: &str, text: String| {
+        RawValue::from_string(text).map_err(|e| format!("Stored {what} is not valid JSON: {e}"))
+    };
+    Ok(MissionFile {
+        format: "kmission".into(),
+        version: KMISSION_VERSION,
+        exported_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        app_version,
+        mission: MissionFileBody {
+            name: m.name,
+            format: m.format,
+            content_hash: m.content_hash,
+            waypoints: raw("waypoints", m.waypoints_json)?,
+            source_xml: m.source_xml,
+            home_lat: m.home_lat,
+            home_lon: m.home_lon,
+            notes: m.notes,
+            created_at: Some(m.created_at),
+            location_name: m.location_name,
+            vehicle_class: m.vehicle_class,
+            extra: m.extra_json.map(|t| raw("extra data", t)).transpose()?,
+        },
+    })
+}
+
+/// Unknown keys are ignored, never an error.
+fn parse_mission_file(text: &str) -> Result<MissionFile, String> {
+    let file: MissionFile = serde_json::from_str(text).map_err(|e| format!("Parse error: {}", e))?;
+    if file.format != "kmission" {
+        return Err(format!("Not a mission file (format: {})", file.format));
+    }
+    if file.version > KMISSION_VERSION {
+        return Err(format!(
+            "This mission file needs a newer Kite (file version {}, this build reads up to {KMISSION_VERSION})",
+            file.version
+        ));
+    }
+    if !file.mission.waypoints.get().trim_start().starts_with('[') {
+        return Err("Not a mission file (no waypoint list)".into());
+    }
+    Ok(file)
+}
+
+#[tauri::command]
+pub fn mission_file_write(
+    path: String,
+    id: i64,
+    db_path: Option<String>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    let m = db::get_mission(&conn, id)
+        .map_err(|e| format!("Query error: {}", e))?
+        .ok_or_else(|| format!("Mission {id} not found"))?;
+    let file = mission_to_file(m, app.package_info().version.to_string())?;
+    let json = serde_json::to_string_pretty(&file).map_err(|e| format!("Serialize error: {}", e))?;
+    crate::user_file::with_write_path(&path, |p| {
+        std::fs::write(p, &json).map_err(|e| format!("Write error: {}", e))
+    })
+}
+
+/// A `.kmission` as read: `extra_json` repeats `file.mission.extra` as text, so the frontend stores it
+/// without parsing it (JavaScript would round integers above 2^53).
+#[derive(serde::Serialize)]
+pub struct MissionFileRead {
+    pub file: MissionFile,
+    pub extra_json: Option<String>,
+}
+
+#[tauri::command]
+pub fn mission_file_read(path: String) -> Result<MissionFileRead, String> {
+    let text = crate::user_file::with_read_path(&path, |p| {
+        std::fs::read_to_string(p).map_err(|e| format!("Read error: {}", e))
+    })?;
+    let file = parse_mission_file(&text)?;
+    let extra_json = file.mission.extra.as_ref().map(|raw| raw.get().to_string());
+    if extra_json.as_deref().is_some_and(|t| !t.trim_start().starts_with('{')) {
+        return Err("Not a mission file (extra data is not an object)".into());
+    }
+    Ok(MissionFileRead { file, extra_json })
+}
+
+#[tauri::command]
+pub fn mission_db_set_extra(id: i64, extra_json: Option<String>, db_path: Option<String>) -> Result<(), String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::set_mission_extra(&conn, id, extra_json.as_deref()).map_err(|e| format!("Update error: {}", e))
+}
+
+#[cfg(test)]
+mod mission_file_tests {
+    use super::*;
+
+    fn mission(waypoints_json: &str, extra_json: Option<&str>) -> Mission {
+        Mission {
+            id: 7,
+            content_hash: "h".into(),
+            name: "Survey".into(),
+            format: "px4".into(),
+            waypoints_json: waypoints_json.into(),
+            source_xml: None,
+            wp_count: 1,
+            total_distance_m: None,
+            alt_diff_m: None,
+            max_alt_m: None,
+            min_alt_m: None,
+            bndbox_min_lat: None,
+            bndbox_min_lon: None,
+            bndbox_max_lat: None,
+            bndbox_max_lon: None,
+            location_name: Some("Somewhere".into()),
+            created_at: "2026-01-02 03:04:05".into(),
+            notes: Some("n".into()),
+            home_lat: None,
+            home_lon: None,
+            vehicle_class: Some("copter".into()),
+            extra_json: extra_json.map(Into::into),
+        }
+    }
+
+    /// The JSON text of waypoints and extra data goes through write + read character for character:
+    /// `1.0000000000000007` is a double the default float parser hands back one bit off.
+    #[test]
+    fn waypoints_and_extra_pass_through_as_text() {
+        let wps = r#"[{"command":16,"alt":1.0000000000000007,"lat":501234567,"lon":81234567}]"#;
+        let extra = r#"{"z":1.0000000000000007,"a":{"big":123456789012345678901234567890}}"#;
+        let file = mission_to_file(mission(wps, Some(extra)), "2.0.0".into()).unwrap();
+        let text = serde_json::to_string_pretty(&file).unwrap();
+        let back = parse_mission_file(&text).unwrap();
+        assert_eq!(back.mission.waypoints.get(), wps);
+        assert_eq!(back.mission.extra.as_ref().unwrap().get(), extra);
+        assert_eq!(back.mission.vehicle_class.as_deref(), Some("copter"));
+        assert_eq!(back.app_version, "2.0.0");
+    }
+
+    #[test]
+    fn refuses_other_formats_newer_versions_and_a_missing_list() {
+        let body = r#""mission":{"name":"M","format":"inav","waypoints":[]}"#;
+        assert!(parse_mission_file(&format!(r#"{{"format":"kmission","version":1,{body}}}"#)).is_ok());
+        assert!(parse_mission_file(&format!(r#"{{"format":"kvehicle","version":1,{body}}}"#)).is_err());
+        assert!(parse_mission_file(&format!(r#"{{"format":"kmission","version":2,{body}}}"#)).is_err());
+        let no_list = r#"{"format":"kmission","version":1,"mission":{"name":"M","format":"inav","waypoints":{}}}"#;
+        assert!(parse_mission_file(no_list).is_err());
+        // Keys a later version adds are skipped.
+        let more = r#"{"format":"kmission","version":1,"later":true,"mission":{"name":"M","format":"inav","waypoints":[],"later":1}}"#;
+        assert!(parse_mission_file(more).is_ok());
+    }
+}
+
+/// Reverse-geocode a mission's location (bounding-box centroid) and store it; skipped when it already
+/// has a name, so each mission is geocoded once.
 #[tauri::command]
 pub async fn mission_db_geocode(
     id: i64,
@@ -618,14 +1028,12 @@ pub async fn mission_db_geocode(
     Ok(location)
 }
 
-/// Delete a flight and its telemetry data
 #[tauri::command]
 pub fn flightlog_delete(flight_id: i64, db_path: Option<String>) -> Result<bool, String> {
     let conn = open_db(&db_path.unwrap_or_default())?;
     db::delete_flight(&conn, flight_id).map_err(|e| format!("Delete error: {}", e))
 }
 
-/// Update notes on a flight
 #[tauri::command]
 pub fn flightlog_update_notes(
     flight_id: i64,
@@ -679,7 +1087,6 @@ pub fn flightlog_update_pilot(
     .map_err(|e| format!("Update error: {}", e))
 }
 
-/// Manually update weather data for a flight
 #[tauri::command]
 pub fn flightlog_update_weather(
     flight_id: i64,
@@ -697,7 +1104,6 @@ pub fn flightlog_update_weather(
     Ok(())
 }
 
-/// Trigger reverse geocoding for a flight (async, fetches from Nominatim)
 #[tauri::command]
 pub async fn flightlog_geocode(
     flight_id: i64,
@@ -715,10 +1121,9 @@ pub async fn flightlog_geocode(
     };
 
     let lang_str = lang.as_deref().unwrap_or("en");
-    let location = crate::flightlog::geocode::reverse_geocode(lat, lon, lang_str).await;
+    let location = crate::flightlog::geocode::flight_location(lat, lon, lang_str).await;
 
     if let Some(ref name) = location {
-        // Update the flight record with the location name
         conn.execute(
             "UPDATE flights SET location_name = ?1 WHERE id = ?2",
             rusqlite::params![name, flight_id],
@@ -729,7 +1134,6 @@ pub async fn flightlog_geocode(
     Ok(location)
 }
 
-/// Fetch weather data for a flight's start position
 #[tauri::command]
 pub async fn flightlog_fetch_weather(
     flight_id: i64,
@@ -761,7 +1165,6 @@ pub async fn flightlog_fetch_weather(
     Ok(())
 }
 
-/// Get the default database path (for display in settings)
 #[tauri::command]
 pub fn flightlog_default_db_path() -> String {
     let portable = std::env::current_exe()
@@ -830,7 +1233,6 @@ pub async fn flightlog_import_blackbox(
     .await
     .map_err(|e| format!("Blackbox import task failed: {}", e))??;
 
-    // Only enrich imported Blackbox flights immediately with location if import was successful
     if let BlackboxImportStatus::Success { flight_id, rows_imported } = &result {
         let conn = open_db(&db_path)?;
         if let Some(flight) = db::get_flight(&conn, *flight_id)
@@ -838,7 +1240,7 @@ pub async fn flightlog_import_blackbox(
         {
             if flight.location_name.as_deref().unwrap_or("").trim().is_empty() {
                 if let (Some(lat), Some(lon)) = (flight.start_lat, flight.start_lon) {
-                    if let Some(name) = crate::flightlog::geocode::reverse_geocode(lat, lon, lang.as_deref().unwrap_or("en")).await {
+                    if let Some(name) = crate::flightlog::geocode::flight_location(lat, lon, lang.as_deref().unwrap_or("en")).await {
                         // The flight is stored already: a failed location update must not fail the import.
                         if let Err(e) = conn.execute(
                             "UPDATE flights SET location_name = ?1 WHERE id = ?2",
@@ -873,9 +1275,8 @@ pub fn blackbox_legacy_mode() -> Result<bool, String> {
     Ok(crate::flightlog::blackbox::legacy_decoder_requested())
 }
 
-/// True when `blackbox_decode` is available (PATH, exe dir, or our download dir). In legacy mode
-/// (`blackbox_legacy_mode`) the frontend checks this before an INAV-blackbox import and offers an
-/// auto-download when it's missing.
+/// True when `blackbox_decode` is available (PATH, exe dir or our download dir); in legacy mode the
+/// frontend offers an auto-download otherwise.
 #[tauri::command]
 pub fn blackbox_decoder_available() -> bool {
     crate::flightlog::decoder::available()
@@ -888,9 +1289,8 @@ pub fn blackbox_decoder_version() -> Option<String> {
     crate::flightlog::decoder::version()
 }
 
-/// Download `blackbox_decode` from the latest iNavFlight/blackbox-tools GitHub release and install it
-/// into the app-data `bin/` dir. Emits `flightlog-import-progress` so the existing import progress bar
-/// shows the download. Returns the installed path. Windows-only (other OS assets are .tar.zst).
+/// Download `blackbox_decode` from the latest blackbox-tools release into the app-data `bin/` dir
+/// (progress as `flightlog-import-progress`); returns the installed path.
 #[tauri::command]
 pub async fn download_blackbox_decode(app_handle: tauri::AppHandle) -> Result<String, String> {
     let report = |progress: u8, message: &str| {
@@ -940,8 +1340,6 @@ pub async fn flightlog_import_raw(
     .map_err(|e| format!("Raw import task failed: {}", e))?
 }
 
-// ── Export / Import / Offline replay ────────────────────────────────
-
 /// Export a flight track as KMZ/KML/GPX/CSV (format detected from file extension)
 #[tauri::command]
 pub fn flightlog_export_track(
@@ -960,7 +1358,6 @@ pub fn flightlog_export_track(
     })
 }
 
-/// Export the raw blackbox binary file for a flight
 #[tauri::command]
 pub fn flightlog_export_blackbox(
     flight_id: i64,
@@ -995,8 +1392,14 @@ pub fn flightlog_blackbox_file_info(
     Ok(info.map(|(filename, size_bytes)| BlackboxFileInfo { filename, size_bytes }))
 }
 
-/// Delete the stored original blackbox file for a flight, keeping the parsed flight + replay data.
-/// Returns the deleted file's original filename (None if there was nothing to delete).
+/// Estimated database size of a flight's rows and of its linked partner's (`db::flight_data_sizes`).
+#[tauri::command(async)]
+pub fn flightlog_flight_data_sizes(flight_id: i64, db_path: Option<String>) -> Result<Vec<db::FlightDataSize>, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::flight_data_sizes(&conn, flight_id).map_err(|e| format!("DB error: {}", e))
+}
+
+/// Delete the stored original blackbox file, keeping the parsed flight; returns its original filename.
 #[tauri::command]
 pub fn flightlog_delete_blackbox_file(
     flight_id: i64,
@@ -1011,12 +1414,9 @@ pub fn flightlog_delete_blackbox_file(
 const COMPACT_RECORDING_ERROR: &str =
     "compact-recording: a flight is being recorded — compact the database after the flight";
 
-/// Compact (defragment) the flight-log database with a full VACUUM. Routine deletes already reclaim
-/// space incrementally; this is the explicit on-demand "Compact Database" maintenance action. It runs
-/// off the main thread (minutes on a slow drive) and is single flight per database file
-/// (`db::compact_database`, `compact-running:` error). Refused while a flight is being recorded: the
-/// VACUUM holds the database for its whole duration and the recording's save would run into it.
-/// Returns the database size before and after, in bytes.
+/// Compact the flight-log database with a full VACUUM, off the main thread; returns the size before
+/// and after, in bytes. Refused while a flight is being recorded: the VACUUM holds the database for
+/// its whole duration and the recording's save would run into it.
 #[tauri::command]
 pub async fn flightlog_compact_db(
     db_path: Option<String>,
@@ -1045,20 +1445,19 @@ fn compact_refusal(state: &crate::state::AppState) -> Result<(), String> {
     Ok(())
 }
 
-/// Export selected flights to a .kflight file
-#[tauri::command]
+#[tauri::command(async)]
 pub fn flightlog_export(
     flight_ids: Vec<i64>,
     output_path: String,
     db_path: Option<String>,
+    app_handle: tauri::AppHandle,
 ) -> Result<usize, String> {
     let conn = open_db(&db_path.unwrap_or_default())?;
     crate::user_file::with_write_path(&output_path, |p| {
-        exchange::export_flights(&conn, &flight_ids, p)
+        exchange::export_flights_with(&conn, &flight_ids, p, &mut export_progress(&app_handle))
     })
 }
 
-/// Import flights from a .kflight file into the main database
 #[tauri::command]
 pub fn flightlog_import_kflight(
     file_path: String,
@@ -1068,13 +1467,172 @@ pub fn flightlog_import_kflight(
     crate::user_file::with_read_path(&file_path, |p| exchange::import_flights(&conn, p))
 }
 
-/// List flights contained in a .kflight file (for preview / offline replay)
+/// Progress of a recording copy: event `flightlog-video-copy-progress` in bytes, one per percent.
+fn video_copy_progress(app_handle: &tauri::AppHandle) -> impl FnMut(u64, u64) + '_ {
+    #[derive(serde::Serialize, Clone)]
+    struct Copied {
+        done: u64,
+        total: u64,
+    }
+    let mut last = u64::MAX;
+    move |done, total| {
+        let percent = done * 100 / total.max(1);
+        if percent != last || done == total {
+            last = percent;
+            let _ = app_handle.emit("flightlog-video-copy-progress", Copied { done, total });
+        }
+    }
+}
+
+/// `no-space:` when `dir` lacks room for `need` bytes (the marker of `EXPORT_NO_SPACE_ERROR`).
+fn need_space(dir: &std::path::Path, need: u64) -> Result<(), String> {
+    match crate::user_file::free_bytes(dir) {
+        Some(free) if free < need => Err(format!("{EXPORT_NO_SPACE_ERROR}{need}:{free}")),
+        _ => Ok(()),
+    }
+}
+
+/// The recordings an export of these flights (`None` = all) could take along.
+#[tauri::command(async)]
+pub fn flightlog_export_videos_info(
+    flight_ids: Option<Vec<i64>>,
+    db_path: Option<String>,
+    video_dir: Option<String>,
+) -> Result<video_files::VideoSet, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    let root = crate::commands::video::record_dir(video_dir.as_deref());
+    video_files::export_set(&conn, flight_ids.as_deref(), &root).map_err(|e| format!("Database error: {e}"))
+}
+
+/// Copy the flights' recordings into the folder `<name>_video` beside the `.kflight` at `output_path`.
+#[tauri::command(async)]
+pub fn flightlog_export_videos(
+    flight_ids: Option<Vec<i64>>,
+    output_path: String,
+    db_path: Option<String>,
+    video_dir: Option<String>,
+    app_handle: tauri::AppHandle,
+) -> Result<video_files::VideoSet, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    let root = crate::commands::video::record_dir(video_dir.as_deref());
+    let kflight = std::path::Path::new(&output_path);
+    let set = video_files::export_set(&conn, flight_ids.as_deref(), &root).map_err(|e| format!("Database error: {e}"))?;
+    need_space(kflight.parent().unwrap_or(kflight), set.bytes)?;
+    video_files::export_videos(&conn, flight_ids.as_deref(), &root, kflight, &mut video_copy_progress(&app_handle))
+        .inspect_err(|e| log::warn!("[flightlog] export of the recordings failed: {e}"))
+}
+
+/// The recordings beside the `.kflight` at `file_path` that flights of this database miss, and how many
+/// recordings of the just imported flights were in the video folder already.
+#[tauri::command(async)]
+pub fn flightlog_import_videos_info(
+    file_path: String,
+    imported_ids: Vec<i64>,
+    db_path: Option<String>,
+    video_dir: Option<String>,
+) -> Result<video_files::VideoSet, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    let root = crate::commands::video::record_dir(video_dir.as_deref());
+    video_files::import_set(&conn, std::path::Path::new(&file_path), &root, &imported_ids)
+        .map_err(|e| format!("Database error: {e}"))
+}
+
+/// Copy those recordings into the video folder and link their flights to them.
+#[tauri::command(async)]
+pub fn flightlog_import_videos(
+    file_path: String,
+    db_path: Option<String>,
+    video_dir: Option<String>,
+    app_handle: tauri::AppHandle,
+) -> Result<video_files::VideoSet, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    let root = crate::commands::video::record_dir(video_dir.as_deref());
+    let kflight = std::path::Path::new(&file_path);
+    let set = video_files::import_set(&conn, kflight, &root, &[]).map_err(|e| format!("Database error: {e}"))?;
+    // The folder may not exist yet: its nearest existing parent tells the volume.
+    let volume = root.ancestors().find(|p| p.exists()).unwrap_or(&root).to_path_buf();
+    need_space(&volume, set.bytes)?;
+    video_files::import_videos(&conn, kflight, &root, &mut video_copy_progress(&app_handle))
+        .inspect_err(|e| log::warn!("[flightlog] import of the recordings failed: {e}"))
+}
+
+/// Remove recording files (trash where there is one) and report what went.
+fn remove_recordings(root: &std::path::Path, files: &[std::path::PathBuf]) -> video_files::VideoSet {
+    let mut gone = Vec::new();
+    for file in files {
+        let size = std::fs::metadata(file).map(|m| m.len()).unwrap_or(0);
+        match trash_or_delete(file) {
+            Ok(()) => gone.push((file.clone(), size)),
+            Err(e) => log::warn!("[flightlog] recording not removed: {e}"),
+        }
+    }
+    video_files::drop_empty_flight_dirs(root, &gone.iter().map(|(f, _)| f.clone()).collect::<Vec<_>>());
+    video_files::VideoSet { count: gone.len(), bytes: gone.iter().map(|(_, s)| s).sum(), ..Default::default() }
+}
+
+/// The recordings that only these flights are linked to — what deleting the flights would leave behind.
+/// Once the flights are gone, `flightlog_orphan_videos_delete` removes them by the names given here.
+#[tauri::command(async)]
+pub fn flightlog_delete_videos_info(
+    flight_ids: Vec<i64>,
+    db_path: Option<String>,
+    video_dir: Option<String>,
+) -> Result<video_files::VideoSet, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    let root = crate::commands::video::record_dir(video_dir.as_deref());
+    let files = video_files::files_of_only(&conn, &flight_ids, &root).map_err(|e| format!("Database error: {e}"))?;
+    Ok(video_files::set_of(&root, &files))
+}
+
+fn orphan_recordings(
+    db_path: Option<String>,
+    video_dir: Option<String>,
+    only: Option<&[String]>,
+    native_rtsp: &crate::video::rtsp_native::NativeRtsp,
+) -> Result<(std::path::PathBuf, Vec<std::path::PathBuf>), String> {
+    let custom = db_path.unwrap_or_default();
+    let conn = open_db(&custom)?;
+    let root = crate::commands::video::record_dir(video_dir.as_deref());
+    let mut keep = crate::flightlog::video_link::waiting_uids(&db::resolve_db_path(&custom, portable_mode()))
+        .ok_or("The list of recordings that wait for their flight cannot be read — nothing is removed")?;
+    let recorder = native_rtsp.recorder();
+    keep.extend(recorder.pending_uids());
+    // The status keeps the last file's name after the recording has stopped.
+    let status = recorder.status();
+    let busy = status.file.filter(|_| status.recording).map(std::path::PathBuf::from);
+    let files = video_files::orphans(&conn, &root, &keep, busy.as_deref(), only).map_err(|e| format!("Database error: {e}"))?;
+    Ok((root, files))
+}
+
+/// Kite's recordings in the video folder that no flight of this database is linked to.
+#[tauri::command(async)]
+pub fn flightlog_orphan_videos_info(
+    db_path: Option<String>,
+    video_dir: Option<String>,
+    native_rtsp: tauri::State<'_, crate::video::rtsp_native::NativeRtsp>,
+) -> Result<video_files::VideoSet, String> {
+    let (root, files) = orphan_recordings(db_path, video_dir, None, &native_rtsp)?;
+    Ok(video_files::set_of(&root, &files))
+}
+
+/// Remove the recordings in `names` (as an info call listed them) that are unlinked NOW: one that found
+/// its flight since stays, and nothing the user was not shown goes.
+#[tauri::command(async)]
+pub fn flightlog_orphan_videos_delete(
+    names: Vec<String>,
+    db_path: Option<String>,
+    video_dir: Option<String>,
+    native_rtsp: tauri::State<'_, crate::video::rtsp_native::NativeRtsp>,
+) -> Result<video_files::VideoSet, String> {
+    let (root, files) = orphan_recordings(db_path, video_dir, Some(&names), &native_rtsp)?;
+    Ok(remove_recordings(&root, &files))
+}
+
 #[tauri::command]
 pub fn flightlog_kflight_list(file_path: String) -> Result<Vec<FlightSummary>, String> {
     exchange::list_flights_in_file(std::path::Path::new(&file_path))
 }
 
-/// Get a single flight from a .kflight file (offline replay)
 #[tauri::command]
 pub fn flightlog_kflight_get(
     file_path: String,
@@ -1083,7 +1641,6 @@ pub fn flightlog_kflight_get(
     exchange::get_flight_from_file(std::path::Path::new(&file_path), flight_id)
 }
 
-/// Get telemetry track from a .kflight file (offline replay)
 #[tauri::command]
 pub fn flightlog_kflight_track(
     file_path: String,
@@ -1092,14 +1649,10 @@ pub fn flightlog_kflight_track(
     exchange::get_track_from_file(std::path::Path::new(&file_path), flight_id)
 }
 
-// ─── ArduPilot DataFlash commands ────────────────────────────────────────────
-
 use crate::flightlog::ardupilot;
 use serde::Serialize;
 
-/// Inventory the FMT records in an ArduPilot .bin file.
-/// Returns the list of registered message type names so the frontend can
-/// display what data is available before committing to a full import.
+/// Inventory the FMT records of an ArduPilot .bin — what data is there before a full import.
 #[tauri::command]
 pub fn flightlog_probe_ardupilot(file_path: String) -> Result<Vec<ArdupilotMsgTypeInfo>, String> {
     let data = std::fs::read(&file_path)
@@ -1126,8 +1679,7 @@ pub struct ArdupilotMsgTypeInfo {
     pub columns: Vec<String>,
 }
 
-/// Decode an ArduPilot .bin file and write a normalized CSV to `out_csv_path`.
-/// Returns a summary of what was decoded for verification.
+/// Decode an ArduPilot .bin into a normalized CSV at `out_csv_path`; returns a summary for verification.
 #[tauri::command]
 pub fn flightlog_decode_ardupilot_csv(
     file_path: String,
@@ -1164,8 +1716,7 @@ pub struct ArdupilotDecodeStats {
     pub message_type_counts: std::collections::HashMap<String, usize>,
 }
 
-/// Import an ArduPilot DataFlash .bin file into the logbook database.
-/// Emits `flightlog-import-progress` events during processing.
+/// Import an ArduPilot DataFlash .bin; emits `flightlog-import-progress`.
 #[tauri::command]
 pub async fn flightlog_import_ardupilot(
     file_path: String,
@@ -1201,7 +1752,6 @@ pub async fn flightlog_import_ardupilot(
     .await
     .map_err(|e| format!("ArduPilot import task failed: {}", e))??;
 
-    // Auto-geocode on successful import
     if let BlackboxImportStatus::Success { flight_id, rows_imported } = &result {
         let conn = open_db(&db_path)?;
         if let Some(flight) = db::get_flight(&conn, *flight_id)
@@ -1209,7 +1759,7 @@ pub async fn flightlog_import_ardupilot(
         {
             if flight.location_name.as_deref().unwrap_or("").trim().is_empty() {
                 if let (Some(lat), Some(lon)) = (flight.start_lat, flight.start_lon) {
-                    if let Some(name) = crate::flightlog::geocode::reverse_geocode(
+                    if let Some(name) = crate::flightlog::geocode::flight_location(
                         lat, lon,
                         lang.as_deref().unwrap_or("en"),
                     ).await {
@@ -1238,7 +1788,6 @@ pub async fn flightlog_import_ardupilot(
     Ok(result)
 }
 
-/// Import a PX4 ULog .ulg flash log (native decoder: `flightlog::ulog`).
 #[tauri::command]
 pub async fn flightlog_import_ulog(
     file_path: String,
@@ -1274,8 +1823,7 @@ pub async fn flightlog_import_ulog(
     .await
     .map_err(|e| format!("ULog import task failed: {}", e))??;
 
-    // Auto-geocode on successful import + offer linking against a live MAVLink recording
-    // (same post-processing as the ArduPilot import).
+    // Same post-processing as the ArduPilot import: geocode + offer linking against a live recording.
     if let BlackboxImportStatus::Success { flight_id, rows_imported } = &result {
         let conn = open_db(&db_path)?;
         if let Some(flight) = db::get_flight(&conn, *flight_id)
@@ -1283,7 +1831,7 @@ pub async fn flightlog_import_ulog(
         {
             if flight.location_name.as_deref().unwrap_or("").trim().is_empty() {
                 if let (Some(lat), Some(lon)) = (flight.start_lat, flight.start_lon) {
-                    if let Some(name) = crate::flightlog::geocode::reverse_geocode(
+                    if let Some(name) = crate::flightlog::geocode::flight_location(
                         lat, lon,
                         lang.as_deref().unwrap_or("en"),
                     ).await {
@@ -1310,10 +1858,7 @@ pub async fn flightlog_import_ulog(
     Ok(result)
 }
 
-// --- Flight Linking Commands -------------------------------------------------
-
-/// Link two flights together (live recording ? blackbox import).
-/// Both flights get `linked_flight_id` pointing at each other, source becomes "both".
+/// Link two flights (live recording ↔ blackbox import): each points at the other, source becomes "both".
 #[tauri::command]
 pub fn flightlog_link_flights(
     flight_a: i64,
@@ -1352,12 +1897,9 @@ pub fn flightlog_find_linkable(
 
 // ── Deferred-commit: resolve the pending live-recording session (ADR-041) ──────────────
 
-/// Commit the pending live-recording session into the main DB (the End-Flight dialog's **Save**).
-/// Returns the new flight id so the frontend can link the flown mission + battery/notes.
-/// `vehicle_id` names the vehicle whose session it is (the `vehicleId` of its `flight-recording-*`
-/// event); without it the only pending session is taken (an error when there are several). A failed
-/// commit puts the session back into its vehicle's slot (Save can be retried) and keeps its temp file
-/// protected.
+/// Commit the pending live-recording session into the main DB (the End-Flight dialog's **Save**) and
+/// return the new flight id. `vehicle_id` picks that vehicle's session (else the only one pending). A
+/// failed commit puts the session back (Save can be retried) and keeps its temp file protected.
 #[tauri::command]
 pub fn flightlog_commit_pending_session(
     vehicle_id: Option<String>,
@@ -1402,9 +1944,8 @@ pub fn flightlog_discard_pending_session(
     Ok(())
 }
 
-/// Continue-on-reconnect for a session interrupted by a disconnect while armed (ADR-042): move the
-/// pending session into the resume queue so the next connection's recorder resumes/finalizes it.
-/// `vehicle_id` as for the commit. Returns whether a session was queued (`false`: nothing pending).
+/// Continue-on-reconnect (ADR-042): move the pending session into the resume queue for the next
+/// connection's recorder. Returns whether a session was queued.
 #[tauri::command]
 pub fn flightlog_continue_pending_session(
     vehicle_id: Option<String>,
@@ -1431,7 +1972,6 @@ pub struct OrphanInfo {
     pub sample_count: i64,
 }
 
-/// Resolve the main DB path (custom dir or default/portable).
 fn resolve_main_db_path(custom: &str) -> std::path::PathBuf {
     let portable = std::env::current_exe()
         .ok()
@@ -1440,22 +1980,29 @@ fn resolve_main_db_path(custom: &str) -> std::path::PathBuf {
     db::resolve_db_path(custom, portable)
 }
 
-fn sessions_dir(custom: &str) -> std::path::PathBuf {
-    resolve_main_db_path(custom)
-        .parent()
-        .unwrap_or(std::path::Path::new("."))
-        .join("sessions")
+/// Where orphan sessions can lie: the app's own sessions folder, and the one next to a user-chosen
+/// database, where Kite up to 2.0-b1 kept them.
+fn orphan_session_dirs(custom: &str) -> Vec<std::path::PathBuf> {
+    let mut dirs = vec![db::sessions_dir(portable_mode())];
+    let legacy = resolve_main_db_path(custom).parent().unwrap_or(std::path::Path::new(".")).join("sessions");
+    if !dirs.contains(&legacy) {
+        dirs.push(legacy);
+    }
+    dirs
 }
 
 // ── Hi-res replay cache (Dev-Docs active/HIRES_REPLAY.md) ────────────────────────────────
 
-/// Sibling of `sessions/`: the DB folder is where the user provisioned space for flight data, so
-/// the disposable full-rate caches live there too (and follow a configured DB folder).
+/// The app's own data folder: work files stay here whatever database folder is chosen — the space
+/// comes back, and the profile drive is normally the fast one (hi-res scrubbing reads the cache).
+fn app_data_dir() -> std::path::PathBuf {
+    resolve_main_db_path("").parent().unwrap_or(std::path::Path::new(".")).to_path_buf()
+}
+
+/// Cache files are named by flight id, so the scratch store's flights get a cache folder of their own.
 fn hires_cache_dir(custom: &str) -> std::path::PathBuf {
-    resolve_main_db_path(custom)
-        .parent()
-        .unwrap_or(std::path::Path::new("."))
-        .join("hires-cache")
+    let scratch = scratch_dir();
+    if std::path::Path::new(custom) == scratch { scratch } else { app_data_dir() }.join("hires-cache")
 }
 
 /// Gates the HI-RES toggle in the replay player and feeds the parse popup's size estimate.
@@ -1541,24 +2088,25 @@ pub fn flightlog_hires_drop(flight_id: i64, db_path: Option<String>) {
     db::remove_temp_session(&cache);
 }
 
-/// Startup cleanup: wipe crash leftovers from the cache dir (every cache is reproducible on demand).
+/// Wipe the hi-res cache (app start, database folder changed): every cache is reproducible on demand,
+/// and its files are named by flight id only. Also clears the work folders Kite up to 2.0-b1 kept
+/// next to a user-chosen database.
 #[tauri::command]
 pub fn flightlog_hires_cleanup(db_path: Option<String>) {
-    crate::flightlog::hires::cleanup_cache_dir(&hires_cache_dir(&db_path.unwrap_or_default()));
+    crate::flightlog::hires::cleanup_cache_dir(&app_data_dir().join("hires-cache"));
+    let db_dir = resolve_main_db_path(&db_path.unwrap_or_default());
+    let db_dir = db_dir.parent().unwrap_or(std::path::Path::new("."));
+    if db_dir != app_data_dir() {
+        crate::flightlog::hires::remove_cache_dir(&db_dir.join("hires-cache"));
+        let _ = std::fs::remove_dir_all(db_dir.join("scratch"));
+    }
 }
 
 // ── Scratch store: open a log WITHOUT importing it (Dev-Docs active/OPEN_LOG_WITHOUT_IMPORT.md) ──
-//
-// `<db_dir>/scratch/` is a throwaway flight-DB directory. The frontend hands it to the ordinary
-// importers as their `db_path`, so an opened file becomes a normal flight there (10 Hz track,
-// archived blob, its own `hires-cache/`) and every logbook/replay command works unchanged. It is
-// wiped before each open, on close, and at app start (crash leftovers) — nothing in it is precious.
+// A throwaway flight DB under `<app data>/scratch/`, wiped before each open, on close and at app start.
 
-fn scratch_dir(custom: &str) -> std::path::PathBuf {
-    let dir = resolve_main_db_path(custom)
-        .parent()
-        .unwrap_or(std::path::Path::new("."))
-        .join("scratch");
+fn scratch_dir() -> std::path::PathBuf {
+    let dir = app_data_dir().join("scratch");
     // Every caller of the scratch store gets its directory from here, so this is where it is kept out
     // of the free-page reclaim (throwaway data; on Windows the wipe fails while a reclaim holds the file).
     db::exclude_from_reclaim(&dir);
@@ -1567,14 +2115,14 @@ fn scratch_dir(custom: &str) -> std::path::PathBuf {
 
 /// The scratch directory to pass as `db_path` for an opened (not imported) log.
 #[tauri::command]
-pub fn flightlog_scratch_dir(db_path: Option<String>) -> String {
-    scratch_dir(&db_path.unwrap_or_default()).to_string_lossy().to_string()
+pub fn flightlog_scratch_dir() -> String {
+    scratch_dir().to_string_lossy().to_string()
 }
 
 /// Delete the scratch directory (flight DB, its hires cache, everything).
 #[tauri::command]
-pub fn flightlog_scratch_clear(db_path: Option<String>) {
-    let dir = scratch_dir(&db_path.unwrap_or_default());
+pub fn flightlog_scratch_clear() {
+    let dir = scratch_dir();
     if dir.exists() {
         if let Err(e) = std::fs::remove_dir_all(&dir) {
             log::warn!("Failed to clear scratch dir {}: {}", dir.display(), e);
@@ -1582,40 +2130,30 @@ pub fn flightlog_scratch_clear(db_path: Option<String>) {
     }
 }
 
-/// Temp sessions that belong to a live workflow in this process — every file a recorder (primary or
-/// secondary, any link) is writing, every pending (awaiting Save/Discard or the re-arm grace) one,
-/// every continue-on-reconnect one, every group-member one (finalized, awaiting its group's store
-/// prompt, or suspended while its link is gone), and every one whose commit failed in this run (kept
-/// for the next start). The orphan scan and the discard sweeps must never touch these.
+/// Temp sessions that belong to a live workflow in this process — being recorded, pending, continued,
+/// group members, or a failed commit kept for the next start. The orphan scan and the discard sweeps
+/// must never touch these.
 fn protected_temp_paths(state: &crate::state::AppState) -> Vec<std::path::PathBuf> {
     state.sessions.protected_paths()
 }
 
-/// An empty temp session younger than this is not a leftover: a previous instance of the app may
-/// still be shutting down and filling it (Windows keeps the process alive for a few seconds after
-/// the window closes, and a second instance can already be up by then).
+/// An empty temp session younger than this is not a leftover: a previous instance may still be
+/// shutting down and filling it.
 const EMPTY_TEMP_GRACE: std::time::Duration = std::time::Duration::from_secs(60);
 
-/// Scan `<db_dir>/sessions/*.ktmp` for an orphan session left by a crash/close. Sessions that are
-/// live in this process (recording / pending / continue-on-reconnect / group-pending / suspended group
-/// member) are skipped; stale empty temp files (no telemetry) are deleted in passing; the newest
-/// non-empty one is returned for the recovery prompt. The frontend scans again after Save /
-/// Continue, and Discard sweeps every leftover, so a pile of stragglers is settled in one launch
-/// instead of resurfacing one per start.
+/// Scan the sessions folders for an orphan `.ktmp` left by a crash/close: sessions live in this
+/// process are skipped, stale empty ones deleted in passing, the newest non-empty one returned.
 #[tauri::command]
 pub fn flightlog_scan_orphan_sessions(
     db_path: Option<String>,
     state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<Option<OrphanInfo>, String> {
-    let dir = sessions_dir(&db_path.unwrap_or_default());
-    let entries = match std::fs::read_dir(&dir) {
-        Ok(e) => e,
-        Err(_) => return Ok(None), // no sessions dir yet → nothing to recover
-    };
+    let dirs = orphan_session_dirs(&db_path.unwrap_or_default());
     let keep = protected_temp_paths(&state);
     let mut candidates = 0usize;
     let mut best: Option<OrphanInfo> = None;
-    for entry in entries.flatten() {
+    // A folder that does not exist yet has nothing to recover.
+    for entry in dirs.iter().filter_map(|dir| std::fs::read_dir(dir).ok()).flatten().flatten() {
         let path = entry.path();
         if path.extension().and_then(|e| e.to_str()) != Some("ktmp") || keep.contains(&path) {
             continue;
@@ -1674,17 +2212,16 @@ pub fn flightlog_scan_orphan_sessions(
     }
     match &best {
         Some(b) => log::info!(
-            "Orphan scan: {} candidate(s) in {}, offering {} ({} samples)",
-            candidates, dir.display(), b.temp_path, b.sample_count,
+            "Orphan scan: {} candidate(s), offering {} ({} samples)",
+            candidates, b.temp_path, b.sample_count,
         ),
-        None => log::debug!("Orphan scan: nothing to recover in {}", dir.display()),
+        None => log::debug!("Orphan scan: nothing to recover in {:?}", dirs),
     }
     Ok(best)
 }
 
-/// Recovery prompt → **Discard**: delete the orphan temp file AND every other leftover in the
-/// sessions dir (live/pending/resume sessions excepted) — "discard" means no temp log remains,
-/// so a pile of stragglers cannot come back one per launch. Nothing reaches the main DB.
+/// Recovery prompt → **Discard**: delete the orphan AND every other leftover in the sessions dir (live
+/// sessions excepted), so stragglers cannot come back one per launch.
 #[tauri::command]
 pub fn flightlog_recover_discard(
     temp_path: String,
@@ -1703,9 +2240,8 @@ pub fn flightlog_recover_discard(
     Ok(())
 }
 
-/// Recovery prompt → **Save Incomplete**: reconstruct the flight from the orphan and commit it to
-/// the main DB (finalized with `end_time` = last sample). Returns the new flight id. On failure the
-/// temp file is kept (no sweep of this run deletes it; the orphan scan skips it until the next start).
+/// Recovery prompt → **Save Incomplete**: commit the orphan (`end_time` = last sample) and return the
+/// new flight id. On failure the temp file is kept for the next start.
 #[tauri::command]
 pub fn flightlog_recover_save_incomplete(
     temp_path: String,
@@ -1745,14 +2281,25 @@ pub fn flightlog_recover_continue(
     state.sessions.put_resume(temp_path, session)
 }
 
+/// The videos attached to a flight, for the flight details. A file that was renamed or moved below the
+/// video folder is found by its id and linked again.
+#[tauri::command(async)]
+pub fn flightlog_flight_videos(
+    flight_id: i64,
+    db_path: Option<String>,
+    video_dir: Option<String>,
+) -> Result<Vec<crate::flightlog::video_link::FlightVideo>, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    let root = crate::commands::video::record_dir(video_dir.as_deref());
+    crate::flightlog::video_link::list_for_flight(&conn, flight_id, &root).map_err(|e| format!("Database error: {e}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     /// Without a recording a compact may start, and the refusal text carries the marker the frontend
-    /// matches. (The refusing side — `has_live_session` true while a recorder writes — is covered in
-    /// `recorder::tests::has_live_session_follows_every_recorder`; a live session cannot be registered
-    /// from here without a recorder.)
+    /// matches. The refusing side is covered in `recorder::tests::has_live_session_follows_every_recorder`.
     #[test]
     fn compact_allowed_without_recording_and_refusal_has_marker() {
         let state = crate::state::AppState::new();

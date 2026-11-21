@@ -22,7 +22,7 @@ The Settings panel, grouped into labelled sections.
 |---|---|---|
 | **Map Provider** | The map imagery source — used by **both the 2D map and the 3D globe**. After the built-in maps the list shows your custom online providers under **Custom online maps**; on the desktop it ends with your offline maps under **Custom offline maps**, each marked **▦**. Both are set up under **[Providers](#providers)** (Map tab). See **[Your own maps](../guides/custom-maps.md)**. | ESRI Hybrid |
 | **Night Mode** | Dim the 2D map at night — Off / Auto (by local time) / On. | Auto |
-| **Power Saving** | Cap the 3D frame rate to save battery — Off (60 fps) / On (20 fps) / Auto (20 fps on battery). While active it also drops the smooth bar animations in the speed and battery widgets, so those read the current value directly, and the frosted-glass blur behind panels and widgets. On phones and tablets the glass blur over the map is always off; only the panels keep it. | Auto |
+| **Power Saving** | Saves battery and graphics load — Off / On / Auto (on while running on battery). While active the map draws the moving aircraft at 20 instead of 60 frames per second, in the 2D and the 3D view; panels, scrolling and the widgets keep their pace. It also drops the smooth bar animations in the speed and battery widgets, so those read the current value directly, and the frosted-glass blur behind panels and widgets. On phones and tablets the glass blur over the map is always off; only the panels keep it. | Auto |
 | **Your Location** | Your detected position (used as a fallback reference). **Detect** re-runs OS geolocation. | — |
 | **GCS marker** | How the ground-station position is sourced — Off / Manual (draggable — place it once; **Reset** snaps it back to *Your Location*) / Continuous (live). Used as the reference when no aircraft fix is available. While your own position is still unknown, the aircraft's home position stands in for it. | Continuous |
 
@@ -59,13 +59,14 @@ These are **global** — every widget, map read-out and panel follows them. See
 |---|---|---|
 | **Language** | The UI language — English, Deutsch, Français, 中文, Български, Slovenčina or Español. | English |
 | **UI Scale** | Scale the whole interface — 100 %, 125 % or 150 % (for high-DPI or far-away screens). | 100 % |
+| **Stay awake without connection** | On: the screen stays on whenever Kite is open, connected or not. Off: Kite keeps the screen on only while the aircraft is armed — and for the whole connection during a continuous raw recording (**Continuous Raw Logging**, below) or when the telemetry feed does not report whether the aircraft is armed. Connected but disarmed, the screen timeout of the device applies, and arming does not switch a screen back on that has already gone dark. On a computer, keeping the screen on also keeps it from going to sleep by itself; closing the lid or choosing Sleep still works. On Linux this needs a desktop session that offers the freedesktop screen-saver inhibit (GNOME and KDE do). | Off |
 | **Default Protocol** | Which protocol the connection bar starts on. **Last used** restores whatever you connected with last time, which is what Kite has always done. Pin it to **MSP**, **MAVLink** or **Telemetry** and that choice wins on every launch, whatever the last session used. Kite still remembers the last-used protocol, so switching back to **Last used** picks up where you left off. | Last used |
 
 ### Updates
 
 | Setting | What it does | Default |
 |---|---|---|
-| **Check for updates** | Whether Kite asks GitHub for a newer version when it starts — **Disabled**, **Stable releases**, **Patch releases only** (bug-fix releases of the version you run, e.g. 2.0.0 → 2.0.1, never 2.1.0), or **Include pre-releases** (betas and release candidates). | Stable releases |
+| **Check for updates** | Whether Kite asks GitHub for a newer version when it starts — **Disabled**, **Stable releases**, **Patch releases only** (bug-fix releases of the version you run, e.g. 2.0.0 → 2.0.1, never 2.1.0), or **Include pre-releases** (betas and release candidates; Kite then compares against the highest version of any kind). | Stable releases (from Google Play: on) |
 
 Kite never downloads anything on its own. When a newer version exists you get a notice with the
 version you have, the one that is available, and the release notes, plus four choices:
@@ -73,11 +74,26 @@ version you have, the one that is available, and the release notes, plus four ch
 - **Update and Restart** downloads the new version, installs it and restarts Kite. On Windows and
   Linux this runs the installer of the package you installed (a `.deb`/`.rpm` asks for your password);
   on macOS the app bundle is replaced in place. A **portable** copy replaces its own executable and
-  restarts. Android has no in-app install and no store listing yet, so the notice there offers only
-  the other three choices.
+  restarts. Not on Android, see below.
 - **Open Release Page** shows the release on GitHub in your browser, with every download.
 - **Remind me later** asks again at the next start.
 - **Skip this version** suppresses the notice for that one version only.
+
+**Android** has no in-app install, and what you get depends on where Kite was installed from:
+
+- **From Google Play:** *Check for updates* is a plain on/off switch. Google Play delivers one
+  version and installs it by itself, so there is no channel to choose. The notice shows the release
+  notes and offers **Open in Play Store** in place of *Update and Restart* and *Open Release Page*.
+  A beta from the Play test track is told about newer betas as well.
+
+    The notice gives you a choice only when **automatic updates for Kite are switched off in the Play
+    Store** (Kite's store page → ⋮ → *Enable auto-update*). With them on, Google Play installs the
+    new version by itself, usually before you have seen the notice.
+
+    The notice can also arrive a little before Google Play offers the version. The store page then
+    shows *Open* instead of *Update*; try again later.
+- **From the `.apk`:** the setting has all four choices, and the notice offers **Open Release Page**,
+  where the new `.apk` is, in place of *Update and Restart*.
 
 On iPhone and iPad the update check is switched off and this section is hidden. TestFlight and the
 App Store tell you about new versions themselves, and GitHub releases have no iOS build.
@@ -151,10 +167,17 @@ switch them off to save bandwidth on a slow over-the-air radio, and on when the 
 | **Enable Flight Recording** | Record the full telemetry track for replay. | On |
 | **Save Raw Data Logs** | Also keep the raw MSP/MAVLink stream (`.rawmsp` / `.tlog`) for each recording. | Off |
 | **Continuous Raw Logging** | Record the raw stream the whole time connected, not just while armed. | Off |
-| **Database Folder** | Where the logbook database lives — **Choose** a folder or **Use Default**. | default path |
+| **Record Weather with Flights** | While a flight is recorded, fetch the forecast wind by height every five minutes and store it with the flight; also fetch the current weather for a stored flight. The position is sent to Open-Meteo rounded to two decimals (about 1 km). With a **Weather** widget on screen the wind is fetched and recorded in any case. | On |
+| **Auto-Detect Flight Location** | Look up the place name of a flight's start point at OpenStreetMap Nominatim when a flight is stored, imported or opened without one. Off: a flight without a place name stays without one. | On |
+| **Database Folder** *(desktop only)* | Where the logbook database lives — **Choose** a folder or **Use Default**. Kite asks whether to move the database along, see [Logbook](../guides/logbook.md#changing-the-database-folder). | default path |
+| **Export database** | Saves a copy of the whole flight database (flights, vehicles, batteries, missions) as one file. Not while a vehicle is connected. See [Logbook](../guides/logbook.md#exporting-and-importing-the-whole-database). | — |
+| **Import database** *(Android, iOS)* | Replaces the flight database with a file from **Export database**, after a confirmation. Not while a vehicle is connected. | — |
+| **Export all flights** | Writes every flight into one `.kflight` file. | — |
+| **Original log files** *(Android, iOS)* | Shown only when the database holds original log files — one imported from a desktop install — with their size. **Remove** deletes them after a confirmation; flights, tracks and telemetry stay. | — |
 | **Compact Database** *(desktop only)* | **Compact now** rebuilds the database file to reclaim space (rarely needed — deleting flights already frees space in the background). Kite shows a blocking notice until it is done; on a hard disk or an SD card this can take several minutes. If a flight is being recorded or an import is running, Kite refuses with a message. While it runs it needs free space: up to the size of the database next to the database file, and about the same again in the system's temporary folder. On Android and iOS the button is not shown: the database holds no original log files there, and deleting flights already gives the space back. | — |
+| **Database size** | The size of the flight database file. What a single flight takes is shown in its detail view in the logbook. | — |
 | **Database backup (pre-update)** | Shown only once a backup exists: the backup Kite wrote before it last upgraded the database format, with its size and a **Delete** button. See **[Flight logbook](../guides/logbook.md#the-database-updates-and-the-automatic-backup)**. | — |
-| **Raw Log Folder** | Where raw `.rawmsp` / `.tlog` files are written. | default path |
+| **Raw Log Folder** | Where raw `.rawmsp` / `.tlog` files are written. On Android they are written in the app's storage and moved into the chosen folder when the vehicle disconnects. | default path |
 
 See **[Flight logbook](../guides/logbook.md)** for how these are used.
 

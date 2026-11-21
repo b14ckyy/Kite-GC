@@ -17,63 +17,58 @@
 
 use std::path::{Path, PathBuf};
 
-/// Mirror a finished session's artefacts into user-granted shared folders, where the settings name
-/// one — the Android half of the custom database / raw-log location settings. On Android those
-/// settings hold SAF **tree URIs** (`content://…`): the app itself always works app-private,
-/// because SQLite and the raw-log writers need real POSIX paths, which a SAF grant cannot provide.
-/// This copies the results out at session end instead — which is exactly what makes them survive
-/// an uninstall, the reason a user picks a folder at all.
-///
-/// The raw-log staging dir is mirrored file-by-file (same-size files skipped — raw logs never
-/// change after close). The database is snapshotted first with `VACUUM INTO` — an atomic,
-/// consistent copy even while other connections hold the live file — and the snapshot dir is then
-/// mirrored the same way.
-///
-/// Never fails the teardown: every problem is logged and swallowed. On every non-Android target
-/// the settings never hold a `content://` value and this is a no-op.
-pub fn mirror_session(db_path: &Path, raw_log_dir: &Path, db_setting: &str, raw_setting: &str) {
+/// Raw logs a logger is writing right now: these must not be moved away under it.
+static OPEN_RAW_LOGS: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+
+pub fn raw_log_opened(path: &Path) {
+    OPEN_RAW_LOGS.lock().unwrap_or_else(|e| e.into_inner()).push(path.to_path_buf());
+}
+
+pub fn raw_log_closed(path: &Path) {
+    OPEN_RAW_LOGS.lock().unwrap_or_else(|e| e.into_inner()).retain(|p| p != path);
+}
+
+/// Android: move the closed raw logs from app-private staging into the SAF tree the raw-log setting
+/// names (the loggers need a real path). Never fails its caller: problems are logged and the files
+/// stay; a no-op elsewhere.
+pub fn move_raw_logs(raw_log_dir: &Path, raw_setting: &str) {
     #[cfg(target_os = "android")]
     {
-        if raw_setting.starts_with("content://") {
-            match crate::android::storage::sync_dir_to_tree(
-                raw_setting,
-                &raw_log_dir.to_string_lossy(),
-            ) {
-                Ok(()) => log::info!("Raw logs mirrored to the shared folder"),
-                Err(e) => log::warn!("Raw-log mirror failed: {e}"),
-            }
+        // One move at a time: two listing the same files would write each of them twice.
+        static MOVING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        if !raw_setting.starts_with("content://") {
+            return;
         }
-        if db_setting.starts_with("content://") {
-            let snap_dir = crate::android::app_data_dir().join("db-mirror");
-            if let Err(e) = std::fs::create_dir_all(&snap_dir) {
-                log::warn!("Database mirror: cannot create the snapshot dir: {e}");
-                return;
-            }
-            let snap = snap_dir.join("flights.db");
-            // VACUUM INTO refuses an existing destination; the previous snapshot is disposable.
-            let _ = std::fs::remove_file(&snap);
-            let result = rusqlite::Connection::open(db_path)
-                .map_err(|e| e.to_string())
-                .and_then(|conn| {
-                    conn.execute("VACUUM INTO ?1", [snap.to_string_lossy().as_ref()])
-                        .map(|_| ())
-                        .map_err(|e| e.to_string())
-                });
-            match result {
-                Ok(()) => match crate::android::storage::sync_dir_to_tree(
-                    db_setting,
-                    &snap_dir.to_string_lossy(),
-                ) {
-                    Ok(()) => log::info!("Database snapshot mirrored to the shared folder"),
-                    Err(e) => log::warn!("Database mirror failed: {e}"),
-                },
-                Err(e) => log::warn!("Database snapshot (VACUUM INTO) failed: {e}"),
-            }
+        let _moving = MOVING.lock().unwrap_or_else(|e| e.into_inner());
+        let listed: Vec<PathBuf> = std::fs::read_dir(raw_log_dir.join("raw_logs"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.is_file())
+            .collect();
+        // Read after the listing: a logger registers before it creates its file.
+        let open = OPEN_RAW_LOGS.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let files: Vec<PathBuf> = listed.into_iter().filter(|p| !open.contains(p)).collect();
+        if files.is_empty() {
+            return;
+        }
+        match crate::android::storage::move_files_to_tree(raw_setting, &files) {
+            Ok(()) => log::info!("{} raw log(s) moved to the shared folder", files.len()),
+            Err(e) => log::warn!("Raw logs not moved to the shared folder: {e}"),
         }
     }
     #[cfg(not(target_os = "android"))]
     {
-        let _ = (db_path, raw_log_dir, db_setting, raw_setting);
+        let _ = (raw_log_dir, raw_setting);
+    }
+}
+
+/// Android: the leftover `db-mirror` folder holds a full second copy of the database.
+pub fn remove_db_mirror_snapshot() {
+    #[cfg(target_os = "android")]
+    {
+        let _ = std::fs::remove_dir_all(crate::android::app_data_dir().join("db-mirror"));
     }
 }
 
@@ -123,6 +118,46 @@ where
         }
     }
     f(Path::new(src))
+}
+
+/// Where an export to `dest` takes its space from: the scratch folder for a document URI (the file is
+/// built there first), otherwise the folder of `dest` itself.
+pub fn write_volume(dest: &str) -> PathBuf {
+    #[cfg(target_os = "android")]
+    if crate::android::content::is_content_uri(dest) {
+        return crate::android::app_data_dir();
+    }
+    Path::new(dest).parent().map(Path::to_path_buf).unwrap_or_default()
+}
+
+/// Bytes the user can still write on the volume of the existing folder `dir`; `None` where the
+/// system does not say.
+pub fn free_bytes(dir: &Path) -> Option<u64> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let path = std::ffi::CString::new(dir.as_os_str().as_bytes()).ok()?;
+        let mut stat = std::mem::MaybeUninit::<libc::statvfs>::uninit();
+        // SAFETY: `path` is a NUL-terminated string and `stat` is written only on success (0).
+        let stat = unsafe {
+            if libc::statvfs(path.as_ptr(), stat.as_mut_ptr()) != 0 {
+                return None;
+            }
+            stat.assume_init()
+        };
+        Some(stat.f_bavail as u64 * stat.f_frsize as u64)
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use windows::core::PCWSTR;
+        use windows::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+        let wide: Vec<u16> = dir.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+        let mut free = 0u64;
+        // SAFETY: `wide` is NUL-terminated and outlives the call; `free` is a valid out pointer.
+        unsafe { GetDiskFreeSpaceExW(PCWSTR(wide.as_ptr()), Some(&mut free), None, None) }.ok()?;
+        Some(free)
+    }
 }
 
 /// A scratch path under app-private storage (Android) or the OS temp dir (desktop), unique per call.

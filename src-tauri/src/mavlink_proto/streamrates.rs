@@ -25,6 +25,7 @@ use super::codec::{self, MavSequence};
 // ── Managed message IDs ──────────────────────────────────────────────────────────────────────
 const ID_SYS_STATUS: f32 = 1.0;
 const ID_GPS_RAW_INT: f32 = 24.0;
+const ID_GPS2_RAW: f32 = 124.0;
 const ID_GLOBAL_POSITION_INT: f32 = 33.0;
 const ID_MISSION_CURRENT: f32 = 42.0;
 const ID_RC_CHANNELS: f32 = 65.0;
@@ -36,6 +37,7 @@ const ID_HOME_POSITION: f32 = 242.0;
 const ID_WIND: f32 = 168.0;
 const ID_WIND_COV: f32 = 231.0;
 const ID_POSITION_TARGET_GLOBAL_INT: f32 = 87.0;
+const ID_EXTENDED_SYS_STATE: f32 = 245.0;
 
 // Rate kinds for the wanted messages (resolved against the two settings at apply time).
 const R_ATTITUDE: u8 = 0;
@@ -47,9 +49,11 @@ const R_HOME_LOW: u8 = 3;
 const WANTED: &[(f32, u8)] = &[
     (ID_ATTITUDE, R_ATTITUDE),
     (ID_GLOBAL_POSITION_INT, R_POSITION),
-    // GPS_RAW_INT now contributes only fix type / sat count / HDOP (slow-changing) — the position,
-    // ground speed and course all come from the fused GLOBAL_POSITION_INT, so 1 Hz is plenty.
+    // The receivers contribute only fix type / sat count / HDOP (slow-changing) — position, ground
+    // speed and course come from the fused GLOBAL_POSITION_INT, so 1 Hz is plenty. The FC sends
+    // GPS2_RAW only with a second receiver configured.
     (ID_GPS_RAW_INT, R_FIXED_1HZ),
+    (ID_GPS2_RAW, R_FIXED_1HZ),
     // VFR_HUD is consumed only for airspeed — gated on the airspeed module (see apply_stream_rates).
     (ID_VFR_HUD, R_POSITION),
     // WIND (ArduPilot EKF wind estimate) — gated on the wind module (see apply_stream_rates).
@@ -66,6 +70,9 @@ const WANTED: &[(f32, u8)] = &[
     // FC's active navigation target → the map's Guided marker (FC-confirmed, incl. external GCS
     // changes). Small message; the frontend ignores it outside the guided mode.
     (ID_POSITION_TARGET_GLOBAL_INT, R_FIXED_1HZ),
+    // Landed state: on the ground or flying, for the control panel — which switches it off once the
+    // vehicle flies and on again at disarm (`mav_landed_state_stream`).
+    (ID_EXTENDED_SYS_STATE, R_FIXED_1HZ),
 ];
 
 // ── Ballast: high-rate messages no widget consumes — disabled (interval = -1) ────────────────

@@ -158,8 +158,20 @@ If the track carries **logged signal strength**, the **Logged RSSI** line plots 
 
 ## Map view: the chart on the map
 
-**Show Map** switches the panel to a wide strip so the **2D map stays visible** next to the profile. This
-ties the two together:
+**Show Map** switches the panel to a wide strip so the **2D map stays visible** next to the profile. The
+strip is a pure tracking view: the chart takes its whole height, and beside it are only **Show Map**,
+**Follow** (while connected), the **↻** reset button and the legend. Mode (Waypoints / Track), datum
+(MSL / AGL), ground clearance and the read-outs are those of the full view — press **Show Map** again to
+get back to them. While a flight is replayed, the replay player hangs below the strip instead of at
+the top of the map.
+
+![The terrain strip above the 2D map during a replay, with the replay player below it](../assets/guides/safety/terrain_strip_replay.png)
+/// caption
+The strip during a replay: flight path, terrain and logged RSSI over the distance flown, the replay
+player and the stick display below it.
+///
+
+The strip ties chart and map together:
 
 - **Hover** the chart → a dot tracks the matching point on the map.
 - **Click** the chart → a **pin** drops on the map at that point (it stays put even after you close the

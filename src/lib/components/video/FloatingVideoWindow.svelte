@@ -4,32 +4,10 @@
 -->
 
 <script lang="ts">
-  // Floating video window — the desktop's in-app sink for the video router, modelled on the phone's
-  // docked window (PhoneVideoDock / Dev-Docs active/PHONE_VIDEO.md §10 "Desktop port"):
-  //  • appears when a source starts (the store flips `floating` on Start): slides in from the left
-  //    into the bottom-left corner (above the status bar; the bottom widget dock reflows out of the
-  //    way — handled in +page.svelte), or to its last free position
-  //  • ONE toggle button parks it — it slides left off the screen and unmounts; the source stays
-  //    open, so the return is instant. The button rides on the frame's bottom-right while the window
-  //    is snapped and swipes back to the bottom-left screen corner when the window parks or is moved.
-  //    Visible as long as a source is active (started: starting / live / error).
-  //  • thin glass bezel like the video widget; no ✕ (the toggle is the only show/hide)
-  //  • the BOTTOM-LEFT corner handle (a rounded square with a four-way arrow) moves the window —
-  //    the only way to move it (away from the corner un-snaps; dropping near the corner re-snaps).
-  //    It used to be a body drag, and right mouse / two fingers with the map in the frame: that
-  //    took the right button from the 3D map's tilt and the second finger from pinch and tilt on a
-  //    touchscreen (Marc, 2026-09-10) — both now reach the map, and neither does anything on video
-  //  • the bezel's lighter TOP-RIGHT corner resizes (aspect-locked, 10–30 % of vh, touch-sized hit
-  //    area, drawn only in the bezel so it never covers the picture)
-  //  • double-click the video to swap it with the map (→ video primary); parking with the map in
-  //    the frame parks the mini map with it (+page moves its map layer), the full-screen video stays.
-  //
-  // Geometry comes from +page (`floatFrameRect` in the store, logical px of the zoomed chrome layer)
-  // — one computation for the window, the swapped-in map and the dock reserve. Layering: separate
-  // absolutely-positioned layers share the page stacking context (the .float-win wrapper has no
-  // z-index). The map (rendered top-level in +page when swapped) composes between the glass frame
-  // (z 60) and the corner handles (z 62), so the mini-map stays interactive while they stay usable
-  // — with the map in the frame +page draws both handles above it (`.miniframe-ctl`).
+  // Floating video window — the desktop's in-app video sink, modelled on the phone's docked window
+  // (Dev-Docs active/PHONE_VIDEO.md §10). Only the BOTTOM-LEFT handle moves it: right mouse and a second
+  // finger belong to the map (3D tilt, pinch). Geometry comes from +page (`floatFrameRect`); the swapped-in
+  // map composes between the glass frame (z 60) and the corner handles (z 62), so both stay usable.
   import { t } from 'svelte-i18n';
   import {
     videoStream,
@@ -48,7 +26,7 @@
   import { canvasSink, mjpegSink } from '$lib/controllers/mjpegSink';
   import { detachVideo } from '$lib/controllers/detachedVideo';
   import { isMobile } from '$lib/platform';
-  import { nativeSurface, activeNativeSurfaces, openNativeSurfaces } from '$lib/controllers/nativeVideo';
+  import { nativeSurface, activeNativeSurfaces, openNativeSurfaces, MAX_SURFACES } from '$lib/controllers/nativeVideo';
   import { doubleTap, mouseDoubleClick } from '$lib/helpers/doubleTap';
   import { startFloatMove, startFloatResize } from '$lib/helpers/floatWindowGestures';
   import VideoReconnectOverlay from '$lib/components/video/VideoReconnectOverlay.svelte';
@@ -70,10 +48,9 @@
   /** The map sits in this frame (swapped) — +page renders it top-level, the body is omitted. */
   const mapHere = $derived($videoState.mapLocation === 'floating');
   const live = $derived($videoState.status === 'live');
-  /** The unplug button: take the picture out of the app into its own window (D3). Native decode
-   *  sink only (D2) — the DOM paths render into THIS WebView and cannot be handed to another one.
-   *  Every desktop platform serves it now, each in its own way: a child window on Windows, a second
-   *  AppKit host on macOS, a second GStreamer pipeline on Linux. */
+  /** The unplug button: take the picture into its own window (D3). Native decode sink only (D2) — the DOM
+   *  paths render into THIS WebView. Each desktop platform serves it its own way (child window / second AppKit
+   *  host / second GStreamer pipeline). */
   const canDetach = $derived(!isMobile && live && $videoState.nativeSink);
   /** The hardware layer is positioned and shown for this window (the router's ack). */
   const armed = $derived($activeNativeSurfaces.has('floating'));
@@ -114,10 +91,8 @@
       // frame's surface published for the length of the animation, and the sink serves two
       // surfaces — the third (the new window's) would be dropped and its hole would stand empty.
       if (detached || !frameEl) { mounted = false; return; }
-      // Mobile, native sink: parked stays mounted, off screen (the phone dock's pattern) — the
-      // native layer stays where it is and a park / recall is nothing but the hole leaving and
-      // returning. A DOM video (MJPEG, camera) would keep decoding off screen, so not for those;
-      // the desktop keeps unmounting (it rasters within the frame, Marc sees no flash there).
+      // Mobile, native sink: parked stays mounted off screen (the phone dock's pattern) — the hole just leaves
+      // and returns. A DOM video (MJPEG, camera) would keep decoding off screen; the desktop keeps unmounting.
       if (isMobile && active && $videoState.nativeSink) return;
       const el = frameEl;
       const done = () => { el.removeEventListener('transitionend', done); if (parked) mounted = false; };
@@ -133,8 +108,13 @@
   const btnAtFrame = $derived(open && $videoState.floatSnapped);
   const btnLeft = $derived(btnAtFrame ? left + width + FLOAT_BTN_GAP_PX : FLOAT_MARGIN_PX);
   const btnTop = $derived(btnAtFrame ? top + height - FLOAT_BTN_PX : vh - FLOAT_SNAP_BOTTOM_PX - FLOAT_BTN_PX);
+  // The button stands for what the window shows when it is out: a map that waits in the video tile comes back
+  // to the window where the tile then hides (a sink with one output).
+  const mapButton = $derived(
+    mapHere || (MAX_SURFACES === 1 && $videoState.nativeSink && !$videoState.floating && $videoState.mapLocation === 'widget'),
+  );
   const btnLabel = $derived(
-    mapHere
+    mapButton
       ? ($videoState.floating ? $t('video.dockMapHide') : $t('video.dockMapShow'))
       : ($videoState.floating ? $t('video.dockHide') : $t('video.dockShow')),
   );
@@ -163,7 +143,7 @@
     title={btnLabel}
     aria-label={btnLabel}
   >
-    {#if mapHere}
+    {#if mapButton}
       <!-- map -->
       <svg viewBox="2 2 20 20" aria-hidden="true">
         <path d="M3 6.5 9 4l6 2.5 6-2.5v13.5L15 20l-6-2.5L3 20z" />
@@ -196,12 +176,9 @@
       data-nv-clip={armed ? 'floating' : undefined}
     ></div>
 
-    <!-- content: the video. When the map is in this frame, it's rendered (top-level) by +page here
-         instead, and the body is omitted. Double-click the video → the map jumps into this frame.
-         `data-nv-clip="floating"` while it holds the hardware layer: the opaque bezel this box
-         paints (its border + the ring around it) sits BEHIND the widget tile, whose own hole is
-         transparent — so the bezel showed through the tile's picture wherever the two overlap. The
-         router cuts it away with the holes of the surfaces above this one, never with its own. -->
+    <!-- content: the video (omitted when +page renders the map into this frame; double-click → the map jumps
+         here). `data-nv-clip="floating"` while it holds the hardware layer: its opaque bezel sits BEHIND the widget
+         tile's transparent hole, so the router cuts it with the holes of the surfaces above, never its own. -->
     {#if !mapHere}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div
@@ -214,12 +191,9 @@
         {#if live && $videoState.nativeSink}
           <!-- Native decode sink (hole punch): the video is a hardware layer BELOW the WebView;
                this div is the transparent hole it shows through. See controllers/nativeVideo. -->
-          <!-- Mobile: the window tells the router where it comes to rest (its box without the slide
-               transform), the layer is placed there once and the hole is cut in one step when the frame
-               stands still — the phone dock's pattern (nativeVideo.ts, NativeSurfaceSpec). The desktop
-               keeps the hole following a drag. The frame and body stay opaque until the hole is open
-               (`holeOpen`), so a sliding frame shows its ground, not the map; the placeholder text only
-               when the sink really serves another surface, not while this one is being armed. -->
+          <!-- Mobile: the router gets the rest box (no slide transform) and cuts the hole in one step when the frame
+               stands still (the phone dock's pattern, NativeSurfaceSpec); the desktop follows a drag. Frame and body stay
+               opaque until `holeOpen`; the placeholder only when the sink really serves another surface. -->
           <div class="native-hole" class:armed={holeOpen} use:nativeSurface={isMobile ? { id: 'floating', rest: restRect } : 'floating'}>
             {#if $activeNativeSurfaces.size > 0 && !armed}<span>{$t('video.sinkElsewhere')}</span>{/if}
           </div>
@@ -267,10 +241,8 @@
       </div>
     {/if}
 
-    <!-- Corner handles: the lighter L just inside the picture's top-right corner resizes, the
-         rounded square with the four-way arrow in the bottom-left corner moves. Video mode only —
-         with the map in the frame its layer covers the chrome, so +page draws the same corners
-         above the map. -->
+    <!-- Corner handles: the light L inside the picture's top-right resizes, the four-way-arrow square bottom-left
+         moves. Video mode only — with the map in the frame, +page draws the same corners above the map. -->
     {#if !mapHere}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div class="fw-grip" onpointerdown={onGripPointerDown} title={$t('video.resizeWindow')}></div>
@@ -362,10 +334,9 @@
     border: 1px solid rgba(255, 255, 255, 0.12);
     touch-action: none; /* nothing to scroll or pan on the picture */
   }
-  /* Native-sink hole: while this window holds the hardware video layer, the glass must stop
-     painting (the native layer shows through transparent DOM); the bezel is painted as an opaque
-     ring OUTSIDE the body instead — a box-shadow on the body, not on the hole: the body's
-     overflow:hidden would clip a shadow of its child (see VideoWidget for the same trick). */
+  /* Native-sink hole: the glass stops painting (the native layer shows through transparent DOM); the bezel is an
+     opaque ring OUTSIDE the body — a box-shadow on the body, since its overflow:hidden would clip a child's shadow
+     (same trick as VideoWidget). */
   .fw-frame.nv-active {
     background: transparent;
     backdrop-filter: none;
@@ -391,6 +362,14 @@
     /* Matches the body's rounding — the surface router reads this radius and cuts the
        hole with rounded corners, so the map behind caps the native layer's square edges. */
     border-radius: 5px;
+  }
+  /* A switch between surfaces leaves this one unserved for a few frames — the note is for the lasting state. */
+  .native-hole span {
+    animation: nv-note-late 0.01s 0.6s both;
+  }
+  @keyframes nv-note-late {
+    from { opacity: 0; }
+    to { opacity: 1; }
   }
   .native-hole.armed {
     background: transparent;
@@ -431,8 +410,8 @@
     box-sizing: border-box;
     width: 32px;
     height: 32px;
-    /* Tight padding, and the glyph's viewBox is cropped to its own bounds — the chain has to stay
-       readable at this size, where a 24-unit box with the usual margin left it too small (Marc). */
+    /* Tight padding, and the glyph's viewBox is cropped to its own bounds — the chain must stay readable at
+       this size. */
     padding: 4px;
     background: rgba(46, 46, 46, 0.82);
     border: 1px solid rgba(55, 168, 219, 0.5);
@@ -469,11 +448,9 @@
     padding: 0 10px;
   }
 
-  /* Resize corner — a translucent light L, set INSIDE the picture rather than drawn into the
-     bezel: it reads better there, and it is the same corner the detached window shows
-     (DetachedVideoFrame's `.dv-grip`, still opaque grey). Translucent so it marks the corner
-     without sitting on the picture (Marc, 2026-09-10). 7 px = the bezel's 4 px plus the 3 px
-     inset both use. The box is the hit area. */
+  /* Resize corner — a translucent light L INSIDE the picture (the same corner the detached window shows),
+     marking the corner without hiding the picture. 7 px = the bezel's 4 px + the 3 px inset; the box is the
+     hit area. */
   .fw-grip {
     position: absolute;
     top: 7px;

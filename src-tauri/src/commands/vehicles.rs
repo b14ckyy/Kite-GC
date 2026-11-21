@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Vehicle / link commands — the multi-vehicle surface next to `connection::{connect, disconnect}`:
-// list the open links and pick which vehicle the singleton UI (widgets, control panel, untargeted
-// commands) follows. See docs/02-design/features/multi-vehicle.design.md §3.1.
+// Vehicle / link commands: list the open links and pick which vehicle the singleton UI (widgets,
+// control panel, untargeted commands) follows.
 
 use tauri::{AppHandle, Emitter, State};
 
@@ -13,7 +12,6 @@ use crate::state::AppState;
 use crate::state::ActiveProtocol;
 use crate::vehicle_registry::{LinkSummary, VehicleId, VehicleInfo};
 
-/// Every open link with its protocol, transport and handshake info.
 #[tauri::command]
 pub fn list_links(state: State<'_, AppState>) -> Result<Vec<LinkSummary>, String> {
     let reg = state.links.lock().map_err(|e| e.to_string())?;
@@ -46,11 +44,9 @@ pub fn set_active_vehicle(vehicle_id: String, state: State<'_, AppState>, app_ha
     Ok(())
 }
 
-/// Debug Monitor runtime toggle of the multi-vehicle feature gate (normally the `--fleet` / `KITE_FLEET`
-/// launch flag, `fleet_mode`). Refused in a release build — `--debug` included: a tester must not reach a
-/// half-finished feature. Off: no secondary-vehicle discovery from now on and the group coordinator never
-/// forms a group flight; vehicles already discovered stay, and a group already running records on to its
-/// normal end — it is never cut mid-flight.
+/// Debug Monitor runtime toggle of the multi-vehicle feature gate (`fleet_mode`); refused in a release
+/// build, `--debug` included. Off stops new discovery and group forming, but a running group flight
+/// records on to its normal end — it is never cut mid-flight.
 #[tauri::command]
 pub fn set_fleet_enabled(on: bool, state: State<'_, AppState>, app_handle: AppHandle) -> Result<(), String> {
     if !cfg!(debug_assertions) {
@@ -83,18 +79,14 @@ pub fn set_fleet_enabled(on: bool, state: State<'_, AppState>, app_handle: AppHa
     Ok(())
 }
 
-/// Debug Monitor ("Fleet (gated)" tab): the group-flight coordinator's live state — registered
-/// recorders, the running group with its members, the ended groups awaiting their store prompt.
-/// Read-only.
+/// Debug Monitor ("Fleet (gated)" tab): the group-flight coordinator's live state, read-only.
 #[tauri::command]
 pub fn debug_group_state(state: State<'_, AppState>) -> Result<GroupDebugState, String> {
     Ok(state.groups.debug_state())
 }
 
-/// Re-announce every known vehicle (`vehicle-discovered`), so a frontend that (re)loaded after the
-/// live announcements can rebuild its vehicle list. The primary always comes from the registry entry
-/// (its identity reflects the MSP tunnel probe); MAVLink handlers add the secondaries they discovered
-/// on a shared link.
+/// Re-announce every known vehicle (`vehicle-discovered`) so a reloaded frontend can rebuild its list;
+/// the primary comes from the registry (its identity reflects the MSP tunnel probe).
 #[tauri::command]
 pub fn announce_vehicles(state: State<'_, AppState>, app_handle: AppHandle) -> Result<(), String> {
     let reg = state.links.lock().map_err(|e| e.to_string())?;

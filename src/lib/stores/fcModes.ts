@@ -1,13 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// The FC's own mode list per vehicle (MAVLink AVAILABLE_MODES, ArduPilot 4.7+). The backend reads it per
-// vehicle and emits `available-modes` once a list is complete (again after the FC's mode set changed);
-// a vehicle that never answers simply has no entry here and the panel keeps Kite's static table.
-//
-// Kept per `vehicleId` for every vehicle, not filtered through `isActive()`: switching the active vehicle
-// switches `activeFcModes` at once, with no re-read. An entry is dropped when its vehicle is lost, its
-// link closes, or everything disconnects.
+// The FC's own mode list per vehicle (MAVLink AVAILABLE_MODES, ArduPilot 4.7+), emitted as `available-modes`
+// once complete; no entry → Kite's static table. Kept for every vehicle (not filtered by `isActive()`), so a
+// vehicle switch switches `activeFcModes` without a re-read; dropped when its vehicle/link goes.
 
 import { writable, derived, type Readable } from 'svelte/store';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';

@@ -4,10 +4,9 @@
 -->
 
 <script lang="ts">
-  // The link editor of one local radar source (an ADS-B receiver row, the FormationFlight module) in the
-  // Radar panel: a transport select, then the serial port + baud, or host + port for TCP / UDP. One
-  // compact row — the panel is also used on a landscape phone. Serial is not offered where the platform
-  // has no serial ports (iOS). Which serial ports are taken is the caller's answer (`portInUse`).
+  // Link editor of one local radar source (ADS-B receiver, FormationFlight) in the Radar panel: transport, then
+  // serial port + baud or host + port, in one compact row (landscape phone). No serial where the platform has
+  // none (iOS); taken ports are the caller's answer (`portInUse`).
   import { t } from 'svelte-i18n';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
   import { hasSerialPorts } from '$lib/platform';

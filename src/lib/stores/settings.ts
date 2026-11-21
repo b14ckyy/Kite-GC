@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Persistent application settings
-// Stores user preferences in localStorage, survives between sessions
+// Persistent application settings (localStorage).
 
 import { writable } from 'svelte/store';
 import { currentProviderId } from '$lib/config/mapProviders';
 import type { RelayConfig } from '$lib/stores/relay';
 import { isMobile } from '$lib/platform';
+import type { LogbookSortMode } from '$lib/stores/flightlogTypes';
 import type { WidgetSize } from '$lib/config/widgetRegistry';
 import { normalizeTileSize, type UserMapSpec } from '$lib/config/mapProviders';
 import { validateTileTemplate } from '$lib/helpers/tileTemplate';
@@ -94,7 +94,6 @@ function normalizeRadarLink<T extends Partial<RadarLinkFields>>(src: T): T & Pic
 /** Fixed, always-present ADS-B providers (URL defined in code, not editable/deletable). Only their
  *  on/off state is persisted (in `radar.adsb.builtins`). */
 export const BUILTIN_ADSB_PROVIDERS: { name: string; url: string }[] = [
-  { name: 'adsb.lol', url: 'https://api.adsb.lol/v2/point/{lat}/{lon}/{dist}' },
   { name: 'adsb.fi', url: 'https://opendata.adsb.fi/api/v3/lat/{lat}/lon/{lon}/dist/{dist}' },
 ];
 
@@ -107,7 +106,7 @@ export interface RadarSettings {
     enabled: boolean;
     /** On/off state for the fixed built-in providers, keyed by name (URL lives in code). */
     builtins: Record<string, boolean>;
-    /** User-editable custom providers (e.g. adsb.fi example). Merged with the built-ins by ICAO. */
+    /** User-editable custom providers. Merged with the built-ins by ICAO. */
     online: AdsbOnlineProvider[];
     /** Local hardware receivers (MAVLink over serial / TCP / UDP). */
     local: AdsbLocalSource[];
@@ -174,16 +173,12 @@ export interface RadarMapSettings {
   visible: { adsb: boolean; formationFlight: boolean; radio: boolean };
 }
 
-/** Default radar settings — built-ins (adsb.lol/.fi) on; adsb.one as a custom (off — currently
- *  unreachable). */
 export const DEFAULT_RADAR: RadarSettings = {
   enabled: true,
   adsb: {
     enabled: true,
-    builtins: { 'adsb.lol': true, 'adsb.fi': true },
-    online: [
-      { name: 'adsb.one', url: 'https://api.adsb.one/v2/point/{lat}/{lon}/{dist}', enabled: false },
-    ],
+    builtins: { 'adsb.fi': true },
+    online: [],
     local: [],
     mspFromFc: false,
     radiusKm: 25,
@@ -271,6 +266,15 @@ export interface RcControlSettings {
   /** Offline platform selection for the config editor (see docs/active/MAVLINK_RC_CONTROL.md §2). When a
    *  FC is connected the detected platform wins and locks; this is the choice used while disconnected. */
   platform: RcPlatform;
+  /** FrSky radios remembered as Bluetooth trainer inputs; absent in older settings. */
+  trainerRadios?: TrainerRadio[];
+}
+
+/** A remembered trainer radio: BLE id, name, and whether its module needs the PIN pairing. */
+export interface TrainerRadio {
+  id: string;
+  name: string;
+  pairing?: boolean;
 }
 
 /** Flight-stack the RC-control config targets — drives the channel split + the send adapter. */
@@ -311,9 +315,8 @@ export const DEFAULT_TELEMETRY_API: TelemetryApiSettings = {
 };
 
 // ── Connection ─────────────────────────────────────────────────────────────────────────────────────
-/** Which protocol the connection bar starts on. `last` restores the last-used one, which is the
- *  historic behaviour and stays the default; a fixed value overrides that stored choice on every
- *  launch, for a pilot who always flies the same link and does not want a stray session to decide. */
+/** Which protocol the connection bar starts on: `last` (default) restores the last-used one; a fixed value
+ *  overrides that stored choice on every launch. */
 export type DefaultProtocol = 'last' | 'msp' | 'mavlink' | 'telemetry';
 
 // ── Update check (GitHub releases — see controllers/updateCheck.ts) ─────────────────────────────────
@@ -397,6 +400,11 @@ export interface AppSettings {
   flightLogRawPath: string;
   flightLogRawEnabled: boolean;
   flightLogRawAlways: boolean;
+  /** Weather requests without a weather widget on screen: during a recording and for a stored flight. */
+  flightWeatherRecording: boolean;
+  /** Look up the place name of a flight's start point. */
+  flightAutoLocation: boolean;
+  logbookSortMode: LogbookSortMode;
   // Mission Control
   defaultWpAltitudeM: number;
   defaultPhTimeSec: number;
@@ -411,6 +419,8 @@ export interface AppSettings {
   /** Per-widget battery selection: 'auto' or an instance id (as a string). Keyed by widget id
    *  ('battery' / 'battery2'). Lets each battery widget pin a specific pack. See MULTI_BATTERY.md. */
   batterySelect: Record<string, string>;
+  /** GPS widget with two receivers: 'ekf' = fused position, 'cycle' = alternate between the receivers. */
+  gpsWidgetMode: 'ekf' | 'cycle';
   /** Which FC system messages (MAVLink STATUSTEXT) surface as on-screen toasts. */
   systemMessages: SystemMessagesLevel;
   /** Backend diagnostic file-log verbosity (applied to the Rust logger on startup + on change). */
@@ -426,10 +436,16 @@ export interface AppSettings {
   locale: string;
   /** Global UI scale factor (1 = 100%, up to 2 = 200%); zooms the chrome, not the map. */
   uiScale: number;
+  /** Phone / tablet: keep the display awake all the time, also without a connection. Off = only
+   *  while the vehicle is armed (the backend holds the rule, link_presence.rs). */
+  stayAwake: boolean;
   // 3D Map
   cesiumIonToken: string;
   /** User chose "don't remind me" on the missing-Cesium-key prompt → never auto-show it again. */
   cesiumKeyPromptDismissed: boolean;
+  /** Answers to the backup prompt, by backup file path, for the backup with this modification time:
+   *  `remindAt` 0 = keep and do not ask again, else the time (ms) from which the prompt comes back. */
+  dbBackupAck: Record<string, { modifiedMs: number; remindAt: number }>;
   /** Low-power 3D render cap: off = uncapped · on = always 20fps · auto = 20fps only while on battery. */
   lowPower3D: 'off' | 'on' | 'auto';
   /** 3D globe at native pixel density (on) or half of it (off). Default: on for desktop, off for mobile. */
@@ -500,6 +516,9 @@ const defaults: AppSettings = {
   flightLogRawPath: '',
   flightLogRawEnabled: false,
   flightLogRawAlways: false,
+  flightWeatherRecording: true,
+  flightAutoLocation: true,
+  logbookSortMode: 'aircraft-location-date',
   defaultWpAltitudeM: 50,
   defaultPhTimeSec: 30,
   lastAutopilotSystem: 'inav',
@@ -507,6 +526,7 @@ const defaults: AppSettings = {
   warnAltitudeM: 120,
   batteryAlertPct: 30,
   batterySelect: {},
+  gpsWidgetMode: 'ekf',
   systemMessages: 'warning',
   logLevel: 'warning',
   interface: {
@@ -523,8 +543,10 @@ const defaults: AppSettings = {
   phoneWidgets: DEFAULT_PHONE_WIDGETS,
   locale: 'en',
   uiScale: 1,
+  stayAwake: false,
   cesiumIonToken: '',
   cesiumKeyPromptDismissed: false,
+  dbBackupAck: {},
   lowPower3D: 'auto',
   highRes3D: !isMobile,
   altitudeCurtain3D: false,
@@ -587,9 +609,11 @@ function load(): AppSettings {
               ...dr.adsb,
               ...pa,
               builtins: { ...dr.adsb.builtins, ...(pa.builtins ?? {}) },
-              // Strip any built-in-named entries from the custom list (migration from the old flat
-              // `online` array, where adsb.lol/.one lived as custom rows).
-              online: (pa.online ?? dr.adsb.online).filter((p) => !builtinNames.has(p.name)),
+              // A built-in name cannot also be a custom row. The adsb.one row is the sample earlier defaults
+              // stored; that service is gone, so it goes unless the user had switched it on.
+              online: (pa.online ?? dr.adsb.online).filter(
+                (p) => !builtinNames.has(p.name) && !(p.name === 'adsb.one' && !p.enabled),
+              ),
               local: (pa.local ?? dr.adsb.local).map(normalizeRadarLink),
             },
             formationFlight: normalizeRadarLink({ ...dr.formationFlight, ...(pr.formationFlight ?? {}) }),

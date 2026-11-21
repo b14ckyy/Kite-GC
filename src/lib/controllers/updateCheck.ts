@@ -1,13 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Startup update check. On launch we ask the backend for the release relevant to the user's channel
-// (stable, patch-only for the running minor, or incl. pre-releases), compare it to the running version,
-// and — if it's newer and not a version the user chose to skip — surface a one-shot prompt with the
-// release notes. Nothing is downloaded until the user picks "Update and Restart"; that hands the accepted
-// release to the backend (commands/updater.rs), which installs it and relaunches. The only persisted
-// state is the skipped version, honoured until a *higher* version appears. A failed check is logged and
-// ignored; it never disrupts use.
+// Startup update check: if the backend's release for the user's channel is newer and not skipped, show a one-shot
+// prompt with the notes. Nothing downloads before "Update and Restart" (commands/updater.rs); a failed check is
+// logged and ignored. Store installations get the store listing as their only way out.
 
 import { writable, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
@@ -29,9 +25,8 @@ export interface UpdateInfo {
   body: string;
 }
 
-/** How the running copy can be updated (Rust `UpdateKind`): installed package, portable binary, or a
- *  mobile build that only links to its store. */
-export type UpdateKind = 'installer' | 'portable' | 'mobile';
+/** How the running copy can be updated (Rust `UpdateKind`). */
+export type UpdateKind = 'installer' | 'portable' | 'store' | 'sideload';
 
 /** Rust `UpdateProgress`, emitted as `update-progress` during the install. */
 interface UpdateProgress {
@@ -52,8 +47,23 @@ export interface InstallState {
 /** A newer release the user should know about, or null when there's nothing to show. Drives UpdateDialog. */
 export const pendingUpdate = writable<UpdateInfo | null>(null);
 
-/** The running copy's update kind; resolved once at the first check. */
+/** The running copy's update kind; `installer` until `resolveUpdateKind` has asked the backend. */
 export const updateKind = writable<UpdateKind>('installer');
+
+let kindQuery: Promise<void> | null = null;
+
+/** Ask the backend once how this copy is updated (at startup: Settings differs for a store installation). */
+export function resolveUpdateKind(): Promise<void> {
+  kindQuery ??= invoke<UpdateKind>('update_kind')
+    .then((kind) => updateKind.set(kind))
+    .catch((e) => {
+      console.warn('[update] kind query failed:', e);
+      // Never leave a mobile build on `installer`: it would offer an install that cannot work.
+      if (isIOS) updateKind.set('store');
+      else if (isAndroid) updateKind.set('sideload');
+    });
+  return kindQuery;
+}
 
 export const installState = writable<InstallState>({ phase: 'idle', percent: null, error: '' });
 
@@ -70,9 +80,15 @@ export async function runUpdateCheck(): Promise<void> {
   const cfg = get(settings).updateCheck;
   if (!updatesSupported || cfg.mode === 'disabled') return;
 
+  await resolveUpdateKind();
+  // A store offers one version: stable, or pre-releases for a copy from the store's test track.
+  const channel = get(updateKind) === 'store'
+    ? (APP_VERSION.includes('-') ? 'prerelease' : 'release')
+    : cfg.mode;
+
   let info: UpdateInfo | null;
   try {
-    info = await invoke<UpdateInfo | null>('check_for_update', { channel: cfg.mode });
+    info = await invoke<UpdateInfo | null>('check_for_update', { channel });
   } catch (e) {
     console.warn('[update] check failed:', e);
     return;
@@ -84,11 +100,6 @@ export async function runUpdateCheck(): Promise<void> {
   // Respect a skipped version — but resurface once something higher than it ships.
   if (cfg.skippedVersion && compareVersions(info.version, cfg.skippedVersion) <= 0) return;
 
-  try {
-    updateKind.set(await invoke<UpdateKind>('update_kind'));
-  } catch (e) {
-    console.warn('[update] kind query failed:', e);
-  }
   installState.set({ phase: 'idle', percent: null, error: '' });
   pendingUpdate.set(info);
 }
@@ -102,15 +113,14 @@ export async function openReleasePage(): Promise<void> {
   pendingUpdate.set(null);
 }
 
-/** The store listing for this mobile build, or null when none exists yet (the dialog then offers the
- *  release page instead). */
+/** The store listing, or null when none exists yet (the dialog then offers the release page). */
 export function storeUrl(): string | null {
   if (isAndroid && PLAY_STORE_URL) return PLAY_STORE_URL;
   if (isIOS && APP_STORE_URL) return APP_STORE_URL;
   return null;
 }
 
-/** "Open in Play Store / App Store" — mobile's replacement for the in-app install. */
+/** "Open in Play Store / App Store" — a store installation's replacement for the in-app install. */
 export async function openStore(): Promise<void> {
   const url = storeUrl();
   if (url) {

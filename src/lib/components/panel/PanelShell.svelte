@@ -9,12 +9,11 @@
 
 <script lang="ts">
   import type { Snippet } from 'svelte';
-  import { panelDockRight } from '$lib/stores/panelDock';
+  import { panelDockRight, panelAlertLevel } from '$lib/stores/panelDock';
 
-  // Reusable panel frame for the whole app (see docs/active/PANEL_FRAMEWORK.md). The shell owns
-  // the frame, positioning, sizing per variant, the scroll/bounding of the framed field, and
-  // the live variant transition. Callers only place content into the snippet slots. It lives
-  // inside `.ui-scale`, so it scales with --ui-scale for free.
+  // Reusable panel frame (docs/active/PANEL_FRAMEWORK.md): owns frame, positioning, per-variant sizing, the
+  // framed field's scroll/bounds and the live variant transition; callers fill the snippet slots. Lives inside
+  // `.ui-scale`, so it scales with --ui-scale.
   let {
     variant = 'compact',
     title = '',
@@ -55,27 +54,30 @@
     children?: Snippet;
   } = $props();
 
-  // Publish the panel's live right edge (viewport px, transform-aware) so frame-pinned overlays can
-  // dodge it — see stores/panelDock. ResizeObserver's initial callback fires on observe(), so a tab
-  // switch (old shell destroyed, new mounted) self-corrects even if the destroy runs last. The
-  // teardown reset to 0 covers plain close; a modal PanelShell opened over a docked one is behind its
-  // own backdrop, so the transient value is never visible.
+  // Publish the panel's live right edge (viewport px, transform-aware) for frame-pinned overlays (stores/panelDock).
+  // ResizeObserver fires on observe(), so a tab switch self-corrects even if the old shell's destroy runs last;
+  // the teardown reset covers plain close.
   let root = $state<HTMLElement>();
   $effect(() => {
     const el = root;
     if (!el) return;
-    const ro = new ResizeObserver(() => panelDockRight.set(el.getBoundingClientRect().right));
+    const publish = () => panelDockRight.set(el.getBoundingClientRect().right);
+    const ro = new ResizeObserver(publish);
     ro.observe(el);
-    return () => { ro.disconnect(); panelDockRight.set(0); };
+    // The observer's first call lands in the entry animation, which shifts the shell sideways.
+    el.addEventListener('animationend', publish);
+    return () => { ro.disconnect(); el.removeEventListener('animationend', publish); panelDockRight.set(0); };
   });
 </script>
 
-<div class="ps ps-{variant}" bind:this={root}>
+<div class="ps ps-{variant}" class:ps-alert-warning={$panelAlertLevel === 'warning'} class:ps-alert-caution={$panelAlertLevel === 'caution'} bind:this={root}>
   {#if variant === 'fullscreen' || variant === 'wide-compact'}
-    <header class="ps-head">
-      <span class="ps-title">{title}</span>
-      {#if headerActions}<div class="ps-head-actions">{@render headerActions()}</div>{/if}
-    </header>
+    {#if title || headerActions}
+      <header class="ps-head">
+        <span class="ps-title">{title}</span>
+        {#if headerActions}<div class="ps-head-actions">{@render headerActions()}</div>{/if}
+      </header>
+    {/if}
     <div class="ps-fs-row">
       {#if params}<aside class="ps-params">{@render params()}</aside>{/if}
       <div class="ps-fs-content">
@@ -129,19 +131,15 @@
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
     backdrop-filter: var(--panel-blur, blur(10px));
     -webkit-backdrop-filter: var(--panel-blur, blur(10px));
-    /* Live variant transitions + smooth panel switch (the shell instance persists across rail
-       switches, so width/height/top animate between any two variants). `interpolate-size`
-       (Chromium 129+ / WebView2) lets width/height animate even to/from the `info` variant's
-       intrinsic `max-content` / `auto` sizes. */
+    /* Live variant transitions (the shell persists across rail switches). `interpolate-size` (Chromium 129+) lets
+       width/height animate to/from the `info` variant's intrinsic sizes. */
     interpolate-size: allow-keywords;
     transition: width 0.25s ease, height 0.25s ease, top 0.25s ease, transform 0.25s ease, opacity 0.25s ease;
     animation: ps-in 0.18s ease-out;
   }
-  /* Low-power mode switches the blur off (--panel-blur: none), and with it the panel loses its own
-     compositor layer: it gets one only while the enter animation or a transition runs, and when that
-     ends the panel is rastered again. Over a native video the window is transparent, so this showed
-     as the panel vanishing for a frame or two after every open (Android tablet). Keeping the layer
-     costs one texture for the one visible panel. */
+  /* Low-power mode switches the blur off, and with it the panel's own compositor layer: re-rastered after each
+     transition, which over a transparent native-video window showed as the panel vanishing for a frame. Keeping
+     the layer costs one texture. */
   :global(html.kite-low-power) .ps {
     will-change: transform;
   }
@@ -153,11 +151,9 @@
     pointer-events: none;
   }
 
-  /* Bounding height shared by compact/advanced (and as a cap for info): full panel area,
-     i.e. below the toolbar, above the bottom dock + status bar. 100% = the (scaled) .app.
-     `--panel-bottom-reserve` is the dock height normally, but shrinks to the rail's 6px status-bar
-     gap on windows too short for the capped panel to reach the nav rail's full height — the panel
-     then overlays the dock (see +page.svelte). Fallback for hosts without the var (PanelPlayground). */
+  /* Bounding height for compact/advanced (cap for info): below the toolbar, above `--panel-bottom-reserve` and
+     the status bar. +page sets the reserve (docked video, dock tiles, or the rail's 6px gap); the fallback is
+     for hosts without the var (PanelPlayground). */
   .ps-info,
   .ps-compact,
   .ps-advanced {
@@ -187,11 +183,9 @@
       top: calc(var(--toolbar-h, 65px) + 8px);
     }
   }
-  /* Tablet (iPad): the toolbar is taller than the desktop default (iOS status-bar + safe-top padding),
-     so the fixed 65px top clipped the panel header under the bar. Track the live bar height, and size
-     the panel to the gap between the bar and the bottom dock (iPad keeps the above-dock layout, unlike
-     the phone which overlays the dock). Same `--panel-bottom-reserve` rule as the desktop: on a
-     window too short for the nav rail the panel may overlay the dock instead of being squeezed. */
+  /* Tablet: the toolbar is taller (iOS status bar + safe-top), so track the live bar height and size the panel
+     to the gap above the bottom dock. Same `--panel-bottom-reserve` rule as the desktop: on a window too short
+     for the nav rail the panel may overlay the dock. */
   :global(html.is-tablet) .ps {
     top: calc(var(--toolbar-h, 65px) + 8px);
   }
@@ -202,16 +196,9 @@
   :global(html.is-tablet) .ps-info {
     max-height: calc(100% - var(--toolbar-h, 65px) - var(--panel-bottom-reserve, var(--grid-bottom-height)) - 24px - 20px);
   }
-  /* iPhone (any orientation): the screen is small, so
-     - width is capped to the viewport (minus the rail + a margin) so the panel never clips off-screen;
-     - the panel is tall and OVERLAYS the HUD dock (it sits above it at z-index 150) instead of being
-       squeezed into the gap above it, so its content is reachable/scrollable. iPad keeps its layout. */
-  /* Phone layout (Dev-Docs archive/PHONE_UI.md): no toolbar, so the panel starts at the top safe
-     inset and may use the full height. Width: every variant keeps the width it asks for on the
-     desktop and is bounded by the SCREEN only — the rail on the left (62px) and an 8px margin on
-     the right. Panels may cover the widget column (z-index 150+ over the column's 100): on a
-     phone the map area alone is too narrow for the advanced two-column layouts (the detail column
-     scrolled sideways even on a 21:9 screen), and a parked panel gives the column back anyway. */
+  /* Phone layout (Dev-Docs archive/PHONE_UI.md): no toolbar — the panel starts at the top safe inset, full
+     height. Width as on the desktop, bounded by the SCREEN (rail 62px left, 8px right): panels may cover the
+     widget column (z 150+ over 100), since the map area alone is too narrow for the advanced layouts. */
   :global(html.is-phone) .ps {
     top: calc(8px + var(--safe-top, 0px));
   }
@@ -243,10 +230,9 @@
     max-width: calc(100% - 62px - var(--grid-side-width) - 54px - 12px);
   }
 
-  /* Fullscreen + Wide-Compact: floating overlays (terrain-analyzer style), NOT edge-to-edge.
-     All variants are left-anchored and sized by width/height (no `right`) so any variant can
-     animate into any other. Fullscreen = even ~62px inset all round; Wide-Compact = a short
-     top strip that stops before the side widget dock so the map stays visible for comparison. */
+  /* Fullscreen + Wide-Compact: floating overlays, left-anchored and sized by width/height (no `right`) so any
+     variant can animate into any other. Fullscreen = ~62px inset all round; Wide-Compact = a short top strip
+     that stops before the side dock. */
   .ps-fullscreen,
   .ps-wide-compact {
     top: 62px;
@@ -264,14 +250,16 @@
     width: calc(100% - 124px);
     height: calc(100% - 124px);
   }
+  /* The strip's height is a variable: the replay player hangs below the strip by it (+page). */
+  :global(:root) {
+    --ps-strip-h: max(20vh, 160px);
+  }
   .ps-wide-compact {
     width: calc(100% - 62px - var(--grid-side-width) - 54px - 6px);
-    height: max(20vh, 160px);
+    height: var(--ps-strip-h);
   }
-  /* Phone (PHONE_UI.md): no toolbar / status bar / side dock — the fullscreen panel spans from the
-     top safe inset to the bottom one and from the rail to the right screen edge (over the widget
-     column, see above). The 62px desktop inset left a band at the bottom (the space the status bar
-     used to take). */
+  /* Phone (PHONE_UI.md): no toolbar / status bar / side dock — the fullscreen panel spans safe inset to safe
+     inset and from the rail to the right screen edge (over the widget column). */
   :global(html.is-phone) .ps-fullscreen,
   :global(html.is-phone) .ps-wide-compact {
     top: calc(8px + var(--safe-top, 0px));
@@ -324,6 +312,22 @@
     flex-shrink: 0;
     min-height: 26px;
   }
+  /* A traffic alert whose banner lies behind this panel: the title bar carries its colour. */
+  .ps-alert-warning .ps-head,
+  .ps-alert-caution .ps-head {
+    border-radius: 4px;
+  }
+  /* Only the column heads have room around them; the full-width heads bring their own padding. */
+  .ps-alert-warning .ps-col > .ps-head,
+  .ps-alert-caution .ps-col > .ps-head {
+    margin: -4px -6px 4px;
+    padding: 4px 6px;
+  }
+  .ps-alert-warning .ps-head { background: #d40000; }
+  .ps-alert-caution .ps-head { background: #f4c020; }
+  .ps-alert-warning .ps-title { color: #fff; }
+  .ps-alert-caution .ps-title { color: #1a1400; }
+
   .ps-title {
     flex: 1;
     font-weight: 600;
@@ -395,7 +399,7 @@
     min-height: 0;
   }
   .ps-params {
-    width: 240px; /* 280 → 240 (2026-09-04): the terrain controls fit with tighter spacing, the graph gets the rest */
+    width: 240px; /* the terrain controls fit with tighter spacing, the graph gets the rest */
     flex-shrink: 0;
     overflow: auto;
     padding: 10px;
@@ -406,6 +410,15 @@
     min-width: 0;
     overflow: auto;
     padding: 10px;
+  }
+  /* The strip is short: its height goes to the chart. */
+  .ps-wide-compact .ps-params {
+    width: auto;
+    padding: 8px;
+  }
+  .ps-wide-compact .ps-fs-content {
+    padding: 2px 4px 2px 0;
+    overflow: hidden;
   }
   /* Fullscreen / Wide-Compact bottom bar (e.g. terrain readouts + hover info). */
   .ps-fs-foot {

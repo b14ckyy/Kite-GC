@@ -10,15 +10,10 @@
 #        | portable   (kite-gc.exe, zipped with an empty `.portable` marker so the download keeps its
 #                      data in a data/ folder next to the executable)
 #
-# One naming source shared by local builds (`just build` / `just build-windows` / `just build-android`)
-# AND the GitHub release workflow, so the filenames are identical everywhere. The release/ folder is
-# git-ignored and refreshed on every run — `-Keep` adds to it instead.
-#
-# `-AndroidOnly` collects the APKs and the Play bundle alone (implies -Keep). `just build-android` and
-# `just build-android-aab` use it: an Android
-# build leaves the DESKTOP outputs of an earlier build untouched in target/release, and collecting
-# them would republish a stale binary under the current version number — a 1.0.0-rc2 kite-gc.exe
-# came out as KiteGC_Windows_x64_1.1.0-dev_portable.zip (found 2026-09-04).
+# Shared by the local `just build*` recipes AND the GitHub release workflow, so the names are identical
+# everywhere. release/ is git-ignored and refreshed on every run — `-Keep` adds to it instead.
+# `-AndroidOnly` (implies -Keep) collects only the APKs and the Play bundle: the desktop outputs of an
+# earlier build still sit in target/release and would be republished under the current version number.
 # ============================================================
 param([switch]$Keep, [switch]$AndroidOnly)
 if ($AndroidOnly) { $Keep = $true }
@@ -41,10 +36,8 @@ $collected = @()
 
 if (-not $AndroidOnly) {
 
-# NSIS installer. Pick the NEWEST match, not the first: Tauri never prunes its bundle dir, so
-# stale installers from earlier builds pile up beside the fresh one and a first-match (which is
-# alphabetical, so a lower version wins) would ship an old build under the current name. The
-# cleanup at the end then removes the raw outputs so the pile-up can't recur.
+# NSIS installer: the NEWEST match, not the first — Tauri never prunes its bundle dir, and the
+# alphabetical first match would ship a stale, lower version under the current name.
 Get-ChildItem (Join-Path $bundle 'nsis\*-setup.exe') -ErrorAction SilentlyContinue |
     Sort-Object LastWriteTime -Descending | Select-Object -First 1 | ForEach-Object {
     $dest = Get-Name 'installer' 'exe'
@@ -65,21 +58,16 @@ if (Test-Path $exe) {
     $script:collected += $dest
 }
 
-# Delete the raw bundle output we just consumed. Tauri never prunes it, and leaving it is exactly
-# what lets stale, wrongly-versioned installers accumulate and get mis-collected next time. The
-# portable .exe comes straight from $rel\kite-gc.exe (a cargo output, overwritten each build), so
-# there's nothing to prune there.
+# Delete the consumed raw bundle output, so stale installers cannot pile up and be mis-collected.
 if ($collected.Count -gt 0) {
     Remove-Item (Join-Path $bundle 'nsis') -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 } # -not $AndroidOnly
 
-# Android: `tauri android build --apk` leaves one release APK per ABI folder under the Gradle
-# outputs (universal / arm64 / armv7 / x86_64 / x86). Same rules as above: newest file per folder,
-# then the raw output is deleted so a stale APK can't be re-collected under a newer version.
+# Android: one release APK per ABI folder — newest per folder, raw output deleted afterwards.
 $apkRoot = Join-Path $root 'src-tauri\gen\android\app\build\outputs\apk'
-$abiNames = @{ 'arm64' = 'arm64'; 'armv7' = 'armv7'; 'x86_64' = 'x64'; 'x86' = 'x86'; 'universal' = 'universal' }
+$abiNames = @{ 'arm64' = 'arm64'; 'arm' = 'armv7'; 'x86_64' = 'x64'; 'x86' = 'x86'; 'universal' = 'universal' }
 Get-ChildItem $apkRoot -Directory -ErrorAction SilentlyContinue | ForEach-Object {
     $abiDir = $_
     $apk = Get-ChildItem (Join-Path $abiDir.FullName 'release\*.apk') -ErrorAction SilentlyContinue |

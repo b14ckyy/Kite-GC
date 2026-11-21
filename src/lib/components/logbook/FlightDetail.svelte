@@ -5,11 +5,12 @@
 
 <script lang="ts">
   import { t } from 'svelte-i18n';
+  import { invoke } from '@tauri-apps/api/core';
   import { convertAltitude, convertDistance, convertSpeed, convertTemperature, formatConverted } from '$lib/utils/units';
-  import { formatDurationSec, formatFlightDateTime, flightTzLabel, missionDbForFlight, flightLoggedWpCount, flightLinkMission, flightUnlinkMission, missionDbSave, missionDbFindByHash, missionDbGeocode, flightSetBatterySerial, batteryDbFindBySerial, batteryDbList, vehicleDbList, flightSetVehicle, getFlight } from '$lib/stores/flightlog';
+  import { formatDurationSec, formatFlightDateTime, flightTzLabel, flightDataSizes, type FlightDataSize, flightVideos, type FlightVideo, missionDbForFlight, flightLoggedWpCount, flightLinkMission, flightUnlinkMission, missionDbSave, missionDbFindByHash, missionDbGeocode, flightSetBatterySerial, batteryDbFindBySerial, batteryDbList, vehicleDbList, flightSetVehicle, getFlight } from '$lib/stores/flightlog';
   import type { Flight, LibraryMission, BatteryPack, Vehicle } from '$lib/stores/flightlogTypes';
   import type { InterfaceSettings } from '$lib/stores/settings';
-  import { mission, missionFlags, loadedMissionId, markMissionSynced } from '$lib/stores/mission';
+  import { mission, missionFlags, loadedMissionId, markMissionSynced, filledMissionCount } from '$lib/stores/mission';
   import { arduMission, arduLoadedMissionId } from '$lib/stores/missionArdupilot';
   import { autopilotSystem } from '$lib/stores/autopilotContext';
   import { batteryManagerOpen, batteryManagerSelectedId, normalizeSerial, normalizeSerialInput, normalizeSerialList, serialTokens } from '$lib/stores/batteryManager';
@@ -22,6 +23,9 @@
   import { buildArduMissionInput } from '$lib/helpers/missionLibraryArdu';
   import { compassPointKey } from '$lib/helpers/compassPoint';
   import { get } from 'svelte/store';
+  import { videoState } from '$lib/stores/video';
+  import { revealItemInDir } from '@tauri-apps/plugin-opener';
+  import { isMobile } from '$lib/platform';
   import { locale } from 'svelte-i18n';
   import WeatherEditor from './WeatherEditor.svelte';
   import Button from '$lib/components/panel/Button.svelte';
@@ -90,6 +94,42 @@
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  // What the flight's rows take in the database; a linked pair shows both parts.
+  let dataSizes = $state<FlightDataSize[]>([]);
+  let videos = $state<FlightVideo[]>([]);
+  // By id: saving notes or weather hands in a new flight object for the same flight.
+  const flightId = $derived(flight.id);
+  $effect(() => {
+    const id = flightId;
+    dataSizes = [];
+    videos = [];
+    if (minimized) return;
+    void flightDataSizes(id, dbPath)
+      .then((sizes) => { if (flightId === id) dataSizes = sizes; })
+      .catch(() => {});
+    void flightVideos(id, dbPath, get(videoState).recordDir)
+      .then((list) => { if (flightId === id) videos = list; })
+      .catch(() => {});
+  });
+
+  // The second try opens the folder itself, for a desktop without a "reveal" service.
+  function showVideoFolder() {
+    const path = videos.find((v) => v.exists && v.path)?.path;
+    if (!path) return;
+    void revealItemInDir(path)
+      .catch(() => invoke('system_open_folder', { path }))
+      .catch((e) => console.warn('[logbook] folder not opened', e));
+  }
+
+  function videoInfo(v: FlightVideo): string {
+    const parts: string[] = [];
+    if (v.duration_ms != null) parts.push(formatDurationSec(Math.round(v.duration_ms / 1000)));
+    if (v.width && v.height) parts.push(`${v.width}×${v.height}`);
+    if (v.codec) parts.push(v.codec === 'hevc' ? 'H.265' : v.codec === 'h264' ? 'H.264' : v.codec);
+    if (v.file_size != null) parts.push(formatBytes(v.file_size));
+    return parts.join(' · ');
   }
 
   let craftNameEditing = $state(false);
@@ -161,10 +201,8 @@
     batteryListOpen = true;
   }
 
-  // The map mission can be linked only if it is a "real" mission (has a provenance flag);
-  // a pure unsaved scratch mission can't. DB → link directly; FILE/FC → save-to-DB-then-link.
-  // ArduPilot/PX4 has no provenance flags yet (Phase 2) → any loaded AP mission is linkable
-  // (it is saved to the library on link if not already there).
+  // Only a "real" map mission (with a provenance flag) can be linked: DB → directly, FILE/FC → save, then link.
+  // ArduPilot/PX4 have no provenance flags yet → any loaded AP mission is linkable (saved to the library on link).
   let canLink = $derived(
     $autopilotSystem === 'inav'
       ? ($mission.waypoints.length > 0 && ($missionFlags.db || $missionFlags.file || $missionFlags.fc))
@@ -207,7 +245,8 @@
       if (get(autopilotSystem) === 'inav') {
         const flags = get(missionFlags);
         missionId = get(loadedMissionId);
-        if (!(flags.db && missionId != null)) {
+        // With several tabs in use the loaded entry can be a set: a flight links the mission of the open tab.
+        if (!(flags.db && missionId != null) || filledMissionCount() > 1) {
           const input = await buildMissionInput(get(mission).waypoints, { name: defaultMissionName() });
           missionId = await missionDbSave(input, dbPath);
           loadedMissionId.set(missionId);
@@ -337,10 +376,9 @@
     void loadVehicles();
   });
 
-  // The library changed elsewhere (Vehicle Manager save / delete, UAV Info save): refresh the names and
-  // re-read this flight's link (a vehicle created from this flight links it; a delete un-links it). The
-  // run on mount reads it too: the `flight` prop is only reloaded when a flight is selected, so after a
-  // remount (Vehicle Manager and back, tab switch) it may predate a link change made since.
+  // The library changed elsewhere (Vehicle Manager / UAV Info save or delete): refresh names and re-read this
+  // flight's link. Also on mount — the `flight` prop reloads only on selection, so after a remount it may
+  // predate a link change.
   let seenLibraryChange = -1;
   $effect(() => {
     const n = $vehicleLibraryChanged;
@@ -406,7 +444,7 @@
   // Open the Vehicle Manager's create form pre-filled from this flight (craft name, FC id); the flight
   // is linked to the new vehicle when it is saved.
   function createVehicleFromFlight() {
-    vehicleManagerCreatePrefill.set({ craftName: flight.craft_name ?? '', fcUid: flight.fc_uid, flightId: flight.id });
+    vehicleManagerCreatePrefill.set({ craftName: flight.craft_name ?? '', fcUid: flight.fc_uid, flightId: flight.id, platformType: flight.platform_type });
     vehicleManagerOpen.set(true);
   }
 
@@ -595,8 +633,13 @@
       {formatFlightSource(flight.source)}
       {#if !minimized}<span class="flight-id-tag">#{flight.id}</span>{/if}
       {#if flight.linked_flight_id} 🔗 #{flight.linked_flight_id}{/if}
+      {#if !minimized}
+        {#each dataSizes as s (s.flight_id)}
+          <span class="raw-size" title={$t('logbook.dataSizeTip')}>{dataSizes.length > 1 ? `${formatFlightSource(s.source)} ` : ''}≈ {formatBytes(s.bytes)}</span>
+        {/each}
+      {/if}
       {#if !minimized && blackboxFile}
-        <span class="raw-size" title={blackboxFile.filename}>{formatBytes(blackboxFile.size_bytes)}</span>
+        <span class="raw-size" title={blackboxFile.filename}>{$t('logbook.rawFileSize', { values: { size: formatBytes(blackboxFile.size_bytes) } })}</span>
         {#if editable && onDeleteBlackbox}
           <button class="raw-del-btn" onclick={onDeleteBlackbox} title={$t('logbook.deleteBlackboxTitle')}>
             🗑 {$t('logbook.deleteBlackbox')}
@@ -604,6 +647,19 @@
         {/if}
       {/if}
     </span>
+    {#if videos.length}
+      <span class="fc-label">{$t('logbook.video')}</span>
+      <span class="fc-value video-list">
+        {#each videos as v (v.id)}
+          <span class="video-file" class:missing={!v.exists} title={v.exists ? (v.path ?? v.name) : $t('logbook.videoMissing', { values: { path: v.path ?? v.name } })}>
+            {v.name}<span class="raw-size">{videoInfo(v)}</span>
+          </span>
+        {/each}
+        {#if !isMobile && videos.some((v) => v.exists && v.path)}
+          <span><Button variant="compact" icon="folder" onclick={showVideoFolder} title={$t('logbook.videoFolderTip')}>{$t('logbook.videoFolder')}</Button></span>
+        {/if}
+      </span>
+    {/if}
     <span class="fc-label">{$t('logbook.mission')}</span>
     <span class="fc-value craft-value-row">
       {#if linkedMission}
@@ -866,6 +922,9 @@
     color: #949494;
     margin-left: 8px;
   }
+  .video-list { display: flex; flex-direction: column; gap: 2px; }
+  .video-file { overflow-wrap: anywhere; }
+  .video-file.missing { color: #949494; text-decoration: line-through; }
   .raw-del-btn {
     margin-left: 6px;
     padding: 1px 6px;

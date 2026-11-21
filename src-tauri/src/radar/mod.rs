@@ -1,13 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Radar — foreign-vehicle tracking subsystem.
-//
-// A standalone background subsystem that tracks vehicles OTHER than the main MSP/MAVLink-connected
-// UAV (ADS-B / FormationFlight / radio telemetry), fully independent of the exclusive telemetry path
-// (it never opens a second handle to the scheduler's link). Sources push batches into an aggregator
-// thread that does per-system merge (by id) + TTL expiry and emits one consolidated `radar-vehicles`
-// snapshot event. See docs/active/RADAR_TRACKING_CORE.md.
+// Radar — foreign-vehicle tracking (ADS-B / FormationFlight / radio telemetry), independent of the main
+// telemetry path (never a second handle to the scheduler's link). Sources feed an aggregator that merges
+// by id, expires by TTL and emits `radar-vehicles` (docs/active/RADAR_TRACKING_CORE.md).
 
 pub mod link;
 pub mod source;
@@ -37,10 +33,8 @@ pub const ADSB_STATUS_EVENT: &str = "radar-adsb-status";
 const EMIT_THROTTLE: Duration = Duration::from_millis(200);
 const AGG_TICK: Duration = Duration::from_millis(250);
 
-/// Cross-source debounce: once a contact's position is updated by one source, positional updates from a
-/// DIFFERENT source are ignored for this long. Online services poll ≤ every 2 s and lag real time, so a
-/// faster realtime feed (hardware ≈ 1 s) keeps ownership and online only fills gaps — no marker jitter
-/// from mixing delayed/leading feeds. Same-source refreshes are always accepted.
+/// Cross-source debounce: after one source updated a contact, another source's positions are ignored this
+/// long — online services poll ≤ 2 s and lag, so the realtime feed keeps ownership (no marker jitter).
 const SOURCE_DEBOUNCE_MS: i64 = 2000;
 
 pub fn now_ms() -> i64 {
@@ -129,7 +123,7 @@ pub struct AdsbConfig {
 }
 
 /// One online ADS-B provider. `url` is a template with `{lat}` / `{lon}` / `{dist}` placeholders
-/// (`dist` is filled in NM); this covers both the `/v2/point/{lat}/{lon}/{dist}` (adsb.lol/.one) and
+/// (`dist` is filled in NM); this covers both the `/v2/point/{lat}/{lon}/{dist}` and
 /// the `/api/v2/lat/{lat}/lon/{lon}/dist/{dist}` (adsb.fi) shapes without special-casing.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -287,10 +281,8 @@ impl RadarManager {
             .unwrap_or_default()
     }
 
-    /// Apply a config: start/stop the pipeline. When already running, reconfigure **in place** — keep the
-    /// aggregator thread (and its accumulated, merged contacts) + the ingest channel alive and only swap
-    /// the source threads. So toggling one source no longer wipes the others' contacts (they persist via
-    /// TTL; the restarted sources just re-poll, invisibly). A full teardown only happens on disable.
+    /// Apply a config, reconfiguring IN PLACE while running: the aggregator (with its merged contacts) and the
+    /// ingest channel stay, only source threads are swapped. A full teardown only on disable.
     pub fn configure(&mut self, config: &RadarConfig, app: &AppHandle) {
         if !config.enabled {
             self.stop(app);
@@ -430,9 +422,8 @@ fn build_sources(
 }
 
 /// The link the FormationFlight module should run on, or `None` when FF is off or its link is incomplete.
-/// A serial link carries the effective baud (0 ⇒ 115200). This is the whole restart-on-change key: the
-/// fields of the transport NOT selected (a stale serial port behind a TCP link) and the node name are
-/// not part of it, so changing them never reopens the link.
+/// This is the whole restart-on-change key: fields of the transport NOT selected and the node name never
+/// reopen the link.
 fn ff_link(config: &RadarConfig) -> Option<LinkSpec> {
     let ff = &config.formation_flight;
     if !ff.enabled {
@@ -511,10 +502,7 @@ fn spawn_aggregator(
                         let ow = owners.entry(v.system).or_default();
                         match m.get_mut(&v.id) {
                             Some(existing) => {
-                                // Cross-source debounce: accept same-source refreshes always; accept a
-                                // different source only after SOURCE_DEBOUNCE_MS without an update. This
-                                // gives the fastest realtime feed ownership and avoids position jitter
-                                // from mixing leading/lagging feeds.
+                                // Cross-source debounce, see SOURCE_DEBOUNCE_MS.
                                 let accept = match (its_source, ow.get(&v.id)) {
                                     (Some(s), Some((last_src, last_t))) => {
                                         s == *last_src || v.last_seen_ms - *last_t >= SOURCE_DEBOUNCE_MS

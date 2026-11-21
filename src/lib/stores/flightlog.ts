@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Flight log Tauri command wrappers.
-// Types live in ./flightlogTypes, helpers in ../helpers/flightlogHelpers.
-// Both are re-exported here so existing imports continue to work unchanged.
+// Flight log Tauri command wrappers; types (./flightlogTypes) and helpers (../helpers/flightlogHelpers)
+// are re-exported here.
 
 import { invoke } from '@tauri-apps/api/core';
 
@@ -34,8 +33,8 @@ export {
 
 // ── Tauri command wrappers ───────────────────────────────────────────
 
-import type { FlightSummary, Flight, TelemetryRecord, BatteryRecord, BlackboxImportStatus, KflightImportResult, LibraryMission, LibraryMissionInput, BatteryPack, BatteryPackInput, BatteryAggregate, BatteryFile, Vehicle, VehicleInput, VehicleAggregate, VehicleFile, VehicleResolution } from './flightlogTypes';
-import type { BatteryInstance } from './telemetry';
+import type { FlightSummary, Flight, TelemetryRecord, BatteryRecord, GpsRecord, BlackboxImportStatus, KflightImportResult, LibraryMission, LibraryMissionInput, BatteryPack, BatteryPackInput, BatteryAggregate, BatteryFile, Vehicle, VehicleInput, VehicleAggregate, VehicleFile, VehicleResolution, MissionFile } from './flightlogTypes';
+import type { BatteryInstance, GpsReceiver } from './telemetry';
 
 /** Save a mission to the library (dedup by content hash). Returns the mission id. */
 export async function missionDbSave(mission: LibraryMissionInput, dbPath: string): Promise<number> {
@@ -85,6 +84,12 @@ export async function missionDbList(dbPath: string): Promise<LibraryMission[]> {
   });
 }
 
+/** Replace a library mission's content hash while it still is `oldHash`; `false` = the entry changed
+ *  meanwhile, or another entry holds the new hash. */
+export async function missionDbSetHash(id: number, contentHash: string, oldHash: string, dbPath: string): Promise<boolean> {
+  return invoke<boolean>('mission_db_set_hash', { id, contentHash, oldHash, dbPath: dbPath || undefined });
+}
+
 /** Update a mission's name + notes (Manager rename / notes edit). */
 export async function missionDbSetMeta(id: number, name: string, notes: string | null, dbPath: string): Promise<void> {
   return invoke<void>('mission_db_set_meta', {
@@ -93,6 +98,19 @@ export async function missionDbSetMeta(id: number, name: string, notes: string |
     notes,
     dbPath: dbPath || undefined,
   });
+}
+
+export async function missionFileWrite(path: string, id: number, dbPath: string): Promise<void> {
+  return invoke<void>('mission_file_write', { path, id, dbPath: dbPath || undefined });
+}
+
+/** `extra_json` is the file's extra data as text: it is stored as it is, never re-serialised here. */
+export async function missionFileRead(path: string): Promise<{ file: MissionFile; extra_json: string | null }> {
+  return invoke<{ file: MissionFile; extra_json: string | null }>('mission_file_read', { path });
+}
+
+export async function missionDbSetExtra(id: number, extraJson: string | null, dbPath: string): Promise<void> {
+  return invoke<void>('mission_db_set_extra', { id, extraJson, dbPath: dbPath || undefined });
 }
 
 /** Export a library mission (its waypoints JSON) to a .mission file (INAV). */
@@ -140,6 +158,15 @@ export async function missionDbGeocode(id: number, lang: string, dbPath: string)
 /** The mission linked to a recorded flight (replay `WP N/X` source), or null. */
 export async function missionDbForFlight(flightId: number, dbPath: string): Promise<LibraryMission | null> {
   return invoke<LibraryMission | null>('mission_db_for_flight', {
+    flightId,
+    dbPath: dbPath || undefined,
+  });
+}
+
+/** `flights.alt_relative`: the track's altitude is relative to the arming point. Null when the flight
+ *  stores no value (imported logs, opened files) — then `isRelativeAltitudeProtocol` decides. */
+export async function flightAltRelative(flightId: number, dbPath: string): Promise<boolean | null> {
+  return invoke<boolean | null>('flight_alt_relative', {
     flightId,
     dbPath: dbPath || undefined,
   });
@@ -397,7 +424,58 @@ export async function getFlightTrack(id: number, dbPath: string): Promise<Teleme
       if (list) rec.batteries = list;
     }
   }
+  // The receivers are an extra: failing to read them must not cost the replay.
+  const gps = await invoke<GpsRecord[]>('flightlog_get_gps_records', {
+    flightId: id,
+    dbPath: dbPath || undefined,
+  }).catch((e) => {
+    console.warn('[flightlog] GPS receiver rows not loaded:', e);
+    return [] as GpsRecord[];
+  });
+  if (gps.length > 0) attachGpsReceivers(track, gps);
   return track;
+}
+
+/** As live: a receiver whose message stopped for this long counts as lost but stays listed. */
+const GPS_RECEIVER_TIMEOUT_MS = 5000;
+
+/** Each track record gets the receivers as they stood at its time: per receiver the newest sample at
+ *  or before it. Both lists are ordered by time; the array is shared until something changes. */
+function attachGpsReceivers(track: TelemetryRecord[], gps: GpsRecord[]): void {
+  const latest = new Map<number, GpsRecord>();
+  let next = 0;
+  let key = '';
+  let current: GpsReceiver[] = [];
+  for (const rec of track) {
+    while (next < gps.length && gps[next].timestamp_ms <= rec.timestamp_ms) {
+      latest.set(gps[next].instance, gps[next]);
+      next++;
+    }
+    if (latest.size === 0) continue;
+    const rows = [...latest.values()].sort((a, b) => a.instance - b.instance);
+    const lost = rows.map((g) => rec.timestamp_ms - g.timestamp_ms > GPS_RECEIVER_TIMEOUT_MS);
+    const k = rows.map((g, i) => `${g.instance}:${g.timestamp_ms}:${lost[i] ? 1 : 0}`).join('|');
+    if (k !== key) {
+      key = k;
+      current = rows.map((g, i) => ({
+        id: g.instance,
+        fixType: lost[i] ? 0 : (g.fix_type ?? 0),
+        fixRaw: lost[i] ? 0 : (g.fix_raw ?? 0),
+        numSat: lost[i] ? 0 : (g.num_sat ?? 0),
+        hdop: lost[i] ? null : g.hdop,
+        lat: g.lat ?? 0,
+        lon: g.lon ?? 0,
+        altMsl: g.alt_msl ?? 0,
+        vdop: g.vdop,
+        hAccM: g.h_acc_m,
+        vAccM: g.v_acc_m,
+        speedMs: g.speed_ms,
+        courseDeg: g.course_deg,
+        yawDeg: g.yaw_deg,
+      }));
+    }
+    rec.gpsReceivers = current;
+  }
 }
 
 export async function deleteFlight(id: number, dbPath: string): Promise<boolean> {
@@ -495,18 +573,19 @@ export async function hiresDrop(flightId: number, dbPath: string): Promise<void>
 
 // ── Scratch store: open a log WITHOUT importing it (Dev-Docs active/OPEN_LOG_WITHOUT_IMPORT.md) ──
 
-/** The throwaway `<db_dir>/scratch/` directory — passed as `dbPath` to the ordinary importers and
- *  logbook commands while a file is open without being imported. */
-export async function scratchDir(dbPath: string): Promise<string> {
-  return invoke<string>('flightlog_scratch_dir', { dbPath: dbPath || undefined });
+/** The throwaway scratch directory in the app's data folder — passed as `dbPath` to the ordinary
+ *  importers and logbook commands while a file is open without being imported. */
+export async function scratchDir(): Promise<string> {
+  return invoke<string>('flightlog_scratch_dir');
 }
 
 /** Wipe the scratch directory (open/close/app start). */
-export async function scratchClear(dbPath: string): Promise<void> {
-  await invoke('flightlog_scratch_clear', { dbPath: dbPath || undefined });
+export async function scratchClear(): Promise<void> {
+  await invoke('flightlog_scratch_clear');
 }
 
-/** Startup cleanup: wipe crash leftovers from the hi-res cache dir. */
+/** Wipe the hi-res cache (app start, database folder changed); `dbPath` names the folder whose
+ *  old work folders are cleared along. */
 export async function hiresCleanup(dbPath: string): Promise<void> {
   await invoke('flightlog_hires_cleanup', { dbPath: dbPath || undefined });
 }
@@ -740,6 +819,39 @@ export async function blackboxFileInfo(
   });
 }
 
+export interface FlightDataSize {
+  flight_id: number;
+  source: 'live' | 'blackbox';
+  bytes: number;
+}
+/** Estimated database size of a flight's own rows, and of its linked partner's — without the stored original log. */
+/** A video attached to a flight (recorded from the RTSP stream). */
+export interface FlightVideo {
+  id: number;
+  name: string;
+  path: string | null;
+  /** The file is below the recording folder (under any name, in any subfolder). */
+  exists: boolean;
+  duration_ms: number | null;
+  codec: string | null;
+  width: number | null;
+  height: number | null;
+  file_size: number | null;
+}
+
+/** `videoDir` = the recording folder ('' = the default): files are looked for below it, by their id. */
+export async function flightVideos(flightId: number, dbPath: string, videoDir: string): Promise<FlightVideo[]> {
+  return invoke<FlightVideo[]>('flightlog_flight_videos', {
+    flightId,
+    dbPath: dbPath || undefined,
+    videoDir: videoDir || undefined,
+  });
+}
+
+export async function flightDataSizes(flightId: number, dbPath: string): Promise<FlightDataSize[]> {
+  return invoke<FlightDataSize[]>('flightlog_flight_data_sizes', { flightId, dbPath: dbPath || undefined });
+}
+
 /** Delete the stored original blackbox file for a flight (keeps the parsed flight + replay data).
  *  Returns the deleted file's original filename, or null if there was nothing to delete. */
 export async function deleteBlackboxFile(flightId: number, dbPath: string): Promise<string | null> {
@@ -779,6 +891,8 @@ export async function importKflight(filePath: string, dbPath: string): Promise<K
   });
 }
 
+// Read a `.kflight` without importing it. No caller today (a `.kflight` is always imported); kept for a
+// later preview. They return flight and track only — no mission, weather or GPS receiver rows.
 export async function listKflightFlights(filePath: string): Promise<FlightSummary[]> {
   return invoke<FlightSummary[]>('flightlog_kflight_list', { filePath });
 }

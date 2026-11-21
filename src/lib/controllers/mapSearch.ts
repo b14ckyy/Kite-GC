@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Map search: search → hits → jump (MapSearch.svelte is the UI). Coordinates are recognised here,
-// locally, and never leave the device; anything else goes to the backend's place search (OSM
-// Nominatim, `map_search_places`) — called on an explicit search only, never while typing (the
-// service's usage policy). A jump is a map-focus request (stores/mapFocus), the mechanism the custom
-// map's "Show map area" uses too.
+// Map search: search → hits → jump (UI: MapSearch.svelte). Coordinates are parsed locally and never leave the
+// device; anything else goes to the backend's place search (Nominatim, `map_search_places`) on an explicit
+// search only (usage policy). A jump is a map-focus request (stores/mapFocus).
 
 import { get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
@@ -51,10 +49,8 @@ export function jumpToHit(hit: PlaceHit): void {
   requestMapFocus({ source: 'search', bounds: hit.bbox, lat: hit.lat, lon: hit.lon });
 }
 
-/** Digits with only separators, degree marks, signs, brackets and single hemisphere letters around them —
- *  no word in it. `Essen 1` or `B 100` are not this (a letter next to a letter, a letter that is no
- *  hemisphere). No lookbehind: iOS WebKit before 16.4 cannot parse one, and the lookahead on a letter
- *  already rejects two letters in a row. */
+/** Digits with only separators, degree marks, signs, brackets and single hemisphere letters — no word (`Essen 1`
+ *  and `B 100` are not). No lookbehind: iOS WebKit before 16.4 cannot parse one. */
 function looksLikeCoordinates(text: string): boolean {
   return /\d/.test(text) && /^(?:[\d\s.,;:°º'"′″+\-()[\]|/]|[NSEWnsew](?![A-Za-z]))+$/.test(text);
 }
@@ -94,11 +90,9 @@ export async function runMapSearch(text: string, isCurrent: () => boolean): Prom
   }
 }
 
-/** "To my location": the ground-station position Kite already knows (the GCS marker's, else the
- *  last OS fix), otherwise one OS location request. Leaves the GCS marker setting alone. Returns
- *  false when no position could be had; the notice is then in the toast banner — or, when the
- *  "System Messages" filter hides it, `noticeShown` is false and the caller says it itself. An OS
- *  answer that arrives after `isCurrent` turned false (the line closed) neither jumps nor notifies. */
+/** "To my location": the known ground-station position (GCS marker, else the last OS fix), else one OS request;
+ *  the GCS marker setting stays. false = no position (notice in the toast banner; `noticeShown` false when the
+ *  filter hid it). A late OS answer after `isCurrent` turned false neither jumps nor notifies. */
 export async function goToMyLocation(isCurrent: () => boolean): Promise<{ ok: boolean; noticeShown: boolean }> {
   const known = get(gcsLocation) ?? get(userGeoLocation);
   if (known) {

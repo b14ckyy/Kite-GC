@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Passive telemetry handler — a dedicated, strictly listen-only thread that owns the ByteTransport.
-//
-// It reads incoming bytes, captures them to file (Phase B), feeds the protocol detector and reports
-// framing stats to the Debug Monitor via the `debug-telemetry-stats` event. It NEVER writes to the
-// transport.
+// Passive telemetry handler: a strictly listen-only thread owning the ByteTransport — capture to file,
+// protocol detection, framing stats (`debug-telemetry-stats`). It NEVER writes to the transport.
 
 use std::collections::VecDeque;
 use std::sync::mpsc;
@@ -35,16 +32,9 @@ const FLUSH_INTERVAL: Duration = Duration::from_secs(2);
 /// sending housekeeping (RSSI, link-stats) after the FC drops, so "any data" never goes stale — this
 /// tracks FC-origin frames specifically.
 const FC_STALE_MS: u128 = 5000;
-/// Experimental MSP-over-SmartPort probe — the one deliberate exception to the listen-only rule. Tests
-/// whether the radio's BLE bridge forwards an inbound S.Port frame into the FC uplink (see `msp_probe`).
-/// Dev-only (release never writes to the transport).
-///
-/// STATUS (2026-06-17): kept ARMED but not yet working. On the FrSky X20RS the Ethos Bluetooth only does
-/// telemetry *forwarding* (downlink mirror) — injected writes to every writable characteristic
-/// (0xFFF3/0xFFF6) × all frame variants produced no FC reply, while the passive MSP reassembler decoded
-/// the radio's own polling cleanly. Pending the Ethos dev confirming whether a bidirectional/serial BT
-/// mode can forward the uplink; once it does, this fires automatically on reconnect. This whole feature
-/// is an isolated commit and can be reverted wholesale if the idea is abandoned.
+/// Experimental MSP-over-SmartPort probe — the one deliberate exception to listen-only, dev builds only:
+/// does the radio's BLE bridge forward an inbound S.Port frame to the FC (see `msp_probe`)? Not working
+/// yet (FrSky X20RS Ethos BT only forwards the downlink); an isolated, revertable feature.
 const MSP_PROBE_ENABLED: bool = cfg!(debug_assertions);
 /// How often to fire the MSP_API_VERSION probe request.
 const MSP_PROBE_INTERVAL: Duration = Duration::from_secs(1);
@@ -89,7 +79,7 @@ struct ProtoHit {
 
 /// Altitude-reference signal (`telemetry-alt-ref`): tells the frontend whether this protocol's GPS
 /// altitude is true MSL (`msl: true`) or only relative-to-arming (`msl: false`). Relative-only protocols
-/// (LTM, CRSF) carry no MSL, so the frontend must anchor them to a ground reference for correct AGL/3D.
+/// (LTM, older CRSF layouts) carry no MSL, so the frontend must anchor them to a ground reference.
 #[derive(Clone, Serialize)]
 struct AltRef {
     msl: bool,
@@ -172,8 +162,8 @@ fn handler_loop(
     let mut detector = Detector::new();
     // Active decoder, created once the detector locks a protocol we can decode (FrSky first).
     let mut frsky: Option<FrskyDecoder> = None;
-    // CRSF decoder (Phase E2): on lock, decodes frames into the radiotelem_<ts>.crsf.txt dump for
-    // offline scaling validation. Does NOT yet publish unified events (that is E4).
+    // CRSF decoder, created on lock: publishes unified events, feeds the recorder and writes a
+    // radiotelem_<ts>.crsf.txt dump.
     let mut crsf: Option<CrsfDecoder> = None;
     // LTM decoder: on lock, publishes unified events + feeds the recorder, and writes a
     // radiotelem_<ts>.ltm.txt decoded dump for validation.
@@ -183,6 +173,7 @@ fn handler_loop(
     let mut last_probe = Instant::now() - MSP_PROBE_INTERVAL;
     // Refine the recorder's protocol label once the sub-protocol is locked (set only once).
     let mut protocol_labeled = false;
+    let mut crsf_msl_told = false;
     // Last protocol info pushed to the status box (re-emitted only on change, e.g. AP passthrough start).
     let mut last_proto: Option<ProtoInfo> = None;
     // Last FC-link-alive state pushed to the status box (re-emitted only on change).
@@ -241,13 +232,15 @@ fn handler_loop(
                             Protocol::Ltm => "Telemetry (LTM)",
                             Protocol::Mavlink => "Telemetry (MAVLink)",
                         };
-                        if let Some(ref rec) = recorder {
-                            if let Ok(mut r) = rec.lock() { r.set_protocol(label); }
-                        }
-                        // Tell the frontend whether this protocol delivers true MSL altitude. LTM/CRSF
-                        // send only arming-relative altitude → the frontend must anchor it to a ground
-                        // reference (captured at the arm edge) for correct AGL/3D.
+                        // LTM / CRSF send only arming-relative altitude: the frontend anchors it to a
+                        // ground reference (captured at the arm edge), the recorder stores the fact.
                         let msl = !matches!(p, Protocol::Ltm | Protocol::Crsf);
+                        if let Some(ref rec) = recorder {
+                            if let Ok(mut r) = rec.lock() {
+                                r.set_protocol(label);
+                                r.set_alt_relative(!msl);
+                            }
+                        }
                         let _ = app_handle.emit("telemetry-alt-ref", AltRef { msl });
                         log::info!("Passive telemetry locked: {} (alt MSL: {})", label, msl);
                         protocol_labeled = true;
@@ -261,12 +254,21 @@ fn handler_loop(
                         msp_probe.get_or_insert_with(MspProbe::new).push_bytes(chunk);
                     }
                 }
-                // Once CRSF is locked, decode frames into the analysis dump (E2; no widget feed yet).
+                // Once CRSF is locked, decode into unified events (+ dump).
                 if detector.locked() == Some(Protocol::Crsf) {
                     crsf.get_or_insert_with(|| {
                         CrsfDecoder::new(capture.as_ref().map(|c| c.sibling_path("crsf.txt")))
                     })
                     .push_bytes(chunk);
+                    // The stream itself tells when its GPS altitude is MSL after all.
+                    if !crsf_msl_told && crsf.as_ref().is_some_and(|d| d.gps_alt_is_msl()) {
+                        crsf_msl_told = true;
+                        if let Some(ref rec) = recorder {
+                            if let Ok(mut r) = rec.lock() { r.set_alt_relative(false); }
+                        }
+                        let _ = app_handle.emit("telemetry-alt-ref", AltRef { msl: true });
+                        log::info!("Passive telemetry: CRSF GPS altitude is MSL (3-byte barometer frame seen)");
+                    }
                 }
                 // Once LTM is locked, decode into unified events (+ dump for validation).
                 if detector.locked() == Some(Protocol::Ltm) {
@@ -289,10 +291,11 @@ fn handler_loop(
             Err(TransportError::Disconnected) => {
                 log::warn!("Passive telemetry transport disconnected");
                 if let Some(c) = capture.as_mut() { c.flush(); }
+                // As on MSP / MAVLink: `shutdown_lost` offers the recovery prompt, `connection-lost` closes the link.
                 if let Some(ref rec) = recorder {
-                    if let Ok(mut r) = rec.lock() { r.shutdown(); }
+                    if let Ok(mut r) = rec.lock() { r.shutdown_lost(); }
                 }
-                let _ = app_handle.emit("telemetry-disconnected", ());
+                let _ = app_handle.emit("connection-lost", ());
                 return Some(transport);
             }
             Err(e) => {

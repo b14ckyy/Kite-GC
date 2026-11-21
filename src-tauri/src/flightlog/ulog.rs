@@ -36,7 +36,9 @@ use chrono::{DateTime, Duration, Utc};
 use rusqlite::Connection;
 
 use super::db;
+use super::gps_rows::{GpsRows, GpsSample};
 use super::types::{BatteryRecord, BlackboxImportStatus, Flight, TelemetryRecord};
+use crate::scheduler::telemetry::{unified_fix_from_raw, GpsReceiverData};
 
 // ─── ULog framing constants ──────────────────────────────────────────────────
 
@@ -199,6 +201,7 @@ impl<'a> FieldView<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Topic {
     Gps,
+    SensorGps,
     Attitude,
     AirData,
     LocalPos,
@@ -217,6 +220,7 @@ enum Topic {
 fn topic_of(name: &str) -> Option<Topic> {
     Some(match name {
         "vehicle_gps_position" => Topic::Gps,
+        "sensor_gps" => Topic::SensorGps,
         "vehicle_attitude" => Topic::Attitude,
         "vehicle_air_data" => Topic::AirData,
         "vehicle_local_position" => Topic::LocalPos,
@@ -267,6 +271,8 @@ pub struct NormalizedRow {
     pub mah_drawn: Option<f64>,
     pub battery_pct: Option<f64>,
     batteries: Vec<UlogBattery>,
+    /// Latest raw sample of each physical receiver (`sensor_gps` instance 0 / 1) at this row.
+    gps_rx: Vec<GpsSample>,
     pub baro_alt_m: Option<f64>,
     pub baro_temp_c: Option<f64>,
     pub nav_alt_m: Option<f64>,
@@ -341,6 +347,8 @@ struct DecoderState {
     is_vtol: bool,
     /// UTC anchor: `time_utc_usec − timestamp` of the first GPS fix carrying real UTC.
     utc_anchor_us: Option<i64>,
+    /// Latest `sensor_gps` message per receiver (multi_id 0 / 1).
+    gps_rx: BTreeMap<u8, GpsSample>,
 }
 
 impl DecoderState {
@@ -513,8 +521,13 @@ pub fn decode_ulog(data: &[u8]) -> Result<(Vec<NormalizedRow>, UlogMeta), String
                 let msg_id = u16::from_le_bytes([payload[1], payload[2]]);
                 let name = String::from_utf8_lossy(&payload[3..]).to_string();
                 let Some(topic) = topic_of(&name) else { continue };
-                // Instance 0 only — except battery_status, where every monitor is read.
-                if multi_id != 0 && topic != Topic::Battery {
+                // Instance 0 only — except battery_status (every monitor) and sensor_gps (two receivers).
+                let instances = match topic {
+                    Topic::Battery => u8::MAX,
+                    Topic::SensorGps => 1,
+                    _ => 0,
+                };
+                if multi_id > instances {
                     continue;
                 }
                 let layout_idx = match layout_by_topic.get(&name) {
@@ -661,6 +674,7 @@ fn process_topic(
                 mah_drawn: primary_bat.map(|b| b.mah),
                 battery_pct: primary_bat.and_then(|b| b.pct),
                 batteries,
+                gps_rx: state.gps_rx.values().copied().collect(),
                 baro_alt_m: state.baro_alt_m,
                 baro_temp_c: state.baro_temp_c,
                 nav_alt_m: state.nav_alt_m,
@@ -711,6 +725,31 @@ fn process_topic(
                     state.vario_ms = Some(-vz);
                 }
             }
+        }
+
+        // The raw values of one receiver; `vehicle_gps_position` above is the selected solution.
+        // `fix_type` matches MAVLink's `GPS_FIX_TYPE` except 8 (extrapolated); `eph` / `epv` are
+        // accuracies in metres.
+        Topic::SensorGps => {
+            let fix_raw = view.u64("fix_type").unwrap_or(0) as u8;
+            let positive = |name: &str| view.finite(name).filter(|v| *v > 0.0);
+            let sample = GpsReceiverData {
+                id: multi_id,
+                fix_type: unified_fix_from_raw(fix_raw),
+                fix_raw,
+                num_sat: view.u64("satellites_used").unwrap_or(0) as u8,
+                hdop: view.finite("hdop"),
+                lat: view.finite("latitude_deg").or_else(|| view.f64("lat").map(|v| v / 1e7)).unwrap_or(0.0),
+                lon: view.finite("longitude_deg").or_else(|| view.f64("lon").map(|v| v / 1e7)).unwrap_or(0.0),
+                alt_msl: view.finite("altitude_msl_m").or_else(|| view.f64("alt").map(|v| v / 1000.0)).unwrap_or(0.0),
+                vdop: view.finite("vdop"),
+                h_acc_m: positive("eph"),
+                v_acc_m: positive("epv"),
+                speed_ms: view.finite("vel_m_s"),
+                course_deg: view.finite("cog_rad").map(|c| c.to_degrees().rem_euclid(360.0)),
+                yaw_deg: view.finite("heading").map(|h| h.to_degrees().rem_euclid(360.0)),
+            };
+            state.gps_rx.insert(multi_id, (view.u64("timestamp").unwrap_or(0), sample));
         }
 
         Topic::Battery => {
@@ -914,7 +953,7 @@ fn normalized_to_telemetry(r: &NormalizedRow, timestamp_ms: i64) -> TelemetryRec
         roll: r.roll_deg,
         pitch: r.pitch_deg,
         yaw: r.yaw_deg,
-        fix_type: r.fix_type,
+        fix_type: r.fix_type.map(unified_fix_from_raw),
         num_sat: r.num_sat,
         cpu_load: None,
         link_quality: r.link_quality,
@@ -939,6 +978,9 @@ fn normalized_to_telemetry(r: &NormalizedRow, timestamp_ms: i64) -> TelemetryRec
         nav_lat: None,
         nav_lon: None,
         nav_alt_m: r.nav_alt_m,
+        target_lat: None,
+        target_lon: None,
+        target_alt_m: None,
         mode_primary,
         mode_modifiers,
         link_snr: None,
@@ -1042,6 +1084,7 @@ where
 
     let mut telemetry_rows: Vec<TelemetryRecord> = Vec::new();
     let mut battery_rows: Vec<BatteryRecord> = Vec::new();
+    let mut gps_rows = GpsRows::default();
     let mut start_lat: Option<f64> = None;
     let mut start_lon: Option<f64> = None;
     let mut max_alt_m: Option<f64> = None;
@@ -1100,6 +1143,7 @@ where
         }
 
         telemetry_rows.push(normalized_to_telemetry(r, timestamp_ms));
+        gps_rows.offer(first_armed_us, &r.gps_rx);
 
         for b in &r.batteries {
             battery_rows.push(BatteryRecord {
@@ -1196,6 +1240,9 @@ where
         db::insert_battery_records_batch(conn, &battery_rows)
             .map_err(|e| format!("Failed to store ULog battery records: {}", e))?;
     }
+    gps_rows
+        .store(conn, flight_id)
+        .map_err(|e| format!("Failed to store ULog GPS receiver records: {}", e))?;
 
     report(92, "archive", "Archiving original ULog file...");
     db::insert_blackbox_file(
@@ -1341,6 +1388,43 @@ mod tests {
         // Second fix has no GPS UTC → derived from the anchor (+1 s of boot time).
         let r2 = &rows[1];
         assert_eq!(r2.utc_time.unwrap().timestamp_micros() as u64, utc0 + 1_000_000);
+    }
+
+    /// `sensor_gps` instances 0 and 1 are kept per receiver and ride on the row the selected
+    /// solution emits; a third instance is not read, a NaN heading is no yaw.
+    #[test]
+    fn sensor_gps_receivers_ride_on_the_row() {
+        const RX_FMT: &str = "sensor_gps:uint64_t timestamp;double latitude_deg;double longitude_deg;double altitude_msl_m;float eph;float epv;float hdop;float vdop;float vel_m_s;float cog_rad;float heading;uint8_t fix_type;uint8_t satellites_used;";
+        let rx = |ts: u64, lat: f64, heading: f32, fix: u8, sats: u8| {
+            P::new().u64(ts).f64(lat).f64(6.85).f64(27.5).f32(0.8).f32(0.0).f32(0.7).f32(1.1).f32(12.0)
+                .f32(std::f32::consts::FRAC_PI_2).f32(heading).u8(fix).u8(sats).0
+        };
+        let mut log = header();
+        for f in [GPS_FMT, ARM_FMT, RX_FMT] {
+            format_msg(&mut log, f);
+        }
+        subscribe(&mut log, 0, 1, "vehicle_gps_position");
+        subscribe(&mut log, 0, 2, "actuator_armed");
+        subscribe(&mut log, 0, 3, "sensor_gps");
+        subscribe(&mut log, 1, 4, "sensor_gps");
+        subscribe(&mut log, 2, 5, "sensor_gps");
+        data_msg(&mut log, 2, &P::new().u64(1_000_000).u8(1).0);
+        data_msg(&mut log, 3, &rx(1_900_000, 52.25, f32::NAN, 6, 21));
+        data_msg(&mut log, 4, &rx(1_950_000, 52.2501, -std::f32::consts::FRAC_PI_2, 3, 17));
+        data_msg(&mut log, 5, &rx(1_960_000, 52.3, 0.0, 3, 9));
+        data_msg(&mut log, 1, &gps_payload(2_000_000, 52.25, 6.85, 27.5, 1_754_500_000_000_000));
+
+        let (rows, _) = decode_ulog(&log).expect("decode");
+        let rx = &rows[0].gps_rx;
+        assert_eq!(rx.iter().map(|(t, r)| (*t, r.id, r.fix_raw, r.fix_type, r.num_sat)).collect::<Vec<_>>(), vec![
+            (1_900_000, 0, 6, 3, 21),
+            (1_950_000, 1, 3, 2, 17),
+        ]);
+        let first = rx[0].1;
+        assert_eq!((first.yaw_deg, first.v_acc_m), (None, None), "NaN heading, zero epv");
+        assert!((first.h_acc_m.unwrap() - 0.8).abs() < 1e-6 && (first.vdop.unwrap() - 1.1).abs() < 1e-6);
+        assert!((first.course_deg.unwrap() - 90.0).abs() < 1e-3 && (first.speed_ms.unwrap() - 12.0).abs() < 1e-6);
+        assert!((rx[1].1.yaw_deg.unwrap() - 270.0).abs() < 1e-3);
     }
 
     /// Pre-v1.14 logs name the position fields `lat`/`lon`/`alt` as int32 1e7-degrees / mm.

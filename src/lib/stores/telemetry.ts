@@ -8,9 +8,9 @@
 import { writable, get } from 'svelte/store';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
-import { connection, connectionProtocol, fcLinkAlive } from '$lib/stores/connection';
+import { connection, connectionProtocol, fcLinkAlive, platformTypeSource, promoteDetectedToVtol } from '$lib/stores/connection';
 import { isActive, activeVehicleId, vehicles } from '$lib/stores/vehicles';
-import { arduVehicleClass } from '$lib/stores/missionArdupilot';
+import { noteQuadplane } from '$lib/stores/missionArdupilot';
 import type { FlightModeState } from '$lib/helpers/flightModeRegistry';
 
 /** One battery monitor instance (ArduPilot/PX4 multi-battery). Live: from the `telemetry-batteries`
@@ -24,6 +24,29 @@ export interface BatteryInstance {
   percentage: number;
   cellCount: number;
   temperature: number | null;
+}
+
+/** One physical GPS receiver (MAVLink GPS_RAW_INT / GPS2_RAW), raw values. */
+export interface GpsReceiver {
+  /** 0 = GPS1. */
+  id: number;
+  /** Unified fix scale, as `TelemetryData.fixType`. */
+  fixType: number;
+  /** MAVLink GPS_FIX_TYPE: 0 no receiver · 1 no fix · 2 2D · 3 3D · 4 DGPS · 5 RTK float · 6 RTK fixed. */
+  fixRaw: number;
+  numSat: number;
+  hdop: number | null;
+  lat: number;
+  lon: number;
+  altMsl: number;
+  // Null where the receiver or the firmware does not report it.
+  vdop: number | null;
+  hAccM: number | null;
+  vAccM: number | null;
+  speedMs: number | null;
+  courseDeg: number | null;
+  /** Heading of a dual-antenna receiver. */
+  yawDeg: number | null;
 }
 
 /** Unified RC-link statistics (RC Link widget). Each field is null when the active protocol can't
@@ -79,6 +102,9 @@ export interface TelemetryData {
   // then falls back to the primary fields above. See docs/active/MULTI_BATTERY.md.
   batteries: BatteryInstance[];
 
+  // Physical GPS receivers (MAVLink; replay: from `gps_records`). Empty on every other protocol.
+  gpsReceivers: GpsReceiver[];
+
   // RC link statistics (RSSI / LQ / SNR — protocol-dependent, see LinkStats)
   link: LinkStats;
 
@@ -131,6 +157,9 @@ export interface TelemetryData {
   navState: number;
   /** FC's current target waypoint (MSP_NAV_STATUS live / blackbox in replay). 0 = none. */
   activeWpNumber: number;
+  /** Size of the mission the FC holds, as a MAVLink FC reports it with the active item (without its home
+   *  slot). 0 = none or not told. */
+  fcMissionItems: number;
 
   /** Firmware variant of the connected FC ("INAV", "ArduPlane", "PX4", …): seeded from the handshake on
    *  connect (`setFcVariant`), set per sample in replay, empty when idle / on passive telemetry. */
@@ -149,12 +178,13 @@ const defaultTelemetry: TelemetryData = {
   voltage: 0, current: 0, mAhDrawn: 0, rssi: 0, power: 0, batteryPercentage: 0, cellCount: 0,
   throttle: 0,
   batteries: [],
+  gpsReceivers: [],
   link: { rssiPercent: null, rssiDbm: null, lq: null, snrDb: null },
   armingFlags: 0, statusSeen: false, cpuLoad: 0, sensorStatus: 0, flightModeFlags: 0, mspRcOverride: false,
   sensorGyro: 0, sensorAcc: 0, sensorMag: 0, sensorBaro: 0,
   sensorGps: 0, sensorRangefinder: 0, sensorPitot: 0, sensorOpflow: 0, sensorRcReceiver: 0, prearmHealthy: 0,
   ekfStatus: 0, ekfType: 0,
-  flightMode: { primary: '', modifiers: [] }, navState: 0, activeWpNumber: 0,
+  flightMode: { primary: '', modifiers: [] }, navState: 0, activeWpNumber: 0, fcMissionItems: 0,
   fcVariant: '',
   lastUpdate: 0,
 };
@@ -327,6 +357,72 @@ let unlisteners: UnlistenFn[] = [];
 // leave the widgets without a live feed; now the second caller just awaits the first.
 let startingListeners: Promise<void> | null = null;
 
+// The one-shot answers of the connect sequence can arrive before `connect` returns, and an event without a
+// listener is dropped: these listen from before the connect call until the last link is closed.
+let connectUnlisteners: UnlistenFn[] = [];
+let startingConnectListeners: Promise<void> | null = null;
+const blackboxByVehicle = new Map<string, boolean>();
+
+/** The logging-backend answer of a vehicle, if it has come — it may precede the connect result. */
+export function blackboxOf(vehicleId: string): boolean | undefined {
+  return blackboxByVehicle.get(vehicleId);
+}
+
+export function startConnectListeners(): Promise<void> {
+  if (connectUnlisteners.length) return Promise.resolve();
+  startingConnectListeners ??= registerConnectListeners().finally(() => { startingConnectListeners = null; });
+  return startingConnectListeners;
+}
+
+async function registerConnectListeners() {
+  connectUnlisteners = [
+    // AHRS_EKF_TYPE: a parameter answer, not a live sample — must not bump lastUpdate.
+    await listen<{ ekf_type: number }>('telemetry-ekf-type', (event) => {
+      upd(event.payload, (t) => ({ ...t, ekfType: event.payload.ekf_type }));
+    }),
+    // Q_ENABLE (a QuadPlane may report MAV_TYPE_FIXED_WING; only this answer tells it from a plane) and the
+    // logging backend (ArduPilot LOG_BACKEND_TYPE / PX4 SDLOG_MODE) for the vehicle-library save.
+    await listen<{ vehicleId?: string; quadplane?: boolean; blackbox?: boolean }>('telemetry-vehicle', (event) => {
+      if (event.payload.quadplane) noteQuadplane(event.payload);
+      const blackbox = event.payload.blackbox;
+      if (blackbox !== undefined && event.payload.vehicleId) blackboxByVehicle.set(event.payload.vehicleId, blackbox);
+      if (!isActive(event.payload)) return;
+      if (event.payload.quadplane) {
+        promoteDetectedToVtol();
+        // The backend raised its own copies (FC info, recorder) to VTOL before it sent this: a library or
+        // manual type goes back in.
+        const shown = get(connection).fcInfo?.platform_type;
+        if (get(platformTypeSource) !== 'detected' && shown !== undefined) {
+          void invoke('set_platform_type', { platformType: shown })
+            .catch((e) => console.warn('[telemetry] restoring the platform type failed', e));
+        }
+      }
+      if (blackbox !== undefined) {
+        connection.update((c) => (c.fcInfo ? { ...c, fcInfo: { ...c.fcInfo, blackbox } } : c));
+      }
+    }),
+    // Passive telemetry: true MSL, or only arming-relative altitude? Sent at the protocol lock, and again
+    // when a CRSF stream turns out to carry MSL.
+    await listen<{ msl: boolean }>('telemetry-alt-ref', (event) => {
+      if (!isActive(event.payload)) return;
+      altReference.set({ msl: event.payload.msl });
+      // A real-MSL protocol supersedes any relative ground anchor.
+      if (event.payload.msl) groundAnchor.set(null);
+    }),
+    // Passive telemetry: the locked protocol (+ optional secondary), sent on change only.
+    await listen<{ primary: string; secondary: string | null }>('telemetry-protocol', (event) => {
+      if (!isActive(event.payload)) return;
+      connectionProtocol.set({ primary: event.payload.primary, secondary: event.payload.secondary });
+    }),
+  ];
+}
+
+export function stopConnectListeners() {
+  for (const unlisten of connectUnlisteners) unlisten();
+  connectUnlisteners = [];
+  blackboxByVehicle.clear();
+}
+
 export function startTelemetryListeners(): Promise<void> {
   if (startingListeners) return startingListeners;
   startingListeners = startTelemetryListenersInner().finally(() => { startingListeners = null; });
@@ -334,7 +430,6 @@ export function startTelemetryListeners(): Promise<void> {
 }
 
 async function startTelemetryListenersInner() {
-  // Clean up any existing listeners
   stopTelemetryListeners();
   const fresh: UnlistenFn[] = [];
   unlisteners = fresh;
@@ -422,6 +517,31 @@ async function startTelemetryListenersInner() {
   );
 
   fresh.push(
+    await listen<{ value: { id: number; fix_type: number; fix_raw: number; num_sat: number; hdop: number | null; lat: number; lon: number; alt_msl: number; vdop: number | null; h_acc_m: number | null; v_acc_m: number | null; speed_ms: number | null; course_deg: number | null; yaw_deg: number | null }[] }>(
+      'telemetry-gps-receivers',
+      (event) => {
+        const gpsReceivers: GpsReceiver[] = event.payload.value.map((r) => ({
+          id: r.id,
+          fixType: r.fix_type,
+          fixRaw: r.fix_raw,
+          numSat: r.num_sat,
+          hdop: r.hdop,
+          lat: r.lat,
+          lon: r.lon,
+          altMsl: r.alt_msl,
+          vdop: r.vdop,
+          hAccM: r.h_acc_m,
+          vAccM: r.v_acc_m,
+          speedMs: r.speed_ms,
+          courseDeg: r.course_deg,
+          yawDeg: r.yaw_deg,
+        }));
+        upd(event.payload, (t) => ({ ...t, gpsReceivers, lastUpdate: Date.now() }));
+      }
+    )
+  );
+
+  fresh.push(
     await listen<{ value: { id: number; voltage: number; current: number; mah_drawn: number; percentage: number; cell_count: number; temperature: number | null }[] }>(
       'telemetry-batteries',
       (event) => {
@@ -455,7 +575,7 @@ async function startTelemetryListenersInner() {
 
   fresh.push(
     await listen<{ arming_flags: number; flight_mode_flags: number; cpu_load: number; sensor_status: number; msp_rc_override?: boolean }>('telemetry-status', (event) => {
-      // flight_mode_flags is now forensic only — the canonical mode comes via telemetry-flightmode.
+      // flight_mode_flags is forensic only; the canonical mode comes via telemetry-flightmode.
       upd(event.payload, (t) => ({
         ...t,
         armingFlags: event.payload.arming_flags,
@@ -510,34 +630,13 @@ async function startTelemetryListenersInner() {
     })
   );
 
-  // EKF core version (AHRS_EKF_TYPE) — one-shot reply on connect, so no lastUpdate bump.
   fresh.push(
-    await listen<{ ekf_type: number }>('telemetry-ekf-type', (event) => {
-      upd(event.payload, (t) => ({ ...t, ekfType: event.payload.ekf_type }));
-    })
-  );
-
-  // QuadPlane detection (ArduPilot Q_ENABLE reply) — a QuadPlane reports MAV_TYPE_FIXED_WING, so the
-  // mission vehicle class can only be upgraded to quadplane from this one-shot param. Upgrade only.
-  fresh.push(
-    await listen<{ quadplane?: boolean; blackbox?: boolean }>('telemetry-vehicle', (event) => {
-      if (!isActive(event.payload)) return;
-      if (event.payload.quadplane) arduVehicleClass.set('quadplane');
-      // Logging-backend answer (ArduPilot LOG_BACKEND_TYPE / PX4 SDLOG_MODE) → FC info for the UAV Info
-      // panel's vehicle-library save.
-      const blackbox = event.payload.blackbox;
-      if (blackbox !== undefined) {
-        connection.update((c) => (c.fcInfo ? { ...c, fcInfo: { ...c.fcInfo, blackbox } } : c));
-      }
-    })
-  );
-
-  fresh.push(
-    await listen<{ active_wp_number: number; nav_state: number }>('telemetry-nav-status', (event) => {
+    await listen<{ active_wp_number: number; nav_state: number; mission_total?: number | null }>('telemetry-nav-status', (event) => {
       upd(event.payload, (t) => ({
         ...t,
         activeWpNumber: event.payload.active_wp_number,
         navState: event.payload.nav_state,
+        fcMissionItems: event.payload.mission_total ?? 0,
         lastUpdate: Date.now(),
       }));
     })
@@ -561,24 +660,6 @@ async function startTelemetryListenersInner() {
         windSpeedMs: event.payload.speed_ms,
         lastUpdate: Date.now(),
       }));
-    })
-  );
-
-  // Altitude reference: does this protocol deliver true MSL, or only arming-relative altitude?
-  fresh.push(
-    await listen<{ msl: boolean }>('telemetry-alt-ref', (event) => {
-      if (!isActive(event.payload)) return;
-      altReference.set({ msl: event.payload.msl });
-      // A real-MSL protocol supersedes any relative ground anchor.
-      if (event.payload.msl) groundAnchor.set(null);
-    })
-  );
-
-  // Passive-telemetry locked protocol (+ optional secondary) for the connection status box.
-  fresh.push(
-    await listen<{ primary: string; secondary: string | null }>('telemetry-protocol', (event) => {
-      if (!isActive(event.payload)) return;
-      connectionProtocol.set({ primary: event.payload.primary, secondary: event.payload.secondary });
     })
   );
 

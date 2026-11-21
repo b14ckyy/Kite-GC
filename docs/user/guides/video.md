@@ -113,6 +113,79 @@ until the feed returns or you stop it. While it retries, every video surface sho
 feed are given a few seconds to heal on their own before a full reconnect is forced, so momentary
 signal dips don't interrupt the stream unnecessarily.
 
+### Recording the RTSP stream (desktop)
+
+Switch on **Record the video stream** below the saved connections and Kite writes the video to a file
+for every flight: the recording starts when the connected vehicle is armed and ends when it is disarmed.
+
+- **What is recorded:** the stream exactly as it arrives — no re-encoding, so the quality is the
+  source's and the recording costs almost no CPU. The file is a Matroska file (`.mkv`) that the common
+  players open (VLC, mpv, the Windows media player).
+- **Requirements:** the **Native RTSP client** and an **H.264 or HEVC** source. An MJPEG stream is not
+  recorded. Windows, Linux and macOS; not on Android and iOS.
+- **Where it goes:** the **Recording folder** — by default a `KiteGC` folder in your videos folder. The
+  file is named after the vehicle and the local time, for example `Wing_2026-11-20_14-05-31.mkv`: the
+  name the vehicle has in your vehicle library, else its craft name, else `Video`.
+- **A few seconds before arming are included:** the recording starts at the last keyframe the source
+  sent before you armed.
+- **In the logbook:** once the flight is saved, its details show the recording under **Video**, and
+  its files move into a folder of their own below the recording folder: `Flights/<name>/`, named
+  after the flight's first recording (without a `_part` number). What lies directly in the
+  recording folder is then a recording that is still being written, has no flight (yet) or could
+  not be moved — on Windows a file another program holds open stays where it is, and remains linked
+  all the same. **Show folder** in the flight details opens the flight's folder in the file manager
+  (not on phones and tablets). Recordings linked before this version stay where they are.
+- **Rename and sort the files as you like:** every recording carries an id of its own, and Kite finds
+  the file by it below the recording folder — under a new name, in subfolders of your own scheme (up
+  to six levels deep). Only the folder itself must stay the one set as **Recording folder**. A file that is no
+  longer below it is shown struck through in the flight details.
+- **Do not convert or re-save the file** with another program if it should stay linked to its flight:
+  tools that rewrite a Matroska file usually give it a new id.
+- **Taking recordings to another Kite:** export the flights as `.kflight` and let Kite copy their
+  recordings next to the file; the import on the other side offers to copy them into the recording
+  folder there, each flight into its own folder. See [Logbook → Exporting](logbook.md#exporting).
+- **Clean up unlinked recordings…** (below the recording folder, shown while recording is switched
+  on) lists Kite's recordings in the folder that no flight in your logbook is linked to, with their
+  names and total size, and removes them when you confirm (recycle bin / trash where there is one).
+  A flight's folder that is empty afterwards goes with its last recording, also when you delete a
+  flight together with its recordings.
+  The typical case is the recording of a flight you deleted while keeping the file. Left alone are
+  a recording that is still being written, including the earlier parts of it, a recording that
+  waits for its flight to be saved — also one a crash cut off; Kite keeps waiting for 30 days, even
+  after you discarded the flight — and every Matroska file Kite did not write. If you use
+  several flight databases with one recording folder, the recordings of the other databases count
+  as unlinked.
+- **Dropouts:** when the stream reconnects during a flight, the recording continues in a new file
+  (`…_part2.mkv`). A new file also starts just below 4 GB, so a FAT32 drive works as a target.
+- **If Kite is closed mid-flight,** the recording is finished and joins the flight when that is saved
+  after the next start.
+- **After a crash or a power loss** the file stays in the recording folder and plays up to the last
+  keyframe that reached the disk; the last seconds can be missing. Such a file has no seek index, so
+  jumping around in it can be slow. It still joins its flight: when you start Kite again and the
+  interrupted flight is saved — continued after reconnecting or saved as it is — the recording from
+  before the crash is linked to it, next to the one made afterwards.
+
+Recording runs only while armed and connected; without a link nothing is recorded.
+
+#### Watching the recording with the replay
+
+Open a flight that has a recording in the logbook while no vehicle is connected, and the video plays in
+the video window (or the Video widget) **in step with the replay**: play, pause, the speed button and
+dragging the timeline all move the picture along with the aircraft on the map.
+
+- **A running live stream is stopped** when such a flight is loaded — the recording uses the same
+  video surface. Start the stream again from the Video panel when you are done; a flight without a
+  recording leaves the stream alone.
+- **Where nothing was recorded** — before arming, after disarming, in a dropout between two files, or
+  when the file is no longer in its folder — the window shows *No video recorded for this part of the
+  flight*.
+- **At 4× and faster** the video shows one picture per keyframe instead of every frame.
+- **Jumping backwards** restarts the picture at the keyframe before the new position; with a source
+  that sends keyframes rarely this takes a moment.
+- **Stop video** in the Video panel ends the playback; the replay itself goes on.
+
+With a vehicle connected the logbook does not put a flight on the map, so no recording plays then.
+
 !!! note "Helpers download themselves"
     **Camera (device)** needs nothing extra, and **RTSP with the Native RTSP client** (the default)
     needs no helper either (on Android that is always the case). **Native Capture** uses the bundled
@@ -127,7 +200,10 @@ signal dips don't interrupt the stream unnecessarily.
 The same feed can appear in several places at once (they all share one stream):
 
 - **As a widget** — the **Video** widget in a dock. It always **crops the picture to fill** its tile,
-  whatever its size.
+  whatever its size. In the docks it takes **no space while video is off** (unless it is the dock's
+  only widget) and comes back when a source starts; edit mode always shows it, so you can place it.
+  **On Android** an RTSP stream on the *Native RTSP client* has one output: the tile also steps aside
+  while the floating window is shown, and returns when you put the window away.
 - **In a floating window** — a movable video frame over the map. **Start** slides it in from the left
   into the bottom-left corner (or to where you last left it) — unless a Video widget is active, in which
   case the window stays parked because the widget already shows the picture. A **camera button** —
@@ -138,7 +214,7 @@ The same feed can appear in several places at once (they all share one stream):
   bottom-left corner** (the four-way arrow) to move it; dragging it to the **bottom-left screen corner
   snaps it there**, where it **displaces the bottom widget dock** to make room (the dock shrinks by the
   window's size). Drag it away from the corner to un-snap and free-float. The **top-right corner grip
-  resizes** it (aspect-locked, touch-friendly).
+  resizes** it (aspect-locked, touch-friendly), up to 40 % of the app window's height.
   **On an Android phone** there is a **docked window** instead: fixed to the bottom-right of the map, sized to
   the stream (at most 40 % of the map height or half its width), no dragging. The **corner marker in
   its top-left** toggles between that size and a compact one (two thirds), for the video and the
@@ -256,12 +332,6 @@ route; the notes below say what each of them costs.
     stalls it, and the Pi's kernel driver then hangs until a reboot. Kite therefore holds the video
     after any lost packet until the next keyframe arrives — a short pause instead of a frozen decoder.
     A **short keyframe interval** at the encoder (1 s) keeps that pause short.
-
-!!! warning "AppImage: video does not work there"
-    The AppImage build cannot play video on either path — the AppImage's launcher environment hides
-    the system's GStreamer plugins from every process inside it. Use the **.deb**, **.rpm** or the
-    **portable build** instead; the AppImage is provided for a quick look at everything else and is
-    planned to be retired.
 
 **With the Native RTSP client off, video support is provided as-is.** Kite then runs video through
 WebKitGTK, which hands playback to GStreamer — and which plugins your distribution installs is

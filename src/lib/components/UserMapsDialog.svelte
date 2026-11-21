@@ -4,11 +4,11 @@
 -->
 
 <script lang="ts">
-  // Settings → Custom Online Provider: the list of the user's online tile sources (Add / Edit / Delete) and,
-  // in place of the list, the editor of one (UserMapEditor). A modal like LogFilePicker, so the
-  // crowded settings menu keeps a single row for the feature. A row shows the host only — the path
-  // and query may hold the user's API key.
+  // Settings → Custom Online Provider: the list of the user's online tile sources and, in its place, the editor
+  // of one (UserMapEditor) — a modal, so settings keeps one row. Rows show the host only: path and query may
+  // hold an API key.
   import { tick } from 'svelte';
+  import { escapeKey } from '$lib/actions/escapeKey';
   import { t } from 'svelte-i18n';
   import { settings } from '$lib/stores/settings';
   import { saveUserMap, deleteUserMap } from '$lib/stores/userMaps';
@@ -26,8 +26,7 @@
 
   let editorRef = $state<{ isDirty: () => boolean } | null>(null);
 
-  function onKeydown(e: KeyboardEvent) {
-    if (e.key !== 'Escape') return;
+  function onEscape() {
     // Unsaved input in the editor: Escape does nothing (Cancel discards it on purpose).
     if (editing && editorRef?.isDirty()) return;
     if (editing) closeEditor();
@@ -41,7 +40,7 @@
     }
     deleteArmed = null;
     deleteUserMap(id);
-    // The pressed button is gone with its row: focus the box again so Escape still closes the list.
+    // The pressed button is gone with its row: the box takes the focus.
     void tick().then(() => box?.focus());
   }
 
@@ -50,8 +49,7 @@
     box?.focus();
   });
 
-  /** Back to the list. The focused editor field is gone with the editor: focus the box again, or
-   *  Escape would no longer reach the backdrop's handler. */
+  /** Back to the list. The focused editor field is gone with the editor: the box takes the focus. */
   function closeEditor() {
     editing = null;
     void tick().then(() => box?.focus());
@@ -59,8 +57,7 @@
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
-<!-- A stray tap outside must not throw away a half-typed map: the backdrop closes the list only. -->
-<div class="dialog-backdrop" onclick={() => { if (!editing) onClose(); }} onkeydown={onKeydown}>
+<div class="dialog-backdrop" use:escapeKey={onEscape}>
   <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
   <div class="dialog-box" role="dialog" aria-modal="true" aria-labelledby="user-maps-title" tabindex="-1" bind:this={box} onclick={(e) => e.stopPropagation()}>
     <div class="dialog-title" id="user-maps-title">
@@ -118,7 +115,6 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 16px;
   }
 
   .dialog-box {
@@ -126,11 +122,8 @@
     border: 1px solid rgba(55, 168, 219, 0.45);
     border-radius: 8px;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
-    padding: 16px 18px 12px;
-    box-sizing: border-box;
+    padding: 16px 18px 0;
     width: min(520px, 100%);
-    /* % of the backdrop (the --ui-scale'd panels layer), not vh — see LogFilePicker. */
-    max-height: 100%;
     display: flex;
     flex-direction: column;
     min-height: 0;
@@ -146,7 +139,7 @@
   }
 
   /* The body scrolls (the editor on a landscape phone), the title stays. */
-  .dialog-body { flex: 0 1 auto; min-height: 0; overflow-y: auto; }
+  .dialog-body { flex: 0 1 auto; min-height: 0; overflow-y: auto; padding-bottom: 12px; }
 
   .dialog-empty {
     font-size: 12px;

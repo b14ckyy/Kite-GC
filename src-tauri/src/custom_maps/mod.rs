@@ -1,19 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-//! Custom (offline) maps from a local tile folder — desktop only.
-//!
-//! Layout: `<root>/<map>/<z>/<x>/<y>.<ext>` — strict XYZ (OSM order, y counted from the top, no TMS
-//! flip). Each direct subfolder of the root is one map, its folder name is the label. Tiles may be
-//! png / jpg / jpeg / webp (case-insensitive); the extension is detected once per map from the first
-//! tile found, the others stay as a fallback. The tile pixel size is detected once per map too (from
-//! one tile's header, normalised to 128 / 256 / 512) and applies to the whole map — mixed tile sizes
-//! inside one map are not supported. Everything here works in FILE levels; the 2D map converts its
-//! own zoom to them (a 512 px map's file level Z is drawn at map zoom Z+1, a 128 px one's at Z−1).
-//!
-//! Tiles are read through the [`TileSource`] trait, so a different source (e.g. a single-file archive)
-//! can later sit behind the same commands without touching the frontend. The coverage index (the
-//! covered areas behind the frames and "Show map area") lives in [`coverage`].
+//! Custom (offline) maps from a local tile folder `<root>/<map>/<z>/<x>/<y>.<ext>` (strict XYZ, no TMS
+//! flip), desktop only. Everything here works in FILE levels; the 2D map converts its own zoom to them
+//! (512 px tiles: file level Z at map zoom Z+1).
 
 pub mod coverage;
 pub mod image_size;
@@ -34,10 +24,8 @@ pub const MAX_LEVEL: u8 = 30;
 /// cheap (it runs at startup), so a level counts as present when one of its first X folders has a tile.
 const PROBE_X_DIRS: usize = 16;
 
-/// Default root: `custom_maps` in the app data folder — the folder the flight database uses when no
-/// custom database path is set (`%APPDATA%\kite-gc` on Windows, `~/.local/share/kite-gc` on Linux,
-/// `~/Library/Application Support/kite-gc` on macOS, `<exe>/data` in portable mode). A custom
-/// database path does not move it.
+/// Default root: `custom_maps` in the app data folder (the flight database's default folder,
+/// `<exe>/data` in portable mode). A custom database path does not move it.
 pub fn default_root() -> PathBuf {
     let db = crate::flightlog::db::resolve_db_path("", crate::is_portable());
     match db.parent() {
@@ -94,7 +82,6 @@ pub fn parse_tile_file_name(name: &str) -> Option<(u32, &str)> {
     Some((parse_index(stem)?, ext))
 }
 
-/// Is (z, x, y) a valid XYZ tile address?
 pub fn valid_tile(z: u8, x: u32, y: u32) -> bool {
     if z > MAX_LEVEL {
         return false;
@@ -305,10 +292,8 @@ impl MapProbe {
     }
 }
 
-/// Probe one map folder: the zoom levels that hold tiles, the tile extension and the tile pixel size.
-/// The size comes from the header of one tile of the HIGHEST level (the level a map is made for); when
-/// that one cannot be read, the sample tiles of the next lower levels are tried. One size applies to
-/// the whole map — a map that mixes tile sizes is drawn as if all its tiles had the detected one.
+/// Probe one map folder: the zoom levels that hold tiles, the tile extension and the tile pixel size —
+/// read from a tile of the HIGHEST level (the level a map is made for), lower levels as fallback.
 pub fn probe_map(dir: &Path) -> Option<MapProbe> {
     let mut min: Option<u8> = None;
     let mut max: Option<u8> = None;
@@ -426,7 +411,7 @@ pub(crate) mod test_util {
         dir
     }
 
-    /// Write a tiny placeholder tile file (no real image is needed: the coverage scan never opens tiles, and the listing falls back to 256 px when a sample has no readable header).
+    /// A tiny placeholder tile file: the coverage scan never opens tiles, and the listing falls back to 256 px.
     pub fn touch_tile(map_dir: &Path, z: u8, x: u32, y: u32, ext: &str) {
         let d = map_dir.join(z.to_string()).join(x.to_string());
         std::fs::create_dir_all(&d).unwrap();

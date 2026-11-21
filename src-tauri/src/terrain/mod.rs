@@ -1,14 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Terrain elevation provider — Copernicus DEM GLO-30.
-//
-// Source: AWS Open Data `copernicus-dem-30m` (Cloud Optimized GeoTIFF, 1°×1°
-// tiles, Float32, EGM2008 geoid ≈ MSL, no API key). Used locally only for
-// AGL waypoint planning, terrain clearance, AGL widget and LOS analysis.
-//
-// Because GLO-30 is geoid-referenced (≈ MSL) it is directly comparable with
-// the FC's MSL GPS altitude and INAV AMSL waypoints — no geoid conversion.
+// Terrain elevation — Copernicus DEM GLO-30 (AWS Open Data COGs, 1°×1° Float32 tiles, no API key).
+// Geoid-referenced (EGM2008 ≈ MSL), so directly comparable with the FC's MSL GPS altitude.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::Cursor;
@@ -39,15 +33,9 @@ struct TileData {
 }
 
 impl TileData {
-    /// Bilinear sample at lat/lon. Returns None if outside the tile.
-    ///
-    /// The bound is the tile's *extent* (width × px), not its last sample: the
-    /// tiles are PixelIsPoint, so the last sample sits one pixel short of the
-    /// next tile's first one. Bounding on `width - 1` refused that final
-    /// pixel strip (~30 m along every south/east tile edge) although the
-    /// point belongs to this tile by `floor()`; the neighbour refuses it too.
-    /// Inside that strip both indices clamp to the edge sample — nearest
-    /// neighbour over at most one pixel, well inside the DEM's own error.
+    /// Bilinear sample at lat/lon; None outside the tile. Bounded by the tile's EXTENT (PixelIsPoint: the last
+    /// sample is one pixel short of the next tile's first) — in that strip both indices clamp to the edge
+    /// sample, well within the DEM's own error.
     fn sample(&self, lat: f64, lon: f64) -> Option<f32> {
         let col = (lon - self.origin_lon) / self.px_lon;
         let row = (self.origin_lat - lat) / self.px_lat;
@@ -222,11 +210,8 @@ impl TerrainProvider {
         removed
     }
 
-    /// Elevation (metres ≈ MSL) at each lat/lon, in input order. A batched
-    /// `elevation()` so a caller resolving many points (e.g. every mission
-    /// waypoint) pays a single IPC round-trip instead of one per point. Loads
-    /// stay serialized via `elevation()`'s `load_lock`, so points sharing a tile
-    /// reuse the same load rather than racing duplicate 42 MB downloads.
+    /// Elevations (m ≈ MSL) of many points in one IPC round-trip; loads stay serialized via `elevation()`'s
+    /// `load_lock`, so points sharing a tile never race duplicate 42 MB downloads.
     pub async fn elevations(&self, points: &[(f64, f64)]) -> Vec<Option<f32>> {
         let mut out = Vec::with_capacity(points.len());
         for &(lat, lon) in points {
@@ -538,8 +523,7 @@ mod tests {
     #[test]
     fn sample_covers_the_last_pixel_strip() {
         let t = quarter_degree_tile();
-        // Beyond the last sample but inside the tile's extent → the edge sample,
-        // not a hole (this strip used to return None along every tile seam).
+        // Beyond the last sample but inside the tile's extent → the edge sample, not a hole.
         assert_eq!(t.sample(47.05, 11.9), Some(115.0));
         // The edges of that strip clamp too.
         assert_eq!(t.sample(48.0, 11.9), Some(103.0));

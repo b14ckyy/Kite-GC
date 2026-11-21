@@ -76,6 +76,17 @@ pub const FIX_2D: u8 = 1;
 pub const FIX_3D: u8 = 2;
 pub const FIX_DGPS: u8 = 3;
 
+/// Raw fix number in MAVLink's `GPS_FIX_TYPE` numbering onto the unified scale. ArduPilot's
+/// `GPS.Status` uses the same numbers; PX4's `sensor_gps.fix_type` too, except 8 = extrapolated.
+pub fn unified_fix_from_raw(raw: u8) -> u8 {
+    match raw {
+        0 | 1 => FIX_NONE,
+        2 => FIX_2D,
+        3 => FIX_3D,
+        _ => FIX_DGPS,
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GpsData {
     /// Unified fix scale, see `FIX_NONE` … `FIX_DGPS`.
@@ -86,6 +97,32 @@ pub struct GpsData {
     pub alt_msl: f64,     // meters
     pub ground_speed: f64, // cm/s → m/s
     pub course: f64,      // degrees * 10 → degrees
+}
+
+/// One physical receiver's own raw values, where `telemetry-gps` carries the fused position: the
+/// `telemetry-gps-receivers` event (MAVLink GPS_RAW_INT = id 0, GPS2_RAW = id 1) and a log import's
+/// sample (the log's receiver instance).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct GpsReceiverData {
+    pub id: u8,
+    /// Unified fix scale, see `FIX_NONE` … `FIX_DGPS`.
+    pub fix_type: u8,
+    /// MAVLink `GPS_FIX_TYPE` as sent: 0 no receiver, 1 no fix, 2 2D, 3 3D, 4 DGPS, 5 RTK float,
+    /// 6 RTK fixed, 7 static, 8 PPP.
+    pub fix_raw: u8,
+    pub num_sat: u8,
+    pub hdop: Option<f64>,
+    pub lat: f64,     // decimal degrees
+    pub lon: f64,     // decimal degrees
+    pub alt_msl: f64, // meters
+    // The rest is `None` where the receiver or the firmware does not report it.
+    pub vdop: Option<f64>,
+    pub h_acc_m: Option<f64>,
+    pub v_acc_m: Option<f64>,
+    pub speed_ms: Option<f64>,
+    pub course_deg: Option<f64>,
+    /// Heading of a dual-antenna receiver.
+    pub yaw_deg: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

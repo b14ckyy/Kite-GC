@@ -36,7 +36,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis", "deb", "appimage", "rpm"],
+    "targets": ["nsis", "deb", "rpm"],
     "linux": {
       "deb": {
         "depends": [

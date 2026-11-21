@@ -9,8 +9,8 @@
 import { writable } from 'svelte/store';
 
 /** De-duplicating store: it is fed from the high-rate telemetry effect (~5 Hz), so it
- *  only notifies subscribers when the value actually changes — otherwise the mission
- *  layer would re-render the whole mission on every telemetry frame. */
+ *  only notifies subscribers when the value actually changes — otherwise the 3D map
+ *  would rebuild the mission on every telemetry frame. */
 function createActiveWp() {
   const inner = writable<number>(0);
   let cur = 0;

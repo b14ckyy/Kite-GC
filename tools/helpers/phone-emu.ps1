@@ -2,30 +2,27 @@
 # Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 #
 # Phone-UI iteration loop: boot an Android emulator (or use a USB device) and run the app through
-# `tauri android dev` — Rust is built once, the UI comes from the Vite dev server with hot reload,
-# so a saved .svelte file shows up on the device about a second later. No APK, no adb install.
+# `tauri android dev` — the UI comes from the Vite dev server with hot reload; no APK, no adb install.
 #
 #   .\tools\helpers\phone-emu.ps1                      # list the AVDs
 #   .\tools\helpers\phone-emu.ps1 Kite_21x9            # boot that AVD + tauri android dev on it
 #   .\tools\helpers\phone-emu.ps1 -Device              # skip the emulator: dev on the USB-attached device
+#   .\tools\helpers\phone-emu.ps1 -Device -Beside      # ... as "Kite Dev" (com.kitegc.app.dev) BESIDE an
+#                                                      # installed copy from Google Play, which a debug
+#                                                      # build cannot replace (different signature)
 #   .\tools\helpers\phone-emu.ps1 -Shot                # screenshot of the running app (see phone-devtools.mjs)
 #
-# The activity is locked to sensorLandscape (AndroidManifest.xml), so the emulator's rotation
-# setting does not matter — the app is always landscape; -Landscape only pins the emulator's own
-# orientation so the launcher matches.
+# The app is always landscape (sensorLandscape); -Landscape only pins the emulator's own orientation.
 #
-# AVDs (created 2026-09-03, android-34 google_apis x86_64, host GPU):
+# AVDs (android-34 google_apis x86_64, host GPU):
 #   Kite_5in_16x9   5.0"  1080×1920  16:9    (pixel profile)
 #   Kite_6in_20x9   6.4"  1080×2400  20:9    (pixel_6 profile)
 #   Kite_21x9       6.0"  1080×2520  21:9    (Xperia-style, custom lcd override)
-#   Kite_AX12_A9    5.5"  1280×720   API 28  (RadioMaster AX12 stand-in: Android 9 + WebView 138 sideloaded
-#                                            after removing the system WebViewStub with -writable-system)
+#   Kite_AX12_A9    5.5"  1280×720   API 28  (RadioMaster AX12 stand-in: Android 9 + sideloaded WebView 138)
 #   Kite_AX12       5.5"  1280×720   API 34  (same panel, current Android — geometry only)
-# Kite_AX12_A9 MUST boot with -writable-system: its WebView 138 lives beside a system overlay that is
-# only active with the flag. Booted without it, the stock WebViewStub (Chrome 69) returns and Android's
-# package manager DROPS the sideloaded WebView (signature mismatch) — the dev build then dies with
-# "SyntaxError: Unexpected token ?" (2026-09-12). Restore: install the APKMirror APK from F:\Downloads
-# again and `adb shell cmd webviewupdate set-webview-implementation com.google.android.webview`.
+# Kite_AX12_A9 MUST boot with -writable-system, or Android drops the sideloaded WebView and the dev build
+# dies with "SyntaxError: Unexpected token ?". Restore: reinstall the WebView 138 APK and
+# `adb shell cmd webviewupdate set-webview-implementation com.google.android.webview`.
 # Data inside the emulator: no USB serial / BLE, but network — the host is 10.0.2.2 (SITL over
 # TCP, MAVLink UDP), or import a .kflight and replay it.
 # Stop: Ctrl+C in this terminal ends tauri dev + vite; close the emulator window separately.
@@ -34,6 +31,7 @@
 param(
   [string]$Avd = '',
   [switch]$Device,
+  [switch]$Beside,
   [switch]$Landscape,
   [switch]$Shot,
   [string]$ShotPath = ''
@@ -103,15 +101,37 @@ if (-not $Device) {
   if (-not $serial) { Write-Host 'no USB device attached'; exit 1 }
 }
 
-# Dev server over the adb bridge, NOT over the network: the CLI's default is the host's LAN IP,
-# which the emulator reaches through its NAT — and there module requests stalled for minutes
-# (grey screen). `adb reverse` maps the device's own 127.0.0.1:1420 to the host, `--host 127.0.0.1`
-# makes Tauri point the WebView (via its dev proxy) at exactly that. Works for USB devices too, no
-# Wi-Fi involved. The reverse mapping lives until the device/emulator disconnects.
+# Dev server over the adb bridge, NOT the network: through the emulator's NAT, module requests stalled
+# for minutes. `adb reverse` + `--host 127.0.0.1` points the WebView at the device's own 127.0.0.1:1420.
 & $adb -s $serial reverse tcp:1420 tcp:1420 | Out-Null
 Set-Location $repo
-if ($Device) {
-  npx tauri android dev --host 127.0.0.1
-} else {
-  npx tauri android dev --host 127.0.0.1 $Avd
+if ($Beside) {
+  # The debug build gets its own application id, but the CLI starts the OTHER copy — a watcher starts
+  # the dev copy once Gradle installed it. HMR does not reach it; reload with
+  #   node tools/helpers/phone-devtools.mjs eval "location.reload()"
+  $env:KITE_ANDROID_DEV_ID = '1'
+  $before = "$((& $adb -s $serial shell dumpsys package com.kitegc.app.dev) -match 'lastUpdateTime' | Select-Object -First 1)"
+  Start-Job -ArgumentList $adb, $serial, $before -ScriptBlock {
+    param($adb, $serial, $before)
+    for ($i = 0; $i -lt 600; $i++) {
+      Start-Sleep -Seconds 3
+      $now = "$((& $adb -s $serial shell dumpsys package com.kitegc.app.dev) -match 'lastUpdateTime' | Select-Object -First 1)"
+      if ($now -and $now -ne $before) {
+        Start-Sleep -Seconds 4   # let the CLI start the other copy first, then come to the front
+        & $adb -s $serial shell am start -n com.kitegc.app.dev/com.kitegc.app.MainActivity | Out-Null
+        break
+      }
+    }
+  } | Out-Null
+}
+try {
+  if ($Device) {
+    npx tauri android dev --host 127.0.0.1
+  } else {
+    npx tauri android dev --host 127.0.0.1 $Avd
+  }
+} finally {
+  # The script shares the caller's environment: without this, every later dev build from the same
+  # terminal would silently become the .dev copy.
+  if ($Beside) { Remove-Item Env:KITE_ANDROID_DEV_ID -ErrorAction SilentlyContinue }
 }

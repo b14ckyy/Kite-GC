@@ -33,7 +33,7 @@
 -keep class com.kitegc.app.UsbSerial { *; }
 
 # Same JNI-only story for the storage bridge (android/storage.rs → StorageAccess):
-# pickFolder/getLastError/syncDirToTree have no Kotlin caller, so R8 strips them and
+# pickFolder/getLastError/moveFilesToTree have no Kotlin caller, so R8 strips them and
 # the folder picker dies with a NoSuchMethodError only in RELEASE builds — the debug
 # build does not minify, which is exactly how this trap stayed invisible in testing.
 -keep class com.kitegc.app.StorageAccess { *; }
@@ -49,3 +49,8 @@
 -keep class com.kitegc.app.NetInfo { *; }
 # Link foreground-service bridge (android/link_service.rs → LinkService) — JNI-only, same rule.
 -keep class com.kitegc.app.LinkService { *; }
+# Install-source lookup (android/install_source.rs → InstallSource) — JNI-only, same rule.
+-keep class com.kitegc.app.InstallSource { *; }
+# Device profile (android/device.rs → DeviceProfile): profile/internalSerialPorts are JNI-only,
+# same rule.
+-keep class com.kitegc.app.DeviceProfile { *; }

@@ -3,11 +3,9 @@
   Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 -->
 
-<!-- PhoneDragGhost — the copy of the widget under the finger while it is dragged between the
-     phone's widget column and the bottom slots (stores/phoneEdit.svelte.ts). Drawn at the root in
-     viewport px: the column clips its own overflow, so a ghost inside it could never leave it. The
-     real tile shows the preview slot; this one is pointer-transparent so the drop target under
-     the finger stays hit-testable. -->
+<!-- PhoneDragGhost — the widget copy under the finger while dragging between the phone column and the
+     bottom slots. Drawn at the root (the column clips its overflow); pointer-transparent so the drop
+     target under the finger stays hit-testable. -->
 <script lang="ts">
   import WidgetRenderer from '$lib/components/WidgetRenderer.svelte';
   import { phoneEdit } from '$lib/stores/phoneEdit.svelte';
@@ -20,7 +18,7 @@
 
 {#if d}
   <div class="ghost" style="left:{d.x}px; top:{d.y}px; width:{d.w}px; height:{d.h}px;">
-    <WidgetRenderer id={d.id} {telem} {interfaceSettings} sizePx={d.h} wPx={d.w} hPx={d.h} ghost />
+    <WidgetRenderer id={d.id} {telem} {interfaceSettings} sizePx={d.h} wPx={d.w} hPx={d.h} small={d.small} ghost />
   </div>
 {/if}
 

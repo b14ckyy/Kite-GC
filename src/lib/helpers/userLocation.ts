@@ -1,15 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Physical location of the user (for Night-Mode "auto" sunset timing). It does NOT need to be
-// precise — city-level is plenty. Sources, in order: a persisted last-known value (restored on
-// launch) and an OS/browser geo check (on start + a manual button). It deliberately never tracks the
-// live map/camera — orbiting the globe must not change it — nor the aircraft's GPS fix: the
-// aircraft is not where the operator stands.
-//
-// The OS check is per-platform: Windows (WebView2) and Linux (WebKitGTK) use the Web Geolocation
-// API, while macOS goes through native CoreLocation (location_macos.rs) because WKWebView ships no
-// Geolocation API at all, so `navigator.geolocation` can never resolve there.
+// Physical location of the user (Night-Mode "auto" sunset timing; city-level is plenty): a persisted last value
+// plus an OS geo check, never the map camera or the aircraft GPS. macOS uses native CoreLocation
+// (location_macos.rs) — WKWebView has no Geolocation API; the other desktops use the Web API.
 
 import { writable, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
@@ -38,10 +32,8 @@ export function setUserLocation(lat: number, lon: number, source: string, accura
   console.log(`[geo] user location set via ${source}: ${lat.toFixed(3)}, ${lon.toFixed(3)}`);
 }
 
-/** Mobile (iOS/Android): native CoreLocation/Android location via the Tauri plugin. The OS permission
- *  prompt is labelled with the app name + Info.plist usage string, not the WebView origin ("localhost"
- *  is all the Web geolocation prompt can show). Loaded lazily so the plugin JS never reaches the desktop
- *  bundle's startup path. */
+/** Mobile: native location via the Tauri plugin, so the OS permission prompt carries the app name, not the
+ *  WebView origin ("localhost"). Loaded lazily so the plugin JS stays off the desktop startup path. */
 async function runGeoCheckNative(): Promise<boolean> {
   try {
     const geo = await import('@tauri-apps/plugin-geolocation');
@@ -114,9 +106,7 @@ function runGeoCheckWeb(): Promise<boolean> {
 
 /** One OS check on the platform's path; true when it delivered a fix (stored via setUserLocation). */
 function runGeoCheck(): Promise<boolean> {
-  // On mobile the vehicle's own GPS is the primary source (see the telemetry subscription below); the OS
-  // check is a best-effort head start before a UAV connects. Route it through the native plugin so the
-  // permission dialog carries the app's name.
+  // On mobile the OS check goes through the native plugin, so the permission dialog carries the app's name.
   if (isMobile) return runGeoCheckNative();
   // macOS desktop (isMacOS excludes iOS): native CoreLocation, see runGeoCheckMacOs.
   if (isMacOS) return runGeoCheckMacOs();
@@ -139,10 +129,9 @@ export function requestUserLocation(): void {
 /** How long "to my location" waits on macOS for CoreLocation to deliver a first fix by event. */
 const MACOS_FIRST_FIX_WAIT_MS = 10_000;
 
-/** A fresh OS geo check that reports its outcome (the map search's "to my location"): the fix, or
- *  null when the permission is denied or the platform has none to give. The fix is stored like any
- *  other (`userGeoLocation`). On macOS a first fix may still arrive by event after the read came back
- *  empty — waited for up to MACOS_FIRST_FIX_WAIT_MS. */
+/** A fresh OS geo check that reports its outcome (map search "to my location"): the fix (stored as usual), or
+ *  null when denied / unavailable. On macOS a first fix may still arrive by event — waited up to
+ *  MACOS_FIRST_FIX_WAIT_MS. */
 export async function locateUserOnce(): Promise<LatLon | null> {
   if (await runGeoCheck()) return get(userGeoLocation);
   if (!isMacOS) return null;
@@ -164,20 +153,16 @@ export async function locateUserOnce(): Promise<LatLon | null> {
   });
 }
 
-// ── macOS: live CoreLocation updates ──
-// The native module emits on every fix that moved more than its jitter threshold, which is what makes
-// `gcsMode: continuous` track on macOS, where there is no watchPosition to drive it. Subscribed at
-// import; the backend only emits when it has an authorised, valid fix.
+// ── macOS: live CoreLocation updates ── emitted per fix that moved past the jitter threshold, which drives
+// `gcsMode: continuous` on macOS (no watchPosition). Subscribed at import; emitted only with an authorised fix.
 if (isMacOS) {
   void listen<{ lat: number; lon: number; accuracy_m: number | null }>('os-location', (e) => {
     setUserLocation(e.payload.lat, e.payload.lon, 'os-corelocation', e.payload.accuracy_m);
   });
 }
 
-/**
- * Best estimate of where the user physically is (for sunset timing).
- * Priority: stored/last-known geo → home position → persisted map centre. Never the live camera.
- */
+/** Best estimate of where the user physically is (sunset timing): stored geo → home position → persisted map
+ *  centre. Never the live camera. */
 export function resolveUserLocation(): LatLon {
   const geo = get(userGeoLocation);
   if (geo) return geo;

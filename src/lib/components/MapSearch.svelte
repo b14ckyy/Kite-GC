@@ -3,14 +3,9 @@
   Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 -->
 
-<!-- MapSearch — "go to a place / coordinates" for the 2D and the 3D map, plus "to my location".
-     One text line, a short hit list, a jump — not an address finder. A magnifier button opens the
-     line beside it (to its left), with the location button left of the line. Search runs on Enter or
-     on the magnifier while the line is open — never while typing (Nominatim's usage policy).
-     Coordinates are recognised locally and work offline; see controllers/mapSearch.ts.
-       variant 'toolbar' — desktop / tablet title bar: toolbar controls, the hit list drops below.
-       variant 'phone'   — the phone's map control column: glass buttons, the hit list rises above
-                           (the line sits near the bottom edge). The parent places the root. -->
+<!-- MapSearch — "go to a place / coordinates" + "to my location" for 2D and 3D: a line beside a magnifier, a
+     short hit list, a jump. Search on Enter/magnifier only, never while typing (Nominatim's usage policy);
+     coordinates parse offline (controllers/mapSearch.ts). Variants: 'toolbar' (list drops) / 'phone' (list rises). -->
 <script lang="ts">
   import { tick } from 'svelte';
   import { t } from 'svelte-i18n';

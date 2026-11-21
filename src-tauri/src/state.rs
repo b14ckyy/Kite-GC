@@ -45,15 +45,9 @@ pub struct MavTarget {
 /// Error of every INAV/MSP command on a link without MSP (plain MAVLink, passive telemetry).
 pub(crate) const NO_MSP_ERR: &str = "FC is not running MSP (INAV)";
 
-/// Run `f` against the connection's MSP scheduler: a direct MSP link, or the MSP-over-MAVLink tunnel
-/// scheduler of a MAVLink link to INAV 10.0+ (`MavlinkHandle.msp`). This is THE backend answer to "does
-/// this link have MSP" — every INAV one-shot command (mission, safehome, geozone, settings, craft name,
-/// stats, RC config) resolves its scheduler here, so it works the same over both links.
-///
-/// The link-registry lock is only held to clone the request handle; `f` runs without it (a tunnel mission
-/// transfer is N × RTT and must not block `disconnect`). Transactions of one connection still run one
-/// at a time (`MspRequester::begin_transaction`). A disconnect mid-transaction makes the next request
-/// fail fast ("Scheduler thread gone"). Never call `with_msp` from inside `f`.
+/// Run `f` against the connection's MSP scheduler — a direct MSP link or the INAV MSP-over-MAVLink tunnel:
+/// THE answer to "does this link have MSP". The registry lock is held only to clone the handle (a tunnel
+/// transfer must not block `disconnect`). Never call `with_msp` from inside `f`.
 pub(crate) fn with_msp<T>(
     state: &AppState,
     f: impl FnOnce(&MspRequester) -> Result<T, String>,
@@ -82,10 +76,8 @@ pub(crate) fn with_msp<T>(
     f(&msp)
 }
 
-/// `with_msp` on a blocking worker thread, for the long multi-request commands (mission transfers,
-/// safehome / geozone batches): Tauri runs `async` commands on the async runtime's workers, and a tunnel
-/// transaction of tens of seconds would park one of them (on a 4-core device `disconnect` then queues
-/// behind it). `f` gets the app handle to reach its own managed state (`app.state::<…>()`).
+/// `with_msp` on a blocking worker, for long multi-request commands: a tunnel transaction of tens of
+/// seconds would otherwise park an async-runtime worker (`disconnect` then queues behind it).
 pub(crate) async fn with_msp_blocking<T, F>(app: &AppHandle, f: F) -> Result<T, String>
 where
     T: Send + 'static,
@@ -130,11 +122,8 @@ pub struct AppState {
     pub ble_scan_stop: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
     /// Airspace Manager (aeronautical data) — last fetched region cached in RAM, or None.
     pub aero: Mutex<Option<AeroCache>>,
-    /// Per-vehicle recording slots shared by every recorder: the pending sessions awaiting
-    /// commit/discard (deferred commit, ADR-041 — set on disarm, resolved by the Save/Discard commands
-    /// or the recorder's grace-arm path; kept here so they survive a disconnect while the End-Flight
-    /// dialog is open), the continue-on-reconnect queue (ADR-042) and the live-path registry the orphan
-    /// scan and the discard sweeps leave alone. See `recorder::SessionSlots`.
+    /// Per-vehicle recording slots shared by every recorder: pending sessions (ADR-041), the continue-on-
+    /// reconnect queue (ADR-042) and the live-path registry. See `recorder::SessionSlots`.
     pub sessions: SessionSlotsHandle,
     /// Flight recorder of every recorded vehicle, by vehicle key (`"L1:S1"`) — link primaries from the
     /// connect paths, secondaries from the MAVLink handler. Lets the command layer reach the ACTIVE
@@ -194,10 +183,9 @@ impl AppState {
         }
     }
 
-    /// Point the MAVLink RC-injection stream at `vehicle` (the new active vehicle) and DISENGAGE it.
-    /// Re-pointing a live stream would hand the sticks to a different aircraft without the operator
-    /// noticing; they re-engage on the new vehicle explicitly (the frontend mirrors this). The PX4 /
-    /// ArduPilot choice follows the link's handshake variant (vehicles sharing one link share it).
+    /// Point the MAVLink RC-injection stream at `vehicle` and DISENGAGE it: re-pointing a live stream would
+    /// hand the sticks to another aircraft unnoticed; the operator re-engages explicitly. PX4 / ArduPilot
+    /// follows the link's handshake variant.
     pub fn retarget_rc(&self, vehicle: Option<&crate::vehicle_registry::VehicleId>) {
         let target = vehicle.and_then(|v| {
             let reg = self.links.lock().ok()?;

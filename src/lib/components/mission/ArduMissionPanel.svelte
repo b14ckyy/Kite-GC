@@ -10,7 +10,7 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import { get } from 'svelte/store';
-  import { save, open } from '@tauri-apps/plugin-dialog';
+  import { open } from '@tauri-apps/plugin-dialog';
   import { invoke } from '@tauri-apps/api/core';
   import { t, locale } from 'svelte-i18n';
   import {
@@ -21,17 +21,19 @@
     arduUndo, arduRedo, arduCanUndo, arduCanRedo, arduClearUndoHistory,
     arduVehicleClass, setArduVehicleClass,
     MAV_FRAME_GLOBAL, MAV_FRAME_GLOBAL_TERRAIN_ALT,
-    serializeWaypoints, parseWaypoints, parsePlanFile, loadArduMissionFromFile,
+    serializeWaypoints, parseWaypoints, parsePlanFile, planVehicleClass, loadArduMissionFromFile,
     type ArduWaypoint,
     framesForUpload,
   } from '$lib/stores/missionArdupilot';
   import { onMissionDownloadProgress, onMissionUploadProgress } from '$lib/stores/mission';
   import { cmdName, cmdShort, cmdHasLocation, cmdDef, cmdValidForVehicle, cmdValidForPx4, enumLabel, type VehicleClass } from '$lib/helpers/arduCommandCatalog';
   import { buildArduWaypointMenu } from '$lib/helpers/arduWaypointMenu';
-  import { anyCase } from '$lib/helpers/fileFilters';
+  import { openFilters } from '$lib/helpers/fileFilters';
+  import { exportFile } from '$lib/helpers/exportFile';
   import { contextMenu } from '$lib/actions/contextMenu';
+  import { requestMapAccess } from '$lib/stores/panelYield';
   import { arduWpDetailLines } from '$lib/helpers/missionWpDetails';
-  import { frameMissionOnMap } from '$lib/stores/mapCamera';
+  import { frameMissionOnMap, focusWaypointOnMap } from '$lib/stores/mapCamera';
   import { connection, linkIsArduPilot } from '$lib/stores/connection';
   import { settings } from '$lib/stores/settings';
   import { activeVehicleId } from '$lib/stores/vehicles';
@@ -72,7 +74,7 @@
     if (showPatternPanel) {
       import('$lib/stores/surveyPattern.svelte').then(m => { m.exitPatternMode(); showPatternPanel = false; });
     } else {
-      import('$lib/stores/surveyPattern.svelte').then(m => { m.enterPatternMode('rectangle'); showPatternPanel = true; });
+      import('$lib/stores/surveyPattern.svelte').then(m => { m.enterPatternMode('rectangle'); showPatternPanel = true; requestMapAccess(); });
     }
   }
   // Leaving edit mode closes the pattern panel (mirror the INAV panel).
@@ -164,13 +166,13 @@
 
   async function handleSaveFile() {
     try {
-      const path = await save({
+      const path = await exportFile({
         title: $t('mission.saveMissionTitle'),
-        defaultPath: 'mission.waypoints',
+        name: 'mission.waypoints',
         filters: [{ name: 'Waypoints', extensions: ['waypoints'] }],
+        write: (p) => invoke<void>('write_text_file', { path: p, content: serializeWaypoints(get(arduMission)) }),
       });
       if (!path) return;
-      await invoke<void>('write_text_file', { path, content: serializeWaypoints(get(arduMission)) });
       statusMessage = $t('mission.missionSaved');
     } catch (e) {
       statusMessage = $t('mission.saveFailed', { values: { error: String(e) } });
@@ -184,22 +186,20 @@
         multiple: false,
         // .plan = QGroundControl's JSON plan (the only format QGC saves — the PX4 ecosystem's
         // mission files); .waypoints/.txt = the QGC WPL 110 text format (Mission Planner et al).
-        filters: [{ name: 'Missions', extensions: anyCase(['waypoints', 'txt', 'plan']) }],
+        filters: openFilters('Missions', ['waypoints', 'txt', 'plan']),
       });
       if (!path) return;
-      const content = await invoke<string>('read_text_file', { path: typeof path === 'string' ? path : path });
-      const wps = parseMissionFile(String(path), content);
-      loadArduMissionFromFile(wps); // fresh selection/undo, FILE provenance, not a library mission
+      const content = await invoke<string>('read_text_file', { path });
+      // By content, not by name: an Android document URI need not end in the file name. A plan is JSON,
+      // WPL text never starts with a brace.
+      const isPlan = content.trimStart().startsWith('{');
+      const wps = isPlan ? parsePlanFile(content) : parseWaypoints(content);
+      loadArduMissionFromFile(wps, isPlan ? planVehicleClass(content) : null);
       statusMessage = $t('mission.loaded', { values: { count: wps.length } });
       frameMissionOnMap();
     } catch (e) {
       statusMessage = $t('mission.openFailed', { values: { error: String(e) } });
     }
-  }
-
-  /** Route by extension: .plan → the QGC JSON plan parser, everything else → QGC WPL text. */
-  function parseMissionFile(name: string, content: string): ArduWaypoint[] {
-    return /\.plan$/i.test(name) ? parsePlanFile(content) : parseWaypoints(content);
   }
 
   // No DOM drop zone here: with Tauri's dragDropEnabled the WebView never receives DOM drop
@@ -298,13 +298,22 @@
     } else {
       arduSelectWpSingle(i);
       selAnchor = i;
+      // The waypoint's editor opens at its marker and brings it into view itself.
+      if (currentEditing) requestMapAccess();
+      else focusRowOnMap(i);
     }
+  }
+  /** A row without a position of its own (modifier) stands for the waypoint of its group. */
+  function focusRowOnMap(i: number) {
+    const located = (w: ArduWaypoint | null | undefined) => !!w && cmdHasLocation(w.command) && (w.lat !== 0 || w.lon !== 0);
+    const wp = located(currentMission[i]) ? currentMission[i] : groups.find((g) => g.modifiers.some((m) => m.idx === i))?.anchor;
+    if (located(wp)) focusWaypointOnMap(wp!.lat / 1e7, wp!.lon / 1e7, 'list');
   }
   function onBadgeClick(e: MouseEvent, i: number) {
     e.stopPropagation();
     if (currentEditing) arduToggleWpSelection(i);
     else if (currentSelIdx === i) arduClearWpSelection();
-    else arduSelectWpSingle(i);
+    else { arduSelectWpSingle(i); focusRowOnMap(i); }
     selAnchor = i;
   }
   function removeSelected() { if (currentSel.size > 0) arduRemoveSelectedWps(); }

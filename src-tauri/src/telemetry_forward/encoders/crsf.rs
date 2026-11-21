@@ -12,8 +12,8 @@ use crate::msp::codec::MspCodec;
 const SYNC: u8 = 0xC8;
 
 const FT_GPS: u8 = 0x02;
-const FT_VARIO: u8 = 0x07;
 const FT_BATTERY: u8 = 0x08;
+const FT_BARO_ALT: u8 = 0x09;
 const FT_ATTITUDE: u8 = 0x1E;
 const FT_FLIGHT_MODE: u8 = 0x21;
 
@@ -65,8 +65,9 @@ impl Encoder for CrsfEncoder {
             frame(FT_GPS, &p, &mut out);
         }
         if let Some(al) = cache.altitude.as_ref() {
-            let p = ((al.vario * 100.0).round() as i16).to_be_bytes();
-            frame(FT_VARIO, &p, &mut out);
+            // INAV's layout with `crsf_use_legacy_baro_packet` off: the GPS frame above is MSL, and this
+            // 3-byte 0x09 (altitude above home + vertical speed) replaces the 0x07 vario frame.
+            frame(FT_BARO_ALT, &baro_alt_payload(al.altitude, al.vario), &mut out);
         }
         if let Some(an) = cache.analog.as_ref() {
             let mut p = Vec::with_capacity(8);
@@ -100,6 +101,28 @@ fn frame(ty: u8, payload: &[u8], out: &mut Vec<u8>) {
     out.push(ty);
     out.extend_from_slice(payload);
     out.push(crc);
+}
+
+/// 0x09: altitude above home packed as INAV's `crsfFrameBarometerAltitudeVarioSensor` does (decimetres
+/// + 10000 up to 2276.7 m, above that metres with the top bit set), then the vertical speed on TBS's
+/// logarithmic scale.
+fn baro_alt_payload(alt_m: f64, vario_ms: f64) -> [u8; 3] {
+    const ALT_MIN_DM: i64 = 10000;
+    const ALT_THRESHOLD_DM: i64 = 0x8000 - ALT_MIN_DM;
+    const ALT_MAX_DM: i64 = 0x7ffe * 10 - 5;
+    let dm = (alt_m * 10.0).round() as i64;
+    let packed: u16 = if dm < -ALT_MIN_DM {
+        0
+    } else if dm > ALT_MAX_DM {
+        0xfffe
+    } else if dm < ALT_THRESHOLD_DM {
+        (dm + ALT_MIN_DM) as u16
+    } else {
+        (((dm + 5) / 10) as u16) | 0x8000
+    };
+    let vario = ((vario_ms.abs() + 1.0).ln() / 0.026 * vario_ms.signum()).round().clamp(-128.0, 127.0) as i8;
+    let alt = packed.to_be_bytes();
+    [alt[0], alt[1], vario as u8]
 }
 
 /// Pick the INAV CRSF mode string. The chain is INAV's `crsfFrameFlightMode()` (`telemetry/crsf.c`)
@@ -175,6 +198,15 @@ mod tests {
         for &(flags, expected) in cases {
             assert_eq!(crsf_mode_string(flags, ARMED), expected, "flags=0x{flags:X}");
         }
+    }
+
+    #[test]
+    fn baro_altitude_is_packed_like_inav() {
+        assert_eq!(baro_alt_payload(0.0, 0.0), [0x27, 0x10, 0]); // 10000
+        assert_eq!(baro_alt_payload(100.0, 1.0), [0x2A, 0xF8, 27]); // 11000; ln(2) / 0.026 = 26.7
+        assert_eq!(baro_alt_payload(-50.5, -1.0), [0x25, 0x17, (-27i8) as u8]); // 9495
+        assert_eq!(baro_alt_payload(3000.0, 0.0), [0x8B, 0xB8, 0]); // metres | 0x8000
+        assert_eq!(baro_alt_payload(-2000.0, -500.0), [0, 0, (-128i8) as u8]);
     }
 
     #[test]

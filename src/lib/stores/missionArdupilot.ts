@@ -5,7 +5,7 @@ import { writable, derived, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
 import { connection, linkHasMsp } from './connection';
 import { settings } from './settings';
-import { activeVehicleId, vehicles } from './vehicles';
+import { activeVehicleId, isActive, vehicles } from './vehicles';
 import { CMD, cmdDef, cmdHasLocation, type VehicleClass } from '$lib/helpers/arduCommandCatalog';
 import { translateWaypoints } from '$lib/helpers/missionGeo';
 
@@ -219,8 +219,7 @@ export const arduMissionModified = derived(
 export const arduMissionFcSynced = derived(arduMissionFlags, (f) => f.fc);
 
 // ── Vehicle class (drives the command catalog filter) ─────────────────
-// Online: derived from the FC's variant and locked. Offline: the operator picks it (QuadPlane can't be
-// auto-detected — it reports as ArduPlane — so it is an offline-only choice for now).
+// Online: derived from the FC (variant, MAV_TYPE, Q_ENABLE) and locked. Offline: the operator picks it.
 
 const VEHICLE_CLASSES: VehicleClass[] = ['plane', 'copter', 'quadplane', 'rover', 'boat', 'sub'];
 
@@ -267,17 +266,36 @@ export function detectVehicleClass(variant: string, mavType: number | null | und
   return null;
 }
 
+// Vehicles whose Q_ENABLE answered 1, kept until every link is closed: the answer comes once, possibly
+// before connect returns, and wins over the class derived from the HEARTBEAT ("plane").
+const _quadplanes = new Set<string>();
+
+/** Whether the FC of this vehicle answered Q_ENABLE = 1 on the current link. */
+export function isQuadplane(vehicleId: string | null | undefined): boolean {
+  return _quadplanes.has(vehicleId ?? '');
+}
+
+export function noteQuadplane(payload: { vehicleId?: string }): void {
+  if (!payload.vehicleId) return;
+  _quadplanes.add(payload.vehicleId);
+  if (isActive(payload) && get(arduVehicleClass) === 'plane' && !linkHasMsp(get(connection))) {
+    arduVehicleClass.set('quadplane');
+  }
+}
+
 let _lastVariantForClass = '';
 connection.subscribe((c) => {
+  if (c.status === 'disconnected' || c.status === 'error') _quadplanes.clear();
   if (c.status !== 'connected' || !c.fcInfo) { _lastVariantForClass = ''; return; }
   // An INAV MSP link (direct or MSP over MAVLink) has no ArduPilot vehicle class — its HEARTBEAT MAV_TYPE
   // (e.g. a VTOL type on a tunnel link) must not re-class the ArduPilot planner.
   if (linkHasMsp(c)) return;
-  const key = `${c.fcInfo.fc_variant}/${c.fcInfo.mav_type ?? ''}`;
+  const vehicleId = get(activeVehicleId) ?? '';
+  const key = `${vehicleId}/${c.fcInfo.fc_variant}/${c.fcInfo.mav_type ?? ''}`;
   if (key === _lastVariantForClass) return;
   _lastVariantForClass = key;
   const cls = detectVehicleClass(c.fcInfo.fc_variant, c.fcInfo.mav_type);
-  if (cls) arduVehicleClass.set(cls);
+  if (cls) arduVehicleClass.set(cls === 'plane' && _quadplanes.has(vehicleId) ? 'quadplane' : cls);
 });
 
 // Drop the FC provenance flag on any disconnect — the on-FC mission is then unknown (mirrors INAV).
@@ -478,10 +496,27 @@ export async function downloadArduMissionFromFc(): Promise<number> {
   const wps = await invoke<ArduWaypoint[]>('ardu_mission_download', { vehicleId: get(activeVehicleId) });
   arduMission.set(wps);
   arduClearWpSelection();
-  arduLoadedMissionId.set(null); // from the FC → not a library mission
+  arduLoadedMissionId.set(null);
   arduClearUndoHistory();        // downloaded mission = fresh undo baseline
   markArduMissionSynced('fc', wps);
+  await linkDownloadToLibrary(wps);
   return wps.length;
+}
+
+/** What the FC returned may be a mission the library already holds: same content hash → linked and
+ *  DB-synced. */
+async function linkDownloadToLibrary(wps: ArduWaypoint[]): Promise<void> {
+  if (wps.length === 0) return;
+  try {
+    // Imported here: the helper imports this store.
+    const { findArduLibraryMissionId } = await import('$lib/helpers/missionLibraryArdu');
+    const id = await findArduLibraryMissionId(wps, get(settings).flightLogDbPath);
+    if (id == null || get(arduMission) !== wps) return;
+    arduLoadedMissionId.set(id);
+    markArduMissionSynced('db', wps);
+  } catch (e) {
+    console.warn('[mission] library lookup after the FC download failed', e);
+  }
 }
 
 // ── Upload framing ────────────────────────────────────────────────────
@@ -564,22 +599,9 @@ export function parseWaypoints(text: string): ArduWaypoint[] {
 }
 
 // ── QGroundControl .plan file format (PX4 ecosystem) ──────────────────
-// A QGC "Plan" is a JSON container: `mission.items[]` of SimpleItems (command / frame /
-// params[7] / autoContinue — exactly the ArduWaypoint fields, with lat/lon/alt riding in
-// params[4..6]), plus a plannedHomePosition and geoFence/rallyPoints sections. QGC saves
-// ONLY this format since v3.2 (it still *imports* .waypoints), so missions coming out of
-// the PX4 ecosystem arrive as .plan files. Import scope for 1.0:
-//  * ComplexItems (Survey, Corridor Scan, …) are QGC-computed patterns that only QGC can
-//    expand into waypoints → refuse the whole file with a readable error rather than
-//    silently dropping flight path.
-//  * geoFence / rallyPoints sections are ignored — Kite handles fence and rally as
-//    separate subsystems; a .plan EXPORT that bundles them is a planned 1.1 feature.
-//  * plannedHomePosition is ignored — like the MAVLink path, the working mission holds
-//    only real waypoints (ArduPilot's home slot 0 is synthesized on upload, PX4 has no
-//    home slot at all; see `reserve_home` in mavlink_proto/mission.rs).
-//  * null params (QGC's "no preference", typically yaw) become 0 — the same value
-//    Kite-authored missions carry in those fields. NaN cannot cross the Tauri IPC
-//    boundary (JSON has no NaN; the Rust side deserializes plain f32).
+// QGC .plan: `mission.items[]` = SimpleItems (lat / lon / alt in params[4..6]) and ComplexItems (patterns).
+// geoFence / rallyPoints and plannedHomePosition are ignored: the working mission holds real waypoints
+// only (see `reserve_home` in mavlink_proto/mission.rs).
 
 /** Which system a .plan targets: `mission.firmwareType` 12 (MAV_AUTOPILOT_PX4) → px4, everything
  *  else (3 = ArduPilotMega, absent, unparseable) → ardupilot. Both share the mission stack — this
@@ -593,10 +615,25 @@ export function planFirmwareTarget(text: string): 'ardupilot' | 'px4' {
   }
 }
 
-/** Replace the working mission with waypoints loaded from a file — the shared post-parse sequence
- *  of every file-import path (panel dialog, global drag-drop): fresh selection, not a library
- *  mission, fresh undo baseline, FILE provenance. */
-export function loadArduMissionFromFile(wps: ArduWaypoint[]): void {
+/** Vehicle class a .plan was made for (`mission.vehicleType` is a MAV_TYPE), or null when it does not say. */
+export function planVehicleClass(text: string): VehicleClass | null {
+  try {
+    const type = (JSON.parse(text) as { mission?: { vehicleType?: number } })?.mission?.vehicleType;
+    return typeof type === 'number' ? mavTypeToClass(type) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A vehicle class read from a file or a library entry; unknown values are dropped. */
+export function knownVehicleClass(cls: string | null | undefined): VehicleClass | null {
+  return cls != null && (VEHICLE_CLASSES as string[]).includes(cls) ? (cls as VehicleClass) : null;
+}
+
+/** Shared post-parse step of every file import (FILE provenance, not a library mission). A class the
+ *  file names selects the editor's class; ignored while connected, the FC decides then. */
+export function loadArduMissionFromFile(wps: ArduWaypoint[], vehicleClass: VehicleClass | null = null): void {
+  if (vehicleClass) setArduVehicleClass(vehicleClass);
   arduMission.set(wps);
   arduSelectedWpIndex.set(-1);
   arduLoadedMissionId.set(null);
@@ -617,39 +654,61 @@ export function parsePlanFile(text: string): ArduWaypoint[] {
   }
   const wps: ArduWaypoint[] = [];
   for (const raw of plan.mission.items) {
-    const item = raw as {
-      type?: string;
-      command?: number;
-      frame?: number;
-      autoContinue?: boolean;
-      params?: (number | null)[];
-    };
-    if (item?.type !== 'SimpleItem') {
-      throw new Error(
-        `unsupported "${item?.type ?? 'unknown'}" item — pattern items (Survey, Corridor Scan, …) exist only inside QGroundControl`,
-      );
-    }
-    if (typeof item.command !== 'number' || !Array.isArray(item.params) || item.params.length < 7) {
-      throw new Error('malformed mission item in .plan file');
-    }
-    const p = (i: number): number => {
-      const v = item.params?.[i];
-      return typeof v === 'number' && Number.isFinite(v) ? v : 0;
-    };
-    wps.push({
-      command: item.command,
-      frame: (item.frame ?? MAV_FRAME_GLOBAL_RELATIVE_ALT) as MavFrame,
-      param1: p(0),
-      param2: p(1),
-      param3: p(2),
-      param4: p(3),
-      lat: Math.round(p(4) * 1e7),
-      lon: Math.round(p(5) * 1e7),
-      alt: p(6),
-      autocontinue: item.autoContinue !== false,
-    });
+    for (const item of planSimpleItems(raw)) wps.push(planItemToWaypoint(item));
   }
   return wps;
+}
+
+interface PlanSimpleItem {
+  type?: string;
+  command?: number;
+  frame?: number;
+  autoContinue?: boolean;
+  params?: (number | null)[];
+}
+
+/** A Survey carries the waypoints QGC generated (`TransectStyleComplexItem.Items`) next to its definition;
+ *  they are taken as they are. A pattern without them only QGC can expand: the file is refused. */
+function planSimpleItems(raw: unknown): PlanSimpleItem[] {
+  const item = raw as PlanSimpleItem & {
+    complexItemType?: string;
+    TransectStyleComplexItem?: { Items?: unknown[] };
+  };
+  if (item?.type === 'SimpleItem') return [item];
+  const generated = item?.TransectStyleComplexItem?.Items;
+  if (item?.type === 'ComplexItem' && Array.isArray(generated) && generated.length > 0) {
+    return generated.map((g) => {
+      if ((g as PlanSimpleItem)?.type !== 'SimpleItem') throw new Error('malformed pattern item in .plan file');
+      return g as PlanSimpleItem;
+    });
+  }
+  const kind = item?.complexItemType ?? item?.type ?? 'unknown';
+  throw new Error(
+    `unsupported "${kind}" item — the file holds only its definition, not the waypoints. Upload the plan to the flight controller from QGroundControl, then download the mission here`,
+  );
+}
+
+function planItemToWaypoint(item: PlanSimpleItem): ArduWaypoint {
+  if (typeof item.command !== 'number' || !Array.isArray(item.params) || item.params.length < 7) {
+    throw new Error('malformed mission item in .plan file');
+  }
+  // null = QGC's "no preference" (typically yaw) → 0, like Kite's own missions; NaN cannot cross the Tauri IPC.
+  const p = (i: number): number => {
+    const v = item.params?.[i];
+    return typeof v === 'number' && Number.isFinite(v) ? v : 0;
+  };
+  return {
+    command: item.command,
+    frame: (item.frame ?? MAV_FRAME_GLOBAL_RELATIVE_ALT) as MavFrame,
+    param1: p(0),
+    param2: p(1),
+    param3: p(2),
+    param4: p(3),
+    lat: Math.round(p(4) * 1e7),
+    lon: Math.round(p(5) * 1e7),
+    alt: p(6),
+    autocontinue: item.autoContinue !== false,
+  };
 }
 
 // ── Per-vehicle missions (multi-vehicle) ───────────────────────────────

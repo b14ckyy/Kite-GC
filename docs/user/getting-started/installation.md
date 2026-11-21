@@ -12,12 +12,12 @@ grabbing:
 | Platform | Installer | Standalone | Portable |
 |---|---|---|---|
 | **Windows** (x64) | `..._installer.exe` (NSIS — install for you or all users) | — | `..._portable.zip` |
-| **Linux** (x64 / arm64) | `..._installer.deb` (Debian/Ubuntu) or `..._installer.rpm` (Fedora/openSUSE) | `..._standalone.AppImage` | `..._portable.zip` |
+| **Linux** (x64 / arm64) | `..._installer.deb` (Debian/Ubuntu) or `..._installer.rpm` (Fedora/openSUSE) | — | `..._portable.zip` |
 | **macOS** (universal) | `..._installer.dmg` | `..._standalone.zip` (the `.app`) | — |
-| **Android** (arm64) | `KiteGC_Android_universal_<version>_installer.apk` | — | — |
+| **Android** | `KiteGC_Android_arm64_<version>_installer.apk`, or `..._armv7_...` if the arm64 one does not install (32-bit Android) | — | — |
 
 - **Installer** — integrates with your system (Start menu / app launcher, uninstaller).
-- **Standalone** — one self-contained runnable file (Linux `.AppImage`, macOS `.app`); no install.
+- **Standalone** — the macOS `.app`, zipped; runs without an install.
 - **Portable** — the bare executable, zipped **with an empty `.portable` marker** already inside, so all
   data stays in a `data/` folder next to it (see [Installed vs portable mode](#installed-vs-portable-mode)).
 
@@ -40,8 +40,8 @@ Download the `.apk` on the device and open it; Android asks once to allow instal
 or file manager. Phones get a dedicated landscape layout, tablets the desktop one. Links: **USB serial**
 over an OTG cable (Android asks per device — pick Kite in the dialog when you plug the cable in),
 **Bluetooth LE** (the first scan asks for the *Nearby devices* permission) and **Wi-Fi** (UDP / TCP).
-Data lives in the app's private storage; **Settings → Data** can point the flight database and raw
-logs at a shared folder instead. See [Connecting](../guides/connecting.md) for what happens while
+Data lives in the app's private storage; **Settings → Data** exports the flight database as a file
+and can move the raw logs to a shared folder. See [Connecting](../guides/connecting.md) for what happens while
 Kite is in the background.
 
 **iPhone / iPad**: no public download yet — the app builds from source (see
@@ -56,18 +56,21 @@ sudo dpkg -i KiteGC_Linux_*_installer.deb
 # Fedora / openSUSE
 sudo rpm -i KiteGC_Linux_*_installer.rpm
 
-# AppImage — no install needed
-chmod +x KiteGC_Linux_*_standalone.AppImage
-./KiteGC_Linux_*_standalone.AppImage
+# Portable — no install needed
+unzip KiteGC_Linux_*_portable.zip -d kite-gc
+./kite-gc/kite-gc
 ```
+
+There is no AppImage from Kite 2.0 on. The portable ZIP is the download that runs without an install;
+it uses your system's WebKitGTK 4.1 and GStreamer, which the `.deb` and `.rpm` ask your package
+manager for.
 
 !!! warning "Linux: your distribution needs to be reasonably current"
     The Linux downloads are compiled on Ubuntu 24.04 and need **glibc 2.39 or newer** — Ubuntu 24.04+,
     Debian 13 (Trixie), Raspberry Pi OS Trixie, Fedora 40+ or a current rolling release. On an older
     system they refuse to start with a message like `version 'GLIBC_2.39' not found`. **Debian 12,
     Raspberry Pi OS Bookworm and Ubuntu 22.04 are below that line.** It applies to every Linux
-    download, the AppImage included: an AppImage bundles the app's own libraries but never glibc,
-    which always comes from your system.
+    download, the portable ZIP included.
 
     **On those same older systems, video has a problem we cannot package around.** They ship
     WebKitGTK 2.50, and Kite runs inside that engine. In the 2.50 series a stopped video stream can
@@ -75,28 +78,6 @@ chmod +x KiteGC_Linux_*_standalone.AppImage
     does. Debian 13 and Ubuntu 24.04 carry 2.52, where this does not happen. So an older distribution
     is not merely unsupported by these downloads; it is a system on which Kite's video would misbehave
     however you installed it.
-
-!!! warning "AppImage: on a very new distribution you may get an empty window"
-    There is a limit at the other end too, and it affects **only the AppImage**. On **Ubuntu 26.04**
-    it starts, draws an empty grey or white window and never loads the interface; the terminal ends
-    with `Could not create default EGL display: EGL_BAD_PARAMETER. Aborting...`.
-
-    **Use the `.deb` instead — it works on the same system.** So does the `.rpm` on the Fedora side.
-
-    An AppImage carries the app's own GTK, GLib and WebKitGTK — here the versions from Ubuntu 24.04 —
-    while the graphics driver always comes from your system. On Ubuntu 26.04 the gap between those two
-    halves has grown too wide: the bundled browser engine can no longer create a display.
-
-    We looked for a packaging fix and did not find one. Bundling *less* makes it worse, because your
-    system's libraries then land on a GLib older than they need; bundling the graphics driver is not
-    an option either, since it has to match your kernel. Rebuilding on a newer base would fix the
-    AppImage and lock out every system below it — the `.deb` included — which is not a trade we are
-    willing to make.
-
-    Verified working: **Ubuntu 24.04**, **Debian 13**. Known broken: **Ubuntu 26.04**.
-
-    If you know AppImage packaging or WebKitGTK well and see something we missed, please say so in
-    [issue #29](https://github.com/b14ckyy/Kite-GC/issues/29) — we would rather be wrong about this.
 
     You can still **[build Kite yourself](../for-developers/building.md)** on an older distribution and
     everything else will work — but the video issue comes from your system's browser engine, so a
@@ -112,7 +93,7 @@ You can run Kite two ways:
 - **Portable** — unzip the `..._portable.zip`: it already contains the executable **and** an empty file
   named **`.portable`**, so Kite keeps **everything** — the flight database, raw logs, and any downloaded
   helper tools — in a single `data/` folder **next to the executable**, writing nothing to your user
-  profile. (You can also add a `.portable` file next to a standalone executable / AppImage yourself.)
+  profile. (You can also add a `.portable` file next to the executable yourself.)
 
 !!! tip "When to go portable"
     Portable mode is ideal for a USB stick or a self-contained folder you can move between PCs, or when
@@ -144,6 +125,19 @@ size/position**, because that path can't be redirected.)
     The **database folder** and the **raw-log folder** are independent and can each be pointed
     anywhere in **Settings** — handy for putting the database on a larger or faster drive. On Windows
     the Documents path follows a OneDrive relocation automatically.
+
+## Memory requirements
+
+Kite's memory use is almost entirely the map: tiles are held as textures by the web view, so it grows
+with the size of the window in pixels. The 3D view and a larger screen need more, video adds very little.
+
+| | Minimum free RAM | Recommended free RAM |
+|---|---|---|
+| **Android** | 1 GB | 2 GB |
+| **Desktop** (Windows, Linux, macOS) | 2 GB | 4 GB |
+
+"Free" means available to Kite while it runs, on top of the system and your other apps. The recommended
+values also cover 4K and ultrawide screens with headroom.
 
 ## Storage requirements
 

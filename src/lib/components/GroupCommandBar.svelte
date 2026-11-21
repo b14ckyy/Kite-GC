@@ -3,9 +3,8 @@
   Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 -->
 
-<!-- GroupCommandBar — bottom-centre overlay over the map (lives in +page's `.app-toasts` band) hosting
-     the shared group command set (GroupCommandButtons) plus the selection count. Rendered only while
-     2+ MAVLink vehicles are connected. The same buttons also sit in the fleet panel footer.
+<!-- GroupCommandBar — bottom-centre map overlay (in +page's `.app-toasts` band) with the shared group commands
+     and the selection count, only while 2+ MAVLink vehicles are connected (also in the fleet panel footer).
      See docs/02-design/features/fleet-control.design.md §4.2. -->
 <script lang="ts">
   import { t } from 'svelte-i18n';
@@ -34,6 +33,10 @@
 {/if}
 
 <style>
+  /* The group confirmation renders in the panels layer, below this bar: out of its way while it is open. */
+  :global(body:has(.gc-backdrop)) .gcb {
+    visibility: hidden;
+  }
   .gcb {
     position: absolute;
     /* Bottom-centre of the frame, above the status bar / bottom widget dock. */

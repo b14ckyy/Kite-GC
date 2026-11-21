@@ -1,27 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-//! Serial transport for Android, over the USB Host API.
-//!
-//! Android has no `/dev/tty*` an unprivileged app may open, so the `serialport` crate the desktop
-//! implementation is built on has no backend there and is not compiled into the mobile build (see the
-//! `cfg(not(target_os = "android"))` dependency block in `Cargo.toml`). The platform route is the USB
-//! Host API, which only exists in Java — so the driver lives in `UsbSerial.kt` in the Android app
-//! module and this file is the JNI shim in front of it.
-//!
-//! The split is deliberate: everything crossing the boundary is a primitive, a `String` or a byte
-//! array, and the Kotlin side owns all device state behind an integer handle. That keeps the JNI
-//! surface small enough to read in one sitting, and means a driver fix for a new USB-serial chip is a
-//! Kotlin change with no Rust involvement.
-//!
-//! Which devices work is decided in `UsbSerial.kt`: CDC-ACM (every mainstream flight controller
-//! connected directly by USB) and Silicon Labs CP210x (most SiK telemetry radios). FTDI and CH340 are
-//! not driven yet.
-//!
-//! Permissions are per device and per session on Android. `SerialConnection::open` blocks on the
-//! system dialog the first time a device is used; plugging the cable in and choosing Kite from the
-//! system's app picker grants it up front and skips the prompt.
+//! Android serial: USB devices through the USB Host API (UsbSerial.kt owns all device state behind
+//! an integer handle; this is the JNI shim), built-in /dev/tty* nodes of known hardware through the
+//! serialport crate's posix backend. The path decides the backend (is_tty_node).
 
+use std::io::{Read, Write};
 use std::time::Duration;
 
 use jni::objects::{JByteArray, JValue};
@@ -77,13 +61,15 @@ fn last_error(handle: i32) -> String {
     jvm::check(&mut env, r, "reading the error text").unwrap_or_else(|e| e)
 }
 
-/// List connectable USB-serial devices.
-///
-/// The Kotlin side answers with a JSON array of `{path, label, type}` — the same shape [`PortInfo`]
-/// serialises to, so the port picker needs no Android-specific handling. Any failure yields an empty
-/// list, exactly like a desktop machine with nothing plugged in: enumeration runs on a timer and must
-/// never surface an error dialog.
+/// USB devices first (a plugged-in FC keeps the top of the picker), then built-in UARTs. Never an
+/// error: enumeration runs on a timer, a failure yields an empty list.
 pub fn list_ports() -> Vec<PortInfo> {
+    let mut ports = usb_ports();
+    ports.extend(crate::android::device::internal_serial_ports());
+    ports
+}
+
+fn usb_ports() -> Vec<PortInfo> {
     let json = match list_ports_json() {
         Ok(json) => json,
         Err(e) => {
@@ -127,21 +113,61 @@ fn list_ports_json() -> Result<String, String> {
     jvm::check(&mut env, r, "reading the device list")
 }
 
-/// An open USB-serial link. The Kotlin side owns the `UsbDeviceConnection`; this is the handle to it.
+enum Backend {
+    /// A USB device driven by `UsbSerial.kt`; the Kotlin side owns the `UsbDeviceConnection` and
+    /// this is the handle to it.
+    Usb { handle: i32, read_timeout_ms: i32 },
+    /// A tty node of the device itself (the AX12's `/dev/ttyS1`), opened through the `serialport`
+    /// crate exactly as the Linux desktop build does.
+    Tty(Box<dyn serialport::SerialPort>),
+}
+
 pub struct SerialConnection {
     port_name: String,
-    handle: i32,
-    read_timeout_ms: i32,
+    backend: Backend,
+}
+
+/// USB device names are always /dev/bus/usb/… (UsbManager), so this prefix cannot misroute one.
+fn is_tty_node(port_name: &str) -> bool {
+    port_name.starts_with("/dev/tty")
 }
 
 impl SerialConnection {
-    /// Open `port_name` (an Android device node such as `/dev/bus/usb/001/002`, as reported by
-    /// [`list_ports`]) at `baud_rate`.
-    ///
-    /// Blocks while the USB permission dialog is up — up to a minute — so it must not be called from
-    /// a thread that has to stay responsive. That matches the desktop implementation, which retries a
-    /// flaky open for up to 1.5 s; both are driven from the connection command, off any UI path.
+    /// A USB node (/dev/bus/usb/…) or a tty node (/dev/ttyS1), as listed by [`list_ports`]. A USB
+    /// open blocks while the permission dialog is up (up to a minute): never call it from a thread
+    /// that must stay responsive.
     pub fn open(port_name: &str, baud_rate: u32) -> Result<Self, String> {
+        if is_tty_node(port_name) {
+            return Self::open_tty(port_name, baud_rate);
+        }
+        Self::open_usb(port_name, baud_rate)
+    }
+
+    /// The tty path. No retry loop: a node that is there and accessible opens on the first try, and
+    /// the two ways it fails — missing, or not ours to open — do not change with waiting.
+    fn open_tty(port_name: &str, baud_rate: u32) -> Result<Self, String> {
+        log::info!("[tty-serial] open requested: {port_name} @ {baud_rate} baud");
+        let port = serialport::new(port_name, baud_rate)
+            .timeout(Duration::from_millis(READ_TIMEOUT_MS))
+            .open()
+            .map_err(|e| {
+                log::warn!("[tty-serial] open {port_name} failed (kind={:?}): {e}", e.kind());
+                format!("Failed to open {port_name}: {e}")
+            })?;
+        let mut conn = Self {
+            port_name: port_name.to_string(),
+            backend: Backend::Tty(port),
+        };
+        // Same DTR/RTS convention as every other backend (see `open_usb`). The AX12's UART1 has both
+        // modem lines wired and asserted by the firmware already; harmless either way.
+        if let Err(e) = conn.set_control_signals(true, true) {
+            log::warn!("[tty-serial] {port_name}: raising DTR/RTS failed (continuing): {e}");
+        }
+        log::info!("[tty-serial] {port_name} opened");
+        Ok(conn)
+    }
+
+    fn open_usb(port_name: &str, baud_rate: u32) -> Result<Self, String> {
         log::info!("[usb-serial] open requested: {port_name} @ {baud_rate} baud");
 
         let mut env = jvm::env()?;
@@ -167,14 +193,14 @@ impl SerialConnection {
 
         let mut conn = Self {
             port_name: port_name.to_string(),
-            handle,
-            read_timeout_ms: READ_TIMEOUT_MS as i32,
+            backend: Backend::Usb {
+                handle,
+                read_timeout_ms: READ_TIMEOUT_MS as i32,
+            },
         };
 
-        // Raise DTR/RTS on open, like every standard tool does. USB-CDC devices gate their
-        // device→host stream on DTR (`tud_cdc_n_connected()`), so without this the link looks dead in
-        // exactly one direction — the same failure the desktop backend was fixed for. Best-effort:
-        // some bridges do not implement the lines.
+        // Raise DTR/RTS: USB-CDC devices gate their device→host stream on DTR
+        // (`tud_cdc_n_connected()`). Best-effort: some bridges do not implement the lines.
         if let Err(e) = conn.set_control_signals(true, true) {
             log::warn!("[usb-serial] {port_name}: raising DTR/RTS failed (continuing): {e}");
         }
@@ -183,8 +209,16 @@ impl SerialConnection {
         Ok(conn)
     }
 
-    /// Assert/deassert DTR + RTS. See the note in [`SerialConnection::open`] for why this matters.
+    /// Assert/deassert DTR + RTS. See the note in [`SerialConnection::open_usb`] for why this matters.
     pub fn set_control_signals(&mut self, dtr: bool, rts: bool) -> Result<(), String> {
+        let handle = match &mut self.backend {
+            Backend::Tty(port) => {
+                port.write_data_terminal_ready(dtr).map_err(|e| format!("DTR: {e}"))?;
+                port.write_request_to_send(rts).map_err(|e| format!("RTS: {e}"))?;
+                return Ok(());
+            }
+            Backend::Usb { handle, .. } => *handle,
+        };
         let mut env = jvm::env()?;
         let class = jvm::app_class(&mut env, BRIDGE)?;
         let r = env
@@ -193,7 +227,7 @@ impl SerialConnection {
                 "setControlLines",
                 "(IZZ)Z",
                 &[
-                    JValue::Int(self.handle),
+                    JValue::Int(handle),
                     JValue::Bool(dtr as u8),
                     JValue::Bool(rts as u8),
                 ],
@@ -203,18 +237,22 @@ impl SerialConnection {
         if ok {
             Ok(())
         } else {
-            Err(last_error(self.handle))
+            Err(last_error(handle))
         }
     }
 }
 
 impl Drop for SerialConnection {
     fn drop(&mut self) {
+        // A tty closes itself with its `serialport` handle; only the USB side has Kotlin-held state.
+        let Backend::Usb { handle, .. } = self.backend else {
+            return;
+        };
         let closed = (|| -> Result<(), String> {
             let mut env = jvm::env()?;
             let class = jvm::app_class(&mut env, BRIDGE)?;
             let r = env
-                .call_static_method(&class, "close", "(I)V", &[JValue::Int(self.handle)])
+                .call_static_method(&class, "close", "(I)V", &[JValue::Int(handle)])
                 .map(|_| ());
             jvm::check(&mut env, r, "UsbSerial.close")
         })();
@@ -228,6 +266,17 @@ impl Drop for SerialConnection {
 
 impl ByteTransport for SerialConnection {
     fn read_bytes(&mut self, buf: &mut [u8]) -> Result<usize, TransportError> {
+        let (handle, read_timeout_ms) = match &mut self.backend {
+            Backend::Tty(port) => {
+                // Mirrors the desktop backend: a read timeout is an idle tick, not an error.
+                return match port.read(buf) {
+                    Ok(n) => Ok(n),
+                    Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => Ok(0),
+                    Err(e) => Err(TransportError::from(e)),
+                };
+            }
+            Backend::Usb { handle, read_timeout_ms } => (*handle, *read_timeout_ms),
+        };
         let mut env = jvm::env().map_err(TransportError::Io)?;
         let class = jvm::app_class(&mut env, BRIDGE).map_err(TransportError::Io)?;
 
@@ -243,9 +292,9 @@ impl ByteTransport for SerialConnection {
                 "read",
                 "(I[BI)I",
                 &[
-                    JValue::Int(self.handle),
+                    JValue::Int(handle),
                     JValue::Object(&jbuf),
-                    JValue::Int(self.read_timeout_ms),
+                    JValue::Int(read_timeout_ms),
                 ],
             )
             .and_then(|v| v.i());
@@ -272,6 +321,14 @@ impl ByteTransport for SerialConnection {
     }
 
     fn write_bytes(&mut self, data: &[u8]) -> Result<(), TransportError> {
+        let handle = match &mut self.backend {
+            Backend::Tty(port) => {
+                port.write_all(data).map_err(TransportError::from)?;
+                port.flush().map_err(TransportError::from)?;
+                return Ok(());
+            }
+            Backend::Usb { handle, .. } => *handle,
+        };
         let mut env = jvm::env().map_err(TransportError::Io)?;
         let class = jvm::app_class(&mut env, BRIDGE).map_err(TransportError::Io)?;
 
@@ -285,7 +342,7 @@ impl ByteTransport for SerialConnection {
                 "write",
                 "(I[BI)Z",
                 &[
-                    JValue::Int(self.handle),
+                    JValue::Int(handle),
                     JValue::Object(&jdata),
                     JValue::Int(WRITE_TIMEOUT_MS),
                 ],
@@ -298,15 +355,22 @@ impl ByteTransport for SerialConnection {
         } else {
             Err(TransportError::Io(format!(
                 "Serial write failed: {}",
-                last_error(self.handle)
+                last_error(handle)
             )))
         }
     }
 
     fn set_read_timeout(&mut self, timeout: Duration) {
-        // Clamped to at least 1 ms: a zero timeout makes Android's `bulkTransfer` block forever, which
-        // is the opposite of what a caller asking for a tight poll wants.
-        self.read_timeout_ms = (timeout.as_millis() as i32).max(1);
+        match &mut self.backend {
+            Backend::Tty(port) => {
+                let _ = port.set_timeout(timeout);
+            }
+            Backend::Usb { read_timeout_ms, .. } => {
+                // Clamped to at least 1 ms: a zero timeout makes Android's `bulkTransfer` block
+                // forever, which is the opposite of what a caller asking for a tight poll wants.
+                *read_timeout_ms = (timeout.as_millis() as i32).max(1);
+            }
+        }
     }
 
     fn description(&self) -> String {

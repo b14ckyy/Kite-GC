@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// FC system messages (MAVLink STATUSTEXT) shown as top-of-screen toasts. The backend emits
-// `mavlink-statustext` ({ severity, text }); we keep the most recent few, expire each one 20 s after
-// it individually arrived (unless it's already slid out of the buffer), and play a severity-tiered
-// audio cue. Severity is MAV_SEVERITY (0 = emergency … 7 = debug).
+// FC system messages (MAVLink STATUSTEXT, `mavlink-statustext`) as top-of-screen toasts, each expiring 20 s after
+// it arrived, with a severity-tiered audio cue; plus pinned GCS notices (`setPinnedStatus`) that stay until
+// cleared. Severity = MAV_SEVERITY (0 = emergency … 7 = debug).
 
 import { writable, get } from 'svelte/store';
 import { isActive, vehicles } from '$lib/stores/vehicles';
@@ -31,6 +30,8 @@ export interface StatusTextMsg {
   expiresAt: number;     // epoch ms when this line fades out (per-message lifetime)
   repeats: number;       // how many times this identical text has arrived while on screen (1 = once)
   vehicle?: StatusTextVehicle;
+  /** A GCS notice that stays until its owner clears it (`setPinnedStatus`); `pinned` is the owner's key. */
+  pinned?: string;
 }
 
 const MAX_BUFFER = 12;          // lines kept (the banner shows a few and scrolls to the newest)
@@ -60,11 +61,9 @@ function levelAllowed(level: StatusTextLevel): boolean {
 
 export const statusTexts = writable<StatusTextMsg[]>([]);
 
-/** Recent ArduPilot/PX4 "PreArm: …" failure reasons (newline-joined), for the arming indicator tooltip.
- *  Tracked independently of the toast `systemMessages` filter (so the detail is available even with
- *  toasts off). The red "not ready" STATE itself comes from the SYS_STATUS PREARM_CHECK bit, not this —
- *  this only supplies the human-readable reasons. Distinct lines accumulate during a check burst and the
- *  whole set clears once the FC stops repeating them (block cleared / armed). */
+/** Recent ArduPilot/PX4 "PreArm: …" reasons (newline-joined) for the arming tooltip, independent of the toast
+ *  filter. The red "not ready" STATE comes from SYS_STATUS PREARM_CHECK, not this. Lines accumulate during a
+ *  burst; the set clears once the FC stops repeating them. */
 export const prearmReason = writable<string | null>(null);
 // ArduPilot phrases arming blockers as "PreArm: …"; PX4 uses "Preflight Fail: …" / "Arming denied: …".
 // (PX4 matching is best-effort / untested — the SYS_STATUS PREARM_CHECK bit is the other fallback.)
@@ -102,7 +101,7 @@ function sweepExpired(): void {
 
 function scheduleSweep(): void {
   if (sweepTimer) { clearTimeout(sweepTimer); sweepTimer = null; }
-  const list = get(statusTexts);
+  const list = get(statusTexts).filter((m) => !m.pinned);
   if (!list.length) return;
   const soonest = Math.min(...list.map((m) => m.expiresAt));
   sweepTimer = setTimeout(sweepExpired, Math.max(0, soonest - Date.now()));
@@ -118,12 +117,9 @@ function push(severity: number, text: string, vehicle?: StatusTextVehicle): bool
   const expiresAt = Date.now() + CLEAR_AFTER_MS;
   let repeated = false;
   statusTexts.update((list) => {
-    // De-dup against the WHOLE buffer, not just the last line. An FC that nags with two alternating
-    // messages (INAV's "UNABLE TO ARM" / "WAITING FOR GPS FIX" while it waits for a fix) never repeats
-    // its *last* line, so a last-line-only check appends a fresh row for every nag and fills the banner
-    // within seconds. A repeat instead refreshes the existing line's lifetime and bumps its counter,
-    // keeping its position so the banner doesn't reshuffle while you're reading it. With several
-    // vehicles the same text from two craft is two lines (keyed by vehicle too).
+    // De-dup against the WHOLE buffer: an FC nagging with two alternating messages never repeats its last line.
+    // A repeat refreshes the existing line's lifetime and counter in place (no reshuffle). Keyed by vehicle too,
+    // so the same text from two craft is two lines.
     const idx = list.findIndex((m) => m.text === clean && (m.vehicle?.vehicleId ?? null) === (vehicle?.vehicleId ?? null));
     if (idx !== -1) {
       repeated = true;
@@ -131,7 +127,9 @@ function push(severity: number, text: string, vehicle?: StatusTextVehicle): bool
       refreshed[idx] = { ...refreshed[idx], severity, level, expiresAt, repeats: refreshed[idx].repeats + 1, vehicle: vehicle ?? refreshed[idx].vehicle };
       return refreshed;
     }
-    return [...list, { id: nextId++, severity, level, text: clean, expiresAt, repeats: 1, vehicle }].slice(-MAX_BUFFER);
+    const pinned = list.filter((m) => m.pinned);
+    const rest = [...list.filter((m) => !m.pinned), { id: nextId++, severity, level, text: clean, expiresAt, repeats: 1, vehicle }];
+    return [...pinned, ...rest.slice(-(MAX_BUFFER - pinned.length))];
   });
   scheduleSweep();
 
@@ -191,6 +189,31 @@ function playTone(level: StatusTextLevel): void {
  *  shown (false: filtered out by the "System Messages" setting). */
 export function pushLocalStatus(severity: number, text: string): boolean {
   return push(severity, text);
+}
+
+/** Show or update the GCS notice `key`: a red line above the messages that never expires and ignores the
+ *  "System Messages" filter (it is not an FC message). No sound — see `playAlarm`. */
+export function setPinnedStatus(key: string, text: string): void {
+  statusTexts.update((list) => {
+    const idx = list.findIndex((m) => m.pinned === key);
+    if (idx === -1) return [{ id: nextId++, severity: 2, level: 'error', text, expiresAt: Infinity, repeats: 1, pinned: key }, ...list];
+    if (list[idx].text === text) return list;
+    const next = [...list];
+    next[idx] = { ...next[idx], text };
+    return next;
+  });
+}
+
+export function clearPinnedStatus(key: string): void {
+  statusTexts.update((list) => (list.some((m) => m.pinned === key) ? list.filter((m) => m.pinned !== key) : list));
+}
+
+/** The loudest cue: three falling notes, for a pinned notice. */
+export function playAlarm(): void {
+  lastSoundAt = Date.now();
+  beep(880, 0, 160, 0.22);
+  beep(660, 200, 160, 0.22);
+  beep(440, 400, 320, 0.22);
 }
 
 /** Start listening for FC STATUSTEXT messages. Safe to call once on app init. */

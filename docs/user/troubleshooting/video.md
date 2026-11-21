@@ -69,6 +69,20 @@ the transport doesn't match the server (see above), or a firewall started blocki
 few reconnect cycles in a row are normal when a source restarts or the network path changes (e.g.
 switching between Wi-Fi and a cellular link).
 
+## macOS: an H.264 stream freezes and reconnects every few seconds
+
+Seen on the classic path (**Native RTSP client** switched off) with H.264 from **OBS using a hardware
+encoder** — NVENC and Quick Sync in our tests: the picture stops right after it starts, and Kite
+reconnects every few seconds, over and over. The same stream plays with the **Native RTSP client** on,
+and the same source plays on the classic path once OBS encodes in software (x264).
+
+- **Turn the Native RTSP client on** (Video panel → RTSP section; it is the default). That is the fix.
+- If you need the classic path, switch the source to a software H.264 encoder.
+
+The cause is in the stream itself: the macOS browser engine's decoder refuses it, and the classic path
+hands the stream on unchanged. Other hardware encoders may behave the same; we have not seen it with
+a camera so far.
+
 ## The picture stutters or shows "frames out of order"
 
 This is almost always the **source encoder**, not Kite. The classic direct path (Native RTSP client
@@ -185,11 +199,6 @@ sustain. Two things are worth knowing:
     `gstreamer1.0-plugins-bad`, `gstreamer1.0-nice`, `gstreamer1.0-plugins-good`, plus
     `gstreamer1.0-libav` if the decoder list is empty (recent Kite **.deb** packages request these
     automatically on install).
-
-    Either way, package installs only affect the **system installation (.deb)**: the **AppImage** brings
-    its own browser engine and does not use the system's media packages at all. If video matters to you
-    on Linux, prefer the **.deb / system installation** — it uses your distribution's engine and plugins,
-    which you can at least influence.
 - **Hardware conversion is used automatically where it exists.** Kite tests the machine once, the first time it is needed, and writes the verdict to the log:
     - Desktop graphics (Intel and AMD, via VAAPI) can do **both halves** — decoding and re-encoding —
       with the frames never leaving the GPU. Look for `[ffmpeg] VAAPI hardware H.264-decode +

@@ -1,26 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Phone widget grid packer (Dev-Docs active/PHONE_UI.md §3) — pure, deterministic, UI-free, and
-// free of runtime imports so `node --experimental-strip-types` can run a check script against it.
-//
-// POSITIONAL model: every active widget carries the position the user last gave it (page, row,
-// col). Packing "settles" the grid:
-//   1. Widgets are processed top-down (page, row, col). Each takes its own position if free.
-//   2. If not (a size change, a foreign drop, a smaller raster), it slides DOWN to the first fit at
-//      or below its position (next pages included); with nothing below, it takes the first fit
-//      anywhere (top-down); with nothing at all it overflows (the caller deactivates it).
-//   3. Gravity — from where it landed it RISES while every slot directly above its span is free.
-//      Nothing rises through an occupied slot, so an S under a W stays under the W even if the W
-//      left a hole beside it (Marc's example); no gap ever sits directly above a widget; no zig-zag.
-//   4. A span never crosses the page boundary; rising stops at the page top.
-//   5. The panel is 1 column wide iff no 2-wide widget is active and the 1×1 tiles fit on the
-//      pages; else maxCols. Columns are ignored while 1 column wide.
-// A widget that is (re)activated has no position yet: it is appended at the END (last page, last
-// row) and therefore ends up in the earliest free slot — "wo wieder Platz ist".
-//
-// Geometry (rows / max cols / pages) is a parameter — the caller passes config/phoneGrid.ts. The
-// raster may change to 5 × 2; nothing here assumes 4 rows.
+// Phone widget grid packer (Dev-Docs active/PHONE_UI.md §3) — pure and free of runtime imports, so
+// `node --experimental-strip-types` can run a check script against it. Widgets keep their last position;
+// packing settles the grid. Rules (referenced below): 1 top-down order, unpositioned last; 2 own slot,
+// else the first fit below, else anywhere; 3 gravity — rise while the slot above the span is free; 4 a
+// span never crosses a page; 5 one column iff no 2-wide widget is active and the 1×1 tiles fit.
 
 import type { WidgetSize } from '../config/widgetRegistry';
 
@@ -62,6 +47,14 @@ export interface PackResult {
   settled: PhoneWidgetEntry[];
 }
 
+/** The widget a drop just put on its position, and its place in the processing order: ahead of the
+ *  widgets that start on its row, or (`late`) behind every widget that starts on one of the rows of
+ *  its span (any column). */
+export interface PackMove {
+  id: string;
+  late: boolean;
+}
+
 /** Slot span of a size state: S 1×1, L 2×2, W 2×1. */
 export function spanOf(size: WidgetSize): { w: number; h: number } {
   if (size === 'L') return { w: 2, h: 2 };
@@ -77,7 +70,7 @@ export function columnsFor(entries: PhoneWidgetEntry[], geom: PhoneGridGeometry)
   return geom.maxCols;
 }
 
-export function packPhoneGrid(entries: PhoneWidgetEntry[], geom: PhoneGridGeometry): PackResult {
+export function packPhoneGrid(entries: PhoneWidgetEntry[], geom: PhoneGridGeometry, moved?: PackMove): PackResult {
   const cols = columnsFor(entries, geom);
   const occ: boolean[][][] = Array.from({ length: geom.pages }, () =>
     Array.from({ length: geom.rows }, () => Array.from({ length: cols }, () => false)),
@@ -94,10 +87,15 @@ export function packPhoneGrid(entries: PhoneWidgetEntry[], geom: PhoneGridGeomet
   // Rule 1: top-down processing; entries without a position come last (append at the end).
   const END = geom.pages * geom.rows;
   const linear = (e: PhoneWidgetEntry) => (e.page == null || e.row == null ? END : e.page * geom.rows + e.row);
+  const key = (e: PhoneWidgetEntry) => {
+    const at = linear(e);
+    if (!moved || e.id !== moved.id || at === END) return at;
+    return moved.late ? at + spanOf(e.size).h - 0.5 : at - 0.5;
+  };
   const order = entries
     .map((e, i) => ({ e, i }))
     .filter(({ e }) => e.active)
-    .sort((a, b) => linear(a.e) - linear(b.e) || a.e.col - b.e.col || a.i - b.i);
+    .sort((a, b) => key(a.e) - key(b.e) || a.e.col - b.e.col || a.i - b.i);
 
   const placements: Placement[] = [];
   const overflow: string[] = [];
@@ -151,6 +149,52 @@ export function packPhoneGrid(entries: PhoneWidgetEntry[], geom: PhoneGridGeomet
     return p ? { ...e, page: p.page, row: p.row, col: p.col } : e;
   });
   return { placements, cols, overflow, settled };
+}
+
+/** A drop: put widget `id` on (page, row, col) and settle the grid; what finds no slot is deactivated. The
+ *  widget keeps the dropped row wherever possible and the occupant gives way (up into the hole, else
+ *  down); of the two processing orders (`PackMove`) the one achieving that wins. A 1×1 on a 1×1 swaps. */
+export function packPhoneMove(
+  entries: PhoneWidgetEntry[],
+  geom: PhoneGridGeometry,
+  id: string,
+  page: number,
+  row: number,
+  col: number,
+): PhoneWidgetEntry[] {
+  const cur = entries.find((e) => e.id === id);
+  if (!cur) return entries;
+  const before = packPhoneGrid(entries, geom);
+  const span = spanOf(cur.size);
+  // A span never crosses the page end: a tall widget dropped on the last row sits one row higher.
+  const p = Math.max(0, Math.min(geom.pages - 1, page));
+  const r = Math.max(0, Math.min(geom.rows - span.h, row));
+  const c = span.w > 1 ? 0 : Math.max(0, Math.min(geom.maxCols - 1, col));
+  const own = before.placements.find((x) => x.id === id);
+  const there =
+    own && own.w === 1 && own.h === 1
+      ? before.placements.find(
+          (x) => x.id !== id && x.w === 1 && x.h === 1 && x.page === p && x.row === r && x.col === Math.min(c, before.cols - 1),
+        )
+      : undefined;
+  const next = entries.map((e) => {
+    if (e.id === id) return { ...e, active: true, page: p, row: r, col: c };
+    if (own && there && e.id === there.id) return { ...e, page: own.page, row: own.row, col: own.col };
+    return e;
+  });
+  const landed = (res: PackResult) => res.placements.some((x) => x.id === id && x.page === p && x.row === r);
+  const fits = (res: PackResult) => res.overflow.length === 0;
+  // A move never costs a widget its place: an order that leaves one without a slot is not taken while another
+  // keeps them all. The last try is the plain order without the swap — the answer when none fits.
+  const tries = [
+    packPhoneGrid(next, geom, { id, late: false }),
+    packPhoneGrid(next, geom, { id, late: true }),
+    packPhoneGrid(next, geom),
+    packPhoneGrid(entries.map((e) => (e.id === id ? { ...e, active: true, page: p, row: r, col: c } : e)), geom),
+  ];
+  const res = tries.find((t) => fits(t) && landed(t)) ?? tries.find(fits) ?? tries[3];
+  const overflow = new Set(res.overflow);
+  return res.settled.map((e) => (e.active && overflow.has(e.id) ? { ...e, active: false } : e));
 }
 
 /** Would `id` (with `size`, `col`) find a slot if activated (appended at the end)? */

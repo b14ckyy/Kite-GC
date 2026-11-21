@@ -10,9 +10,8 @@ use serde::Serialize;
 use std::sync::{Arc, OnceLock};
 use tokio::sync::Semaphore;
 
-/// Cap on concurrent tile reads / existence checks. Each one occupies a blocking-pool thread; on a
-/// dead network share a stat or read can hang for a long time, and without a cap one pan of the map
-/// (dozens of tiles) could fill the whole blocking pool and stall every other blocking task.
+/// Cap on concurrent tile reads / existence checks: on a dead network share each can hang a blocking-pool
+/// thread, and one map pan could otherwise stall every other blocking task.
 const MAX_CONCURRENT_TILE_IO: usize = 8;
 
 fn tile_io_gate() -> Arc<Semaphore> {

@@ -1,12 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Unified flight-mode model (see docs/active/FLIGHT_MODE_UNIFIED.md).
-//
-// Each protocol input adapter classifies its raw mode data into a canonical FlightModeState
-// (string ids: one `primary` + zero or more `modifiers`). The pipeline, widget, track-coloring and
-// recording/replay consume only this — no protocol awareness downstream. The frontend output
-// registry maps ids → label + category (category → colour).
+// Unified flight-mode model (docs/active/FLIGHT_MODE_UNIFIED.md): every protocol adapter classifies into
+// a canonical FlightModeState (`primary` + `modifiers`); nothing downstream knows the protocol.
 
 use serde::Serialize;
 
@@ -24,10 +20,9 @@ impl FlightModeState {
     }
 }
 
-/// Synthetic INAV "arming disabled" bits the passive decoders (CRSF / S.Port) set on *disarmed* telemetry
-/// so the toolbar arming indicator can show ready vs not-ready — these links carry only a coarse mode
-/// signal, not INAV's real armingFlags bitfield. Real INAV MSP never uses bits 0/1 (armingFlag_e starts at
-/// ARMED = bit 2), so reusing them is safe; the frontend maps them to reasons in `helpers/arming.ts`.
+/// Synthetic INAV "arming disabled" bits the passive decoders set on disarmed telemetry (ready vs
+/// not-ready). Safe: real INAV armingFlags never use bits 0/1 (ARMED = bit 2); the frontend maps them in
+/// `helpers/arming.ts`.
 pub const ARM_DISABLE_INITIALISING: u32 = 1 << 0; // CRSF "WAIT" (still initialising)
 pub const ARM_DISABLE_BLOCKED: u32 = 1 << 1; // CRSF "!ERR" / S.Port arming-disabled
 
@@ -96,10 +91,8 @@ pub fn classify_inav(flags: u32) -> FlightModeState {
     FlightModeState { primary: primary.to_string(), modifiers }
 }
 
-/// Dispatch a MAVLink HEARTBEAT `custom_mode` to the right per-autopilot classifier, selected by the
-/// `fc_variant` string. PX4 packs the mode (main + sub) into `custom_mode` completely differently from
-/// ArduPilot's flat per-vehicle table, so they need separate decoders. Used by the live MAVLink handler
-/// and the tlog importer (both have the variant from the HEARTBEAT autopilot field).
+/// Dispatch a HEARTBEAT `custom_mode` by `fc_variant`: PX4 packs main + sub mode into it, ArduPilot uses
+/// a flat per-vehicle table.
 pub fn classify_mavlink(custom_mode: u32, variant: &str) -> FlightModeState {
     if variant.eq_ignore_ascii_case("PX4") {
         classify_px4(custom_mode)
@@ -108,10 +101,8 @@ pub fn classify_mavlink(custom_mode: u32, variant: &str) -> FlightModeState {
     }
 }
 
-/// Classify a PX4 HEARTBEAT `custom_mode` into the canonical model (no modifiers). PX4 uses
-/// `union px4_custom_mode`: `main_mode` in bits 16-23 and `sub_mode` in bits 24-31. The sub_mode
-/// only refines AUTO and POSCTL; every other mode is identified by main_mode alone. Ids mirror the
-/// frontend `MODE_REGISTRY` (`px4_*` plus the shared manual/acro/mission/land/takeoff entries).
+/// Classify a PX4 `custom_mode` (`px4_custom_mode`: main_mode bits 16-23, sub_mode bits 24-31; sub_mode
+/// only refines AUTO and POSCTL). Ids mirror the frontend `MODE_REGISTRY`.
 pub fn classify_px4(custom_mode: u32) -> FlightModeState {
     let main_mode = ((custom_mode >> 16) & 0xFF) as u8;
     let sub_mode = ((custom_mode >> 24) & 0xFF) as u8;
@@ -152,12 +143,9 @@ fn px4_mode_id(main_mode: u8, sub_mode: u8) -> Option<&'static str> {
     })
 }
 
-/// Classify a PX4 ULog `vehicle_status.nav_state` into the canonical model (no modifiers).
-/// ULog flash logs carry the commander's NAVIGATION_STATE_* enum, NOT the MAVLink
-/// `px4_custom_mode` union the HEARTBEAT uses, so the .ulg importer needs its own table.
-/// Ids map onto the same canonical set as `px4_mode_id`, so the frontend registry and
-/// translations cover them already. Values from PX4 msg/versioned/VehicleStatus.msg (v1.14+);
-/// a few pre-1.14 states occupied the gaps (6-9, 16) and fall through to the raw-id form.
+/// Classify a PX4 ULog `vehicle_status.nav_state` (NAVIGATION_STATE_*, not the HEARTBEAT union) onto the
+/// same canonical ids. Values from PX4 VehicleStatus.msg (v1.14+); pre-1.14 states in the gaps (6-9, 16)
+/// fall through to the raw-id form.
 pub fn classify_px4_nav_state(nav_state: u8) -> FlightModeState {
     let id = match nav_state {
         0 => "manual",            // MANUAL
@@ -183,11 +171,9 @@ pub fn classify_px4_nav_state(nav_state: u8) -> FlightModeState {
     FlightModeState::primary(id)
 }
 
-/// Classify an ArduPilot HEARTBEAT custom_mode into the canonical model (no modifiers). The registry
-/// resolves label + category. The per-vehicle table is selected from the fc_variant string, in every
-/// spelling that reaches here: "ArduPlane"/"ArduRover"/"ArduSub"/"ArduCopter" (live handshake, tlog,
-/// stored flights), "Plane"/"Copter"/"ArduBlimp"/"ArduPilot" (DataFlash), "plane"/"rover"/"sub"/
-/// "copter" (passthrough telemetry). Anything else uses the Copter table.
+/// Classify an ArduPilot HEARTBEAT custom_mode into the canonical model (no modifiers). The table is
+/// picked from fc_variant in every spelling that reaches here ("ArduPlane", DataFlash "Plane",
+/// passthrough "plane", …); anything else uses the Copter table.
 pub fn classify_ardupilot(custom_mode: u32, variant: &str) -> FlightModeState {
     let v = variant.trim().to_ascii_lowercase();
     let table: fn(u32) -> Option<&'static str> = if v.contains("plane") {
@@ -406,10 +392,8 @@ mod tests {
         assert_eq!(ap(5, "ArduSub"), "ardu_mode_5");
     }
 
-    /// Every variant spelling a caller passes: live handshake / tlog / stored flights ("Ardu*" from
-    /// `vehicle::identify`), DataFlash ("Plane", "Copter", "ArduBlimp", fallback "ArduPilot"),
-    /// passthrough telemetry (lower case). Rover 4 = Hold, Sub 19 = Manual, Plane 19 = QLoiter and
-    /// Copter 4 = Guided tell the tables apart.
+    /// Every variant spelling a caller passes (live "Ardu*", DataFlash, passthrough lower case). Rover
+    /// 4 = Hold, Sub 19 = Manual, Plane 19 = QLoiter and Copter 4 = Guided tell the tables apart.
     #[test]
     fn variant_spellings_select_the_right_table() {
         for v in ["ArduRover", "rover", "boat", "ARDUROVER"] {

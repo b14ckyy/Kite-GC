@@ -43,7 +43,7 @@ service by the app.
 | **Settings** | Units, layout, connection settings, map providers, API keys you entered (Cesium ion, OpenAIP, and any key inside the URL of a custom online provider), interface options | App data folder of the OS |
 | **Flight log database** | Telemetry recorded during flights: GPS track, altitude, speed, battery, flight modes, events; take-off place name and weather; your vehicle and battery records; the flight controller's hardware ID where the firmware reports one | App data folder of the OS |
 | **Database backup** | A full copy of the flight log database (`flights.pre-migration-backup.db`), written automatically before an update upgrades the database format. Only the latest is kept; Settings → Data → *Database backup* deletes it | Next to the flight log database |
-| **Replay caches** | Temporary decodes of a stored onboard log for **HI-RES** replay (`hires-cache/`), and logs opened for replay without importing them (`scratch/`). Removed when you close the flight or the opened logs, and at the next app start | Next to the flight log database |
+| **Replay caches** | Temporary decodes of a stored onboard log for **HI-RES** replay (`hires-cache/`), and logs opened for replay without importing them (`scratch/`). Removed when you close the flight or the opened logs, and at the next app start | App data folder of the OS |
 | **Missions, geozones, safe homes** | Waypoints and areas you plan, with coordinates | Files you save |
 | **Terrain cache** | Elevation tiles for areas you planned or flew in, kept so terrain features work offline | App data folder of the OS |
 | **Last known position** | A coarse (city-level) position, used to time the automatic night mode on the next start | Settings |
@@ -54,15 +54,16 @@ The exact locations and file formats are listed under
 [Troubleshooting → Connection](troubleshooting/connection.md#getting-a-diagnostic-log).
 
 Deleting the app's data folder, or uninstalling the app on Android and iOS, removes all of it. One
-exception on Android: if you pointed the flight database or the raw logs at a folder of your own
-(Settings → Data), Kite copies them there, and that copy stays when the app is uninstalled.
+exception on Android: if you pointed the raw logs at a folder of your own (Settings → Data), Kite
+moves them there, and they stay when the app is uninstalled. The same goes for every file you
+exported.
 
 ## Data that leaves your device only when you act
 
 These transfers happen only because you trigger them, and you choose the recipient every time:
 
 - **Exports** — flight logs (`.kflight`), vehicle (`.kvehicle`) and battery (`.kbatt`) files, missions
-  (`.mission`, `.waypoints`, `.plan`). Kite writes the file where you tell it to; on Android and iOS it
+  (`.mission`, `.waypoints`). Kite writes the file where you tell it to; on Android and iOS it
   hands the file to the system share sheet.
 - **Diagnostic log** — Settings → Diagnostics → *Open Folder* shows you the log file, and on Android
   *Share log file* passes it to the app you pick (mail, messenger, cloud drive). Attaching it to a bug
@@ -95,8 +96,8 @@ Each provider handles the request under its own privacy policy, which we link be
 
 | When | Service | What is sent | How to switch it off |
 | --- | --- | --- | --- |
-| **At every app start** | GitHub Releases API ([GitHub privacy statement](https://docs.github.com/site-policy/privacy-policies)) | A request for the latest release (with *Patch releases only* or *Include pre-releases*: the list of recent releases), including its release notes. No data about you or your installation. Not on iPhone and iPad, where the update check is off | Settings → Updates → *Check for updates: Disabled* |
-| **When a flight is recorded** (the aircraft arms with a valid GPS fix) | Open-Meteo ([privacy](https://open-meteo.com/en/terms)) and OpenStreetMap Nominatim ([privacy](https://osmfoundation.org/wiki/Privacy_Policy)) | The take-off coordinates, to store the weather and the place name in the logbook entry | *(no setting yet — see the note below)* |
+| **At every app start** | GitHub Releases API ([GitHub privacy statement](https://docs.github.com/site-policy/privacy-policies)) | A request for the latest release (with *Patch releases only* or *Include pre-releases*, and for a beta installed from Google Play: the list of recent releases), including its release notes. No data about you or your installation. Not on iPhone and iPad, where the update check is off | Settings → Updates → *Check for updates: Disabled* (a copy from Google Play: the switch off) |
+| **When a flight is recorded** (the aircraft arms with a valid GPS fix) | Open-Meteo ([privacy](https://open-meteo.com/en/terms)) and OpenStreetMap Nominatim ([privacy](https://osmfoundation.org/wiki/Privacy_Policy)) | The take-off coordinates — to Open-Meteo rounded to two decimals (about 1 km) — to store the weather and the place name in the logbook entry | Settings → Data → Flight Logbook → *Record Weather with Flights* (Open-Meteo) and *Auto-Detect Flight Location* (Nominatim) |
 | **While the map is shown** | The map tile provider you selected: OpenStreetMap ([privacy](https://osmfoundation.org/wiki/Privacy_Policy)), OpenTopoMap, Esri ArcGIS ([privacy](https://www.esri.com/en-us/privacy/overview)); Kite 1.0.1 and earlier also CARTO ([privacy](https://carto.com/privacy)) for the dark map — or, with a [custom online provider](guides/custom-maps.md#custom-online-providers) selected, the service you added, under its own policy | The map tiles for the area on screen, i.e. which region you are looking at; for a custom online provider also the API key you put into its URL | Use the map without internet — Kite then shows only what the system's web cache still holds |
 | **When a terrain feature needs elevation** (AGL planning, terrain clearance, line-of-sight analysis, terrain radar) | Copernicus DEM on AWS Open Data ([AWS privacy notice](https://aws.amazon.com/privacy/)) | The 1°×1° elevation tile covering the area | Downloads only for areas you plan or fly in; tiles are cached |
 
@@ -112,13 +113,15 @@ Each provider handles the request under its own privacy policy, which we link be
 | Feature | Service | What is sent |
 | --- | --- | --- |
 | **3D map** | Cesium ion ([privacy](https://cesium.com/legal/privacy-policy/)) with the access token *you* created; imagery and terrain from the providers configured in your Cesium account | Terrain and imagery requests for the area on screen — and, with *3D Buildings (OSM)* switched on, the OpenStreetMap building tiles Cesium serves for that area — authenticated with your own token, i.e. under your own Cesium account |
-| **Radar / ADS-B traffic** | adsb.lol, adsb.one, adsb.fi (community ADS-B aggregators; each publishes its own terms) | The query centre (the map viewport or your aircraft's position) and a search radius, polled while the radar is on |
+| **Radar / ADS-B traffic** | adsb.fi, and any online service you add yourself (community ADS-B aggregators; each publishes its own terms) | The query centre (the map viewport or your aircraft's position) and a search radius, polled while the radar is on |
+| **Weather widget** (off by default), and **while a flight is recorded** unless *Record Weather with Flights* is off (Settings → Data → Flight Logbook) — never for a replay | Open-Meteo ([privacy](https://open-meteo.com/en/terms)) | The aircraft's position **rounded to two decimals (about 1 km)** — with the widget also the home position while there is no GPS fix — every five minutes (every minute while a request fails), to get the forecast wind and weather for that place. The rounding is enough for the forecast model and too coarse to follow the aircraft. The answers that arrive during a recorded flight are stored with it in the flight log database |
 | **Airspace Manager** | OpenAIP ([privacy](https://www.openaip.net/privacy)) with the API key *you* registered | A position and radius for the airspace layers you enabled, authenticated with your key |
 
 !!! note "Weather and place-name lookup"
     The logbook enrichment sends the take-off position to Open-Meteo and Nominatim automatically when
-    a recorded flight starts. If you fly without internet, the lookup simply fails and the entry stays
-    without weather and place name.
+    a recorded flight is stored or a log is imported, and again when you open a flight that still lacks the data. If you fly
+    without internet, the lookup simply fails and the entry stays without weather and place name. Both
+    lookups have their own switch under **Settings → Data → Flight Logbook**.
 
 ## Device permissions
 

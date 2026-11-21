@@ -18,12 +18,9 @@
 </script>
 
 <script lang="ts">
-  // Picker behind the mobile "Share log file" button (Settings → Diagnostics). The log folder is
-  // app-private on Android — no file manager or MTP connection reaches it — so the system share sheet
-  // is the only way a log leaves the device, and after a restart the file a tester needs is
-  // yesterday's, not the active one. One row per day-file, newest first; a tap hands the path to
-  // `onPick`. Markup and colours follow ConfirmDialog; rows are finger-sized (≥ 44 px) and the list
-  // scrolls inside a 60vh cap so the dialog fits a 5.5" landscape phone.
+  // Picker behind the mobile "Share log file" button: the Android log folder is app-private, so the share
+  // sheet is the only way out, and the needed file is often yesterday's. One finger-sized row per
+  // day-file, newest first; the list scrolls inside a 60vh cap so it fits a 5.5" landscape phone.
   import { t } from 'svelte-i18n';
 
   let {
@@ -32,8 +29,8 @@
     onClose,
   }: { files: LogFileInfo[]; onPick: (path: string) => void; onClose: () => void } = $props();
 
-  /** `kite-gc-2026-09-16.log` → `2026-09-16`, the day's overflow file `kite-gc-2026-09-16-2.log` →
-   *  `2026-09-16 (2)`; a name outside the scheme is shown as it is. */
+  /** `kite-gc-YYYY-MM-DD.log` → `YYYY-MM-DD`, the overflow file `…-2.log` → `YYYY-MM-DD (2)`; a name
+   *  outside the scheme is shown as it is. */
   function dateOf(name: string): string {
     const m = /^kite-gc-(\d{4}-\d{2}-\d{2})(-2)?\.log$/.exec(name);
     if (!m) return name;
@@ -92,7 +89,6 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 16px;
   }
 
   .dialog-box {
@@ -101,11 +97,7 @@
     border-radius: 8px;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
     padding: 16px 18px 12px;
-    box-sizing: border-box;
     width: min(420px, 100%);
-    /* % of the backdrop, not vh: the backdrop fills the --ui-scale'd panels layer, so this clamp
-       holds at any zoom while a vh figure would be multiplied by the scale. */
-    max-height: 100%;
     display: flex;
     flex-direction: column;
     min-height: 0;
@@ -126,8 +118,8 @@
     padding: 12px 0 14px;
   }
 
-  /* The list scrolls, the dialog does not: 30 days of files must fit under the Close button on a
-     720 px-high phone screen. Shrinkable, so the box's own clamp above wins when 60vh is too tall. */
+  /* The list scrolls first: 30 days of files must fit under the Close button on a phone. Shrinkable, so
+     the box's limit wins when 60vh is too tall. */
   .log-list {
     display: flex;
     flex-direction: column;

@@ -17,10 +17,10 @@ Excluded fields are typically Blackbox tuning data, PID internals, or low-level 
 
 ## Current schema
 
-Current implemented schema version: `v21`. The core replay-focused telemetry field set was complete at
+Current implemented schema version: `v22`. The core replay-focused telemetry field set was complete at
 `v5`; `v6`–`v20` add flight-level mission/pilot/battery/vehicle links and a handful of additional
 live/import telemetry fields (link metrics, airspeed, throttle, canonical flight mode); `v21` drops the
-stored decoded Blackbox rows.
+stored decoded Blackbox rows; `v22` adds the tables and columns the 2.x features build on.
 
 Migration history (tracked via `PRAGMA user_version`):
 
@@ -50,6 +50,36 @@ Migration history (tracked via `PRAGMA user_version`):
   log importer made it (`protocol` `BLACKBOX` / `DATAFLASH` / `ULOG`) or it holds decoded rows or an
   archived log, otherwise `live`. On unlink, a flight without a stored value falls back to the same
   protocol / archived-log check.
+- `v22`: three per-flight tables, none with a foreign key (deleting a flight removes their rows
+  explicitly):
+    - `gps_records` + `idx_gps_records_flight` — raw values of every GPS receiver next to the fused track
+      (`instance` 0 = `GPS_RAW_INT`, 1 = `GPS2_RAW`; unified and raw fix type, satellites, HDOP / VDOP,
+      position, MSL altitude, accuracies, speed, course, yaw). Written by the recorder, one row per
+      `GPS_RAW_INT` / `GPS2_RAW` of a listed receiver while a flight is recorded (Kite asks for 1 Hz;
+      with Full MAVLink Telemetry the FC's own rate), buffered and written with the telemetry batch;
+      `timestamp_ms` is the session time the message arrived. The replay attaches to each track record
+      the newest row per receiver at or before it (older than 5 s = lost, as live). The DataFlash and
+      ULog imports fill it too (`flightlog/gps_rows.rs`): at every kept track row (100 ms grid) the
+      newest sample of each receiver, stored once and at its own log time — DataFlash from `GPS`
+      instance 0 / 1 plus `GPA` (VDOP, accuracies), ULog from `sensor_gps` instance 0 / 1. INAV
+      Blackbox has one receiver and no raw stream, the `.tlog` / `.rawmsp` import writes none;
+    - `weather_records` + `idx_weather_records_flight` — one row per weather answer during a flight, the
+      answer stored whole as JSON (`data_json`) with the position it was asked for. Written by the
+      recorder from the backend weather service (`weather/service.rs`), which polls while a weather
+      widget is on screen, or a flight is recorded and the setting *Record Weather with Flights* is on; `timestamp_ms` is the session time the answer
+      reached the recorder (the answer in hand at the start of a flight is stored too);
+    - `flight_videos` + `idx_flight_videos_flight` — videos attached to a flight: a path relative to the
+      video folder, basic metadata, and two sync anchors (video frame, time in the video, time on the
+      flight's timeline). Prepared; nothing reads or writes it yet.
+
+  New columns: `missions.extra_json` (data a version does not know yet — kept as it is) and
+  `missions.vehicle_class`; `flights.alt_relative` (1 = altitudes relative to the arming point, 0 = MSL,
+  NULL = decide from the `protocol` label). The back-fill sets it on every existing flight: 1 for the
+  passive CRSF and LTM links, else 0. The recorder sets it when a session is committed: what the passive
+  handler reported for its protocol, 0 for an active MSP or MAVLink link, and the label rule for a
+  session recovered from disk. The replay reads it with the flight (`flight_alt_relative`) and uses the
+  label only for a flight without a value (imported logs, opened files); the linked blackbox track of a
+  pair always counts as MSL.
 
 Freed space: the database runs with `auto_vacuum = INCREMENTAL`, so deleted data (e.g. a blackbox
 BLOB) first lands on the SQLite freelist. A background thread hands the freelist back to the file
@@ -352,7 +382,7 @@ The `.kflight` file format is a self-contained SQLite database used for sharing 
 
 ### Schema
 
-An export holds the per-flight data tables `flights`, `telemetry_records`, `battery_records` and `blackbox_files`, with the same columns as in the main database. The libraries (vehicles, missions, battery packs), group flights and `flight_events` are not exported. On top of that come `blackbox_records` and a metadata table.
+An export holds the per-flight data tables `flights`, `telemetry_records`, `battery_records`, `gps_records`, `weather_records`, `flight_videos` and `blackbox_files`, with the columns of the main database (`flights` without the local `vehicle_id` value), plus a `missions` table that holds only the missions the exported flights are linked to (`flights.mission_id`). The other libraries (vehicles, battery packs), group flights and `flight_events` are not exported. On top of that come `blackbox_records` and a metadata table.
 
 `blackbox_records` holds no decoded rows, only one **marker row** per log flight: `flight_id`, `timestamp_us = 0`, `csv_data = ''`. A log flight is one whose own source is `blackbox`: either `source = 'blackbox'`, or `source = 'both'` with `source_before_link = 'blackbox'`. If `source_before_link` is NULL, the same fallback as on unlink decides (log-importer `protocol`, or an archived log). The table and its markers are there for Kite 1.0. Its importer reads the table for every flight and fails the flight when the table is missing. It copies the marker rows like decoded rows, and its unlink restores a flight to `blackbox` when it has rows there.
 
@@ -367,7 +397,7 @@ An export holds the per-flight data tables `flights`, `telemetry_records`, `batt
 
 1. Creates a fresh SQLite file at `dest_path`
 2. Creates the tables listed above
-3. Copies each flight (with `source_before_link`) and its associated `telemetry_records`, `battery_records`, and `blackbox_files`. A linked pair keeps its link only if both flights are exported. A flight exported without its partner is written as the single flight it was before the link: its own source, `source_before_link` NULL, no link
+3. Copies each flight (with `source_before_link`, `alt_relative` and `logged_wp_count`) and its associated `telemetry_records`, `battery_records`, `gps_records`, `weather_records`, `flight_videos` and `blackbox_files`, and the mission it is linked to (once per mission, by content hash). A linked pair keeps its link only if both flights are exported. A flight exported without its partner is written as the single flight it was before the link: its own source, `source_before_link` NULL, no link
 4. Writes the `blackbox_records` marker rows and the `_kflight_meta` rows
 5. VACUUMs the file for minimal size
 
@@ -379,8 +409,9 @@ An export holds the per-flight data tables `flights`, `telemetry_records`, `batt
 2. Lists all flights in the file
 3. Duplicate detection: skips flights matching `craft_name` + `start_time` within ±10 seconds
 4. Copies non-duplicate flights with all associated records into the main DB, but never the file's `blackbox_records` rows. A file from before `v21` has no `source_before_link` column. For its `both` flights the value is derived from the file: `blackbox` when the flight's `protocol` is `BLACKBOX`, `DATAFLASH` or `ULOG` (only the log importers write these), or when the file holds `blackbox_records` rows (decoded rows or a marker) or a `blackbox_files` row for the flight; `live` otherwise
-5. Restores the links between imported flights. An imported flight that arrived as `both` but ends up without a partner becomes the single flight it was, with its own source and `source_before_link` NULL
-6. Returns `(imported_count, skipped_count)`
+5. Links each imported flight to its mission (best effort — a failure is logged and the flight is kept): a library mission with the same content hash keeps its name and notes. While no flight is linked to it, the file's home position, `vehicle_class` and `extra_json` replace its own (values the file lacks stay); once flights are linked to it, it only gets the ones it lacks filled in, otherwise the file's mission is added to the library. A file from before `v22` has no `missions` table, none of the `v22` tables and no `alt_relative`; nothing is copied for them
+6. Restores the links between imported flights. An imported flight that arrived as `both` but ends up without a partner becomes the single flight it was, with its own source and `source_before_link` NULL
+7. Returns `ImportResult { imported, skipped, errors }`
 
 ### Raw Blackbox export
 

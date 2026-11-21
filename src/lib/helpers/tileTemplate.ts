@@ -1,22 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Pure helpers for Leaflet-style tile URL templates: filling one in (the 3D view and the user-map test
-// build their URLs here; the 2D view lets Leaflet's own `getTileUrl` do it) and validating a template a
-// user typed (Settings → Custom Online Provider).
-//
-// Placeholders: `{z}` `{x}` `{y}`; `{-y}` = the row counted from the south (TMS); `{s}` = a subdomain
-// (a/b/c); `{r}` = Leaflet's retina suffix (`@2x` on a high-DPI screen in 2D, empty elsewhere).
+// Pure helpers for Leaflet-style tile URL templates: filling one in (3D view, user-map test) and validating a
+// user's (Settings → Custom Online Provider). Placeholders: `{z}` `{x}` `{y}`; `{-y}` = TMS row from the south;
+// `{s}` = subdomain (a/b/c); `{r}` = Leaflet's retina suffix (`@2x` on high-DPI 2D, empty elsewhere).
 
 /** Every placeholder Kite fills in. Leaflet throws on any other `{name}` it cannot resolve. */
 export const TILE_PLACEHOLDERS = ["z", "x", "y", "-y", "s", "r"] as const;
 
 const PLACEHOLDER_RE = /\{([^{}]*)\}/g;
 
-/** Fill a tile URL template for tile z/x/y. The subdomain is picked from `subdomains` by
- *  `(x + y + z) % n`, as the 3D view and the 2D map's own fallback path (`CachedTileLayer._buildUrlAt`)
- *  always did — Leaflet's regular 2D path uses `(x + y) % n`, so a `{s}` tile may be cached under two
- *  subdomains. `retina` replaces `{r}`. */
+/** Fill a template for tile z/x/y. Subdomain = `(x + y + z) % n` as in 3D and CachedTileLayer._buildUrlAt —
+ *  Leaflet's regular 2D path uses `(x + y) % n`, so a `{s}` tile may be cached under two subdomains. `retina`
+ *  replaces `{r}`. */
 export function fillTileTemplate(
   template: string,
   z: number,
@@ -81,16 +77,9 @@ export function templateHost(template: string): string {
   }
 }
 
-/** Leaflet layer options for an online source whose tiles are `tileSize` px and whose URL goes up to
- *  level `maxUrlZoom`. Leaflet requests URL level = map zoom + `zoomOffset`, and `maxNativeZoom` /
- *  `minNativeZoom` are MAP zooms (`GridLayer._clampZoom` compares them with the map zoom before the
- *  offset is added in `TileLayer._getZoomForUrl`):
- *  - 512 px: offset −1 (a 512 px tile at map zoom Z covers what four 256 px tiles do, i.e. one URL
- *    level lower). Native up to map zoom maxUrlZoom+1; map zoom 0 would need URL level −1, so
- *    `minNativeZoom` 1 (Leaflet scales level 1 down there).
- *  - 128 px: offset +1, native up to map zoom maxUrlZoom−1.
- *  - 256 px: no shift.
- *  Above the native limit Leaflet enlarges the top level, up to `maxZoom` ≥ 20. */
+/** Leaflet options for an online source with `tileSize` px tiles up to URL level `maxUrlZoom`. URL level = map
+ *  zoom + `zoomOffset`; native limits are MAP zooms (`_clampZoom` runs before the offset): 512 px → offset −1,
+ *  native to maxUrlZoom+1, minNativeZoom 1; 128 px → +1, native to maxUrlZoom−1; 256 px → none. Over-zoom to ≥ 20. */
 export function userLayerZoom(
   maxUrlZoom: number,
   tileSize: 128 | 256 | 512,
@@ -116,10 +105,9 @@ export function userLayerZoom(
   };
 }
 
-/** Leaflet layer options for a custom (offline folder) map whose tiles are `tileSize` px and whose
- *  highest FILE level is `maxLevel`: the same level shift as an online source (`userLayerZoom` — file
- *  level = map zoom + `zoomOffset`, so a 512 px map's level Z is native at map zoom Z+1, a 128 px one's
- *  at Z−1), and over-zoom up to two map zooms past the highest native one (at least 20). */
+/** Leaflet options for a custom map with `tileSize` px tiles and highest FILE level `maxLevel`: the same level
+ *  shift as `userLayerZoom` (512 px level Z native at map zoom Z+1, 128 px at Z−1), over-zoom two map zooms past
+ *  the highest native one (at least 20). */
 export function customLayerZoom(maxLevel: number, tileSize: 128 | 256 | 512): ReturnType<typeof userLayerZoom> {
   const zoom = userLayerZoom(maxLevel, tileSize);
   return { ...zoom, maxZoom: Math.max(20, zoom.maxNativeZoom + 2) };

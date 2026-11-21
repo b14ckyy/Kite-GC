@@ -33,3 +33,28 @@ export const frameFleetSignal = { subscribe: _frameFleet.subscribe };
 export function frameFleetOnMap(): void {
   _frameFleet.update((n) => n + 1);
 }
+
+/** A waypoint the pilot picked: from the mission list (centre it, or frame the mission when none of it
+ *  is in view) or on its map marker (a follow camera stays on it, a free camera does not move). */
+export interface WaypointFocus {
+  lat: number;
+  lon: number;
+  source: 'list' | 'marker';
+}
+
+const _focusWaypoint = writable<(WaypointFocus & { seq: number }) | null>(null);
+let focusSeq = 0;
+
+export function focusWaypointOnMap(lat: number, lon: number, source: WaypointFocus['source']): void {
+  _focusWaypoint.set({ lat, lon, source, seq: ++focusSeq });
+}
+
+/** New requests only: a view mounted later must not replay the last one. */
+export function onWaypointFocus(fn: (f: WaypointFocus) => void): () => void {
+  let seen = focusSeq;
+  return _focusWaypoint.subscribe((f) => {
+    if (!f || f.seq <= seen) return;
+    seen = f.seq;
+    fn(f);
+  });
+}

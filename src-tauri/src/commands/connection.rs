@@ -48,8 +48,7 @@ pub struct ConnectResult {
     pub fc_info: FcInfo,
 }
 
-/// A protocol path's result: the started handler and what it learned about the vehicle. `connect`
-/// turns this into a registry entry.
+/// A protocol path's result: the started handler and what it learned about the vehicle.
 struct Opened {
     protocol: ActiveProtocol,
     protocol_name: &'static str,
@@ -115,7 +114,6 @@ pub async fn ble_scan_start(app: AppHandle, state: State<'_, AppState>) -> Resul
     Ok(())
 }
 
-/// Stop the live BLE scan session (if any).
 #[tauri::command]
 pub fn ble_scan_stop(state: State<'_, AppState>) -> Result<(), String> {
     let mut guard = state.ble_scan_stop.lock().map_err(|e| e.to_string())?;
@@ -123,9 +121,8 @@ pub fn ble_scan_stop(state: State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
-/// Write a craft name to the connected INAV FC (MSP_SET_NAME) and persist it (MSP_EEPROM_WRITE),
-/// then update the cached `fc_info`. INAV/MSP only; rejected for non-MSP / disconnected links. Used
-/// post-flight to push a newly chosen craft name to the FC so future flights auto-link to a vehicle.
+/// Write a craft name to the connected INAV FC (MSP_SET_NAME + EEPROM write) and update the cached
+/// `fc_info`, so future flights auto-link to a vehicle. INAV/MSP only.
 #[tauri::command(async)]
 pub fn inav_set_craft_name(name: String, state: State<'_, AppState>) -> Result<(), String> {
     let trimmed = name.trim();
@@ -150,9 +147,8 @@ pub fn inav_set_craft_name(name: String, state: State<'_, AppState>) -> Result<(
     Ok(())
 }
 
-/// Read the INAV lifetime flight statistics from the FC `stats` settings (MSP2_COMMON_SETTING by
-/// name). `enabled` mirrors the `stats` toggle; the totals are only meaningful when it is on. Used
-/// to offer the FC's lifetime totals as a vehicle baseline. INAV/MSP only.
+/// Read INAV's lifetime flight statistics (`stats` settings) as a vehicle baseline; the totals mean
+/// something only when `enabled`. INAV/MSP only.
 #[tauri::command(async)]
 pub fn inav_read_stats(state: State<'_, AppState>) -> Result<InavStats, String> {
     use crate::commands::fc_settings::try_read_uint_setting;
@@ -172,31 +168,23 @@ pub fn inav_read_stats(state: State<'_, AppState>) -> Result<InavStats, String> 
     })
 }
 
-/// Connect to a flight controller on the given transport and protocol.
-/// MSP: Performs handshake + starts telemetry scheduler.
-/// MAVLink: Waits for HEARTBEAT + starts handler thread.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)] // Tauri command — args map to frontend invoke() params
 pub async fn connect(
     transport_type: TransportType,
     // Protocol selection ("msp" or "mavlink", defaults to "msp")
     protocol: Option<String>,
-    // Serial params
     port: Option<String>,
     baud_rate: Option<u32>,
-    // TCP/UDP params
     host: Option<String>,
     tcp_port: Option<u16>,
-    // BLE params
     ble_device_id: Option<String>,
-    // Telemetry config
     attitude_rate_hz: Option<f64>,
     position_rate_hz: Option<f64>,
     airspeed_enabled: Option<bool>,
     wind_enabled: Option<bool>,
     // MAVLink: when true, request no stream rates — FC streams per its own SRn_* params (ADR-043)
     mavlink_full_telemetry: Option<bool>,
-    // Flight log config
     flight_log_enabled: Option<bool>,
     flight_log_db_enabled: Option<bool>,
     flight_log_path: Option<String>,
@@ -204,6 +192,7 @@ pub async fn connect(
     flight_log_raw: Option<bool>,
     flight_log_raw_always: Option<bool>,
     state: State<'_, AppState>,
+    trainer: State<'_, crate::hid::frsky_trainer::TrainerManager>,
     app_handle: AppHandle,
 ) -> Result<ConnectResult, String> {
     // Multi-vehicle: every connect opens an additional link. Reserve its id now (the handlers stamp
@@ -223,11 +212,9 @@ pub async fn connect(
         }
         (reg.reserve_id(), first)
     };
-    // Group recording off (the default, `fleet_mode::group_recording`): ONE recorded vehicle at a time — a
-    // connecting link records only when no recorder runs right now (the first link; or the recorded one
-    // came back over a new link after a drop, while another link stayed up — its Continue-on-reconnect
-    // resumes then). Any further link records nothing (no recorder, no raw log), so a fleet session never
-    // writes group data into the flight database.
+    // Group recording off (the default): ONE recorded vehicle at a time — a link records only when no
+    // recorder runs (the first link, or the recorded vehicle back over a new link). Any further link
+    // records nothing, so a fleet session never writes group data into the flight database.
     let nobody_records = first_link || state.recorders.lock().map(|m| m.is_empty()).unwrap_or(true);
     let flight_log_enabled = if nobody_records || crate::fleet_mode::group_recording() {
         flight_log_enabled
@@ -243,11 +230,8 @@ pub async fn connect(
         proto, transport_type, port, baud_rate, host, tcp_port, ble_device_id,
     );
 
-    // Open byte-level transport based on type. Every variant is handled on every platform — the
-    // platform differences live behind `transport::serial` / `transport::ble` (on iOS a serial open
-    // fails with a clear runtime error; BLE is CoreBluetooth there). TCP/UDP are platform-independent.
-    // The OS-facing link status names the transport ("MSP over Serial"); the protocol paths
-    // below only know their protocol.
+    // Every transport type is handled on every platform; the differences live behind `transport::serial`
+    // / `transport::ble` (on iOS a serial open fails with a clear runtime error).
     crate::link_status::set_transport(&transport_type.to_string());
     let byte_transport: Box<dyn ByteTransport> = match transport_type {
         TransportType::Serial => {
@@ -267,6 +251,9 @@ pub async fn connect(
         }
         TransportType::Ble => {
             let dev_id = ble_device_id.ok_or("BLE device ID required")?;
+            if trainer.holds(&dev_id) {
+                return Err("This radio is remembered as a Bluetooth trainer input; RC control is looking for it. Close the RC panel or remove the radio there".into());
+            }
             if proto == "telemetry" {
                 // Passive mode: no known profile required — auto-discover + subscribe to all
                 // Notify/Indicate characteristics and dump the GATT table to the Debug Monitor.
@@ -281,10 +268,8 @@ pub async fn connect(
     let transport_note = byte_transport.diagnostic_note();
     log::info!("Transport opened, protocol={} link=L{} ({})", proto, link_id, transport_desc);
 
-    // One link per endpoint. A second socket talking to the same UDP/TCP peer (or the same serial
-    // port / BLE device) does not give a second view of the vehicles — the peer answers whichever
-    // socket spoke last, so both links starve each other (PX4 SITL: 0 bytes on the newcomer, dropped
-    // vehicles on the first). Every vehicle behind one endpoint is already discovered on one link.
+    // One link per endpoint: a second socket to the same peer starves both links (the peer answers
+    // whichever socket spoke last), and every vehicle behind one endpoint is already found on one link.
     {
         let reg = state.links.lock().map_err(|e| e.to_string())?;
         let duplicate = reg.iter().find(|e| e.transport == transport_desc).map(|e| e.id);
@@ -300,7 +285,6 @@ pub async fn connect(
 
     let result = match proto {
         "mavlink" => {
-            // ── MAVLink Path ─────────────────────────────────────────────
             connect_mavlink(
                 link_id,
                 byte_transport,
@@ -320,7 +304,6 @@ pub async fn connect(
             )
         }
         "telemetry" => {
-            // ── Passive Telemetry Path (listen-only, auto-detect) ────────
             connect_passive_telemetry(
                 link_id,
                 byte_transport,
@@ -333,7 +316,6 @@ pub async fn connect(
             )
         }
         _ => {
-            // ── MSP Path ────────────────────────────────────────────────
             connect_msp(
                 link_id,
                 byte_transport,
@@ -353,8 +335,7 @@ pub async fn connect(
         }
     };
 
-    // Central success/failure log — a failed connect otherwise only surfaces in the UI toast and
-    // leaves no trace in the diagnostics log (the original PX4 report had nothing to go on).
+    // Central success/failure log — otherwise a failed connect leaves no trace in the diagnostics log.
     let opened = match result {
         Ok(o) => {
             log::info!(
@@ -374,7 +355,7 @@ pub async fn connect(
         }
     };
 
-    // Register the link. The first link's primary vehicle becomes the active one.
+    // The first link's primary vehicle becomes the active one.
     let primary = VehicleId::new(link_id, opened.sysid);
     let entry = LinkEntry {
         id: link_id,
@@ -389,7 +370,13 @@ pub async fn connect(
         let mut reg = state.links.lock().map_err(|e| e.to_string())?;
         reg.insert(entry)
     };
-    crate::link_presence::link_up(&opened.fc_info, opened.protocol_name);
+    // This link records the raw stream continuously (the display then stays awake, link_presence):
+    // what `FlightRecorder::start_continuous_log` goes by — `raw_always` alone, with the flight log
+    // on. A passive telemetry link never records raw data.
+    let raw_always = opened.protocol_name != "Telemetry"
+        && flight_log_enabled.unwrap_or(false)
+        && flight_log_raw_always.unwrap_or(false);
+    crate::link_presence::link_up(&opened.fc_info, opened.protocol_name, raw_always);
     let _ = app_handle.emit("vehicle-discovered", &discovered);
     if activated {
         state.retarget_rc(Some(&primary));
@@ -399,7 +386,6 @@ pub async fn connect(
     Ok(ConnectResult { link_id, vehicle_id: primary.to_key(), fc_info: opened.fc_info })
 }
 
-/// MSP connection path: handshake → scheduler
 #[allow(clippy::too_many_arguments)] // mirrors the connect() command's parameter set
 fn connect_msp(
     link_id: LinkId,
@@ -421,10 +407,8 @@ fn connect_msp(
     // lifecycle. Created up front so both share the same slot.
     let msp_raw_sink: MspRawSink = std::sync::Arc::new(std::sync::Mutex::new(None));
 
-    // In CONTINUOUS raw mode, open the raw logger NOW — before the handshake — so the handshake's
-    // identity frames (MSP_NAME / MSP_FC_VARIANT / …) are captured in the log and the offline parser
-    // can recover the vehicle info. The recorder later adopts this same logger (ADR-049). Per-flight
-    // mode opens on arm instead, so it intentionally has no handshake.
+    // In CONTINUOUS raw mode open the raw logger before the handshake, so its identity frames are in the
+    // log for the offline parser (the recorder adopts this logger later). Per-flight mode opens on arm.
     if flight_log_enabled.unwrap_or(false)
         && flight_log_raw.unwrap_or(false)
         && flight_log_raw_always.unwrap_or(false)
@@ -448,7 +432,6 @@ fn connect_msp(
         }
     }
 
-    // Wrap in MSP protocol layer (adds MSP v2 framing + response parser)
     let mut transport = MspTransport::new(byte_transport, msp_raw_sink.clone());
     // No tunnel on this link — clear the Tunnel tab's counters of an earlier MAVLink session.
     msp_tunnel::stats::reset();
@@ -456,9 +439,8 @@ fn connect_msp(
     // One vehicle per MSP link → sysid 0. Everything this link emits carries "L{id}:S0".
     let emitter = VehicleEmitter::new(app_handle.clone(), VehicleId::new(link_id, 0));
 
-    // ── MSP Handshake ──────────────────────────────────────────────
-    // Identity, version gate, feature set, craft info and home (shared with the MSP-over-MAVLink
-    // tunnel — see msp/handshake.rs). One attempt per request on a direct MSP link.
+    // Identity, version gate, features, craft info and home (shared with the tunnel, msp/handshake.rs);
+    // one attempt per request on a direct MSP link.
     let handshake = crate::msp::handshake::run(&mut transport, 1)?;
     let fc_info = handshake.fc_info;
     if let Some(fix) = handshake.home {
@@ -469,7 +451,6 @@ fn connect_msp(
     let link_stats_supported = fc_info.features.as_ref().is_some_and(|f| f.link_stats);
     let wind_supported = fc_info.features.as_ref().is_some_and(|f| f.wind_estimate);
 
-    // ── Start telemetry scheduler ────────────────────────────────────────
     let config = TelemetryConfig {
         attitude_rate_hz: attitude_rate_hz.unwrap_or(5.0),
         position_rate_hz: position_rate_hz.unwrap_or(2.0),
@@ -480,7 +461,6 @@ fn connect_msp(
         wind_enabled: wind_enabled.unwrap_or(false) && wind_supported,
     };
 
-    // ── Flight recorder setup ────────────────────────────────────────────
     let flight_log_settings = FlightLogSettings {
         enabled: flight_log_enabled.unwrap_or(false),
         db_enabled: flight_log_db_enabled.unwrap_or(false),
@@ -527,7 +507,6 @@ fn connect_msp(
     Ok(Opened { protocol: ActiveProtocol::Msp(handle), protocol_name: "MSP", fc_info, sysid: 0, compid: 0 })
 }
 
-/// MAVLink connection path: handshake → handler
 #[allow(clippy::too_many_arguments)]
 fn connect_mavlink(
     link_id: LinkId,
@@ -546,8 +525,8 @@ fn connect_mavlink(
     state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<Opened, String> {
-    // MAVLink handshake: wait for FC HEARTBEAT, send GCS HEARTBEAT back
-    let (mut fc_info, fc_sysid, fc_compid, uid2_valid) = mavlink_proto::perform_handshake(&mut *byte_transport)?;
+    let mavlink_proto::Handshake { mut fc_info, sysid: fc_sysid, compid: fc_compid, uid2_valid, version_rtt } =
+        mavlink_proto::perform_handshake(&mut *byte_transport)?;
 
     log::info!(
         "MAVLink connected: {} (sysid={}) via {}",
@@ -556,52 +535,20 @@ fn connect_mavlink(
         byte_transport.description(),
     );
 
-    // Configure telemetry stream rates (ADR-043) — mirrors the MSP poll-rate knobs. Skipped when
-    // "Full MAVLink Telemetry" is on, so the FC streams purely per its own SRn_* params (.tlog gets
-    // everything). Applied here, before the handler thread starts, while we still own the transport.
-    // Which of the two wind messages this FC speaks — WIND on ArduPilot, WIND_COV on PX4.
-    let is_px4 = fc_info.fc_variant == "PX4";
-    if mavlink_full_telemetry.unwrap_or(false) {
-        // SET_MESSAGE_INTERVAL is sticky on the FC until reboot, so a prior reduced session would
-        // otherwise keep the link narrow. Reset our managed messages to the FC's SRn defaults.
-        mavlink_proto::streamrates::reset_stream_rates(&mut *byte_transport, fc_sysid, is_px4);
-    } else {
-        mavlink_proto::streamrates::apply_stream_rates(
-            &mut *byte_transport,
-            fc_sysid,
-            attitude_rate_hz.unwrap_or(5.0),
-            position_rate_hz.unwrap_or(2.0),
-            airspeed_enabled.unwrap_or(false),
-            wind_enabled.unwrap_or(false),
-            is_px4,
-        );
+    // Also handed to the handler: vehicles it discovers later on this link get the same shaping (ADR-043).
+    let rates = mavlink_proto::handler::StreamRateConfig {
+        full_telemetry: mavlink_full_telemetry.unwrap_or(false),
+        attitude_hz: attitude_rate_hz.unwrap_or(5.0),
+        position_hz: position_rate_hz.unwrap_or(2.0),
+        airspeed_enabled: airspeed_enabled.unwrap_or(false),
+        wind_enabled: wind_enabled.unwrap_or(false),
+    };
+    // A tunnel candidate gets them AFTER the probe: ~35 commands queue for seconds on a slow uplink
+    // (ELRS), and the probe behind them would time out.
+    if uid2_valid {
+        mavlink_proto::handler::configure_primary(&mut *byte_transport, fc_sysid, &fc_info.fc_variant, &rates);
     }
 
-    // Ask the FC which EKF core is active (AHRS_EKF_TYPE) for the header EKF indicator. One-shot,
-    // fire-and-forget — the PARAM_VALUE reply is decoded by the handler thread once it starts.
-    mavlink_proto::params::request_ekf_type(&mut *byte_transport, fc_sysid);
-
-    // One-shot HOME_POSITION request — recovers the real FC home on a mid-flight connect (MAVLink
-    // counterpart of the MSP_WP(0) read below in the MSP path). Unconditional: in Full-telemetry
-    // mode this is the ONLY source (no interval push), in reduced mode it beats the first 0.2 Hz tick.
-    mavlink_proto::params::request_home_position(&mut *byte_transport, fc_sysid);
-
-    // ArduPilot: read Q_ENABLE to detect a QuadPlane (which reports MAV_TYPE_FIXED_WING, so the mission
-    // vehicle class can't be told from the HEARTBEAT alone). Copter/Rover/Sub lack the param → no reply.
-    if fc_info.fc_variant.starts_with("Ardu") {
-        mavlink_proto::params::request_quadplane_flag(&mut *byte_transport, fc_sysid);
-    }
-
-    // Logging backend for the vehicle library's "blackbox available" flag: ArduPilot LOG_BACKEND_TYPE
-    // (bitmask, 0 = none), PX4 SDLOG_MODE (-1 = disabled). The reply lands in the handler, which
-    // updates the stored FC info and emits `telemetry-vehicle { blackbox }`.
-    if fc_info.fc_variant.starts_with("Ardu") {
-        mavlink_proto::params::request_param(&mut *byte_transport, fc_sysid, "LOG_BACKEND_TYPE");
-    } else if fc_info.fc_variant.contains("PX4") {
-        mavlink_proto::params::request_param(&mut *byte_transport, fc_sysid, "SDLOG_MODE");
-    }
-
-    // ── Flight recorder setup ────────────────────────────────────────────
     let flight_log_settings = FlightLogSettings {
         enabled: flight_log_enabled.unwrap_or(false),
         db_enabled: flight_log_db_enabled.unwrap_or(false),
@@ -639,19 +586,8 @@ fn connect_mavlink(
         None
     };
 
-    // Start the MAVLink handler thread. Its events carry "L{link}:S{sysid}" of the handshake vehicle;
-    // vehicles it discovers later on the same link get their own sysid stamped. The stream shaping
-    // applied above is handed along so those vehicles are configured identically.
-    let rates = mavlink_proto::handler::StreamRateConfig {
-        full_telemetry: mavlink_full_telemetry.unwrap_or(false),
-        attitude_hz: attitude_rate_hz.unwrap_or(5.0),
-        position_hz: position_rate_hz.unwrap_or(2.0),
-        airspeed_enabled: airspeed_enabled.unwrap_or(false),
-        wind_enabled: wind_enabled.unwrap_or(false),
-    };
     store_recorder(&state, emitter.key(), &recorder_handle);
-    // Vehicles discovered later on this link record unattended (DB only) with the same settings.
-    // Group recording off (`fleet_mode::group_recording`): vehicles discovered beside the primary get no
+    // Vehicles discovered later record unattended (DB only); with group recording off they get no
     // recorder — only the first vehicle's flights reach the logbook.
     let secondary_recording = if flight_log_settings.enabled && flight_log_settings.db_enabled && crate::fleet_mode::group_recording() {
         let portable = std::env::current_exe()
@@ -670,25 +606,19 @@ fn connect_mavlink(
     let probe_recorder = recorder_handle.clone();
     let mut handle = mavlink_proto::handler::start(byte_transport, fc_sysid, fc_compid, fc_info.fc_variant.clone(), (fc_info.platform_type, fc_info.mav_type), emitter.clone(), recorder_handle, state.rc_tx.clone(), rates, secondary_recording);
 
-    // INAV MSP over MAVLink (D2): INAV's AUTOPILOT_VERSION carries an all-zero uid2 (and a fake
-    // ArduPilot 4.7.0 version), so the MAVLink identity can't tell INAV apart — only the tunnel can.
-    // uid2 all-zero (or no AUTOPILOT_VERSION at all) → probe the TUNNEL inline (≤ 2 s); a real uid2 →
-    // ArduPilot / PX4, no probe, no delay.
+    // INAV MSP over MAVLink: INAV's AUTOPILOT_VERSION has an all-zero uid2 (and a fake ArduPilot 4.7.0),
+    // so only the tunnel tells it apart. All-zero / missing uid2 → probe the TUNNEL inline (2 s, longer
+    // on a slow link); a real uid2 → ArduPilot / PX4, no probe.
     msp_tunnel::stats::reset();
     if !uid2_valid {
-        match probe_msp_tunnel(&handle, fc_sysid, fc_info.mav_type, &link_desc, &state, &emitter) {
+        match probe_msp_tunnel(&handle, fc_sysid, fc_info.mav_type, &link_desc, version_rtt, &state, &emitter) {
             TunnelProbe::Up(sched, inav_info) => {
                 handle.msp = Some(sched);
                 // INAV confirmed → the handler switches to INAV's MAVLink conventions (MISSION_CURRENT).
                 handle.inav_tunnel.store(true, std::sync::atomic::Ordering::Relaxed);
-                // Two identities on a tunnel link, on purpose:
-                //  • `handle.fc_variant` keeps the HEARTBEAT variant ("Generic" / "ArduPlane" / …). The
-                //    handler decodes telemetry with it — INAV emulates ArduPilot flight modes in the
-                //    HEARTBEAT `custom_mode`, so the MAVLink mode tables are the right ones.
-                //  • the link entry's `fc_info` (returned to the frontend below) is the INAV identity from the MSP
-                //    handshake, with `features.msp_tunnel = true`. The frontend keys its INAV surface on
-                //    that flag (`hasMsp` / `isArduPilotLink` in stores/connection.ts), and every INAV
-                //    command reaches this scheduler through `state::with_msp`.
+                // Two identities on purpose: `handle.fc_variant` keeps the HEARTBEAT variant (INAV emulates ArduPilot
+                // modes in `custom_mode`, so the handler decodes with those tables); `fc_info` is the INAV identity
+                // with `features.msp_tunnel`, on which the frontend keys its INAV surface.
                 fc_info = inav_info;
                 // The recorder was created with the heartbeat identity before the probe — upgrade it so
                 // the flights of this link are stored as the INAV craft (name, version, FC id).
@@ -698,13 +628,13 @@ fn connect_mavlink(
                     }
                 }
             }
-            TunnelProbe::NoTunnel => {}
+            // An `Up` probe has sent them itself, ahead of the tunnel scheduler.
+            TunnelProbe::NoTunnel => {
+                let _ = handle.cmd_tx_clone().send(mavlink_proto::handler::MavlinkCommand::ConfigurePrimary);
+            }
             TunnelProbe::LinkLost => {
-                // The handler already emitted `connection-lost` (before the link was registered, so the
-                // frontend's disconnect found nothing) — tear down and fail the connect instead of
-                // storing a dead "connected" link.
-                // That `connection-lost` carries this (still unregistered) link's `linkId`; the
-                // +page.svelte listener ignores a linkId it does not know, so other links stay up.
+                // The handler already emitted `connection-lost` for this unregistered link (the frontend ignores an
+                // unknown linkId) — tear down and fail the connect instead of storing a dead link.
                 let _ = handle.stop();
                 // The primary's and any secondary discovered during the probe.
                 state.drop_link_recorders(link_id);
@@ -724,6 +654,16 @@ fn connect_mavlink(
     Ok(Opened { protocol: ActiveProtocol::Mavlink(handle), protocol_name: "MAVLink", fc_info, sysid: fc_sysid, compid: fc_compid })
 }
 
+fn tunnel_probe_window(version_rtt: Option<std::time::Duration>) -> std::time::Duration {
+    use std::time::Duration;
+    version_rtt.map_or(Duration::from_secs(2), |r| (r * 3).clamp(Duration::from_secs(2), Duration::from_secs(10)))
+}
+
+fn tunnel_reply_timeout(probe_rtt: std::time::Duration) -> std::time::Duration {
+    use std::time::Duration;
+    (probe_rtt * 3).clamp(Duration::from_secs(2), Duration::from_secs(10))
+}
+
 /// Outcome of the connect-time MSP-over-MAVLink probe.
 // `Up` carries the running scheduler + FC info; the enum is built once per connect.
 #[allow(clippy::large_enum_variant)]
@@ -736,28 +676,30 @@ enum TunnelProbe {
     LinkLost,
 }
 
-/// Probe for INAV's MSP-over-MAVLink tunnel on a running MAVLink handler (D2) and, on success, run the
-/// INAV MSP handshake through it and start the MSP scheduler in tunnel mode. `Up` carries the scheduler
-/// and the INAV `FcInfo` (`features.msp_tunnel = true`, `adsb_msp = false`, `mav_type` kept from the
-/// HEARTBEAT). Every failure is logged at warn; the tunnel receiver is unregistered on drop.
+/// Probe for INAV's MSP-over-MAVLink tunnel (D2) and, on success, run the INAV handshake through it
+/// and start the scheduler in tunnel mode. Failures are logged at warn.
 fn probe_msp_tunnel(
     handle: &mavlink_proto::MavlinkHandle,
     fc_sysid: u8,
     mav_type: u8,
     link_desc: &str,
+    version_rtt: Option<std::time::Duration>,
     state: &State<'_, AppState>,
     app_handle: &VehicleEmitter,
 ) -> TunnelProbe {
     use std::time::{Duration, Instant};
 
-    /// Probe attempts: send at t = 0 / 500 / 1000 ms, wait for the first reply until t = 2 s.
-    const PROBE_WAITS_MS: [u64; 3] = [500, 500, 1000];
+    // Attempts go out at 0, 1/4 and 1/2 of the window.
+    let window = tunnel_probe_window(version_rtt);
+    let probe_waits = [window / 4, window / 4, window / 2];
     /// After the reply: swallow late duplicate replies of the earlier attempts before the handshake.
     const PROBE_DRAIN: Duration = Duration::from_millis(100);
 
     log::warn!(
-        "MSP tunnel probe: AUTOPILOT_VERSION uid2 is zero or missing — probing INAV MSP over MAVLink (FC sysid {}, up to 2 s)",
-        fc_sysid
+        "MSP tunnel probe: AUTOPILOT_VERSION uid2 is zero or missing — probing INAV MSP over MAVLink (FC sysid {}, up to {} ms; AUTOPILOT_VERSION {})",
+        fc_sysid,
+        window.as_millis(),
+        version_rtt.map_or("not answered".to_string(), |r| format!("answered in {} ms", r.as_millis()))
     );
     let tunnel = match TunnelTransport::open(handle.cmd_tx_clone(), fc_sysid, link_desc) {
         Ok(t) => t,
@@ -772,12 +714,12 @@ fn probe_msp_tunnel(
     let mut msp = MspTransport::new(Box::new(tunnel), raw_sink);
 
     let started = Instant::now();
+    // Round trip counted from the FIRST attempt: on a slow link the reply to it lands in a later wait.
     let mut answered: Option<(usize, Duration)> = None;
-    for (i, wait_ms) in PROBE_WAITS_MS.iter().enumerate() {
-        let sent = Instant::now();
-        match msp.msp_request_timeout(MSP_API_VERSION, &[], *wait_ms) {
+    for (i, wait) in probe_waits.iter().enumerate() {
+        match msp.msp_request_timeout(MSP_API_VERSION, &[], wait.as_millis() as u64) {
             Ok(_) => {
-                answered = Some((i + 1, sent.elapsed()));
+                answered = Some((i + 1, started.elapsed()));
                 break;
             }
             Err(e) if msp.is_connection_lost() => {
@@ -788,16 +730,22 @@ fn probe_msp_tunnel(
         }
     }
     let Some((attempt, rtt)) = answered else {
-        log::warn!("MSP tunnel probe: no reply after 2 s (3 attempts) — plain MAVLink");
-        msp_tunnel::stats::set_probe("no_reply", None, format!("{} ms, 3 attempts", started.elapsed().as_millis()));
+        log::warn!("MSP tunnel probe: no reply after {} ms (3 attempts) — plain MAVLink", window.as_millis());
+        msp_tunnel::stats::set_probe(
+            "no_reply",
+            None,
+            format!("{} ms, 3 attempts (window {} ms)", started.elapsed().as_millis(), window.as_millis()),
+        );
         return TunnelProbe::NoTunnel;
     };
     let rtt_ms = rtt.as_millis() as u64;
+    let reply_timeout = tunnel_reply_timeout(rtt);
+    msp.set_response_timeout(reply_timeout);
     log::warn!(
-        "MSP tunnel probe: MSP_API_VERSION answered in {} ms (attempt {}/3, {} ms since probe start)",
+        "MSP tunnel probe: MSP_API_VERSION answered {} ms after the first attempt (during attempt {}/3) — reply timeout {} ms",
         rtt_ms,
         attempt,
-        started.elapsed().as_millis()
+        reply_timeout.as_millis()
     );
 
     // Late duplicates (a slow reply to an earlier attempt) are unsolicited to the handshake — drain them.
@@ -839,14 +787,11 @@ fn probe_msp_tunnel(
     }
     if let Some(f) = fc_info.features.as_mut() {
         f.msp_tunnel = true;
-        // The tunnel scheduler never polls MSP2_ADSB_VEHICLE_LIST, so FC-side ADS-B is not available on
-        // a tunnel link today (FC-relayed MAVLink ADSB_VEHICLE ingestion is a separate open feature, see
-        // Dev-Docs QUICK_NOTES) — the "ADS-B from FC (MSP)" source must not be offered.
+        // The tunnel scheduler never polls MSP2_ADSB_VEHICLE_LIST, so the "ADS-B from FC (MSP)" source must
+        // not be offered on a tunnel link.
         f.adsb_msp = false;
-        // Likewise the MSP RC stream (MSP_SET_RAW_RC / MSP2_INAV_SET_AUX_RC): the tunnel scheduler never
-        // runs it (one request in flight, on-demand only), so this LINK has neither MSP-RC nor AUX-RC.
-        // The RC tab is hidden on a tunnel link until Stage 3 — MAVLink-RX mode, see Dev-Docs
-        // active/MSP_OVER_MAVLINK.md.
+        // Likewise no MSP RC stream on a tunnel link (one request in flight, on demand only); the RC tab is
+        // hidden until Stage 3 (Dev-Docs active/MSP_OVER_MAVLINK.md).
         f.msp_rc = false;
         f.aux_rc = false;
     }
@@ -861,8 +806,27 @@ fn probe_msp_tunnel(
     msp_tunnel::stats::set_probe(
         "ok",
         Some(rtt_ms),
-        format!("attempt {}/3 — INAV {}", attempt, fc_info.fc_version),
+        format!(
+            "attempt {}/3 — INAV {} — window {} ms, reply timeout {} ms",
+            attempt,
+            fc_info.fc_version,
+            window.as_millis(),
+            reply_timeout.as_millis()
+        ),
     );
+
+    // The connect requests go out now, and one request behind them returns once the uplink has drained:
+    // the scheduler's first reads would time out queued behind ~35 commands on a slow link.
+    const DRAIN_MAX_MS: u64 = 10_000;
+    let _ = handle.cmd_tx_clone().send(mavlink_proto::handler::MavlinkCommand::ConfigurePrimary);
+    let drain = Instant::now();
+    if let Err(e) = msp.msp_request_timeout(MSP_API_VERSION, &[], DRAIN_MAX_MS) {
+        if msp.is_connection_lost() {
+            log::warn!("MSP tunnel: MAVLink link lost after the INAV handshake ({})", e);
+            return TunnelProbe::LinkLost;
+        }
+    }
+    log::info!("MSP tunnel: connect requests sent, uplink clear after {} ms", drain.elapsed().as_millis());
 
     // Tunnel-mode scheduler: no polling, no recorder, no RC stream / radar, one request in flight.
     let sched = scheduler::start(
@@ -873,7 +837,7 @@ fn probe_msp_tunnel(
         state.radar_ingest.clone(),
         state.radar_msp_enabled.clone(),
         state.rc_tx.clone(),
-        SchedulerMode::Tunnel,
+        SchedulerMode::Tunnel { reply_timeout },
     );
     log::warn!("MSP tunnel: MSP scheduler started in tunnel mode (on-demand only, 1 request in flight)");
     TunnelProbe::Up(sched, fc_info)
@@ -884,17 +848,14 @@ fn probe_msp_tunnel(
 pub struct TunnelMspReply {
     /// Reply payload as spaced hex
     reply_hex: String,
-    /// Reply payload length in bytes
     bytes: usize,
     /// TUNNEL chunks received for this request (as counted by the tunnel transport)
     chunks: u32,
     rtt_ms: u64,
 }
 
-/// Dev tool (Debug Monitor → Tunnel): send one MSP request with a hex payload through the active MSP
-/// scheduler (the MSP-over-MAVLink tunnel, or a direct MSP link) and return the raw reply. The
-/// hardware test for the tunnel's multi-chunk replies: `0x2048` must come back as 640 payload bytes.
-/// Only available while debug mode is on (debug build or `--debug`).
+/// Dev tool (Debug Monitor → Tunnel): one MSP request with a hex payload through the active MSP
+/// scheduler, raw reply back (`0x2048` must return 640 bytes). Debug mode only.
 #[tauri::command(async)]
 pub fn debug_tunnel_msp_request(
     code: u16,
@@ -949,10 +910,8 @@ fn parse_hex_payload(text: &str) -> Result<Vec<u8>, String> {
         .ok_or_else(|| "Payload is not valid hex".to_string())
 }
 
-/// Passive telemetry path: no handshake — start the listen-only handler immediately.
-/// The wire protocol is auto-detected by the handler; nothing is ever transmitted. When flight logging
-/// is enabled, a recorder is attached and fed the decoded telemetry (arm/disarm derived from the FC's
-/// flight-mode field — e.g. FrSky MODES).
+/// Passive telemetry path: listen-only, protocol auto-detected, nothing is ever sent. Arm/disarm for
+/// the recorder comes from the decoded flight-mode field.
 fn connect_passive_telemetry(
     link_id: LinkId,
     byte_transport: Box<dyn ByteTransport>,
@@ -968,9 +927,8 @@ fn connect_passive_telemetry(
         byte_transport.description()
     );
 
-    // Synthesize a minimal FcInfo so the frontend enters the connected state. Passive telemetry carries
-    // no FC identity (no handshake) — leave firmware empty (shown as "N/A") and use the Generic platform
-    // (255) so the map shows the generic arrow rather than defaulting to a multirotor.
+    // A minimal FcInfo so the frontend enters the connected state: no firmware (shown "N/A") and the
+    // Generic platform, so the map shows the generic arrow rather than a multirotor.
     let fc_info = FcInfo {
         platform_type: 255, // PLATFORM_GENERIC
         ..FcInfo::default()
@@ -1016,14 +974,12 @@ fn connect_passive_telemetry(
     Ok(Opened { protocol: ActiveProtocol::PassiveTelemetry(handle), protocol_name: "Telemetry", fc_info, sysid: 0, compid: 0 })
 }
 
-/// Disconnect one link (`link_id`) or, with `None`, every link (the pre-multi-vehicle behaviour the
-/// single connect/disconnect toggle still relies on). Stops the handler(s), drops the transport(s) and
-/// moves the active vehicle to a remaining link if its own went away.
+/// Disconnect one link, or every link with `None` (the single connect toggle relies on that); the
+/// active vehicle moves to a remaining link if its own went away.
 #[tauri::command]
 pub async fn disconnect(link_id: Option<LinkId>, state: State<'_, AppState>, app_handle: AppHandle) -> Result<(), String> {
-    // A running MSP write transaction (safehome / geozone / mission save) gets up to 5 s to finish, so
-    // the scheduler is not stopped between its SET requests (half-written RAM config). Read
-    // transactions simply end on the scheduler stop. Only the link(s) about to close are waited for.
+    // A running MSP write transaction gets up to 5 s to finish, so the scheduler never stops between its
+    // SET requests (half-written RAM config).
     let msps: Vec<crate::scheduler::MspRequester> = {
         let reg = state.links.lock().map_err(|e| e.to_string())?;
         reg.iter()
@@ -1094,9 +1050,7 @@ pub async fn disconnect(link_id: Option<LinkId>, state: State<'_, AppState>, app
     Ok(())
 }
 
-/// Publish (or drop) a link primary's recorder handle for the command layer, under its vehicle key
-/// (dropped again on disconnect), and register it with the group-flight coordinator (it unregisters
-/// itself on teardown).
+/// Publish (or drop) a link primary's recorder for the command layer and register it with the group coordinator.
 fn store_recorder(state: &State<'_, AppState>, key: &str, rec: &Option<crate::flightlog::recorder::FlightRecorderHandle>) {
     state.set_recorder(key, rec.as_ref());
     if let Some(r) = rec {
@@ -1104,9 +1058,8 @@ fn store_recorder(state: &State<'_, AppState>, key: &str, rec: &Option<crate::fl
     }
 }
 
-/// Override the platform type of the connected vehicle for this session (UAV Info panel dropdown).
-/// Updates the stored FC info and the recorder, so the flight being recorded — and any flight started
-/// later on this link — is saved with the chosen type. RAM only; nothing is persisted.
+/// Override the connected vehicle's platform type for this session (RAM only): the stored FC info and
+/// the recorder, so this and later flights on the link are saved with it.
 #[tauri::command]
 pub fn set_platform_type(platform_type: u8, state: State<'_, AppState>) -> Result<(), String> {
     let active_key = {
@@ -1137,7 +1090,22 @@ pub fn set_platform_type(platform_type: u8, state: State<'_, AppState>) -> Resul
 
 #[cfg(test)]
 mod tests {
-    use super::parse_hex_payload;
+    use super::{parse_hex_payload, tunnel_probe_window, tunnel_reply_timeout};
+    use std::time::Duration;
+
+    #[test]
+    fn tunnel_waits_follow_the_measured_round_trip() {
+        let ms = Duration::from_millis;
+        // A fast link and a missing AUTOPILOT_VERSION keep the 2 s floor.
+        assert_eq!(tunnel_probe_window(None), ms(2000));
+        assert_eq!(tunnel_probe_window(Some(ms(40))), ms(2000));
+        assert_eq!(tunnel_reply_timeout(ms(15)), ms(2000));
+        // A slow radio link: 2.4 s for AUTOPILOT_VERSION.
+        assert_eq!(tunnel_probe_window(Some(ms(2400))), ms(7200));
+        assert_eq!(tunnel_reply_timeout(ms(2500)), ms(7500));
+        assert_eq!(tunnel_probe_window(Some(ms(2900))), ms(8700));
+        assert_eq!(tunnel_reply_timeout(ms(9000)), ms(10000));
+    }
 
     #[test]
     fn hex_payload_parses_with_separators() {
@@ -1147,7 +1115,7 @@ mod tests {
 
     #[test]
     fn hex_payload_rejects_non_ascii_without_panicking() {
-        // en-dash (3 UTF-8 bytes) used to panic with "byte index is not a char boundary"
+        // en-dash (3 UTF-8 bytes): must not panic on a char boundary
         assert!(parse_hex_payload("0\u{2013}02").is_err());
         assert!(parse_hex_payload("0–02").is_err());
         assert!(parse_hex_payload("123").is_err());

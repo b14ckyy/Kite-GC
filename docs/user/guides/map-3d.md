@@ -126,8 +126,9 @@ In **Settings → Map → 3D View**:
 
 In **Settings → Interface → Display**:
 
-- **Power Saving** — cap the 3D frame rate to save battery: **Off (60 fps)**, **On (20 fps)** or
-  **Auto** (20 fps on battery). Helpful on laptops and tablets. While active it also drops the smooth
+- **Power Saving** — **Off**, **On** or **Auto** (on while running on battery). While active the 3D
+  view renders 20 instead of 60 frames per second, and the moving aircraft on the 2D map is drawn at
+  the same rate. Helpful on laptops and tablets. While active it also drops the smooth
   bar animations in the speed and battery widgets (they jump straight to the current value) and the
   frosted-glass blur behind panels and widgets — every blurred surface is re-rendered on each frame
   while the map moves, so this saves noticeable CPU and GPU during a flight; the readings are unchanged.

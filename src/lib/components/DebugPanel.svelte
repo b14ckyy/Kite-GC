@@ -23,6 +23,7 @@
   import { nativeHoleDebug } from "$lib/controllers/nativeVideo";
   import { isLinux } from "$lib/platform";
   import NumberStepper from "$lib/components/NumberStepper.svelte";
+  import DebugTrainerTab from "$lib/components/DebugTrainerTab.svelte";
   import { mjpegStats, uiJankMs, startJankProbe, stopJankProbe } from "$lib/controllers/mjpegSink";
   import { activeVehicleId } from "$lib/stores/vehicles";
   import { activeFcModes } from "$lib/stores/fcModes";
@@ -36,7 +37,7 @@
 
   let { onclose }: { onclose: () => void } = $props();
 
-  type Tab = 'msp' | 'mavlink' | 'modes' | 'tunnel' | 'alerts' | 'telemetry' | 'rc' | 'performance' | 'video' | 'fleet' | 'customMaps';
+  type Tab = 'msp' | 'mavlink' | 'modes' | 'tunnel' | 'alerts' | 'telemetry' | 'rc' | 'trainer' | 'performance' | 'video' | 'fleet' | 'customMaps';
   let tab = $state<Tab>('msp');
 
   // ── Custom maps: the active map's coverage index + the last resolved tiles ──
@@ -154,11 +155,9 @@
     s.logarithmicDepthBuffer = pLogDepth;
     s.highDynamicRange = pHdr;
     s.debugShowFramesPerSecond = pFpsOverlay;
-    // While the fps overlay is on, force continuous rendering — otherwise requestRenderMode renders
-    // only on change, so the counter freezes when the map is idle and is skewed when it only ticks on
-    // a load/update. Set it directly for immediate effect AND flag it in the store so Map3D's own
-    // requestRenderMode reverters (alert/WP pulses, radar clear) keep honouring it. Restored when the
-    // overlay (or the panel) closes.
+    // While the fps overlay is on, force continuous rendering (requestRenderMode freezes or skews the counter).
+    // Set directly AND flagged in the store, so Map3D's requestRenderMode reverters (pulses, radar) honour it.
+    // Restored when the overlay (or the panel) closes.
     perf3dForceContinuous.set(pFpsOverlay);
     s.requestRenderMode = !pFpsOverlay;
     s.requestRender();
@@ -189,11 +188,9 @@
     return stopJankProbe;
   });
 
-  // Load live values when the Performance tab is open, and RE-load whenever the 3D viewer attaches or
-  // detaches — the 3D view may mount after the tab was opened, so a one-shot load on tab-open would stay
-  // stuck on "3D not loaded". While the tab is open and 3D is attached, force continuous rendering so the
-  // fps readout (and overlay) tick live instead of freezing under requestRenderMode; restore on-demand
-  // rendering when leaving the tab (unless the user pinned the overlay on).
+  // Load live values while the Performance tab is open, and RE-load when the 3D viewer attaches/detaches (it may
+  // mount after the tab opened). With 3D attached, force continuous rendering so fps ticks live; restore
+  // on-demand rendering when leaving the tab (unless the overlay is pinned on).
   $effect(() => {
     if (tab !== 'performance') return;
     if (!$perf3dAttached) { perfReady = false; return; }
@@ -613,7 +610,7 @@
     <button class="debug-close" onclick={onclose}>✕</button>
   </div>
 
-  <div class="debug-tabs">
+  <div class="debug-tabs" onwheel={(e) => { if (!e.deltaX) e.currentTarget.scrollLeft += e.deltaY; }}>
     <button class="tab" class:active={tab === 'msp'} onclick={() => tab = 'msp'}>{$t('debug.tabMsp')}</button>
     <button class="tab" class:active={tab === 'mavlink'} onclick={() => tab = 'mavlink'}>{$t('debug.tabMavlink')}</button>
     <button class="tab" class:active={tab === 'modes'} onclick={() => tab = 'modes'}>{$t('debug.tabModes')}</button>
@@ -621,6 +618,7 @@
     <button class="tab" class:active={tab === 'telemetry'} onclick={() => tab = 'telemetry'}>{$t('debug.tabTelemetry')}</button>
     <button class="tab" class:active={tab === 'alerts'} onclick={() => tab = 'alerts'}>{$t('debug.tabAlerts')}</button>
     <button class="tab" class:active={tab === 'rc'} onclick={() => tab = 'rc'}>{$t('debug.tabRc')}</button>
+    <button class="tab" class:active={tab === 'trainer'} onclick={() => tab = 'trainer'}>{$t('debug.tabTrainer')}</button>
     <button class="tab" class:active={tab === 'performance'} onclick={() => tab = 'performance'}>{$t('debug.tabPerformance')}</button>
     <button class="tab" class:active={tab === 'video'} onclick={() => tab = 'video'}>{$t('debug.tabVideo')}</button>
     <button class="tab" class:active={tab === 'fleet'} onclick={() => tab = 'fleet'}>{$t('debug.tabFleet')}</button>
@@ -1106,6 +1104,8 @@
         <span class="cap-path">{$fcChannels.length ? $fcChannels.map((v, i) => `CH${i + 1}:${v}`).join('  ') : '—'}</span>
       </div>
     </div>
+  {:else if tab === 'trainer'}
+    <DebugTrainerTab />
   {:else if tab === 'alerts'}
     <div class="debug-stats alerts-stats">
       {#if !alerts.uavValid}
@@ -1448,10 +1448,8 @@
       {/if}
     </div>
   {:else if tab === 'video'}
-    <!-- WebRTC inbound pipeline, one row per stage: what arrives from the engine (recv), what the decoder
-         manages (decoded/dropped) and what the playout reports (freezes/delay). Splitting the stages is
-         the whole point — it tells whether an unstable picture loses frames upstream of the WebView,
-         in the decoder, or only at presentation. -->
+    <!-- WebRTC inbound pipeline, one row per stage — arrival (recv), decoder (decoded/dropped), playout
+         (freezes/delay) — to tell whether an unstable picture loses frames upstream, in the decoder or at presentation. -->
     <div class="perf-tab">
       <div class="debug-stats">
         <div class="stat-group">
@@ -1738,9 +1736,14 @@
     gap: 4px;
     padding: 6px 8px 0;
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    overflow-x: auto;
+    flex: none;
+    scrollbar-width: thin;
   }
 
   .tab {
+    flex: none;
+    white-space: nowrap;
     background: none;
     border: none;
     border-bottom: 2px solid transparent;

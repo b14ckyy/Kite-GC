@@ -4,12 +4,9 @@
 -->
 
 <script lang="ts">
-  // Hold-to-confirm button (control library, see docs/active/VEHICLE_CONTROL.md): fills left→right
-  // while pressed; firing `onconfirm` only once the fill completes. Releasing early cancels. Touch-
-  // and trackpad-friendly (no drag precision needed). A vertical swipe that starts on the button
-  // scrolls the panel instead (`touch-action: pan-y`): the browser then takes the gesture and sends
-  // `pointercancel`, which drops the hold. Used for all vehicle-control actions except
-  // arming (which uses the slide-to-confirm ArmSlider).
+  // Hold-to-confirm button (docs/active/VEHICLE_CONTROL.md): fills left→right while pressed and fires `onconfirm`
+  // only when full; releasing cancels. A vertical swipe scrolls the panel instead (`touch-action: pan-y` → the
+  // browser sends `pointercancel`, dropping the hold). All vehicle-control actions except arming (ArmSlider).
   import type { Snippet } from 'svelte';
 
   let {

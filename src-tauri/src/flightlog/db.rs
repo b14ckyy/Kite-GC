@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// SQLite database for flight logging
-// Uses rusqlite with bundled SQLite — no external dependencies required.
-// Schema evolution via PRAGMA user_version + sequential migrations.
+// SQLite flight database (bundled rusqlite); schema evolution via PRAGMA user_version + sequential steps.
 
 use std::path::{Path, PathBuf};
 
@@ -11,14 +9,15 @@ use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Result as SqlResult};
 
 use super::types::{
+    GpsRecord,
     BatteryAggregate, BatteryPack, BatteryPackInput, BatteryRecord, Flight, FlightEvent, FlightGroup,
     FlightSummary, Mission,
-    MissionInput, TelemetryRecord, Vehicle, VehicleAggregate, VehicleInput, VehicleResolution,
+    MissionInput, TelemetryRecord, Vehicle, VehicleAggregate, VehicleInput, VehicleResolution, WeatherRecord,
 };
 use crate::msp::hardware_uid;
 use crate::msp::types::INAV_SITL_UID;
 
-const CURRENT_SCHEMA_VERSION: u32 = 21;
+pub(crate) const CURRENT_SCHEMA_VERSION: u32 = 22;
 
 /// Column list (excluding the autoincrement `id`) for `telemetry_records`, shared by the temp-session
 /// copy so the SELECT and INSERT column orders can never drift apart. `flight_id` is first so the
@@ -31,12 +30,11 @@ const TELEMETRY_COLS: &str = "flight_id, timestamp_ms, lat, lon, alt_m, speed_ms
     rx_signal_received, hw_health_status, baro_temperature, \
     wind_n_ms, wind_e_ms, wind_d_ms, rc_data_json, rc_command_json, \
     nav_lat, nav_lon, nav_alt_m, mode_primary, mode_modifiers, link_snr, link_rssi_dbm, airspeed_ms, \
-    throttle_pct, wall_ms";
+    throttle_pct, wall_ms, target_lat, target_lon, target_alt_m";
 
-/// Full single-statement DDL for `telemetry_records` at the current field set. The main DB grows
-/// this table via the migration chain; the per-session temp DB (no migration history) creates it
-/// in one shot. The two MUST describe the same columns (the temp rows are copied into the main
-/// table on disarm). No FK here — the temp DB has no `flights` table.
+/// Single-statement DDL for `telemetry_records` at the current field set, for the per-session temp DB (no
+/// migration history). MUST describe the same columns as the migration chain builds — the temp rows are
+/// copied into the main table. No FK: the temp DB has no `flights` table.
 const TELEMETRY_RECORDS_DDL_FULL: &str = "CREATE TABLE IF NOT EXISTS telemetry_records (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     flight_id    INTEGER NOT NULL,
@@ -50,7 +48,8 @@ const TELEMETRY_RECORDS_DDL_FULL: &str = "CREATE TABLE IF NOT EXISTS telemetry_r
     baro_temperature REAL, wind_n_ms REAL, wind_e_ms REAL, wind_d_ms REAL,
     rc_data_json TEXT, rc_command_json TEXT, nav_lat REAL, nav_lon REAL, nav_alt_m REAL,
     mode_primary TEXT, mode_modifiers TEXT, link_snr INTEGER, link_rssi_dbm INTEGER,
-    airspeed_ms REAL, throttle_pct REAL, wall_ms INTEGER
+    airspeed_ms REAL, throttle_pct REAL, wall_ms INTEGER,
+    target_lat REAL, target_lon REAL, target_alt_m REAL
 );";
 
 /// Per-instance battery samples (ArduPilot/PX4 multi-monitor). `flight_id` first so the temp-session
@@ -73,8 +72,85 @@ const BATTERY_RECORDS_DDL_FULL: &str = "CREATE TABLE IF NOT EXISTS battery_recor
     temperature   REAL
 );";
 
-/// Open (or create) the flight log database at the given path.
-/// Runs migrations if needed.
+/// Raw values of every GPS receiver next to the fused track (`instance` 0 = GPS_RAW_INT, 1 = GPS2_RAW;
+/// a log import: the log's receiver instance). `fix_type` is the unified scale, `fix_raw` the number
+/// as sent or logged (MAVLink's `GPS_FIX_TYPE` numbering).
+pub(crate) const GPS_RECORDS_DDL_FULL: &str = "CREATE TABLE IF NOT EXISTS gps_records (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    flight_id     INTEGER NOT NULL,
+    timestamp_ms  INTEGER NOT NULL,
+    instance      INTEGER NOT NULL,
+    fix_type      INTEGER,
+    fix_raw       INTEGER,
+    num_sat       INTEGER,
+    hdop          REAL,
+    lat           REAL,
+    lon           REAL,
+    alt_msl       REAL,
+    vdop          REAL,
+    h_acc_m       REAL,
+    v_acc_m       REAL,
+    speed_ms      REAL,
+    course_deg    REAL,
+    yaw_deg       REAL
+);";
+
+/// One row per weather answer during a flight; `data_json` is the backend's `WindAloft` as returned, so
+/// the widget reads it back unchanged and a new field needs no schema change.
+pub(crate) const WEATHER_RECORDS_DDL_FULL: &str = "CREATE TABLE IF NOT EXISTS weather_records (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    flight_id     INTEGER NOT NULL,
+    timestamp_ms  INTEGER NOT NULL,
+    lat           REAL,
+    lon           REAL,
+    source        TEXT,
+    data_json     TEXT NOT NULL
+);";
+
+/// Videos attached to a flight: a path relative to the video folder (a setting), never the file. The
+/// sync is two anchors (a, b), each a video frame / video time and the flight time it belongs to, so a
+/// split or partial recording maps onto the log. Dev-Docs active/SCHEMA_V22.md.
+pub(crate) const FLIGHT_VIDEOS_DDL_FULL: &str = "CREATE TABLE IF NOT EXISTS flight_videos (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    flight_id         INTEGER NOT NULL,
+    rel_path          TEXT NOT NULL,
+    label             TEXT,
+    duration_ms       INTEGER,
+    codec             TEXT,
+    width             INTEGER,
+    height            INTEGER,
+    fps               REAL,
+    frame_count       INTEGER,
+    file_size         INTEGER,
+    fingerprint       TEXT,
+    sync_a_frame      INTEGER,
+    sync_a_video_ms   INTEGER,
+    sync_a_flight_ms  INTEGER,
+    sync_b_frame      INTEGER,
+    sync_b_video_ms   INTEGER,
+    sync_b_flight_ms  INTEGER,
+    extra_json        TEXT,
+    created_at        TEXT NOT NULL DEFAULT (datetime('now'))
+);";
+
+static UPGRADE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// The schema version of an EXISTING database that has upgrade steps pending.
+fn upgrade_pending_on(conn: &Connection) -> SqlResult<Option<u32>> {
+    let version = get_user_version(conn)?;
+    Ok((version > 0 && version < CURRENT_SCHEMA_VERSION).then_some(version))
+}
+
+/// `(found, current)` schema versions of an existing database that is not at this build's: lower = an
+/// open would upgrade it, higher = written by a newer Kite. Read-only — nothing is created, migrated or
+/// backed up; a missing, fresh or unreadable file is `None`.
+pub fn schema_mismatch(path: &Path) -> Option<(u32, u32)> {
+    let conn = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).ok()?;
+    let found = get_user_version(&conn).ok()?;
+    (found > 0 && found != CURRENT_SCHEMA_VERSION).then_some((found, CURRENT_SCHEMA_VERSION))
+}
+
+/// Creates the file if missing; an existing one with pending steps is backed up, then migrated.
 pub fn open_database(path: &Path) -> SqlResult<Connection> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).ok();
@@ -88,9 +164,8 @@ pub fn open_database(path: &Path) -> SqlResult<Connection> {
          PRAGMA foreign_keys = ON;",
     )?;
 
-    // Incremental auto-vacuum: freed pages (e.g. a deleted blackbox BLOB) go on a freelist and are
-    // handed back via `PRAGMA incremental_vacuum` in the background after a delete (`spawn_reclaim`) —
-    // cost ∝ freed pages, not the whole DB. (A full `VACUUM` rewrites the entire file, which is unusable once logs reach GBs.)
+    // Incremental auto-vacuum: freed pages go on a freelist and are handed back in the background after
+    // a delete (`spawn_reclaim`) — cost ∝ freed pages, not the whole multi-GB file.
     // The mode can only be set before tables exist on a fresh DB, or converted with one VACUUM on an
     // existing one — so do that one-time conversion here when the DB isn't already INCREMENTAL (2).
     let auto_vacuum: i64 = conn.query_row("PRAGMA auto_vacuum", [], |row| row.get(0))?;
@@ -100,23 +175,21 @@ pub fn open_database(path: &Path) -> SqlResult<Connection> {
         conn.execute_batch("VACUUM;")?;
     }
 
-    // Migration safety net (Dev-Docs active/DB_MIGRATIONS.md): when schema steps are pending on an
-    // EXISTING database, snapshot it first — flight archives are irreplaceable. Exactly ONE backup
-    // is kept (the file is multi-GB with blackbox blobs); each upgrade replaces the previous one.
-    // A fresh DB (v0) has nothing to lose and gets none. If the snapshot fails (disk full, …) the
-    // open fails too — migrating without the safety copy is not acceptable.
-    let version = get_user_version(&conn)?;
-    let upgrade = version > 0 && version < CURRENT_SCHEMA_VERSION;
-    if upgrade {
+    // Safety net (Dev-Docs archive/DB_MIGRATIONS.md): one backup before pending steps; the open fails if it
+    // fails. One upgrade per process at a time: a second open waits here, re-reads the version and finds
+    // nothing left (two at once would write the same backup file).
+    let _upgrading = upgrade_pending_on(&conn)?
+        .is_some()
+        .then(|| UPGRADE_LOCK.lock().unwrap_or_else(|e| e.into_inner()));
+    if let Some(version) = upgrade_pending_on(&conn)? {
         backup_before_migration(&conn, path, version)?;
     }
 
     migrate(&conn)?;
+    drop(_upgrading);
 
-    // A large freelist left behind — a schema step that dropped a table (v21: `blackbox_records`;
-    // the steps run in transactions and may not vacuum themselves), or a reclaim cut short by an app
-    // exit — is handed back to the file system in the background. One cheap pragma per open (this runs
-    // for every command connection); repeated triggers are harmless (`spawn_reclaim` is single-flight).
+    // A large freelist left behind (a schema step that dropped a table, a reclaim cut short by an app
+    // exit) is handed back in the background; repeated triggers are harmless (single flight).
     if freelist_pages(&conn)? > RECLAIM_ON_OPEN_PAGES {
         spawn_reclaim(&conn);
     }
@@ -127,15 +200,9 @@ pub fn open_database(path: &Path) -> SqlResult<Connection> {
 /// pages. Below that the next delete picks the pages up anyway; above it something big was left behind.
 const RECLAIM_ON_OPEN_PAGES: i64 = 4096;
 
-/// Pages per `PRAGMA incremental_vacuum(N)` call of the background reclaim. Each call is its own
-/// write transaction: a small chunk keeps the write lock short — a recording or import waits at most
-/// about one chunk, PROVIDED its write transaction takes the lock up front (`write_tx`; a deferred
-/// read→write upgrade fails instead of waiting) — and lets the WAL auto-checkpoint between chunks
-/// instead of growing by the whole freelist.
-/// Measured on copies of a 1.2 GB archive (113k free pages, 4 KiB pages): a 1024-page chunk takes tens
-/// of ms on an SSD (34 ms median / 46 ms p95 including the auto-checkpoint, ~4.2 s for the whole
-/// freelist, WAL peak 7 MB); on a 7200 rpm hard disk chunks take a few hundred ms (2048-page chunks:
-/// 0.39–0.53 s median, 22–29 s in total).
+/// Pages per `PRAGMA incremental_vacuum(N)` call of the background reclaim, each its own write
+/// transaction: a small chunk keeps the write lock short (tens of ms on an SSD, a few hundred on a hard
+/// disk) and lets the WAL checkpoint between chunks. Writers only wait if they lock up front (`write_tx`).
 const RECLAIM_CHUNK_PAGES: i64 = 1024;
 
 /// Pause of the background reclaim between two chunks. Writers waiting for the lock must get a real
@@ -161,10 +228,8 @@ pub(crate) fn exclude_from_reclaim(dir: &Path) {
     }
 }
 
-/// Whether the database file `db_file` (an absolute path, as `Connection::path` names it) lies in a
-/// directory registered with `exclude_from_reclaim`. Compared in canonical form: SQLite names the file
-/// with symlinks resolved (on macOS the temp folder sits behind `/var` → `/private/var`), which
-/// `std::path::absolute` does not do.
+/// Whether `db_file` lies in a directory registered with `exclude_from_reclaim`. Compared canonically:
+/// SQLite names the file with symlinks resolved (macOS `/var` → `/private/var`), `absolute` does not.
 fn reclaim_excluded(db_file: &Path) -> bool {
     let canonical = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
     let file = canonical(db_file);
@@ -179,11 +244,8 @@ fn reclaims_in_flight() -> std::sync::MutexGuard<'static, Vec<(PathBuf, bool)>> 
     RECLAIMS_IN_FLIGHT.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// Database files a "Compact Database" (full `VACUUM`, `compact_database`) is running on — single flight
-/// per file. While a file is listed, no background reclaim starts on it and a running one stops before
-/// its next chunk: the VACUUM empties the freelist anyway, and a reclaim chunk waiting for the write lock
-/// the VACUUM holds for minutes would only time out.
-///
+/// Database files a "Compact Database" (`compact_database`) is running on. No reclaim runs on a listed
+/// file: the VACUUM empties the freelist anyway, and a chunk waiting for its lock would only time out.
 /// Lock order: `RECLAIMS_IN_FLIGHT` → `COMPACTS_IN_FLIGHT`, never the reverse.
 static COMPACTS_IN_FLIGHT: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
 
@@ -215,13 +277,9 @@ struct ReclaimStats {
     longest: std::time::Duration,
 }
 
-/// Hand the whole freelist back to the file system (`auto_vacuum = INCREMENTAL`, see `open_database`),
-/// `chunk_pages` at a time, each chunk its own implicit transaction. `PRAGMA incremental_vacuum(N)`
-/// frees one page per result row it yields, so every call is stepped to the end (`execute_batch` steps
-/// once and frees exactly one page). Loops until `freelist_count` is 0, so pages freed by others while
-/// it runs go too; `pause` is slept before every chunk but the first. Synchronous — the app goes
-/// through `spawn_reclaim`. `stop` is asked before every chunk; once it says yes the run ends there and
-/// the rest stays on the freelist (a compact took the file over).
+/// Hand the whole freelist back to the file system, `chunk_pages` at a time, until `stop` says so.
+/// `PRAGMA incremental_vacuum(N)` frees one page per result row, so every call must be stepped to the
+/// end (`execute_batch` steps once and frees exactly one page). Synchronous; the app uses `spawn_reclaim`.
 fn reclaim_free_pages(
     conn: &Connection,
     chunk_pages: i64,
@@ -255,13 +313,9 @@ fn reclaim_free_pages(
     Ok(stats)
 }
 
-/// Reclaim the free pages of `conn`'s database file in a background thread, so a delete or an upgrade
-/// never blocks its (often main-thread) caller and never fails on the reclaim. The thread opens its own
-/// plain connection (no `open_database`: no migration, no backup). Single flight per file: a trigger
-/// while one runs makes it go round once more instead of starting a second one. Errors are logged
-/// only — whatever stays on the freelist is picked up by the next trigger. A connection without a
-/// file (in-memory, the tests) is reclaimed synchronously right here. No reclaim starts on a file a
-/// compact is running on (`COMPACTS_IN_FLIGHT`).
+/// Reclaim the free pages of `conn`'s database file in a background thread on its own plain connection
+/// (no `open_database`), so a delete or an upgrade never blocks or fails on it. Single flight per file;
+/// errors are only logged. In-memory connections are reclaimed synchronously right here.
 pub(crate) fn spawn_reclaim(conn: &Connection) {
     let path = match conn.path() {
         Some(p) if !p.is_empty() => PathBuf::from(p),
@@ -448,12 +502,9 @@ impl Drop for CompactGuard {
     }
 }
 
-/// Register a compact of `conn`'s database file (single flight: a second one gets
-/// `COMPACT_RUNNING_ERROR`) and wait until no background reclaim runs on it any more — a running one
-/// stops before its next chunk, new ones do not start while the guard lives (`spawn_reclaim`). This
-/// covers the reclaim the compact's own `open_database` starts on a large freelist as well. A
-/// connection without a file (in-memory) is unreachable for anyone else and needs no registration.
-/// Crate-visible for tests elsewhere that need a compact "running" on a file.
+/// Register a compact of `conn`'s database file (a second one gets `COMPACT_RUNNING_ERROR`) and wait
+/// until no background reclaim runs on it — including the one its own `open_database` may have started.
+/// No new reclaim starts while the guard lives.
 pub(crate) fn begin_compact(conn: &Connection) -> Result<CompactGuard, String> {
     let Some(path) = conn.path().filter(|p| !p.is_empty()).map(PathBuf::from) else {
         return Ok(CompactGuard { path: None });
@@ -484,12 +535,9 @@ pub(crate) fn begin_compact(conn: &Connection) -> Result<CompactGuard, String> {
     Ok(guard)
 }
 
-/// Full defragmenting VACUUM — rebuilds the whole DB file to squeeze out fragmentation. Expensive
-/// (cost ∝ DB size, minutes for a GB-sized archive on a hard disk or SD card); exposed only as the
-/// explicit "Compact Database" maintenance action. Routine deletes use incremental_vacuum instead (see
-/// `open_database`). Single flight per file, and no background reclaim runs on the file meanwhile
-/// (`begin_compact`). Sets `conn`'s busy timeout to `COMPACT_BUSY_TIMEOUT`. Returns the database
-/// size before and after.
+/// Full defragmenting VACUUM — cost ∝ DB size (minutes for a GB archive on a hard disk or SD card), so
+/// only the explicit "Compact Database" action; routine deletes use incremental_vacuum. Returns the
+/// database size before and after.
 pub fn compact_database(conn: &Connection) -> Result<CompactStats, String> {
     let _guard = begin_compact(conn)?;
     let size = |conn: &Connection| -> SqlResult<i64> {
@@ -525,15 +573,9 @@ pub struct CompactStats {
     pub size_after: i64,
 }
 
-/// Resolve the database file path based on settings.
-/// - Empty db_path + portable mode → <exe_dir>/data/flights.db
-/// - Empty db_path + normal mode → <AppData>/kite-gc/flights.db
-/// - Non-empty db_path → <db_path>/flights.db
+/// The database file: `<db_path>/flights.db`, else `<exe_dir>/data/` (portable) or `<AppData>/kite-gc/`.
 pub fn resolve_db_path(custom_path: &str, portable: bool) -> PathBuf {
-    // Android: a user-chosen location is a SAF tree URI, not a path. The database cannot live there
-    // (SQLite needs POSIX open/seek/lock for the journal), so the live DB stays on the platform
-    // default below and the session-end mirror copies a snapshot into the granted tree
-    // (user_file::mirror_session).
+    // Android: the database is always app-private; a `content://` tree URI is no place for SQLite.
     #[cfg(target_os = "android")]
     let custom_path = if custom_path.starts_with("content://") { "" } else { custom_path };
 
@@ -594,13 +636,38 @@ pub fn resolve_db_path(custom_path: &str, portable: bool) -> PathBuf {
     PathBuf::from("flights.db")
 }
 
-/// Resolve the **raw-log base directory** (where `raw_logs/` with .tlog / raw MSP files live). This is
-/// intentionally **separate from the database folder**: the DB defaults to AppData, but raw logs default
-/// to the user's Documents (`Documents/KiteGC`) where they are easy to find / hand to Mission Planner.
-/// `custom_path` (empty = use default) overrides it; both are configurable independently in Settings.
+/// Number and total size of the archived original log files.
+pub fn original_logs_total(conn: &Connection) -> SqlResult<(i64, i64)> {
+    conn.query_row("SELECT COUNT(*), COALESCE(SUM(file_size), 0) FROM blackbox_files", [], |r| Ok((r.get(0)?, r.get(1)?)))
+}
+
+/// Delete every archived original log file. The pages go back to the file system in the background
+/// (`spawn_reclaim`) — no VACUUM, whose working copy a mobile device cannot hold.
+pub fn remove_original_logs(conn: &Connection) -> SqlResult<usize> {
+    let removed = conn.execute("DELETE FROM blackbox_files", [])?;
+    spawn_reclaim(conn);
+    Ok(removed)
+}
+
+/// Every flight, oldest first.
+pub fn all_flight_ids(conn: &Connection) -> SqlResult<Vec<i64>> {
+    let mut stmt = conn.prepare("SELECT id FROM flights ORDER BY start_time, id")?;
+    let ids = stmt.query_map([], |r| r.get(0))?.collect();
+    ids
+}
+
+/// Where the temp sessions of a recording live: always the app's own data folder, never a database
+/// folder the user chose — they are written all through a flight and must not sit on a removable or
+/// network drive.
+pub fn sessions_dir(portable: bool) -> PathBuf {
+    resolve_db_path("", portable).parent().unwrap_or(Path::new(".")).join("sessions")
+}
+
+/// The raw-log base directory — deliberately NOT the DB folder: raw logs default to `Documents/KiteGC`,
+/// easy to find and hand to Mission Planner. `custom_path` (empty = default) overrides it.
 pub fn resolve_raw_log_dir(custom_path: &str, portable: bool) -> PathBuf {
-    // Android: same as resolve_db_path — a SAF tree URI cannot be written through std::fs, so the
-    // writers stay in the app-private staging dir below and the mirror copies finished files out.
+    // Android: a SAF tree URI cannot be written through std::fs: the writers stay in the app-private
+    // staging dir below and closed files are moved out (`user_file::move_raw_logs`).
     #[cfg(target_os = "android")]
     let custom_path = if custom_path.starts_with("content://") { "" } else { custom_path };
 
@@ -636,19 +703,12 @@ pub fn resolve_raw_log_dir(custom_path: &str, portable: bool) -> PathBuf {
     PathBuf::from(".")
 }
 
-/// Begin a write transaction (`BEGIN IMMEDIATE`). THE RULE for the flight database: every transaction
-/// that writes takes the write lock up front through this helper — never a DEFERRED one. A deferred
-/// transaction that reads first and writes later is upgraded to a writer at its first write, and that
-/// upgrade fails at once with SQLITE_BUSY — the busy timeout is NOT applied — whenever another
-/// connection holds the write lock or has committed since the read. The background reclaim
-/// (`spawn_reclaim`) holds the lock in back-to-back chunks, and recordings, imports and a second open
-/// write too. `BEGIN IMMEDIATE` waits under the busy timeout instead; for write-first transactions
-/// it costs nothing.
+/// Begin a write transaction (`BEGIN IMMEDIATE`). THE RULE: every writing transaction on the flight
+/// database goes through this, never a DEFERRED one — its read→write upgrade fails at once with
+/// SQLITE_BUSY (no busy timeout) while another connection, e.g. the background reclaim, writes.
 pub(crate) fn write_tx(conn: &Connection) -> SqlResult<rusqlite::Transaction<'_>> {
     rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)
 }
-
-// ── Schema migrations ────────────────────────────────────────────────
 
 fn get_user_version(conn: &Connection) -> SqlResult<u32> {
     conn.query_row("PRAGMA user_version", [], |row| row.get(0))
@@ -675,7 +735,7 @@ type MigrationStep = fn(&Connection) -> SqlResult<()>;
 
 /// The migration chain, one `(target version, step)` per schema version. Module-level so the tests
 /// can build a DB at an older version from the real steps.
-const MIGRATION_STEPS: [(u32, MigrationStep); 21] = [
+const MIGRATION_STEPS: [(u32, MigrationStep); 22] = [
     (1, migrate_v0_to_v1),
     (2, migrate_v1_to_v2),
     (3, migrate_v2_to_v3),
@@ -697,6 +757,7 @@ const MIGRATION_STEPS: [(u32, MigrationStep); 21] = [
     (19, migrate_v18_to_v19),
     (20, migrate_v19_to_v20),
     (21, migrate_v20_to_v21),
+    (22, migrate_v21_to_v22),
 ];
 
 fn migrate(conn: &Connection) -> SqlResult<()> {
@@ -709,12 +770,9 @@ fn migrate(conn: &Connection) -> SqlResult<()> {
         return Err(db_newer_error(current));
     }
 
-    // Every step runs in its OWN transaction: its schema objects and its version stamp commit
-    // together or not at all. A failing step rolls back and leaves the DB cleanly on the last
-    // reached version (the stamps are literal per-step targets for the same reason — a historical
-    // stamp-to-CURRENT once produced a "newest version, missing objects" DB; the ensure_* block
-    // below still self-heals that legacy case). PRAGMA user_version is transactional in SQLite.
-    // None of the steps may contain VACUUM or its own BEGIN/COMMIT.
+    // Every step runs in its OWN transaction: its objects and version stamp commit together or not at all
+    // (user_version is transactional), and stamps are literal per-step targets. No step may contain VACUUM
+    // or its own BEGIN/COMMIT.
     for (target, step) in MIGRATION_STEPS {
         if current < target {
             let tx = write_tx(conn)?;
@@ -724,10 +782,8 @@ fn migrate(conn: &Connection) -> SqlResult<()> {
         }
     }
 
-    // Self-heal: ensure the latest schema actually exists even if a prior version bump left it
-    // incomplete. Legacy migrations call set_user_version(CURRENT), so a CURRENT bump can
-    // mark the DB as the newest version without the matching migration ever creating its
-    // objects. Idempotent, so a healthy DB is unaffected.
+    // Self-heal: legacy migrations stamped CURRENT without creating every object, so ensure the latest
+    // schema exists. Idempotent.
     ensure_v8_schema(conn)?;
     ensure_v9_schema(conn)?;
     ensure_v10_schema(conn)?;
@@ -742,6 +798,7 @@ fn migrate(conn: &Connection) -> SqlResult<()> {
     ensure_v19_schema(conn)?;
     ensure_v20_schema(conn)?;
     ensure_v21_schema(conn)?;
+    ensure_v22_schema(conn)?;
 
     Ok(())
 }
@@ -860,9 +917,7 @@ fn migrate_v9_to_v10(conn: &Connection) -> SqlResult<()> {
     Ok(())
 }
 
-/// Idempotently add the mission launch/home columns (the planned takeoff reference — the
-/// base for REL waypoint altitudes + the 3D mission preview's height). Safe to call on every
-/// open; only adds what's missing.
+/// Idempotently add the mission launch/home columns (the REL-altitude base and 3D preview height).
 fn ensure_v11_schema(conn: &Connection) -> SqlResult<()> {
     if !column_exists(conn, "missions", "home_lat")? {
         conn.execute_batch("ALTER TABLE missions ADD COLUMN home_lat REAL;")?;
@@ -879,9 +934,8 @@ fn migrate_v10_to_v11(conn: &Connection) -> SqlResult<()> {
     Ok(())
 }
 
-/// v12: canonical flight-mode columns on telemetry_records (see docs/active/FLIGHT_MODE_UNIFIED.md).
-/// Additive + idempotent; old rows keep NULL (render as the `other` category on replay — acceptable
-/// in alpha). The raw `active_flight_mode_flags` column stays as a forensic field.
+/// v12: canonical flight-mode columns on telemetry_records (docs/active/FLIGHT_MODE_UNIFIED.md); old rows
+/// keep NULL. The raw `active_flight_mode_flags` stays as a forensic field.
 fn ensure_v12_schema(conn: &Connection) -> SqlResult<()> {
     if !column_exists(conn, "telemetry_records", "mode_primary")? {
         conn.execute_batch("ALTER TABLE telemetry_records ADD COLUMN mode_primary TEXT;")?;
@@ -914,9 +968,8 @@ fn migrate_v12_to_v13(conn: &Connection) -> SqlResult<()> {
     Ok(())
 }
 
-/// v14: live RC-link metrics on telemetry_records — `link_snr` (dB) + `link_rssi_dbm` (raw dBm) from
-/// the unified link-stats pipeline (CRSF 0x14 / INAV 9.1 MSP2_INAV_GET_LINK_STATS). `link_quality` (v3)
-/// is now also populated live (was Blackbox-only). Additive + idempotent; old rows keep NULL.
+/// v14: live RC-link metrics on telemetry_records — `link_snr` (dB), `link_rssi_dbm` (raw dBm).
+/// Additive + idempotent; old rows keep NULL.
 fn ensure_v14_schema(conn: &Connection) -> SqlResult<()> {
     if !column_exists(conn, "telemetry_records", "link_snr")? {
         conn.execute_batch("ALTER TABLE telemetry_records ADD COLUMN link_snr INTEGER;")?;
@@ -948,10 +1001,9 @@ fn migrate_v14_to_v15(conn: &Connection) -> SqlResult<()> {
     Ok(())
 }
 
-/// v16: the vehicle library — a `vehicles` table holding the per-aircraft build sheet. Flights
-/// soft-linked by the existing `flights.craft_name` until v20 stored the link (`flights.vehicle_id`).
-/// Idempotent; only creates the table if missing. Records (max time/dist/alt) are derived from the
-/// linked flights, not stored here.
+/// v16: the vehicle library — a `vehicles` table holding the per-aircraft build sheet (flights linked
+/// by craft name until v20 stored `flights.vehicle_id`). Idempotent. Records (max time/dist/alt) are
+/// derived from the linked flights, not stored here.
 fn ensure_v16_schema(conn: &Connection) -> SqlResult<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS vehicles (
@@ -1071,13 +1123,10 @@ fn migrate_v18_to_v19(conn: &Connection) -> SqlResult<()> {
     Ok(())
 }
 
-/// v20: group flights (Dev-Docs active/GROUP_FLIGHTS.md §3.1) — `flight_groups` (the header that ties
-/// the member flights of a multi-vehicle flight together; no track, no telemetry), `flights.group_id`
-/// (deleting a group dissolves it: members stay as single flights), the per-flight event timeline
-/// `flight_events` (arm/disarm; the column set of INAV_PUSH_TELEMETRY §6.4) and a wall-clock stamp per
-/// telemetry row (`telemetry_records.wall_ms`, UTC epoch ms; NULL for imports and older rows), and the
-/// flight → library vehicle link `flights.vehicle_id` (Dev-Docs active/MULTI_VEHICLE.md §9.1; deleting a
-/// vehicle un-links its flights). Additive + idempotent.
+/// v20: group flights (Dev-Docs active/GROUP_FLIGHTS.md §3.1) — `flight_groups`, `flights.group_id`,
+/// the per-flight event timeline `flight_events`, `telemetry_records.wall_ms` (UTC epoch ms) — and the
+/// library vehicle link `flights.vehicle_id` (MULTI_VEHICLE.md §9.1). Deleting a group or a vehicle
+/// only un-links its flights. Additive + idempotent.
 fn ensure_v20_schema(conn: &Connection) -> SqlResult<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS flight_groups (
@@ -1120,10 +1169,8 @@ fn ensure_v20_schema(conn: &Connection) -> SqlResult<()> {
         conn.execute_batch("ALTER TABLE telemetry_records ADD COLUMN wall_ms INTEGER;")?;
     }
     if !column_exists(conn, "flights", "vehicle_id")? {
-        // The column and its one-time back-fill commit together: a savepoint nests inside the
-        // migration step's transaction and also covers the self-heal call (no transaction there). The
-        // back-fill runs only here, when the column is born — later opens never re-link a flight the
-        // user un-linked.
+        // Column and one-time back-fill commit together (the savepoint also covers the self-heal call).
+        // The back-fill runs only when the column is born — later opens never re-link an un-linked flight.
         conn.execute_batch("SAVEPOINT v20_vehicle_id;")?;
         let added = conn
             .execute_batch(
@@ -1145,11 +1192,8 @@ fn ensure_v20_schema(conn: &Connection) -> SqlResult<()> {
     Ok(())
 }
 
-/// Link every flight without a vehicle to the one the resolution rule names (`resolve_vehicle_id`:
-/// `fc_uid` first, craft name as the fallback, the newest vehicle on a tie). On a database without FC
-/// ids that is exactly what the logbook showed through its craft-name match before v20; a flight whose
-/// FC id matches a vehicle goes to that vehicle instead. Only touches `vehicle_id IS NULL` rows, so it
-/// is re-entrant. Returns the number of flights linked.
+/// Link every flight without a vehicle to the one `resolve_vehicle_id` names. Only touches
+/// `vehicle_id IS NULL` rows, so it is re-entrant. Returns the number of flights linked.
 fn backfill_flight_vehicle_ids(conn: &Connection) -> SqlResult<usize> {
     let has_vehicles: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM vehicles)", [], |r| r.get(0))?;
     if !has_vehicles {
@@ -1188,12 +1232,9 @@ pub(crate) fn table_exists(conn: &Connection, table: &str) -> SqlResult<bool> {
     )
 }
 
-/// v21: `blackbox_records` (the decoded CSV line of every kept INAV Blackbox row) is dropped — nothing
-/// read it: replay uses `telemetry_records`, hi-res replay re-decodes the archived original in
-/// `blackbox_files`. Its one use, the source restore when a live/log pair is unlinked, now reads
-/// `flights.source_before_link`: the flight's own source (`live` / `blackbox`) while `source` reads
-/// `both` for a linked pair, NULL for an unlinked flight. Idempotent; `open_database` starts the
-/// background reclaim of the freed pages after the upgrade.
+/// v21: `blackbox_records` is dropped — nothing read it (replay uses `telemetry_records`, hi-res replay
+/// re-decodes the archived original). Unlinking a pair restores the source from the new
+/// `flights.source_before_link` instead (the own source while `source` reads `both`). Idempotent.
 fn ensure_v21_schema(conn: &Connection) -> SqlResult<()> {
     if !column_exists(conn, "flights", "source_before_link")? {
         // Column and back-fill commit together, like `flights.vehicle_id` in v20 — and the back-fill
@@ -1223,10 +1264,8 @@ fn ensure_v21_schema(conn: &Connection) -> SqlResult<()> {
     Ok(())
 }
 
-/// SQL condition on a `flights` row: the flight was made by a log importer. Only they write these
-/// `protocol` values — `BLACKBOX` (blackbox.rs), `DATAFLASH` (ardupilot.rs), `ULOG` (ulog.rs); live
-/// recordings and raw-log imports write `MSP` / `MAVLink` / `Telemetry …`. A macro so `END_LINK_SET`
-/// can embed it at compile time.
+/// SQL condition on a `flights` row: made by a log importer — only they write these `protocol` values
+/// (`BLACKBOX`, `DATAFLASH`, `ULOG`). A macro so `END_LINK_SET` can embed it at compile time.
 macro_rules! log_protocol_sql {
     () => {
         "protocol IN ('BLACKBOX', 'DATAFLASH', 'ULOG')"
@@ -1264,6 +1303,73 @@ fn backfill_source_before_link(conn: &Connection) -> SqlResult<usize> {
 fn migrate_v20_to_v21(conn: &Connection) -> SqlResult<()> {
     ensure_v21_schema(conn)?;
     set_user_version(conn, 21)?;
+    Ok(())
+}
+
+/// SQL condition on a `flights` row: altitudes relative to the arming point (passive CRSF / LTM carry no
+/// MSL; labels from `passive_telemetry/handler.rs`). Same rule as `isRelativeAltitudeProtocol`
+/// (helpers/altReference.ts) — change both together.
+const ALT_RELATIVE_PROTOCOL_SQL: &str =
+    "protocol LIKE 'Telemetry (%' AND (protocol LIKE '%CRSF%' OR protocol LIKE '%LTM%')";
+
+/// The nav target columns of `telemetry_records` (v22), for a table that predates them: the main database
+/// and a `.ktmp` session file left by an older build.
+fn add_nav_target_columns(conn: &Connection) -> SqlResult<()> {
+    for column in ["target_lat", "target_lon", "target_alt_m"] {
+        if !column_exists(conn, "telemetry_records", column)? {
+            // Two opens of a database already at v22 run this unlocked: the loser's ALTER finds the column.
+            if let Err(e) = conn.execute_batch(&format!("ALTER TABLE telemetry_records ADD COLUMN {column} REAL;")) {
+                if !column_exists(conn, "telemetry_records", column)? {
+                    return Err(e);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// v22 (Dev-Docs active/SCHEMA_V22.md). `missions.extra_json` is kept opaque: data this version does not
+/// know.
+fn ensure_v22_schema(conn: &Connection) -> SqlResult<()> {
+    conn.execute_batch(GPS_RECORDS_DDL_FULL)?;
+    conn.execute_batch(WEATHER_RECORDS_DDL_FULL)?;
+    conn.execute_batch(FLIGHT_VIDEOS_DDL_FULL)?;
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_gps_records_flight ON gps_records(flight_id, timestamp_ms);
+         CREATE INDEX IF NOT EXISTS idx_weather_records_flight ON weather_records(flight_id, timestamp_ms);
+         CREATE INDEX IF NOT EXISTS idx_flight_videos_flight ON flight_videos(flight_id);",
+    )?;
+    add_nav_target_columns(conn)?;
+    if !column_exists(conn, "missions", "extra_json")? {
+        conn.execute_batch("ALTER TABLE missions ADD COLUMN extra_json TEXT;")?;
+    }
+    if !column_exists(conn, "missions", "vehicle_class")? {
+        conn.execute_batch("ALTER TABLE missions ADD COLUMN vehicle_class TEXT;")?;
+    }
+    if !column_exists(conn, "flights", "alt_relative")? {
+        // Column and back-fill commit together; the back-fill runs only when the column is born. NULL
+        // (imported logs) = decide from the protocol label.
+        conn.execute_batch("SAVEPOINT v22_alt_relative;")?;
+        let added = conn.execute_batch("ALTER TABLE flights ADD COLUMN alt_relative INTEGER;").and_then(|_| {
+            conn.execute(
+                &format!("UPDATE flights SET alt_relative = CASE WHEN {ALT_RELATIVE_PROTOCOL_SQL} THEN 1 ELSE 0 END"),
+                [],
+            )
+        });
+        match added {
+            Ok(_) => conn.execute_batch("RELEASE v22_alt_relative;")?,
+            Err(e) => {
+                let _ = conn.execute_batch("ROLLBACK TO v22_alt_relative; RELEASE v22_alt_relative;");
+                return Err(e);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn migrate_v21_to_v22(conn: &Connection) -> SqlResult<()> {
+    ensure_v22_schema(conn)?;
+    set_user_version(conn, 22)?;
     Ok(())
 }
 
@@ -1415,8 +1521,6 @@ fn migrate_v1_to_v2(conn: &Connection) -> SqlResult<()> {
     Ok(())
 }
 
-// ── CRUD operations ─────────────────────────────────────────────────
-
 /// Insert a new flight, returns the row ID. Every flight insert goes through here (live commit,
 /// crash recovery, every importer, `.kflight` import): a flight without an explicit `vehicle_id` is
 /// linked to the library vehicle `resolve_vehicle_id` names (none → NULL).
@@ -1503,7 +1607,8 @@ pub fn insert_telemetry_batch(
                 rc_data_json, rc_command_json,
                 nav_lat, nav_lon, nav_alt_m,
                 mode_primary, mode_modifiers,
-                link_snr, link_rssi_dbm, airspeed_ms, throttle_pct, wall_ms
+                link_snr, link_rssi_dbm, airspeed_ms, throttle_pct, wall_ms,
+                target_lat, target_lon, target_alt_m
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
                 ?14, ?15, ?16, ?17, ?18, ?19, ?20,
@@ -1514,7 +1619,8 @@ pub fn insert_telemetry_batch(
                 ?36, ?37,
                 ?38, ?39, ?40,
                 ?41, ?42,
-                ?43, ?44, ?45, ?46, ?47
+                ?43, ?44, ?45, ?46, ?47,
+                ?48, ?49, ?50
             )",
         )?;
         for r in records {
@@ -1566,6 +1672,9 @@ pub fn insert_telemetry_batch(
                 r.airspeed_ms,
                 r.throttle_pct,
                 r.wall_ms,
+                r.target_lat,
+                r.target_lon,
+                r.target_alt_m,
             ])?;
         }
     }
@@ -1629,12 +1738,99 @@ pub fn get_flight_battery_records(conn: &Connection, flight_id: i64) -> SqlResul
     rows.collect()
 }
 
+/// One answer of the weather service, stored whole: `data_json` is the widget's `WindAloft`.
+pub fn insert_weather_record(
+    conn: &Connection,
+    flight_id: i64,
+    timestamp_ms: i64,
+    lat: f64,
+    lon: f64,
+    source: &str,
+    data_json: &str,
+) -> SqlResult<()> {
+    conn.execute(
+        "INSERT INTO weather_records (flight_id, timestamp_ms, lat, lon, source, data_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![flight_id, timestamp_ms, lat, lon, source, data_json],
+    )?;
+    Ok(())
+}
+
+/// The weather answers of a flight, oldest first, for the replay.
+pub fn get_flight_weather_records(conn: &Connection, flight_id: i64) -> SqlResult<Vec<WeatherRecord>> {
+    let mut stmt = conn.prepare(
+        "SELECT timestamp_ms, lat, lon, source, data_json FROM weather_records
+         WHERE flight_id = ?1 ORDER BY timestamp_ms ASC, id ASC",
+    )?;
+    let rows = stmt.query_map(params![flight_id], |r| {
+        Ok(WeatherRecord {
+            timestamp_ms: r.get(0)?,
+            lat: r.get(1)?,
+            lon: r.get(2)?,
+            source: r.get(3)?,
+            data_json: r.get(4)?,
+        })
+    })?;
+    rows.collect()
+}
+
+/// The columns of `gps_records` behind `flight_id`, in the order `insert_gps_record` binds them.
+const GPS_RECORDS_COLS: &str = "timestamp_ms, instance, fix_type, fix_raw, num_sat, hdop, lat, lon, alt_msl, \
+    vdop, h_acc_m, v_acc_m, speed_ms, course_deg, yaw_deg";
+
+/// `(timestamp_ms, sample)` pairs of one flight, in one transaction.
+pub fn insert_gps_records_batch(
+    conn: &Connection,
+    flight_id: i64,
+    records: &[(i64, crate::scheduler::telemetry::GpsReceiverData)],
+) -> SqlResult<()> {
+    let tx = write_tx(conn)?;
+    {
+        let mut stmt = tx.prepare_cached(&format!(
+            "INSERT INTO gps_records (flight_id, {GPS_RECORDS_COLS})
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)"
+        ))?;
+        for (timestamp_ms, r) in records {
+            stmt.execute(params![
+                flight_id, timestamp_ms, r.id, r.fix_type, r.fix_raw, r.num_sat, r.hdop, r.lat, r.lon, r.alt_msl,
+                r.vdop, r.h_acc_m, r.v_acc_m, r.speed_ms, r.course_deg, r.yaw_deg,
+            ])?;
+        }
+    }
+    tx.commit()
+}
+
+/// The raw receiver samples of a flight, oldest first, for the replay.
+pub fn get_flight_gps_records(conn: &Connection, flight_id: i64) -> SqlResult<Vec<GpsRecord>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {GPS_RECORDS_COLS} FROM gps_records WHERE flight_id = ?1 ORDER BY timestamp_ms ASC, id ASC"
+    ))?;
+    let rows = stmt.query_map(params![flight_id], |r| {
+        Ok(GpsRecord {
+            timestamp_ms: r.get(0)?,
+            instance: r.get(1)?,
+            fix_type: r.get(2)?,
+            fix_raw: r.get(3)?,
+            num_sat: r.get(4)?,
+            hdop: r.get(5)?,
+            lat: r.get(6)?,
+            lon: r.get(7)?,
+            alt_msl: r.get(8)?,
+            vdop: r.get(9)?,
+            h_acc_m: r.get(10)?,
+            v_acc_m: r.get(11)?,
+            speed_ms: r.get(12)?,
+            course_deg: r.get(13)?,
+            yaw_deg: r.get(14)?,
+        })
+    })?;
+    rows.collect()
+}
+
 // ── Live recording: per-session temp store (commit-on-disarm, ADR-040) ──────────────
 
-/// Open (creating its parent dir) a per-session temp SQLite file: the `telemetry_records` table
-/// (full current field set) plus a self-describing `session_meta` table so an orphaned `.ktmp`
-/// left by a crash can be interpreted on its own (crash recovery is a later phase). WAL +
-/// `synchronous = NORMAL`: the file is the durable buffer for the in-flight stream.
+/// Open a per-session temp SQLite file: `telemetry_records` plus a self-describing `session_meta`, so an
+/// orphaned `.ktmp` can be interpreted on its own. WAL + `synchronous = NORMAL`: the durable buffer.
 pub fn open_temp_session(path: &Path) -> SqlResult<Connection> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).ok();
@@ -1646,6 +1842,8 @@ pub fn open_temp_session(path: &Path) -> SqlResult<Connection> {
     )?;
     conn.execute_batch(TELEMETRY_RECORDS_DDL_FULL)?;
     conn.execute_batch(BATTERY_RECORDS_DDL_FULL)?;
+    conn.execute_batch(WEATHER_RECORDS_DDL_FULL)?;
+    conn.execute_batch(GPS_RECORDS_DDL_FULL)?;
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS session_meta (
             id            INTEGER PRIMARY KEY CHECK (id = 1),
@@ -1684,6 +1882,7 @@ pub fn open_temp_session(path: &Path) -> SqlResult<Connection> {
     if !column_exists(&conn, "telemetry_records", "wall_ms")? {
         conn.execute_batch("ALTER TABLE telemetry_records ADD COLUMN wall_ms INTEGER;")?;
     }
+    add_nav_target_columns(&conn)?;
     // …and the group-flight membership (GROUP_FLIGHTS.md §3.3). `role` stays NULL on such a file: it
     // marks a session whose arm/disarm history was never recorded (see `SessionMetaRow::role`).
     for column in ["vehicle_key", "role", "group_id", "group_file"] {
@@ -1770,10 +1969,8 @@ pub fn update_session_meta_identity(
     Ok(())
 }
 
-/// Record who writes a temp session and whether it belongs to a group flight (GROUP_FLIGHTS.md §3.3):
-/// the recorder's vehicle key, its role (`single` | `member`), and — for a member — the group id and
-/// the file name of the group's `.kgrp` (it lives next to the `.ktmp`). Written at session start and
-/// whenever the membership changes.
+/// Record the temp session's writer and group membership (vehicle key, role `single` | `member`, group
+/// id, `.kgrp` file name); written at session start and on every membership change.
 pub fn update_session_meta_membership(
     conn: &Connection,
     vehicle_key: &str,
@@ -1931,16 +2128,9 @@ pub fn read_stats_samples(conn: &Connection) -> SqlResult<Vec<StatsSample>> {
     rows.collect()
 }
 
-/// Commit a finished temp session into the main DB atomically: insert the finalized `flights` row,
-/// ATTACH the temp file, copy its `telemetry_records` (rewriting `flight_id` to the new main id),
-/// then DETACH. Returns the new flight id. The main DB therefore only ever sees the flight as a
-/// finished whole. `ATTACH`/`DETACH` cannot run inside a transaction, so they bracket it.
-///
-/// Group flights (GROUP_FLIGHTS.md §3.4): the session's `session_events` become the flight's
-/// `flight_events`, and a group id in its `session_meta` (else `flight.group_id`) is written to
-/// `flights.group_id`. The group row must exist already (the caller commits it first); a missing one
-/// fails the commit instead of silently dropping the membership. A `.ktmp` from before these tables
-/// commits as before.
+/// Commit a finished temp session into the main DB atomically (ATTACH/DETACH bracket the transaction, as
+/// they cannot run inside one); returns the new flight id. The group row must exist already: a missing
+/// one fails the commit instead of silently dropping the membership.
 pub fn commit_session_to_main(
     conn: &Connection,
     temp_path: &Path,
@@ -1958,6 +2148,8 @@ pub fn commit_session_to_main(
             None
         };
         let has_events = attached_table_exists(conn, "session_events")?;
+        let has_weather = attached_table_exists(conn, "weather_records")?;
+        let has_gps = attached_table_exists(conn, "gps_records")?;
 
         let tx = write_tx(conn)?;
         let mut row = flight.clone();
@@ -1989,7 +2181,6 @@ pub fn commit_session_to_main(
             ),
             [],
         )?;
-        // Copy per-instance battery samples too (multi-battery), rewriting flight_id like above.
         let bat_select = BATTERY_RECORDS_COLS.replacen("flight_id", &flight_id.to_string(), 1);
         tx.execute(
             &format!(
@@ -2000,6 +2191,23 @@ pub fn commit_session_to_main(
             ),
             [],
         )?;
+        if has_weather {
+            tx.execute(
+                "INSERT INTO main.weather_records (flight_id, timestamp_ms, lat, lon, source, data_json)
+                 SELECT ?1, timestamp_ms, lat, lon, source, data_json
+                 FROM sess.weather_records ORDER BY timestamp_ms ASC, id ASC",
+                params![flight_id],
+            )?;
+        }
+        if has_gps {
+            tx.execute(
+                &format!(
+                    "INSERT INTO main.gps_records (flight_id, {GPS_RECORDS_COLS})
+                     SELECT ?1, {GPS_RECORDS_COLS} FROM sess.gps_records ORDER BY timestamp_ms ASC, id ASC"
+                ),
+                params![flight_id],
+            )?;
+        }
         if has_events {
             tx.execute(
                 "INSERT INTO main.flight_events (flight_id, timestamp_ms, wall_ms, kind, code, text, source)
@@ -2053,10 +2261,8 @@ pub fn remove_temp_session(temp_path: &Path) {
     }
 }
 
-/// Delete every temp `.ktmp` session in `dir` except the ones in `keep` (the live, pending,
-/// continue-on-reconnect, group-pending and suspended group-member sessions). Enforces the
-/// single-temp invariant whenever the user discards: stragglers from earlier crashes must not
-/// resurface one per launch. Returns the number removed.
+/// Delete every temp `.ktmp` in `dir` except `keep`, so stragglers from earlier crashes cannot resurface
+/// one per launch. Returns the number removed.
 pub fn sweep_temp_sessions(dir: &Path, keep: &[PathBuf]) -> usize {
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
@@ -2183,12 +2389,10 @@ pub fn get_flight(conn: &Connection, flight_id: i64) -> SqlResult<Option<Flight>
     }
 }
 
-// ── Mission library ─────────────────────────────────────────────────
-
 const MISSION_COLS: &str = "id, content_hash, name, format, waypoints_json, source_xml, \
     wp_count, total_distance_m, alt_diff_m, max_alt_m, min_alt_m, \
     bndbox_min_lat, bndbox_min_lon, bndbox_max_lat, bndbox_max_lon, location_name, \
-    created_at, notes, home_lat, home_lon";
+    created_at, notes, home_lat, home_lon, vehicle_class, extra_json";
 
 fn row_to_mission(row: &rusqlite::Row) -> SqlResult<Mission> {
     Ok(Mission {
@@ -2212,6 +2416,8 @@ fn row_to_mission(row: &rusqlite::Row) -> SqlResult<Mission> {
         notes: row.get(17)?,
         home_lat: row.get(18)?,
         home_lon: row.get(19)?,
+        vehicle_class: row.get(20)?,
+        extra_json: row.get(21)?,
     })
 }
 
@@ -2233,8 +2439,9 @@ pub fn upsert_mission(conn: &Connection, m: &MissionInput) -> SqlResult<i64> {
             content_hash, name, format, waypoints_json, source_xml, wp_count,
             total_distance_m, alt_diff_m, max_alt_m, min_alt_m,
             bndbox_min_lat, bndbox_min_lon, bndbox_max_lat, bndbox_max_lon, notes,
-            home_lat, home_lon
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+            home_lat, home_lon, vehicle_class, extra_json, location_name, created_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
+                  ?18, ?19, ?20, COALESCE(?21, datetime('now')))",
         params![
             m.content_hash,
             m.name,
@@ -2253,6 +2460,10 @@ pub fn upsert_mission(conn: &Connection, m: &MissionInput) -> SqlResult<i64> {
             m.notes,
             m.home_lat,
             m.home_lon,
+            m.vehicle_class,
+            m.extra_json,
+            m.location_name,
+            m.created_at,
         ],
     )?;
     Ok(conn.last_insert_rowid())
@@ -2286,17 +2497,18 @@ pub fn find_mission_by_hash(conn: &Connection, content_hash: &str) -> SqlResult<
     .optional()
 }
 
-/// Overwrite an existing library mission in place (OVERWRITE on save). Updates content + all
-/// computed metadata; `created_at` and `location_name` are preserved. The caller should
-/// pre-check `find_mission_by_hash` so it does not collide with a *different* existing row.
+/// Overwrite a library mission in place. `created_at`, `location_name` and — unless the input brings
+/// one — `extra_json` are kept. The caller pre-checks `find_mission_by_hash`: the new hash must not be
+/// another row's.
 pub fn update_mission(conn: &Connection, id: i64, m: &MissionInput) -> SqlResult<()> {
     conn.execute(
         "UPDATE missions SET
             content_hash = ?1, name = ?2, format = ?3, waypoints_json = ?4, source_xml = ?5,
             wp_count = ?6, total_distance_m = ?7, alt_diff_m = ?8, max_alt_m = ?9, min_alt_m = ?10,
             bndbox_min_lat = ?11, bndbox_min_lon = ?12, bndbox_max_lat = ?13, bndbox_max_lon = ?14,
-            notes = ?15, home_lat = ?16, home_lon = ?17
-         WHERE id = ?18",
+            notes = ?15, home_lat = ?16, home_lon = ?17, vehicle_class = ?18,
+            extra_json = COALESCE(?19, extra_json)
+         WHERE id = ?20",
         params![
             m.content_hash,
             m.name,
@@ -2315,10 +2527,28 @@ pub fn update_mission(conn: &Connection, id: i64, m: &MissionInput) -> SqlResult
             m.notes,
             m.home_lat,
             m.home_lon,
+            m.vehicle_class,
+            m.extra_json,
             id,
         ],
     )?;
     Ok(())
+}
+
+/// A `.kmission` import onto an existing row; a `.kflight` import has its own rule (exchange.rs).
+pub fn set_mission_extra(conn: &Connection, id: i64, extra_json: Option<&str>) -> SqlResult<()> {
+    conn.execute("UPDATE missions SET extra_json = ?1 WHERE id = ?2", params![extra_json, id])?;
+    Ok(())
+}
+
+/// Replace a mission's content hash, as long as it still is `old_hash`: the new one was computed
+/// from the content behind that. `false` when the entry changed meanwhile or another row holds the hash.
+pub fn set_mission_hash(conn: &Connection, id: i64, content_hash: &str, old_hash: &str) -> SqlResult<bool> {
+    let n = conn.execute(
+        "UPDATE OR IGNORE missions SET content_hash = ?1 WHERE id = ?2 AND content_hash = ?3",
+        params![content_hash, id, old_hash],
+    )?;
+    Ok(n > 0)
 }
 
 /// Update only a mission's name + notes (rename / notes edit in the Manager; content unchanged).
@@ -2379,9 +2609,8 @@ pub fn unlink_flight_mission(conn: &Connection, flight_id: i64) -> SqlResult<()>
     Ok(())
 }
 
-/// Delete a library mission, first unlinking any flights that reference it (those flights keep
-/// their telemetry and the Blackbox-header WP fallback). The FK has no ON DELETE, so a bare
-/// delete of a referenced mission would fail — hence the explicit unlink.
+/// Delete a library mission, unlinking the flights that reference it first (the FK has no ON DELETE).
+/// Those flights keep their telemetry and the Blackbox-header WP fallback.
 pub fn delete_mission(conn: &Connection, id: i64) -> SqlResult<()> {
     conn.execute(
         "UPDATE flights SET mission_id = NULL WHERE mission_id = ?1",
@@ -2426,8 +2655,6 @@ pub fn list_flights_for_mission(conn: &Connection, mission_id: i64) -> SqlResult
     rows.collect()
 }
 
-// ── Battery library ─────────────────────────────────────────────────
-
 const BATTERY_COLS: &str = "id, serial, label, manufacturer, model, chemistry, cell_count, \
     capacity_mah, c_rating_discharge, c_rating_charge, connector, in_service_date, status, \
     notes, created_at, base_flight_seconds, base_mah, base_cycles, base_charges";
@@ -2456,10 +2683,8 @@ fn row_to_battery(row: &rusqlite::Row) -> SqlResult<BatteryPack> {
     })
 }
 
-/// Canonical battery serial: ASCII alphanumerics only, upper-cased. The serial is the soft-link key,
-/// and free-form spaces/punctuation/case are a common source of links that silently fail to resolve
-/// (and hardware barcodes are upper alnum anyway). We hard-normalize at every store + lookup so the
-/// exact-match link is reliable; keep this identical to the frontend `normalizeSerial`.
+/// Canonical battery serial: ASCII alphanumerics, upper case — normalized at every store and lookup so
+/// the exact-match soft link resolves. Keep identical to the frontend `normalizeSerial`.
 pub fn normalize_serial(s: &str) -> String {
     s.chars()
         .filter(|c| c.is_ascii_alphanumeric())
@@ -2467,11 +2692,8 @@ pub fn normalize_serial(s: &str) -> String {
         .collect()
 }
 
-/// Canonical battery-serial *list*: a single flight may link several packs, stored comma-separated in
-/// the freetext `flights.battery_serial` column. Split on commas, normalize each token with
-/// `normalize_serial`, drop empties, de-duplicate (order-preserving), and rejoin with a plain comma
-/// (no spaces) — a canonical token list the `*_for_serial` lookups match exactly. Keep in sync with the
-/// frontend `normalizeSerialList`.
+/// Canonical serial list (`flights.battery_serial` may link several packs): normalized, de-duplicated
+/// tokens joined by a plain comma. Keep in sync with the frontend `normalizeSerialList`.
 pub fn normalize_serial_list(s: &str) -> String {
     let mut out: Vec<String> = Vec::new();
     for tok in s.split(',') {
@@ -2668,8 +2890,6 @@ pub fn set_flight_battery_serial(
     Ok(())
 }
 
-// ── Vehicle library ─────────────────────────────────────────────────
-
 const VEHICLE_COLS: &str = "id, name, craft_name, vehicle_type, status, image, notes, \
     model, wingspan_mm, length_mm, weight_auw_g, weight_dry_g, \
     motors, props, esc, recommended_cells, recommended_capacity_mah, \
@@ -2724,10 +2944,8 @@ fn row_to_vehicle(row: &rusqlite::Row) -> SqlResult<Vehicle> {
     })
 }
 
-/// Canonical craft name: trim leading/trailing whitespace, preserve case + inner content (it is a
-/// user-facing display string, unlike a battery serial). The flight↔vehicle match is done
-/// case-insensitively (`COLLATE NOCASE`) on the trimmed value. Keep identical to the frontend
-/// `normalizeCraftName`. Returns `None` for an empty/whitespace-only string.
+/// Canonical craft name: trimmed, case preserved (a display string); matched case-insensitively. Keep
+/// identical to the frontend `normalizeCraftName`. `None` for blank.
 pub fn normalize_craft_name(s: &str) -> Option<String> {
     let t = s.trim();
     if t.is_empty() {
@@ -2887,10 +3105,8 @@ fn vehicle_id_by_craft_name(conn: &Connection, craft: &str) -> SqlResult<Option<
     .optional()
 }
 
-/// Where a flight flown with `fc_uid` / `craft_name` points in the library: the vehicle storing the FC
-/// hardware id, else the newest vehicle carrying the craft name — then `conflict` is set when the flight
-/// has a hardware id and that vehicle stores a different one (FC swapped, or a second aircraft with the
-/// same craft name). Shared by `resolve_vehicle_id` and `resolve_vehicle`.
+/// Where a flight points in the library: the vehicle storing its FC hardware id, else the newest one
+/// carrying its craft name — with `conflict` set when that vehicle stores a different hardware id.
 fn vehicle_candidate(conn: &Connection, fc_uid: Option<&str>, craft_name: &str) -> SqlResult<Option<(i64, &'static str, bool)>> {
     let uid = fc_uid.and_then(hardware_uid);
     if let Some(u) = uid.as_deref() {
@@ -2911,12 +3127,9 @@ fn vehicle_candidate(conn: &Connection, fc_uid: Option<&str>, craft_name: &str) 
     Ok(Some((id, "craft", conflict)))
 }
 
-/// The library vehicle a flight flown with `fc_uid` / `craft_name` belongs to, for every automatic
-/// link (flight insert, the v20 back-fill, `.kflight` import): the vehicle storing the FC hardware id
-/// first, else the one carrying the craft name (vehicles and flights without a UID — 1.0 data, passive
-/// telemetry); the newest vehicle when several match. When unsure, unlinked (Marc, 2026-11-11): a
-/// flight with a hardware id never links by craft name to a vehicle that stores a DIFFERENT one — it
-/// stays unlinked until the user decides. `None` = not in the library.
+/// The library vehicle a flight belongs to, for every automatic link (see `vehicle_candidate`). When
+/// unsure, unlinked: a flight with a hardware id never links by craft name to a vehicle that stores a
+/// DIFFERENT one — the user decides. `None` = not in the library.
 pub fn resolve_vehicle_id(conn: &Connection, fc_uid: Option<&str>, craft_name: &str) -> SqlResult<Option<i64>> {
     Ok(match vehicle_candidate(conn, fc_uid, craft_name)? {
         Some((id, _, false)) => Some(id),
@@ -2970,11 +3183,9 @@ pub fn set_flight_vehicle(conn: &Connection, flight_id: i64, vehicle_id: Option<
     Ok(n > 0)
 }
 
-/// The flights a link-by-identity moves to vehicle `?1`: those flown with the craft name `?2` (trimmed,
-/// case-insensitive) or with the FC hardware id `?3`, not linked to that vehicle yet — with `?4`
-/// (only_unlinked), only flights without any vehicle. With an FC id key the craft-name arm never
-/// crosses a different FC id: a flight matches by name only when it has no hardware id of its own
-/// (none, empty, all zero or the INAV SITL constant `?5` — `msp::hardware_uid`) or the same one.
+/// The flights a link-by-identity moves to vehicle `?1`: craft name `?2` or FC hardware id `?3`, not
+/// linked to it yet (`?4`: only unlinked ones). The name arm never crosses a different FC id — it needs
+/// no real hardware id on the flight (none, zero or the SITL constant `?5`) or the same one.
 const LINKABLE_FLIGHTS_WHERE: &str = "((?2 IS NOT NULL AND TRIM(craft_name) = ?2 COLLATE NOCASE \
          AND (?3 IS NULL OR fc_uid IS NULL OR REPLACE(TRIM(fc_uid), '0', '') = '' \
               OR TRIM(fc_uid) = ?5 COLLATE NOCASE OR TRIM(fc_uid) = ?3 COLLATE NOCASE)) \
@@ -3161,6 +3372,29 @@ pub fn list_flights_for_vehicle(conn: &Connection, vehicle_id: i64) -> SqlResult
     rows.collect()
 }
 
+/// `flights.alt_relative`: the track's altitude is relative to the arming point, not MSL. `None` (the
+/// recorder was never told, e.g. a session recovered from disk) falls back to the protocol label rule.
+pub fn set_flight_alt_relative(conn: &Connection, flight_id: i64, relative: Option<bool>) -> SqlResult<()> {
+    conn.execute(
+        &format!(
+            "UPDATE flights SET alt_relative = COALESCE(?1, CASE WHEN {ALT_RELATIVE_PROTOCOL_SQL} THEN 1 ELSE 0 END)
+             WHERE id = ?2"
+        ),
+        params![relative, flight_id],
+    )?;
+    Ok(())
+}
+
+/// `None` for a flight without a stored value (imported logs, files from before v22).
+pub fn get_flight_alt_relative(conn: &Connection, flight_id: i64) -> SqlResult<Option<bool>> {
+    Ok(conn
+        .query_row("SELECT alt_relative FROM flights WHERE id = ?1", params![flight_id], |row| {
+            row.get::<_, Option<bool>>(0)
+        })
+        .optional()?
+        .flatten())
+}
+
 /// Read the Blackbox-header waypoint count for a flight (fallback `X` for replay).
 pub fn get_flight_logged_wp_count(conn: &Connection, flight_id: i64) -> SqlResult<Option<i64>> {
     match conn
@@ -3200,11 +3434,9 @@ pub fn read_flight_track(
     flight_id: i64,
     fc_variant: Option<&str>,
 ) -> SqlResult<Vec<TelemetryRecord>> {
-    // Flights recorded before the unified flight-mode model (f8e5699, 2026-06-14) stored the raw
-    // mode flags but no canonical mode, and replay them as N/A. An import can be repeated, a live
-    // recording cannot, so the mode is derived here from the flags that are already in the row.
-    // `active_flight_mode_flags` holds INAV's bitmask or MAVLink's custom_mode depending on the
-    // source, which is what the variant selects between.
+    // Flights recorded before the unified flight-mode model stored raw flags but no canonical mode; derive
+    // it here (a live recording cannot be repeated). `active_flight_mode_flags` holds INAV's bitmask or
+    // MAVLink's custom_mode — the variant selects which.
     let mut stmt = conn.prepare(&format!(
         "SELECT id, {TELEMETRY_COLS} FROM telemetry_records          WHERE flight_id = ?1 ORDER BY timestamp_ms ASC"
     ))?;
@@ -3283,6 +3515,9 @@ fn read_telemetry_record(row: &rusqlite::Row) -> SqlResult<TelemetryRecord> {
         airspeed_ms: row.get(45)?,
         throttle_pct: row.get(46)?,
         wall_ms: row.get(47)?,
+        target_lat: row.get(48)?,
+        target_lon: row.get(49)?,
+        target_alt_m: row.get(50)?,
     })
 }
 
@@ -3394,9 +3629,7 @@ pub fn find_duplicate_flight(
     Ok(Some(flight))
 }
 
-/// Delete a flight and all related data (telemetry, battery samples, events, archived files).
-/// Explicitly deletes child rows first (in case foreign_keys is off), then starts the background
-/// reclaim of the freed pages.
+/// Delete a flight and all its child rows, then start the background reclaim of the freed pages.
 pub fn delete_flight(conn: &Connection, flight_id: i64) -> SqlResult<bool> {
     let deleted = delete_flight_rows(conn, flight_id)?;
 
@@ -3409,9 +3642,8 @@ pub fn delete_flight(conn: &Connection, flight_id: i64) -> SqlResult<bool> {
     Ok(deleted)
 }
 
-/// SQL expression on a `flights` row of a `both` flight: its own source (schema v21) — what it was
-/// before `link_flights`, or, without a stored value (an orphan `both`, or a pair whose value was
-/// lost), `blackbox` for a log importer's flight or one that holds an archived log, `live` otherwise.
+/// SQL expression on a `both` flight's row: its own source — the stored `source_before_link`, else
+/// derived (`blackbox` for a log importer's flight or one holding an archived log, else `live`).
 /// A macro so the consts below can embed it at compile time.
 macro_rules! own_source_sql {
     () => {
@@ -3437,17 +3669,18 @@ pub(crate) const END_LINK_SET: &str = concat!(
 
 /// The row work of `delete_flight` without the page reclaim, so it can run inside a transaction.
 fn delete_flight_rows(conn: &Connection, flight_id: i64) -> SqlResult<bool> {
-    // Clear any linked_flight_id references pointing to this flight
     conn.execute(
         &format!("UPDATE flights SET {END_LINK_SET} WHERE linked_flight_id = ?1"),
         params![flight_id],
     )?;
 
-    // Explicitly delete child tables (don't rely solely on CASCADE; `battery_records` has no FK at
-    // all, so without this its rows outlived the flight).
+    // Child tables are deleted explicitly: most have no FK, their rows would outlive the flight.
     conn.execute("DELETE FROM blackbox_files WHERE flight_id = ?1", params![flight_id])?;
     conn.execute("DELETE FROM telemetry_records WHERE flight_id = ?1", params![flight_id])?;
     conn.execute("DELETE FROM battery_records WHERE flight_id = ?1", params![flight_id])?;
+    conn.execute("DELETE FROM gps_records WHERE flight_id = ?1", params![flight_id])?;
+    conn.execute("DELETE FROM weather_records WHERE flight_id = ?1", params![flight_id])?;
+    conn.execute("DELETE FROM flight_videos WHERE flight_id = ?1", params![flight_id])?;
     conn.execute("DELETE FROM flight_events WHERE flight_id = ?1", params![flight_id])?;
     let affected = conn.execute("DELETE FROM flights WHERE id = ?1", params![flight_id])?;
     Ok(affected > 0)
@@ -3710,11 +3943,8 @@ pub fn unlink_flight(conn: &Connection, flight_id: i64) -> SqlResult<()> {
     Ok(())
 }
 
-/// Find a live flight that could be linked to a blackbox import.
-/// Matches on craft_name and overlapping time window (±60 seconds).
-/// Duration-match tolerance (seconds) for the craft-name-less fallback (covers the recorder's arm/disarm
-/// grace + detection latency). Passive telemetry (FrSky/CRSF) carries no craft name, so a blackbox of the
-/// same flight can't match on name — fall back to a near-identical duration within the ±60 s start window.
+/// Duration tolerance (s) of the craft-name-less match: passive telemetry carries no craft name, so a
+/// blackbox of the same flight matches by a near-identical duration within the ±60 s start window.
 const DURATION_MATCH_TOLERANCE_SEC: i64 = 10;
 
 pub fn find_linkable_live_flight(
@@ -3767,9 +3997,7 @@ pub fn find_linkable_live_flight(
     Ok(result)
 }
 
-/// Retrieve the first blackbox file BLOB + original filename for a flight.
-/// Also checks the linked partner flight if no file is found directly.
-/// Returns None if no blackbox file is attached.
+/// The first blackbox file BLOB + original filename of a flight, else of its linked partner.
 pub fn get_blackbox_file(
     conn: &Connection,
     flight_id: i64,
@@ -3812,9 +4040,81 @@ pub fn get_blackbox_file(
     Ok(None)
 }
 
-/// Original blackbox file info (filename + size in bytes) stored for this flight (or its linked
-/// partner). Lightweight — does not load the BLOB. `None` if there's no stored original. Gates the
-/// export / delete-original buttons and supplies the size shown next to them.
+/// A flight's share of the database, by the source of its rows.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct FlightDataSize {
+    pub flight_id: i64,
+    /// `live` or `blackbox`.
+    pub source: String,
+    pub bytes: u64,
+}
+
+/// Estimated row bytes of a flight and of its linked partner (SQLite record encoding per column).
+/// Indexes, page slack and `blackbox_files` are not counted.
+pub fn flight_data_sizes(conn: &Connection, flight_id: i64) -> SqlResult<Vec<FlightDataSize>> {
+    let linked: Option<i64> = conn
+        .query_row("SELECT linked_flight_id FROM flights WHERE id = ?1", params![flight_id], |r| r.get(0))
+        .optional()?
+        .flatten();
+    let mut tables: Vec<String> = Vec::new();
+    {
+        let mut stmt = conn.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")?;
+        for name in stmt.query_map([], |r| r.get::<_, String>(0))? {
+            let name = name?;
+            if name != "blackbox_files" {
+                tables.push(name.replace('"', "\"\""));
+            }
+        }
+    }
+    let mut row_bytes: Vec<(String, String)> = Vec::new();
+    for table in tables {
+        let mut cols: Vec<String> = Vec::new();
+        let mut stmt = conn.prepare(&format!("PRAGMA table_info(\"{table}\")"))?;
+        for col in stmt.query_map([], |r| r.get::<_, String>(1))? {
+            // Quoted below as an identifier.
+            cols.push(col?.replace('"', "\"\""));
+        }
+        if !cols.iter().any(|c| c == "flight_id") {
+            continue;
+        }
+        let per_col: Vec<String> = cols
+            .iter()
+            .map(|c| {
+                format!(
+                    "1 + CASE typeof(\"{c}\") WHEN 'null' THEN 0 WHEN 'real' THEN 8 WHEN 'integer' THEN \
+                     CASE WHEN \"{c}\" BETWEEN -128 AND 127 THEN 1 WHEN \"{c}\" BETWEEN -32768 AND 32767 THEN 2 \
+                     WHEN \"{c}\" BETWEEN -2147483648 AND 2147483647 THEN 4 ELSE 8 END \
+                     ELSE LENGTH(CAST(\"{c}\" AS BLOB)) END"
+                )
+            })
+            .collect();
+        row_bytes.push((table, per_col.join(" + ")));
+    }
+    let mut out = Vec::new();
+    for id in std::iter::once(flight_id).chain(linked) {
+        let source: Option<String> = conn
+            .query_row(
+                &format!("SELECT CASE WHEN source = 'both' THEN {OWN_SOURCE_SQL} ELSE source END FROM flights WHERE id = ?1"),
+                params![id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let Some(source) = source else { continue };
+        let mut bytes: i64 = 0;
+        for (table, expr) in &row_bytes {
+            // 4 bytes per row for the cell header and the row id.
+            bytes += conn.query_row(
+                &format!("SELECT COALESCE(SUM(4 + {expr}), 0) FROM \"{table}\" WHERE flight_id = ?1"),
+                params![id],
+                |r| r.get::<_, i64>(0),
+            )?;
+        }
+        out.push(FlightDataSize { flight_id: id, source, bytes: bytes.max(0) as u64 });
+    }
+    Ok(out)
+}
+
+/// Original blackbox file info (filename, bytes) of this flight or its partner, without loading the BLOB.
 pub fn blackbox_file_info(conn: &Connection, flight_id: i64) -> SqlResult<Option<(String, i64)>> {
     let here: Option<(String, i64)> = conn
         .query_row(
@@ -3847,10 +4147,8 @@ pub fn blackbox_file_info(conn: &Connection, flight_id: i64) -> SqlResult<Option
     Ok(None)
 }
 
-/// Delete the stored original blackbox file BLOB for a flight (or its linked partner), keeping the
-/// flight row and its `telemetry_records` intact — replay still works from the DB; the "export
-/// original" capability and hi-res replay (which re-decodes the original) are lost. Returns the
-/// deleted file's original filename (None if there was nothing to delete).
+/// Delete the stored original blackbox file BLOB for a flight (or its linked partner). Replay keeps
+/// working; "export original" and hi-res replay are lost. Returns the deleted file's original name.
 pub fn delete_blackbox_file(conn: &Connection, flight_id: i64) -> SqlResult<Option<String>> {
     // Resolve which flight actually holds the file: this one, else its linked partner.
     let mut target: Option<i64> = None;
@@ -4011,6 +4309,30 @@ mod tests {
         cleanup(&path);
     }
 
+    /// `schema_mismatch` reports an older and a newer existing database, and neither a missing, a fresh
+    /// nor a current one — without creating or changing the file.
+    #[test]
+    fn schema_mismatch_is_read_only_and_exact() {
+        let path = temp_db_path("schema-mismatch");
+        cleanup(&path);
+        assert_eq!(schema_mismatch(&path), None);
+        assert!(!path.exists(), "the probe must not create the database");
+        drop(open_database(&path).unwrap());
+        assert_eq!(schema_mismatch(&path), None);
+        let stamp = |version: u32| {
+            let conn = Connection::open(&path).unwrap();
+            set_user_version(&conn, version).unwrap();
+        };
+        stamp(CURRENT_SCHEMA_VERSION + 1);
+        assert_eq!(schema_mismatch(&path), Some((CURRENT_SCHEMA_VERSION + 1, CURRENT_SCHEMA_VERSION)));
+        stamp(CURRENT_SCHEMA_VERSION - 1);
+        assert_eq!(schema_mismatch(&path), Some((CURRENT_SCHEMA_VERSION - 1, CURRENT_SCHEMA_VERSION)));
+        assert!(!backup_path_for(&path).exists(), "the probe must not start the upgrade");
+        drop(open_database(&path).unwrap());
+        assert_eq!(schema_mismatch(&path), None);
+        cleanup(&path);
+    }
+
     /// Hi-res cache sampling (HIRES_REPLAY): nearest row at-or-before the timestamp, None before
     /// the first row (the player then falls back to the 10 Hz sample).
     #[test]
@@ -4033,8 +4355,7 @@ mod tests {
         remove_temp_session(&path);
     }
 
-    /// Full open/migrate pass over a COPY of a real flight database (Marc's RC2 archive,
-    /// F:\DEVELOPMENT\TEST_DATA\Kite-GC-testdata\flights-real.db — outside the repo).
+    /// Full open/migrate pass over a COPY of a real flight database (kept outside the repo).
     /// `KITE_TEST_DB=<path> cargo test migrates_the_real_database -- --ignored --nocapture`
     #[test]
     #[ignore]
@@ -4276,6 +4597,9 @@ mod tests {
                 nav_lat: None,
                 nav_lon: None,
                 nav_alt_m: None,
+                target_lat: None,
+                target_lon: None,
+                target_alt_m: None,
                 mode_primary: None,
                 mode_modifiers: None,
                 link_snr: None,
@@ -4373,6 +4697,9 @@ mod tests {
             nav_lat: None,
             nav_lon: None,
             nav_alt_m: None,
+            target_lat: None,
+            target_lon: None,
+            target_alt_m: None,
             mode_primary: None,
             mode_modifiers: None,
             link_snr: None,
@@ -4565,6 +4892,9 @@ mod tests {
             nav_lat: None,
             nav_lon: None,
             nav_alt_m: None,
+            target_lat: None,
+            target_lon: None,
+            target_alt_m: None,
             mode_primary: Some("manual".into()),
             mode_modifiers: None,
             link_snr: None,
@@ -4779,6 +5109,24 @@ mod tests {
         assert_eq!(count(&conn, "SELECT COUNT(*) FROM flight_events WHERE flight_id = ?1", id), 0);
     }
 
+    /// The size is the flight's own rows only, grows with them, and names each flight of a pair.
+    #[test]
+    fn flight_data_sizes_count_only_the_flights_own_rows() {
+        let conn = test_db();
+        let a = insert_flight(&conn, &flight("A", None)).unwrap();
+        let b = insert_flight(&conn, &flight("B", None)).unwrap();
+        insert_telemetry_batch(&conn, &[telemetry(a, 0, None)]).unwrap();
+        let one = flight_data_sizes(&conn, a).unwrap();
+        assert_eq!((one.len(), one[0].flight_id), (1, a));
+        assert!(one[0].bytes > 0);
+
+        insert_telemetry_batch(&conn, &[telemetry(a, 100, None), telemetry(b, 0, None)]).unwrap();
+        let two = flight_data_sizes(&conn, a).unwrap();
+        assert!(two[0].bytes > one[0].bytes && two[0].bytes < one[0].bytes * 3);
+        assert_eq!(flight_data_sizes(&conn, b).unwrap()[0].bytes, one[0].bytes);
+        assert!(flight_data_sizes(&conn, 9999).unwrap().is_empty());
+    }
+
     /// `wall_ms` round-trips through the main DB, and through a temp session commit — including a
     /// `.ktmp` written before v20 (no `wall_ms` column), which `open_temp_session` back-fills.
     #[test]
@@ -4797,10 +5145,31 @@ mod tests {
             let t = open_temp_session(&temp).unwrap();
             insert_telemetry_batch(&t, &[telemetry(0, 0, Some(1_790_000_000_500)), telemetry(0, 200, Some(1_790_000_000_700))])
                 .unwrap();
+            insert_weather_record(&t, 0, 150, 48.1, 11.5, "open-meteo", "{\"elevationM\":520.0,\"steps\":[]}").unwrap();
+            t.execute(
+                "INSERT INTO gps_records (flight_id, timestamp_ms, instance, fix_raw, num_sat, lat, yaw_deg)
+                 VALUES (0, 180, 1, 6, 19, 48.1, 271.5)",
+                [],
+            )
+            .unwrap();
         }
         let committed = commit_session_to_main(&conn, &temp, &flight("Wall", None)).unwrap();
         let track = get_flight_track(&conn, committed).unwrap();
         assert_eq!(track.iter().map(|r| r.wall_ms).collect::<Vec<_>>(), [Some(1_790_000_000_500), Some(1_790_000_000_700)]);
+        // The weather answers of the session follow the flight to its new id.
+        let weather: (i64, String) = conn
+            .query_row(
+                "SELECT timestamp_ms, data_json FROM weather_records WHERE flight_id = ?1",
+                params![committed],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(weather, (150, "{\"elevationM\":520.0,\"steps\":[]}".to_string()));
+        let read = get_flight_weather_records(&conn, committed).unwrap();
+        assert_eq!((read.len(), read[0].timestamp_ms, read[0].lat), (1, 150, Some(48.1)));
+        let gps = get_flight_gps_records(&conn, committed).unwrap();
+        assert_eq!(gps.len(), 1);
+        assert_eq!((gps[0].timestamp_ms, gps[0].instance, gps[0].fix_raw, gps[0].yaw_deg, gps[0].hdop), (180, 1, Some(6), Some(271.5), None));
         remove_temp_session(&temp);
 
         // A pre-v20 `.ktmp` (telemetry DDL without wall_ms) is back-filled on open and still commits.
@@ -4820,6 +5189,59 @@ mod tests {
         assert!(track[0].wall_ms.is_none());
         remove_temp_session(&temp);
         cleanup(&temp);
+    }
+
+    /// The nav target round-trips through the main DB and a temp session commit; a database and a `.ktmp`
+    /// that predate the columns get them.
+    #[test]
+    fn nav_target_round_trips_and_older_tables_get_the_columns() {
+        let with_target = |flight_id: i64, timestamp_ms: i64| TelemetryRecord {
+            target_lat: Some(48.1),
+            target_lon: Some(11.5),
+            target_alt_m: Some(620.0),
+            ..telemetry(flight_id, timestamp_ms, None)
+        };
+        let target = |r: &TelemetryRecord| (r.target_lat, r.target_lon, r.target_alt_m);
+
+        let conn = test_db();
+        let id = insert_flight(&conn, &flight("Target", None)).unwrap();
+        insert_telemetry_batch(&conn, &[with_target(id, 0), telemetry(id, 100, None)]).unwrap();
+        let track = get_flight_track(&conn, id).unwrap();
+        assert_eq!(target(&track[0]), (Some(48.1), Some(11.5), Some(620.0)));
+        assert_eq!(target(&track[1]), (None, None, None));
+
+        let temp = temp_db_path("nav-target-ktmp").with_file_name("active_test_L1-S2.ktmp");
+        remove_temp_session(&temp);
+        {
+            let t = open_temp_session(&temp).unwrap();
+            insert_telemetry_batch(&t, &[with_target(0, 0)]).unwrap();
+        }
+        let committed = commit_session_to_main(&conn, &temp, &flight("Target", None)).unwrap();
+        assert_eq!(target(&get_flight_track(&conn, committed).unwrap()[0]), (Some(48.1), Some(11.5), Some(620.0)));
+        remove_temp_session(&temp);
+
+        // A `.ktmp` of a build without the columns is back-filled on open and still commits.
+        {
+            let legacy = Connection::open(&temp).unwrap();
+            let ddl = TELEMETRY_RECORDS_DDL_FULL.replace(",\n    target_lat REAL, target_lon REAL, target_alt_m REAL", "");
+            assert_ne!(ddl, TELEMETRY_RECORDS_DDL_FULL);
+            legacy.execute_batch(&ddl).unwrap();
+            legacy.execute_batch(BATTERY_RECORDS_DDL_FULL).unwrap();
+            legacy.execute("INSERT INTO telemetry_records (flight_id, timestamp_ms) VALUES (0, 0)", []).unwrap();
+        }
+        drop(open_temp_session(&temp).unwrap());
+        let committed = commit_session_to_main(&conn, &temp, &flight("Legacy target", None)).unwrap();
+        assert_eq!(target(&get_flight_track(&conn, committed).unwrap()[0]), (None, None, None));
+        remove_temp_session(&temp);
+        cleanup(&temp);
+
+        // A v22 database written before the columns joined v22 gets them at the next open.
+        for column in ["target_lat", "target_lon", "target_alt_m"] {
+            conn.execute_batch(&format!("ALTER TABLE telemetry_records DROP COLUMN {column};")).unwrap();
+        }
+        ensure_v22_schema(&conn).unwrap();
+        assert!(column_exists(&conn, "telemetry_records", "target_alt_m").unwrap());
+        assert_eq!(get_flight_track(&conn, id).unwrap().len(), 2);
     }
 
     // ── Schema v20: flight → library vehicle (`flights.vehicle_id`) ─────────────────────────
@@ -4846,10 +5268,8 @@ mod tests {
         get_flight(conn, flight_id).unwrap().unwrap().vehicle_id
     }
 
-    /// The v19 → v20 step adds `flights.vehicle_id` + its index and links the existing flights the way
-    /// the craft-name display did, with the FC id first: UID beats craft name, the newest vehicle wins,
-    /// synthetic ids never match, unmatched flights stay NULL. The back-fill only runs when the column is
-    /// born — a later open never re-links a flight the user un-linked — and is itself re-entrant.
+    /// The v19 → v20 step adds `flights.vehicle_id` and back-fills it: UID beats craft name, the newest
+    /// vehicle wins, synthetic ids never match. A later open never re-links a flight the user un-linked.
     #[test]
     fn v20_backfills_flight_vehicle_ids() {
         let conn = Connection::open_in_memory().unwrap();
@@ -5037,9 +5457,7 @@ mod tests {
     }
 
     /// When unsure, unlinked: a flight with a hardware FC id does not link by craft name to a vehicle that
-    /// stores a different one — on insert, in the back-fill and on `.kflight` import (see exchange.rs) —
-    /// while the post-flight summary still reports that candidate with `uid_conflict`. Without an FC id
-    /// on the flight or on the vehicle the craft-name link still works.
+    /// stores a different one; the post-flight summary still reports it with `uid_conflict`.
     #[test]
     fn craft_name_fallback_never_crosses_a_different_fc_id() {
         let conn = test_db();
@@ -5183,6 +5601,166 @@ mod tests {
         assert_eq!(get_flight(&conn, id).unwrap().unwrap().craft_name, "quad");
     }
 
+    // ── Schema v22 ────────────────────────────────────────────────────────────────────────
+
+    /// A v21 database with flights and a mission: the v22 step adds the tables and columns, back-fills
+    /// `alt_relative` from the protocol label, keeps the existing rows, and a second pass is a no-op.
+    #[test]
+    fn v21_database_migrates_to_v22() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        migrate_to(&conn, 21);
+        assert!(!table_exists(&conn, "gps_records").unwrap());
+        let flight = |protocol: &str| {
+            conn.execute(
+                "INSERT INTO flights (start_time, craft_name, source, protocol) VALUES ('2026-09-01T10:00:00+00:00', 'W', 'live', ?1)",
+                params![protocol],
+            )
+            .unwrap();
+            conn.last_insert_rowid()
+        };
+        let msp = flight("MSP");
+        let crsf = flight("Telemetry (CRSF)");
+        let ltm = flight("Telemetry (LTM)");
+        let mavlink_passive = flight("Telemetry (MAVLink)");
+        conn.execute(
+            "INSERT INTO missions (content_hash, name, waypoints_json) VALUES ('h1', 'M', '[]')",
+            [],
+        )
+        .unwrap();
+
+        migrate(&conn).unwrap();
+        assert_eq!(get_user_version(&conn).unwrap(), 22);
+        for table in ["gps_records", "weather_records", "flight_videos"] {
+            assert!(table_exists(&conn, table).unwrap(), "{table}");
+        }
+        for (table, column) in [("missions", "extra_json"), ("missions", "vehicle_class"), ("flights", "alt_relative")] {
+            assert!(column_exists(&conn, table, column).unwrap(), "{table}.{column}");
+        }
+        let alt_relative = |id: i64| -> Option<i64> {
+            conn.query_row("SELECT alt_relative FROM flights WHERE id = ?1", params![id], |r| r.get(0)).unwrap()
+        };
+        assert_eq!(alt_relative(msp), Some(0));
+        assert_eq!(alt_relative(crsf), Some(1));
+        assert_eq!(alt_relative(ltm), Some(1));
+        assert_eq!(alt_relative(mavlink_passive), Some(0));
+        let mission: (String, Option<String>, Option<String>) = conn
+            .query_row("SELECT name, extra_json, vehicle_class FROM missions WHERE content_hash = 'h1'", [], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })
+            .unwrap();
+        assert_eq!(mission, ("M".to_string(), None, None));
+
+        // Re-entrant: a value set after the migration survives the self-heal pass and the step itself.
+        conn.execute("UPDATE flights SET alt_relative = NULL WHERE id = ?1", params![crsf]).unwrap();
+        migrate(&conn).unwrap();
+        let tx = conn.unchecked_transaction().unwrap();
+        migrate_v21_to_v22(&tx).unwrap();
+        tx.commit().unwrap();
+        assert_eq!(alt_relative(crsf), None);
+        assert_eq!(get_user_version(&conn).unwrap(), 22);
+    }
+
+    /// A mission row keeps `extra_json` through an overwrite that brings none, takes a new one when given,
+    /// and an insert stores the vehicle class and the creation time a `.kmission` import hands over.
+    #[test]
+    fn mission_extra_and_vehicle_class_round_trip() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        let input = |hash: &str, extra: Option<&str>| MissionInput {
+            content_hash: hash.into(),
+            name: "M".into(),
+            format: "px4".into(),
+            waypoints_json: "[]".into(),
+            source_xml: None,
+            wp_count: 0,
+            total_distance_m: None,
+            alt_diff_m: None,
+            max_alt_m: None,
+            min_alt_m: None,
+            bndbox_min_lat: None,
+            bndbox_min_lon: None,
+            bndbox_max_lat: None,
+            bndbox_max_lon: None,
+            notes: None,
+            home_lat: None,
+            home_lon: None,
+            vehicle_class: Some("copter".into()),
+            extra_json: extra.map(Into::into),
+            created_at: Some("2026-01-02 03:04:05".into()),
+            location_name: Some("Somewhere".into()),
+        };
+        let id = upsert_mission(&conn, &input("h1", Some(r#"{"patterns":[1]}"#))).unwrap();
+        let m = get_mission(&conn, id).unwrap().unwrap();
+        assert_eq!(m.vehicle_class.as_deref(), Some("copter"));
+        assert_eq!(m.extra_json.as_deref(), Some(r#"{"patterns":[1]}"#));
+        assert_eq!(m.created_at, "2026-01-02 03:04:05");
+        assert_eq!(m.location_name.as_deref(), Some("Somewhere"));
+
+        update_mission(&conn, id, &input("h2", None)).unwrap();
+        let m = get_mission(&conn, id).unwrap().unwrap();
+        assert_eq!(m.content_hash, "h2");
+        assert_eq!(m.extra_json.as_deref(), Some(r#"{"patterns":[1]}"#), "an overwrite without extra keeps it");
+        assert_eq!(m.created_at, "2026-01-02 03:04:05");
+
+        update_mission(&conn, id, &input("h2", Some("{}"))).unwrap();
+        assert_eq!(get_mission(&conn, id).unwrap().unwrap().extra_json.as_deref(), Some("{}"));
+        set_mission_extra(&conn, id, None).unwrap();
+        assert_eq!(get_mission(&conn, id).unwrap().unwrap().extra_json, None);
+
+        // Without a creation time from a file the database stamps its own.
+        let mut plain = input("h3", None);
+        plain.created_at = None;
+        let id3 = upsert_mission(&conn, &plain).unwrap();
+        assert!(!get_mission(&conn, id3).unwrap().unwrap().created_at.is_empty());
+    }
+
+    /// A value the recorder knows is stored as given; without one the protocol label decides.
+    #[test]
+    fn alt_relative_is_stored_or_derived_from_the_label() {
+        let path = temp_db_path("alt-relative-set");
+        cleanup(&path);
+        let conn = open_database(&path).unwrap();
+        let with = |protocol: &str| insert_flight(&conn, &Flight { protocol: protocol.into(), ..flight("Wing", None) }).unwrap();
+        let (crsf, msp, told) = (with("Telemetry (CRSF)"), with("MSP"), with("MSP"));
+        assert_eq!(get_flight_alt_relative(&conn, crsf).unwrap(), None);
+        set_flight_alt_relative(&conn, crsf, None).unwrap();
+        set_flight_alt_relative(&conn, msp, None).unwrap();
+        set_flight_alt_relative(&conn, told, Some(true)).unwrap();
+        let read = |id| get_flight_alt_relative(&conn, id).unwrap();
+        assert_eq!((read(crsf), read(msp), read(told)), (Some(true), Some(false), Some(true)));
+        assert_eq!(get_flight_alt_relative(&conn, 9999).unwrap(), None);
+        drop(conn);
+        cleanup(&path);
+    }
+
+    /// The v22 child tables carry no FK: `delete_flight` removes their rows, other flights keep theirs.
+    #[test]
+    fn delete_flight_removes_v22_child_rows() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        migrate(&conn).unwrap();
+        let flight = || {
+            conn.execute(
+                "INSERT INTO flights (start_time, craft_name, source) VALUES ('2026-09-01T10:00:00+00:00', 'W', 'live')",
+                [],
+            )
+            .unwrap();
+            conn.last_insert_rowid()
+        };
+        let (gone, kept) = (flight(), flight());
+        for id in [gone, kept] {
+            conn.execute("INSERT INTO gps_records (flight_id, timestamp_ms, instance) VALUES (?1, 0, 0)", params![id]).unwrap();
+            conn.execute("INSERT INTO weather_records (flight_id, timestamp_ms, data_json) VALUES (?1, 0, '{}')", params![id]).unwrap();
+            conn.execute("INSERT INTO flight_videos (flight_id, rel_path) VALUES (?1, 'a/b.mp4')", params![id]).unwrap();
+        }
+        delete_flight(&conn, gone).unwrap();
+        for table in ["gps_records", "weather_records", "flight_videos"] {
+            assert_eq!(count(&conn, &format!("SELECT COUNT(*) FROM {table} WHERE flight_id = ?1"), gone), 0, "{table}");
+            assert_eq!(count(&conn, &format!("SELECT COUNT(*) FROM {table} WHERE flight_id = ?1"), kept), 1, "{table}");
+        }
+    }
+
     // ── Schema v21: no decoded Blackbox rows, `flights.source_before_link` ───────────────────
 
     fn source_of(conn: &Connection, flight_id: i64) -> (String, Option<String>, Option<i64>) {
@@ -5253,7 +5831,7 @@ mod tests {
         let lone_live = raw("live");
 
         migrate(&conn).unwrap();
-        assert_eq!(get_user_version(&conn).unwrap(), 21);
+        assert_eq!(get_user_version(&conn).unwrap(), CURRENT_SCHEMA_VERSION);
         assert!(!table_exists(&conn, "blackbox_records").unwrap());
         assert!(!object_exists(&conn, "index", "idx_blackbox_records_flight"));
         assert_eq!(source_of(&conn, live_1), linked("live", log_1));
@@ -5298,9 +5876,7 @@ mod tests {
     }
 
     /// Link and unlink round-trip the sources of both flights — also for a log flight whose archived
-    /// original is gone (deleted by the user, or never stored), where the old "has decoded rows" check
-    /// and the fallback "has a file" check would both say `live`. Deleting one flight of a pair
-    /// restores the partner.
+    /// original is gone. Deleting one flight of a pair restores the partner.
     #[test]
     fn link_unlink_and_delete_restore_the_sources() {
         let conn = test_db();
@@ -5459,10 +6035,8 @@ mod tests {
         matches!(e, rusqlite::Error::SqliteFailure(f, _) if f.code == rusqlite::ErrorCode::DatabaseBusy)
     }
 
-    /// Why `write_tx` exists: a DEFERRED transaction that reads first cannot become a writer once
-    /// another connection has committed since its read, or while another connection holds the write
-    /// lock — SQLite answers SQLITE_BUSY at once, without the busy timeout. This is what made a flight
-    /// save fail while the background reclaim was running.
+    /// Why `write_tx` exists: a DEFERRED transaction that reads first cannot become a writer while
+    /// another connection writes — SQLite answers SQLITE_BUSY at once, without the busy timeout.
     #[test]
     fn deferred_read_then_write_fails_without_waiting() {
         let path = temp_db_path("deferred-busy");
