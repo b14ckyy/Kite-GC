@@ -515,7 +515,8 @@
 
   // Terrain Analysis overlay (NavRail-triggered, full-width over the map)
   let terrainOpen = $state(false);
-  terrainAnalysis.subscribe((s) => { terrainOpen = s.open; });
+  let terrainCompact = $state(false);
+  terrainAnalysis.subscribe((s) => { terrainOpen = s.open; terrainCompact = s.compact; });
 
   // Debug Monitor + dev UI: DEV builds, or a release started with `--debug` (backend `is_debug_mode`).
   // The runtime flag keeps the DebugPanel chunk in the release bundle; it loads lazily only in debug mode.
@@ -1402,6 +1403,13 @@
     return () => cancelAnimationFrame(frame);
   });
 
+  // The terrain strip (wide-compact) lies where the replay player hangs: the player moves below it, by the
+  // strip's height (PanelShell `.ps-wide-compact`) and its 9px offset from the top bar.
+  $effect(() => {
+    const below = terrainOpen && terrainCompact && !panelHidden;
+    document.documentElement.style.setProperty('--log-player-drop', below ? 'calc(max(20vh, 160px) + 9px)' : '0px');
+  });
+
   /** Width of the area the map shows in: the window, on a phone without the widget column at its side. */
   function mapAreaWidth(): number {
     const column = document.querySelector('.pwp')?.getBoundingClientRect();
@@ -1421,7 +1429,8 @@
    *  goes out of the way as well. Measured once the variant transition has settled. */
   function hideLogbookOverPlayer() {
     setTimeout(() => {
-      if (!logbookMinimized || panelHidden || activeTab !== 'logbook') return;
+      // `activeTab` stays 'logbook' under the terrain overlay: the panel on screen is not the card then.
+      if (!logbookMinimized || panelHidden || activeTab !== 'logbook' || terrainOpen) return;
       const card = document.querySelector('.panels-host .ps')?.getBoundingClientRect();
       const player = document.querySelector('.log-player')?.getBoundingClientRect();
       if (!card || !player || player.width === 0) return;

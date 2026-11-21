@@ -42,7 +42,7 @@
      sit just right of its right edge. */
   .stick-overlay {
     position: absolute;
-    top: 62px;
+    top: calc(62px + var(--log-player-drop, 0px));
     left: 50%;
     transform: translateX(calc(var(--log-player-w, 640px) / 2 + 28px));
     z-index: 50;

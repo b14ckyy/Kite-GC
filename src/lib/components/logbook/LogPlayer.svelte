@@ -436,9 +436,11 @@
 {/if}
 
 <style>
+  /* --log-player-drop (set by +page): the player hangs below the terrain strip while that lies under the
+     top bar. Every box of the player takes it, the stick overlay too. */
   .log-player {
     position: absolute;
-    top: 62px;
+    top: calc(62px + var(--log-player-drop, 0px));
     left: 50%;
     transform: translateX(-50%);
     width: var(--log-player-w, 640px);
@@ -456,14 +458,14 @@
     flex-direction: column;
     gap: 4px;
     user-select: none;
-    transition: transform 0.2s ease, opacity 0.2s ease;
+    transition: transform 0.2s ease, opacity 0.2s ease, top 0.2s ease;
   }
 
   /* Starts at the top bar's bottom edge (53px), so the 9px gap above the panel counts too — that is
      exactly where the collapsed strip hangs and where users instinctively aim. */
   .log-player-zone {
     position: absolute;
-    top: 53px;
+    top: calc(53px + var(--log-player-drop, 0px));
     left: 50%;
     transform: translateX(-50%);
     width: var(--log-player-w, 640px);
@@ -488,11 +490,11 @@
     max-width: calc(var(--phone-gap-r) - var(--phone-gap-l) - 16px);
   }
   :global(html.is-phone) .log-player {
-    top: calc(8px + var(--safe-top, 0px));
+    top: calc(8px + var(--safe-top, 0px) + var(--log-player-drop, 0px));
   }
   :global(html.is-phone) .log-player-zone,
   :global(html.is-phone) .log-player-compact {
-    top: var(--safe-top, 0px);
+    top: calc(var(--safe-top, 0px) + var(--log-player-drop, 0px));
   }
 
   /* Collapsed: the full panel slides up under the top bar and fades; it stays in the DOM (its
@@ -507,7 +509,7 @@
      top bar). Starts hidden under the bar and slides down while the full panel is collapsed. */
   .log-player-compact {
     position: absolute;
-    top: 53px;
+    top: calc(53px + var(--log-player-drop, 0px));
     left: 50%;
     width: var(--log-player-w, 640px);
     max-width: calc(100vw - 40px);
@@ -530,7 +532,7 @@
     pointer-events: none;
     transform: translate(-50%, -110%);
     opacity: 0;
-    transition: transform 0.2s ease, opacity 0.2s ease;
+    transition: transform 0.2s ease, opacity 0.2s ease, top 0.2s ease;
   }
   .log-player-compact.shown {
     transform: translate(-50%, 0);
