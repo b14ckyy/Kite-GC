@@ -7,7 +7,7 @@
 
 use tauri::{AppHandle, State};
 
-use crate::hid::frsky_trainer::TrainerManager;
+use crate::hid::frsky_trainer::{TrainerDevice, TrainerManager};
 use crate::hid::HidManager;
 
 /// Start streaming HID input (idempotent). Emits the device list immediately, then live snapshots.
@@ -28,10 +28,14 @@ pub fn hid_select_device(id: usize, manager: State<'_, HidManager>) {
     manager.select(id);
 }
 
-/// Connect to a radio in Bluetooth trainer mode (BLE peripheral id from a scan); emits `trainer-status`.
+/// Look for the remembered radios (BLE peripheral ids) and stream the first in trainer mode; emits `trainer-status`.
 #[tauri::command]
-pub fn trainer_start(app: AppHandle, device_id: String, manager: State<'_, TrainerManager>) -> Result<(), String> {
-    manager.start(app, device_id)
+pub fn trainer_start(
+    app: AppHandle,
+    devices: Vec<TrainerDevice>,
+    manager: State<'_, TrainerManager>,
+) -> Result<(), String> {
+    manager.start(app, devices)
 }
 
 #[tauri::command]

@@ -251,7 +251,7 @@ pub async fn connect(
         }
         TransportType::Ble => {
             let dev_id = ble_device_id.ok_or("BLE device ID required")?;
-            if trainer.active_device().as_deref() == Some(dev_id.as_str()) {
+            if trainer.holds(&dev_id) {
                 return Err("This radio is in use as the Bluetooth trainer input of RC control".into());
             }
             if proto == "telemetry" {

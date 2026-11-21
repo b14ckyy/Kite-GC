@@ -12,6 +12,7 @@
   /** Matches the Rust `TrainerStatus`. */
   interface TrainerStatus {
     state: string;
+    device_id: string;
     device: string;
     error: string | null;
     characteristic: string;
@@ -28,6 +29,7 @@
     reconnects: number;
     last_raw: string;
     last_rejected_raw: string;
+    pairing: boolean;
   }
 
   let devices = $state<BleDeviceInfo[]>([]);
@@ -60,7 +62,7 @@
   async function start(id: string) {
     scanErr = '';
     try {
-      await invoke('trainer_start', { deviceId: id });
+      await invoke('trainer_start', { devices: [{ id }] });
     } catch (e) {
       scanErr = String(e);
     }
@@ -99,6 +101,7 @@
       <span class="label">{$t('debug.trainer.state')}</span>
       <span class="value state-{status.state}">{status.state}</span>
       <span class="value">{status.device}</span>
+      {#if status.pairing}<span class="value">PIN</span>{/if}
       {#if status.error}<span class="warn">{status.error}</span>{/if}
     </div>
     <div class="row">

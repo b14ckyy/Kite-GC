@@ -94,6 +94,10 @@ version = "0.61"
 features = [
     "Gaming_Input",
     "Foundation_Collections",
+    # PIN pairing of BLE modules that demand it on connect (transport/ble_pairing.rs).
+    "Foundation",
+    "Devices_Bluetooth",
+    "Devices_Enumeration",
     # XInput fallback for Xbox-class pads that Windows.Gaming.Input lists but never reads (hid/windows.rs).
     "Win32_UI_Input_XboxController",
     # Hole-punch spike / native video sink (P2.1): raw child windows under the WebView.

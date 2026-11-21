@@ -142,9 +142,11 @@ fn snapshot(channels: &[u16]) -> HidSnapshot {
 /// Emitted as `trainer-status` (4 Hz and on every state change).
 #[derive(Clone, Serialize, Default)]
 pub struct TrainerStatus {
-    /// searching | connecting | waiting | streaming | stalled | stopped | foreign (final: the radio
-    /// sends other data, e.g. telemetry, and was released)
+    /// searching | connecting | waiting | streaming | stalled | stopped | foreign (`device_id` sends
+    /// other data, e.g. telemetry, and was given up for this start)
     pub state: &'static str,
+    /// BLE id of the radio this status is about.
+    pub device_id: String,
     pub device: String,
     pub error: Option<String>,
     pub characteristic: String,
@@ -164,13 +166,23 @@ pub struct TrainerStatus {
     pub last_raw: String,
     /// Last notification that closed a rejected frame.
     pub last_rejected_raw: String,
+    /// A module that demands a passkey; it is paired with the FrSky PIN before every connection.
+    pub pairing: bool,
+}
+
+/// A remembered radio as the frontend hands it over.
+#[derive(serde::Deserialize)]
+pub struct TrainerDevice {
+    pub id: String,
+    #[serde(default)]
+    pub pairing: bool,
 }
 
 /// Owns the stop handle of the running trainer task.
 #[derive(Default)]
 pub struct TrainerManager {
     stop: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
-    device: Mutex<Option<String>>,
+    devices: Mutex<Vec<String>>,
 }
 
 impl TrainerManager {
@@ -178,9 +190,18 @@ impl TrainerManager {
         Self::default()
     }
 
-    /// BLE id of the radio the trainer task holds; the radio cannot serve telemetry at the same time.
-    pub fn active_device(&self) -> Option<String> {
-        self.device.lock().ok()?.clone()
+    /// True for a radio the trainer task looks for or holds; it cannot serve telemetry at the same time.
+    pub fn holds(&self, device_id: &str) -> bool {
+        self.devices
+            .lock()
+            .map(|l| l.iter().any(|d| d == device_id))
+            .unwrap_or(false)
+    }
+
+    pub fn release(&self, device_id: &str) {
+        if let Ok(mut list) = self.devices.lock() {
+            list.retain(|d| d != device_id);
+        }
     }
 
     /// Dropping the sender ends the task.
@@ -188,25 +209,39 @@ impl TrainerManager {
         if let Ok(mut guard) = self.stop.lock() {
             *guard = None;
         }
-        if let Ok(mut guard) = self.device.lock() {
-            *guard = None;
+        if let Ok(mut list) = self.devices.lock() {
+            list.clear();
         }
     }
 
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
-    pub fn start(&self, app: tauri::AppHandle, device_id: String) -> Result<(), String> {
-        if crate::transport::ble::is_listen_device(&device_id) {
-            return Err("This radio is in use as the telemetry link".into());
+    pub fn start(&self, app: tauri::AppHandle, devices: Vec<TrainerDevice>) -> Result<(), String> {
+        let mut ids = Vec::new();
+        for d in devices {
+            if d.pairing {
+                crate::transport::ble_pairing::flag(&d.id);
+            }
+            // A radio the telemetry link holds is left alone; that link hands it over itself.
+            if !crate::transport::ble::is_listen_device(&d.id) {
+                ids.push(d.id);
+            }
+        }
+        if ids.is_empty() {
+            return Err("No radio to look for (in use as the telemetry link)".into());
         }
         let (tx, rx) = tokio::sync::oneshot::channel::<()>();
         *self.stop.lock().map_err(|e| e.to_string())? = Some(tx);
-        *self.device.lock().map_err(|e| e.to_string())? = Some(device_id.clone());
-        tauri::async_runtime::spawn(link::run(app, device_id, rx));
+        *self.devices.lock().map_err(|e| e.to_string())? = ids.clone();
+        tauri::async_runtime::spawn(link::run(app, ids, rx));
         Ok(())
     }
 
     #[cfg(any(target_os = "ios", target_os = "android"))]
-    pub fn start(&self, _app: tauri::AppHandle, _device_id: String) -> Result<(), String> {
+    pub fn start(
+        &self,
+        _app: tauri::AppHandle,
+        _devices: Vec<TrainerDevice>,
+    ) -> Result<(), String> {
         Err("Bluetooth trainer input is not available on this platform".into())
     }
 }
@@ -341,6 +376,7 @@ mod link {
         }
     }
 
+    use crate::transport::ble_pairing;
     use btleplug::api::{Central, CharPropFlags, Manager as _, Peripheral as _, ScanFilter};
     use btleplug::platform::{Manager, Peripheral};
     use futures::StreamExt;
@@ -355,6 +391,12 @@ mod link {
     /// Data without a single trainer frame for this long is something else (telemetry): release.
     const FOREIGN_AFTER: Duration = Duration::from_secs(2);
     const FOREIGN_NOTIFICATIONS: u64 = 10;
+    /// The older FrSky module (TI CC254x profile) carries these beside FFF6; the radios with their
+    /// own Bluetooth do not. That module demands a passkey and hangs up without one.
+    const PIN_MODULE_MARKERS: [uuid::Uuid; 2] = [
+        uuid::Uuid::from_u128(0x0000fff4_0000_1000_8000_00805f9b34fb),
+        uuid::Uuid::from_u128(0x0000fff5_0000_1000_8000_00805f9b34fb),
+    ];
 
     fn emit(app: &AppHandle, stats: &Stats) {
         let _ = app.emit("trainer-status", &stats.status);
@@ -394,29 +436,46 @@ mod link {
 
     pub async fn run(
         app: AppHandle,
-        device_id: String,
+        mut ids: Vec<String>,
         mut stop: tokio::sync::oneshot::Receiver<()>,
     ) {
         let mut stats = Stats::new();
         let mut peripheral: Option<Peripheral> = None;
-        log::info!("[trainer] started for device {device_id}");
+        let mut bond: Option<ble_pairing::Bond> = None;
+        // btleplug also lists radios seen earlier: one that failed to connect is tried last next time.
+        let mut failed: Option<String> = None;
+        let mut gave_up = false;
+        log::info!("[trainer] started for {ids:?}");
         loop {
             let result = tokio::select! {
                 _ = &mut stop => break,
-                r = session(&app, &device_id, &mut peripheral, &mut stats) => r,
+                r = session(&app, &ids, failed.as_deref(), &mut peripheral, &mut bond, &mut stats) => r,
             };
+            failed = (result.is_err() && stats.status.state == "connecting")
+                .then(|| stats.status.device_id.clone());
             if let Err(e) = result {
                 log::warn!("[trainer] {e}");
                 stats.status.error = Some(e);
             }
-            if stats.foreign {
-                break;
-            }
             if let Some(p) = peripheral.take() {
                 let _ = p.disconnect().await;
             }
+            if let Some(b) = bond.take() {
+                b.release().await;
+            }
             clear_feed();
             stats.status.channels.clear();
+            if stats.foreign {
+                stats.foreign = false;
+                let id = stats.status.device_id.clone();
+                ids.retain(|d| *d != id);
+                app.state::<TrainerManager>().release(&id);
+                set_state(&app, &mut stats, "foreign");
+                if ids.is_empty() {
+                    gave_up = true;
+                    break;
+                }
+            }
             set_state(&app, &mut stats, "searching");
             tokio::select! {
                 _ = &mut stop => break,
@@ -426,21 +485,27 @@ mod link {
         if let Some(p) = peripheral.take() {
             let _ = p.disconnect().await;
         }
+        if let Some(b) = bond.take() {
+            b.release().await;
+        }
         clear_feed();
         stats.status.channels.clear();
-        if stats.foreign {
+        if gave_up {
             app.state::<TrainerManager>().stop();
+            log::info!("[trainer] ended: no radio left that sends trainer frames");
+        } else {
+            set_state(&app, &mut stats, "stopped");
+            log::info!("[trainer] stopped");
         }
-        let end = if stats.foreign { "foreign" } else { "stopped" };
-        set_state(&app, &mut stats, end);
-        log::info!("[trainer] {end}");
     }
 
     /// One connection; returns with the reason when the link is lost or delivers nothing.
     async fn session(
         app: &AppHandle,
-        device_id: &str,
+        ids: &[String],
+        failed: Option<&str>,
         slot: &mut Option<Peripheral>,
+        bond: &mut Option<ble_pairing::Bond>,
         stats: &mut Stats,
     ) -> Result<(), String> {
         set_state(app, stats, "searching");
@@ -465,7 +530,12 @@ mod link {
                 .peripherals()
                 .await
                 .map_err(|e| format!("list peripherals: {e}"))?;
-            if let Some(p) = list.into_iter().find(|p| p.id().to_string() == device_id) {
+            let mut known: Vec<_> = list
+                .into_iter()
+                .filter(|p| ids.iter().any(|d| *d == p.id().to_string()))
+                .collect();
+            known.sort_by_key(|p| failed == Some(p.id().to_string().as_str()));
+            if let Some(p) = known.into_iter().next() {
                 break Some(p);
             }
             if Instant::now() >= deadline {
@@ -474,16 +544,36 @@ mod link {
             tokio::time::sleep(Duration::from_millis(500)).await;
         };
         let _ = adapter.stop_scan().await;
-        let peripheral = found.ok_or_else(|| "radio not found in the BLE scan".to_string())?;
+        let peripheral = found.ok_or_else(|| "no remembered radio in the BLE scan".to_string())?;
         *slot = Some(peripheral.clone());
+        let device_id = peripheral.id().to_string();
+        let device_id = device_id.as_str();
+        if stats.status.device_id != device_id {
+            stats.status.device_id = device_id.to_string();
+            stats.status.device.clear();
+        }
 
-        stats.status.device = peripheral
+        stats.status.pairing = ble_pairing::flagged(device_id);
+        if stats.status.pairing {
+            set_state(app, stats, "connecting");
+            match ble_pairing::pair(device_id, ble_pairing::FRSKY_PIN).await {
+                Ok(b) => *bond = Some(b),
+                Err(e) => log::warn!("[trainer] {e}; connecting unpaired"),
+            }
+        }
+
+        // A reconnect often comes without the advertised name; the modules pad theirs with CR LF.
+        let name = peripheral
             .properties()
             .await
             .ok()
             .flatten()
-            .and_then(|p| p.local_name)
-            .unwrap_or_else(|| device_id.to_string());
+            .and_then(|p| p.local_name);
+        match name.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
+            Some(n) => stats.status.device = n.to_string(),
+            None if stats.status.device.is_empty() => stats.status.device = device_id.to_string(),
+            None => {}
+        }
         set_state(app, stats, "connecting");
         peripheral
             .connect()
@@ -504,6 +594,15 @@ mod link {
                 c.uuid,
                 c.properties
             );
+        }
+        let pin_module = PIN_MODULE_MARKERS.iter().all(|m| {
+            all.iter()
+                .any(|c| c.service_uuid == SERVICE && c.uuid == *m)
+        });
+        if pin_module && !stats.status.pairing {
+            ble_pairing::flag(device_id);
+            stats.status.pairing = true;
+            return Err("module demands a passkey: reconnecting with PIN pairing".into());
         }
         let mut targets: Vec<_> = all
             .iter()

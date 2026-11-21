@@ -39,7 +39,7 @@ export async function initTrainerHandover(
     const tr = get(t);
     const title = tr('rc.trainer.detectedTitle');
     const rc = get(settings).rcControl;
-    if (rc.enabled && rc.trainerRadio?.id === id) {
+    if (rc.enabled && rc.trainerRadios?.some((r) => r.id === id)) {
       // A known radio switches over without a question.
       pushLocalStatus(6, tr('rc.trainer.detectedKnown', { values: { name } }));
       if (get(hidActive)) await startTrainer();

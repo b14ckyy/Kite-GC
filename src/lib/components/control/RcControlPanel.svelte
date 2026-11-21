@@ -397,7 +397,7 @@
       {/if}
       <button
         class="rc-bt"
-        class:on={trainerOpen || !!$settings.rcControl.trainerRadio}
+        class:on={trainerOpen || !!$settings.rcControl.trainerRadios?.length}
         onclick={() => (trainerOpen = !trainerOpen)}
         title={$t('rc.trainer.title')}
         aria-label={$t('rc.trainer.title')}
