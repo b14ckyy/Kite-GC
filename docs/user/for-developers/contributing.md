@@ -40,7 +40,8 @@ repository, everyone else forks and opens the PR from the fork. The workflow is 
 **Fixes for an already-released version** go on the **oldest** release branch that has the bug
 (`release/1.0.x` for a bug that exists in 1.0) and are merged **upwards** afterwards — into the newer
 release line, if there is one, and into `development` — so nothing is lost and nothing is fixed twice.
-Base the PR on the release branch, not on `development`, and say so in the description.
+Base the PR on the release branch, not on `development`, and say so in the description. The merge
+upwards is done by the maintainers, collected for several fixes; a contributor opens the one PR only.
 
 Release lines are maintained for a while: a feature release receives patches until the **second**
 feature release after it has shipped (1.0.x until 2.1.0 — see [Release support](../release-support.md)),
