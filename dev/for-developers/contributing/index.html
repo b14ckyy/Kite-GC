@@ -2043,6 +2043,10 @@ AI help) can top up the other languages afterwards.</p>
 start the dev app and switch the language to it — the interface then shows the key at every position
 instead of the text. The file is git-ignored; take the <code>index.ts</code> registration out again before you commit.
 Contributed by teodoryantcheff.</p>
+<p><strong>Checking the locale files:</strong> <code>npm run check:i18n</code> compares every locale with <code>en.json</code> and reports keys that
+<code>en.json</code> does not have, values of another kind and translated strings whose <code>{placeholders}</code> differ from the
+English ones. It also lists keys missing in <code>de.json</code>, which the maintainer keeps complete; in an English-only
+PR that part of the report is expected and makes the run end with exit code 1.</p>
 <h2 id="licensing-contributor-terms">Licensing &amp; contributor terms<a class="headerlink" href="#licensing-contributor-terms" title="Permanent link">&para;</a></h2>
 <p>Kite Ground Control is licensed under <strong><a href="https://www.gnu.org/licenses/gpl-3.0.html">GPL-3.0-or-later</a></strong>.</p>
 <ul>

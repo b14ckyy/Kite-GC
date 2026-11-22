@@ -1716,11 +1716,15 @@
 <p>What's new in each Kite Ground Control release — the big features up top, the full list of changes
 below. The newest release is expanded; click an older version to unfold it. This page is shared by
 every released version of the documentation; the <strong>Dev</strong> docs also list what is still being built.</p>
-<p>Each version heading ends with the line's support status — <strong>Live</strong>, <strong>Maintenance</strong> or <strong>EOL</strong> — as
-defined on the <a href="../release-support/">release support</a> page. Patch releases (1.0.1, 1.0.2, …) are listed
+<p>Each version heading ends with the line's support status — <strong>Live</strong>, <strong>Maintenance</strong> or <strong>EOL</strong>, or
+<strong>Pre-release</strong> before the first release of a line — as defined on the
+<a href="../release-support/">release support</a> page. Patch releases (1.0.1, 1.0.2, …) are listed
 inside the box of the feature release they belong to, so the notes for one release line stay together.</p>
 <details class="note" open="open">
-<summary>2.0 — in development</summary>
+<summary>2.0 — Beta · Pre-release</summary>
+<p><strong>2.0 is in beta.</strong> Its features are complete with 2.0.0-b2; until the final release it
+only takes fixes. Kite 1.0 stays the stable version meanwhile. The betas are on the
+<a href="https://github.com/b14ckyy/Kite-GC/releases">releases page</a>.</p>
 <p><strong>Why 2.0, not 1.1:</strong> the flight database changes its schema with this release. Kite
 writes one backup next to it before migrating (<code>flights.pre-migration-backup.db</code>) — but the
 migrated database cannot be opened by Kite 1.0 any more, so there is no way back except that
@@ -2028,7 +2032,7 @@ stays <em>Stable releases</em>. <a href="https://github.com/b14ckyy/Kite-GC/pull
   becomes an input device of RC control, without a cable. Kite remembers a list of radios,
   connects to the one in trainer mode by itself and tells trainer data from telemetry in both
   directions. The older FrSky Bluetooth module, also retro-fitted to EdgeTX radios, is paired
-  with its code without a prompt (confirmed on Windows). Frame format taken from garfield2412's
+  with its code without a prompt (Windows and Linux). Frame format taken from garfield2412's
   FrSky-Bluetooth-Trainer. See
   <a href="../guides/rc-control/#a-frsky-radio-over-bluetooth">A FrSky radio over Bluetooth</a>. [#348]</li>
 <li><strong>INAV over a MAVLink-only link (MSP/MAV)</strong> — with INAV 10.0, missions, safe homes, geozones,
@@ -2255,13 +2259,39 @@ stays <em>Stable releases</em>. <a href="https://github.com/b14ckyy/Kite-GC/pull
 <li><strong>Live AGL: the projected flight line is smoother</strong>, and the compass and horizon have the
   frosted-glass look of the other widgets. <a href="https://github.com/b14ckyy/Kite-GC/pull/101">#101</a></li>
 <li><strong>The second battery widget is labelled "BAT 2".</strong> <a href="https://github.com/b14ckyy/Kite-GC/pull/237">#237</a></li>
+<li><strong>TCP links: a broken connection is re-established instead of ending the session.</strong> When
+  the TCP connection to a Wi-Fi bridge or a simulator broke (the other end restarted or
+  closed it), Kite disconnected, cleared the map and asked what to do with the recording.
+  Kite now connects to the same address again in the background and carries on; meanwhile
+  the link shows as stalled, like a radio dropout. Over TCP and UDP the connection only
+  ends when the computer has no network left to reach the address, or when a TCP
+  connection breaks before any data arrived. [#358]</li>
+<li><strong>Bluetooth LE: a dropped link is re-established on every platform.</strong> On Windows, Linux
+  and macOS Kite already reconnected to a Bluetooth module that was out of range or
+  restarted. On Android, iPhone and iPad, and for a listen-only telemetry link on every
+  platform, the connection ended instead. Now the link comes back by itself everywhere and
+  shows as stalled meanwhile; it only ends when Bluetooth is switched off or no longer
+  allowed. [#359]</li>
 </ul>
 <p><strong>Fixed</strong></p>
 <p>Every fix of 1.0.1 and 1.0.2 is part of 2.0. This list holds what is fixed in 2.0 only.</p>
 <ul>
+<li><strong>Flight trail: the flown track comes back when a flight is continued.</strong> After a lost
+  connection to an armed aircraft (TCP or Bluetooth out of range, a cable pulled, the app
+  restarted) and <strong>Continue on Reconnect</strong>, the map started with an empty trail although the
+  recording carried on as one flight. The same happened on arming again shortly after a
+  landing, where Kite continues the same recording. The track flown so far is now drawn
+  again, on the 2D and the 3D map. [#357]</li>
 <li><strong>RC control: a second controller no longer takes over.</strong> With two controllers connected,
   losing the one in use let the stick stream continue from the other with the same mapping.
   Control now ends when the controller it was started with disappears. [#348]</li>
+<li><strong>Relay: a UDP relay aimed at Kite's own port no longer freezes the app.</strong> A UDP relay whose
+  target was the port Kite itself receives telemetry on (for example <code>127.0.0.1:14550</code> while
+  connected over UDP on 14550) fed its MAVLink output back into the link, where it was read as
+  vehicle telemetry and relayed again, faster and faster, until Kite stopped responding. Such a
+  relay is now refused with a message, and Kite ignores what its own relays send. The same could
+  happen through a second ground station that forwards the relay's output back to Kite; a relay
+  now sends at most 100 times per second, so such a ring can no longer build up. [#355]</li>
 <li><strong>Relay: LTM and CRSF carry the altitude above home.</strong> The LTM output wrote the GPS altitude
   (above sea level) where LTM consumers expect the altitude above home, and the CRSF output had
   no altitude above home at all. A tracker or a second Kite behind the relay showed the sea-level
