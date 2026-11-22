@@ -64,6 +64,11 @@ impl MspParser {
         self.checksum_errors
     }
 
+    /// Drop a partially received frame whose stream is gone; the checksum error count stays.
+    pub fn reset(&mut self) {
+        self.state = DecoderState::Idle;
+    }
+
     /// Feed one byte to the parser. Returns `Some(MspMessage)` when a complete
     /// valid message has been decoded.
     pub fn push(&mut self, byte: u8) -> Option<MspMessage> {

@@ -60,7 +60,7 @@ impl LinkSpec {
                 }
                 Ok(Box::new(conn))
             }
-            LinkSpec::Tcp { host, port } => Ok(Box::new(TcpTransport::connect(host, *port)?)),
+            LinkSpec::Tcp { host, port } => Ok(Box::new(TcpTransport::connect_once(host, *port)?)),
             LinkSpec::Udp { host, port } => {
                 // Probe first, so a busy port fails here quietly instead of through UdpTransport's
                 // fallback path, which warns on every attempt (once per reconnect backoff otherwise).
