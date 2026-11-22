@@ -59,7 +59,7 @@ Top to bottom, the ADS-B tab is organized into:
 
 - **Alerts** — the collision-alert toggles and thresholds (see [Collision alerts](#collision-alerts)).
 - **Online service** — the **download radius** and **poll interval** that apply to all online feeds.
-- **Online sources** — the provider rows: the two built-ins plus any custom rows, with **Add source**.
+- **Online sources** — the provider rows: the built-in adsb.fi plus any custom rows, with **Add source**.
 - **Local sources** — your hardware receivers, with **Add receiver**.
 
 Every source row has its own **on/off toggle** and a **status badge** — a green number is the live
