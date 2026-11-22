@@ -1890,6 +1890,10 @@ pub fn open_temp_session(path: &Path) -> SqlResult<Connection> {
             conn.execute_batch(&format!("ALTER TABLE session_meta ADD COLUMN {column} TEXT;"))?;
         }
     }
+    // Not in the CREATE: `write_session_meta` replaces the row, the recorder sets this right after it.
+    if !column_exists(&conn, "session_meta", "alt_relative")? {
+        conn.execute_batch("ALTER TABLE session_meta ADD COLUMN alt_relative INTEGER;")?;
+    }
     Ok(conn)
 }
 
@@ -1926,6 +1930,12 @@ pub fn write_session_meta(
             fc_uid,
         ],
     )?;
+    Ok(())
+}
+
+/// What the link said about its altitude (`flights.alt_relative`), so a crash-recovered session keeps it.
+pub fn update_session_meta_alt_relative(conn: &Connection, relative: Option<bool>) -> SqlResult<()> {
+    conn.execute("UPDATE session_meta SET alt_relative = ?1 WHERE id = 1", params![relative])?;
     Ok(())
 }
 
@@ -2007,13 +2017,15 @@ pub struct SessionMetaRow {
     pub group_id: Option<String>,
     /// File name of the group's `.kgrp`, in the same directory as the `.ktmp`.
     pub group_file: Option<String>,
+    /// `flights.alt_relative` as the link told it; NULL = never told, or a file from before the column.
+    pub alt_relative: Option<bool>,
 }
 
 /// Read the single `session_meta` row of a temp session (None if absent — e.g. a malformed file).
 pub fn read_session_meta(conn: &Connection) -> SqlResult<Option<SessionMetaRow>> {
     conn.query_row(
         "SELECT start_time, craft_name, fc_variant, fc_version, board_id, platform_type, \
-                protocol, start_lat, start_lon, fc_uid, vehicle_key, role, group_id, group_file \
+                protocol, start_lat, start_lon, fc_uid, vehicle_key, role, group_id, group_file, alt_relative \
          FROM session_meta WHERE id = 1",
         [],
         |row| {
@@ -2032,6 +2044,7 @@ pub fn read_session_meta(conn: &Connection) -> SqlResult<Option<SessionMetaRow>>
                 role: row.get(11)?,
                 group_id: row.get(12)?,
                 group_file: row.get(13)?,
+                alt_relative: row.get(14)?,
             })
         },
     )
