@@ -2094,6 +2094,20 @@
     for (const p of points) updateTrail(p.lat, p.lon, p.mode);
   }
 
+  function clearTrail() {
+    for (const seg of trailSegments) { map?.removeLayer(seg); }
+    trailSegments = [];
+    if (activeTrailLine) { map?.removeLayer(activeTrailLine); activeTrailLine = undefined; }
+    trailCurrentPositions = [];
+    trailCurrentColor = '';
+  }
+
+  /** Replaces the trail, e.g. with a resumed flight's whole track. */
+  export function restoreTrail(points: { lat: number; lon: number; mode: string }[]): void {
+    clearTrail();
+    appendTrailPoints(points);
+  }
+
   /** Thin plain black trail of GPS movement while disarmed (monitoring only). */
   function updatePreArmTrail(lat: number, lon: number) {
     if (!map) return;
@@ -2622,12 +2636,7 @@
 
         // Trail reset on arm (home is set centrally in +page → the home marker follows homePosition).
         if (armed && !wasArmed && t.fixType >= 2 && t.lat !== 0) {
-          // Clear trail for new flight
-          for (const seg of trailSegments) { map?.removeLayer(seg); }
-          trailSegments = [];
-          if (activeTrailLine) { map?.removeLayer(activeTrailLine); activeTrailLine = undefined; }
-          trailCurrentPositions = [];
-          trailCurrentColor = '';
+          clearTrail();
           // Drop the pre-arm line — the colored flight trail takes over.
           resetPreArmTrail();
         }

@@ -101,7 +101,7 @@
   import type { PhoneWidgetsConfig } from '$lib/controllers/phoneWidgetController';
   import { isValidGpsCoordinate, isArmed } from '$lib/helpers/telemetry';
   import { anyCase } from '$lib/helpers/fileFilters';
-  import { liveTrack, appendLivePoint, clearLiveTrack, backfillLivePoints } from '$lib/stores/liveTrack';
+  import { liveTrack, appendLivePoint, clearLiveTrack, backfillLivePoints, restoreLivePoints, type LiveTrackPoint } from '$lib/stores/liveTrack';
   import { toTelemetryData } from '$lib/adapters/telemetryAdapter';
   import { activeWpNumber, replayWpTotal } from '$lib/stores/navStatus';
   import { missionManagerOpen, missionManagerSelectedId, requestOpenFlightId, requestOpenMissionId, missionLibraryRevision } from '$lib/stores/missionManager';
@@ -195,7 +195,8 @@
   // Map3D instance handle — used to read the 3D camera focus on a 3D→2D switch so
   // the 2D map can re-centre on the same spot (keeping its own zoom).
   /** 2D map instance — for the trail backfill after the page was hidden (BACKGROUND_TELEMETRY.md). */
-  let mapRef: { appendTrailPoints?: (points: { lat: number; lon: number; mode: string }[]) => void } | undefined = $state();
+  type TrailPoint = { lat: number; lon: number; mode: string };
+  let mapRef: { appendTrailPoints?: (points: TrailPoint[]) => void; restoreTrail?: (points: TrailPoint[]) => void } | undefined = $state();
   // `connection-lost` while hidden → one reconnect attempt on return (unless the recording-interrupted
   // prompt took over). Not a loop.
   let lostWhileHidden = false;
@@ -593,6 +594,18 @@
     // announced (MSP-tunnel probe). Secondaries are announced before their frames, so none is adopted here.
     return ownerGone && (vehicleId === get(activeVehicleId) || !get(vehicles).has(vehicleId));
   }
+  // A resumed flight's earlier track, held until the armed frame that resumed it is through: track
+  // and 2D trail are cleared on that frame, in this same store update.
+  let pendingTrackRestore: LiveTrackPoint[] | null = null;
+  function applyTrackRestore(): void {
+    if (!pendingTrackRestore || !armEdgeInit || !prevArmed) return;
+    const points = pendingTrackRestore;
+    pendingTrackRestore = null;
+    setTimeout(() => {
+      const merged = restoreLivePoints(points);
+      mapRef?.restoreTrail?.(merged.map((p) => ({ lat: p.lat, lon: p.lon, mode: p.mode_primary })));
+    }, 0);
+  }
   telemetry.subscribe((t) => {
     liveTelem = t;
     // Accumulate the live flown track (RAM) for the Terrain Analyzer
@@ -655,6 +668,7 @@
       if (t.statusSeen) armStartMs = 0;
     }
     prevArmed = armed;
+    applyTrackRestore();
   });
 
   // Mirror the manual launch reference into the Home store so the Home widget points at the
@@ -1015,6 +1029,7 @@
     // Auto-refresh the logbook on disconnect (picks up a just-recorded live flight). Disarm is covered by
     // the flight-recording-ended listener.
     if (wasConnected && c.status !== 'connected') {
+      pendingTrackRestore = null;
       void loadLogbook();
       // Lost the FC → the locked home becomes a manual reference (keeps its position so planning
       // continues; the marker reverts to a draggable orange "L").
@@ -3991,6 +4006,16 @@
       awaitingResumeReconnect = false;
       endFlightDialog?.close();
     });
+    // The vehicle may not be announced yet when its recorder reports (MSP-tunnel probe).
+    void listen<{ vehicleId?: string; points: { lat: number; lon: number; alt_msl: number; mode: string; ts_ms: number }[] }>(
+      'flight-track-restored',
+      (event) => {
+        const vid = event.payload.vehicleId;
+        if (vid != null && vid !== get(activeVehicleId) && get(vehicles).has(vid)) return;
+        pendingTrackRestore = event.payload.points.map((p) => ({ lat: p.lat, lon: p.lon, alt_m: p.alt_msl, mode_primary: p.mode, timestamp_ms: p.ts_ms }));
+        applyTrackRestore();
+      },
+    );
     // Connection lost while recording (device gone, e.g. USB unplugged) → recovery prompt.
     void listen<{ temp_path: string; craft_name: string; start_time: string; duration_sec: number; sample_count: number; vehicleId?: string }>(
       'flight-recording-interrupted',

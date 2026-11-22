@@ -18,10 +18,10 @@ use crate::scheduler::telemetry::{AnalogData, GpsData, StatusData};
 const ARMED_FLAG: u32 = 1 << 2;
 
 /// Track-point spacing (m) — the same gate as the recorder and the frontend `liveTrack`.
-const MIN_TRACK_SPACING_M: f64 = 5.0;
+pub(crate) const MIN_TRACK_SPACING_M: f64 = 5.0;
 
 /// Current flight only (the DB is the archive); the oldest points go first.
-const MAX_TRACK_POINTS: usize = 20_000;
+pub(crate) const MAX_TRACK_POINTS: usize = 20_000;
 
 /// One flown point, as the frontend's `liveTrack` wants it.
 #[derive(Clone, Serialize)]

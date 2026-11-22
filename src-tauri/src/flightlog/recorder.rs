@@ -18,6 +18,7 @@ use super::group_store;
 use super::msp_raw_logger::{MspRawLogger, MspRawSink};
 use super::tlog_logger::TlogLogger;
 use super::types::{BatteryRecord, Flight, FlightEvent, FlightLogSettings, TelemetryRecord};
+use crate::link_status::{TrackPoint, MAX_TRACK_POINTS, MIN_TRACK_SPACING_M};
 use crate::msp::FcInfo;
 use crate::vehicle_registry::emitter::VehicleEmitter;
 use crate::scheduler::telemetry::{
@@ -179,6 +180,12 @@ impl RecorderSink for VehicleEmitter {
 #[derive(serde::Serialize, Clone)]
 struct FlightRecordingEvent {
     flight_id: i64,
+}
+
+/// Payload for `flight-track-restored`: what a resumed session had flown before it was parked.
+#[derive(serde::Serialize)]
+struct TrackRestoredEvent {
+    points: Vec<TrackPoint>,
 }
 
 /// Payload for `flight-recording-ended` — the disarm summary stats (no `flight_id` exists yet under
@@ -1819,6 +1826,34 @@ impl FlightRecorder {
         self.was_armed = is_armed;
     }
 
+    /// The active session's flown track at the live trail's point spacing; the newest points when it is
+    /// longer than the trail holds. A row without a mode takes the one before it.
+    fn session_track(&self) -> Vec<TrackPoint> {
+        let Some(flight) = self.active_flight.as_ref() else { return Vec::new() };
+        let Some(conn) = flight.temp_db.as_ref() else { return Vec::new() };
+        let rows = match db::read_session_track(conn) {
+            Ok(rows) => rows,
+            Err(e) => {
+                log::warn!("Cannot read the track of the resumed session: {}", e);
+                return Vec::new();
+            }
+        };
+        let start_ms = flight.start_time.timestamp_millis();
+        let mut points: Vec<TrackPoint> = Vec::new();
+        for r in rows {
+            let last = points.last();
+            if last.is_some_and(|l| haversine_m(l.lat, l.lon, r.lat, r.lon) < MIN_TRACK_SPACING_M) {
+                continue;
+            }
+            let mode = r.mode_primary.or_else(|| last.map(|l| l.mode.clone())).unwrap_or_default();
+            let ts_ms = r.wall_ms.unwrap_or(start_ms + r.timestamp_ms);
+            points.push(TrackPoint { lat: r.lat, lon: r.lon, alt_msl: r.alt_m, mode, ts_ms });
+        }
+        let excess = points.len().saturating_sub(MAX_TRACK_POINTS);
+        points.drain(..excess);
+        points
+    }
+
     /// Move a finalized session into this vehicle's pending entry and tell the frontend to show the
     /// End-Flight summary (Save/Discard). Used by `on_disarm` and the continue-on-reconnect
     /// disarmed-on-first-poll path.
@@ -2004,6 +2039,10 @@ impl FlightRecorder {
         }
         self.write_membership_meta();
         self.emit("flight-recording-resumed", ());
+        let points = self.session_track();
+        if !points.is_empty() {
+            self.emit("flight-track-restored", TrackRestoredEvent { points });
+        }
     }
 
     /// The same aircraft came back while its group ran: adopt its suspended member session (§3.2), keeping
@@ -3026,7 +3065,7 @@ mod tests {
         rig.advance_s(3);
         rec.on_status(&status(true));
         assert_eq!(active_path(&rec), path);
-        assert_eq!(emitted.lock().unwrap().last().map(String::as_str), Some("flight-recording-resumed"));
+        assert_eq!(emitted.lock().unwrap()[2..], ["flight-recording-resumed", "flight-track-restored"]);
         rig.advance_s(1);
         rec.on_gps(&gps(2, 48.1, 11.5));
         rec.on_status(&status(false));
@@ -3040,7 +3079,7 @@ mod tests {
         // Grace lapsed → the previous flight is committed (with its events), a new one starts.
         rig.advance_s(6);
         rec.on_status(&status(true));
-        let tail: Vec<String> = emitted.lock().unwrap().iter().skip(3).cloned().collect();
+        let tail: Vec<String> = emitted.lock().unwrap().iter().skip(4).cloned().collect();
         assert_eq!(tail, ["flight-recording-ended", "flight-recording-committed", "flight-recording-started"]);
         assert!(!path.exists());
         assert_ne!(active_path(&rec), path);
@@ -3638,6 +3677,38 @@ mod tests {
         assert_eq!(kinds(&file_events(&path)), [("arm", 1000)]);
         let meta = db::read_session_meta(&Connection::open(&path).unwrap()).unwrap().unwrap();
         assert_eq!(meta.vehicle_key.as_deref(), Some("L2:S1"));
+    }
+
+    /// A session resumed on reconnect hands its flown track to the frontend: thinned to the trail
+    /// spacing, a row without a mode coloured like the one before it.
+    #[test]
+    fn continue_on_reconnect_restores_the_track() {
+        let rig = Rig::new("continue-track");
+        let path = rig.dir.join("sessions").join("track.ktmp");
+        let at = |ts: i64, lat: f64, mode: Option<&str>| TelemetryRecord {
+            alt_m: Some(500.0), mode_primary: mode.map(str::to_string), ..row(ts, lat, 5.0, 10)
+        };
+        let rows = [
+            at(0, 48.0, Some("cruise")),
+            at(100, 48.000_01, Some("cruise")),
+            at(1000, 48.001, None),
+            TelemetryRecord { lat: None, ..at(1500, 48.0, Some("rth")) },
+            at(2000, 48.002, Some("rth")),
+        ];
+        write_ktmp(&path, Some("single"), None, &rows, &[]);
+        let (p, _) = summarize_temp_session(path.clone(), rig.dir.join("flights.db"), rig.clock.as_ref()).unwrap();
+        rig.slots.put_resume(path.to_string_lossy().to_string(), p).unwrap();
+        let (mut rec, emitted) = rig.recorder("L2:S1", fc("Craft", None));
+        rec.on_status(&status(true));
+        assert_eq!(*emitted.lock().unwrap(), ["flight-recording-resumed", "flight-track-restored"]);
+        let track = rec.session_track();
+        let seen: Vec<(f64, &str, i64)> = track.iter().map(|p| (p.lat, p.mode.as_str(), p.ts_ms)).collect();
+        assert_eq!(seen, [
+            (48.0, "cruise", 1_700_000_000_000),
+            (48.001, "cruise", 1_700_000_001_000),
+            (48.002, "rth", 1_700_000_002_000),
+        ]);
+        assert_eq!(track[0].alt_msl, 500.0);
     }
 
     /// Builds a `.ktmp` with the current schema: `rows`, `events`, and the given role / group.

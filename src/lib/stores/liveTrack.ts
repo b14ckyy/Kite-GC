@@ -73,3 +73,14 @@ export function backfillLivePoints(points: LiveTrackPoint[], flightStartMs: numb
   if (cur.length > 0 && cur[cur.length - 1].timestamp_ms < flightStartMs) clearLiveTrack();
   for (const p of points) appendLivePoint(p.lat, p.lon, p.alt_m, p.mode_primary, p.timestamp_ms);
 }
+
+/** A resumed flight's earlier points, in front of those that arrived since.
+ *  Emptied first: the 3D trail rebuilds only when the store shrinks. */
+export function restoreLivePoints(points: LiveTrackPoint[]): LiveTrackPoint[] {
+  if (points.length === 0) return get(liveTrack);
+  const lastMs = points[points.length - 1].timestamp_ms;
+  const merged = [...points, ...get(liveTrack).filter((p) => p.timestamp_ms > lastMs)];
+  liveTrack.set([]);
+  liveTrack.set(merged);
+  return merged;
+}
