@@ -4,6 +4,8 @@
 //! One relay = a protocol encoder + an output transport + stats. Built from a `RelayConfig` (persisted
 //! frontend-side, handed over on primary connect).
 
+use std::time::{Duration, Instant};
+
 use serde::{Deserialize, Serialize};
 
 use super::cache::TelemetryCache;
@@ -17,6 +19,11 @@ use super::output::serial::SerialSink;
 use super::output::tcp::TcpSink;
 use super::output::udp::UdpSink;
 use super::output::OutputSink;
+
+/// Shortest gap between two frame sets of one relay (100 Hz). No real source is faster, and it bounds a
+/// loop: output that finds its way back into the link (through a second ground station) is relayed
+/// again, and without the limit every vehicle frame adds one more that circulates for good.
+const MIN_EMIT_INTERVAL: Duration = Duration::from_millis(10);
 
 /// Relay configuration from the frontend settings store.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -74,6 +81,7 @@ pub struct Relay {
     pub frames_out: u64,
     pub errors: u64,
     pub ok: bool,
+    last_emit: Option<Instant>,
 }
 
 impl Relay {
@@ -104,6 +112,11 @@ impl Relay {
             "udp" => {
                 let host = cfg.output.host.as_deref().filter(|h| !h.is_empty()).ok_or("udp relay needs a host")?;
                 let port = cfg.output.udp_port.ok_or("udp relay needs a port")?;
+                if crate::transport::udp::targets_own_listener(host, port) {
+                    return Err(format!(
+                        "{host}:{port} is the UDP port Kite itself receives telemetry on. Choose another port or host for this relay."
+                    ));
+                }
                 Box::new(UdpSink::open(host, port)?)
             }
             other => return Err(format!("Unsupported relay output kind: {}", other)),
@@ -121,12 +134,18 @@ impl Relay {
             frames_out: 0,
             errors: 0,
             ok: true,
+            last_emit: None,
         })
     }
 
     /// Build one full frame set from the cache (called once per pacer tick) and write it out. Errors are
     /// counted, not fatal (the device may reappear).
     pub fn emit_set(&mut self, cache: &TelemetryCache) {
+        let now = Instant::now();
+        if self.last_emit.is_some_and(|t| now.duration_since(t) < MIN_EMIT_INTERVAL) {
+            return;
+        }
+        self.last_emit = Some(now);
         let frames = self.encoder.frame_set(cache);
         if frames.is_empty() {
             return;

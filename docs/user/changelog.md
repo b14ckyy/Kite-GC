@@ -572,6 +572,13 @@ inside the box of the feature release they belong to, so the notes for one relea
     - **RC control: a second controller no longer takes over.** With two controllers connected,
       losing the one in use let the stick stream continue from the other with the same mapping.
       Control now ends when the controller it was started with disappears. [#348]
+    - **Relay: a UDP relay aimed at Kite's own port no longer freezes the app.** A UDP relay whose
+      target was the port Kite itself receives telemetry on (for example `127.0.0.1:14550` while
+      connected over UDP on 14550) fed its MAVLink output back into the link, where it was read as
+      vehicle telemetry and relayed again, faster and faster, until Kite stopped responding. Such a
+      relay is now refused with a message, and Kite ignores what its own relays send. The same could
+      happen through a second ground station that forwards the relay's output back to Kite; a relay
+      now sends at most 100 times per second, so such a ring can no longer build up. [#355]
     - **Relay: LTM and CRSF carry the altitude above home.** The LTM output wrote the GPS altitude
       (above sea level) where LTM consumers expect the altitude above home, and the CRSF output had
       no altitude above home at all. A tracker or a second Kite behind the relay showed the sea-level

@@ -20,7 +20,8 @@
 //   sends us data. This covers listen-mode bridges, client-mode SITL, and broadcast setups alike.
 
 use std::collections::HashMap;
-use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
+use std::net::{IpAddr, SocketAddr, ToSocketAddrs, UdpSocket};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use super::{ByteTransport, TransportError};
@@ -29,6 +30,46 @@ use super::{ByteTransport, TransportError};
 /// loop adds to outgoing commands (it services a queued write only once the current blocking recv
 /// returns). See the TCP transport for the full rationale.
 const READ_TIMEOUT_MS: u64 = 50;
+
+/// Local ports the open UDP links listen on, and the source ports of Kite's own relay sockets. A relay
+/// aimed at a listening port of this machine would be read back as vehicle telemetry and relayed again.
+static LISTENING: Mutex<Vec<u16>> = Mutex::new(Vec::new());
+static OWN_SENDERS: Mutex<Vec<u16>> = Mutex::new(Vec::new());
+
+fn forget(list: &Mutex<Vec<u16>>, port: u16) {
+    if let Ok(mut l) = list.lock() {
+        if let Some(i) = l.iter().position(|p| *p == port) {
+            l.remove(i);
+        }
+    }
+}
+
+/// A relay's UDP socket registers its source port; the links drop what it sends.
+pub fn register_own_sender(port: u16) {
+    if let Ok(mut l) = OWN_SENDERS.lock() {
+        l.push(port);
+    }
+}
+
+pub fn forget_own_sender(port: u16) {
+    forget(&OWN_SENDERS, port);
+}
+
+/// An address of this machine: loopback, unspecified, or one a socket can be bound to.
+fn is_this_machine(ip: IpAddr) -> bool {
+    ip.is_loopback() || ip.is_unspecified() || UdpSocket::bind((ip, 0)).is_ok()
+}
+
+/// True when `host:port` is a UDP link Kite itself listens on (this machine, or the limited broadcast).
+pub fn targets_own_listener(host: &str, port: u16) -> bool {
+    if !LISTENING.lock().map(|l| l.contains(&port)).unwrap_or(false) {
+        return false;
+    }
+    let Ok(addrs) = (host, port).to_socket_addrs() else { return false };
+    addrs
+        .map(|a| a.ip())
+        .any(|ip| matches!(ip, IpAddr::V4(v4) if v4.is_broadcast()) || is_this_machine(ip))
+}
 
 /// An active UDP transport to a flight controller
 pub struct UdpTransport {
@@ -40,6 +81,8 @@ pub struct UdpTransport {
     /// Configured send target — where the initial GCS HEARTBEAT goes, and the fallback while no peer
     /// has spoken yet.
     peer: SocketAddr,
+    /// The local port as registered in `LISTENING`.
+    local_port: u16,
     /// Every source that has sent us data recently, with its last-seen time (peer learning). Outgoing
     /// frames go to ALL of them: several vehicles pushing to our listening port each speak from their
     /// own socket (multi-vehicle SITL / several telemetry bridges), and a command for sysid 3 sent
@@ -108,10 +151,16 @@ impl UdpTransport {
             .set_read_timeout(Some(Duration::from_millis(READ_TIMEOUT_MS)))
             .map_err(|e| format!("Failed to set read timeout: {}", e))?;
 
+        let local_port = socket.local_addr().map(|a| a.port()).unwrap_or(port);
+        if let Ok(mut l) = LISTENING.lock() {
+            l.push(local_port);
+        }
+
         Ok(Self {
             configured: addr,
             bind_note,
             peer,
+            local_port,
             peers: HashMap::new(),
             socket,
             peer_unreachable_logged: false,
@@ -144,6 +193,12 @@ impl UdpTransport {
     }
 }
 
+impl Drop for UdpTransport {
+    fn drop(&mut self) {
+        forget(&LISTENING, self.local_port);
+    }
+}
+
 /// Alternate local port when the well-known one is taken: the target port + 10000 (14550 → 24550,
 /// 14560 → 24560), kept inside the registered/dynamic range. Deterministic across reconnects.
 fn stable_fallback_port(port: u16) -> u16 {
@@ -159,6 +214,12 @@ impl ByteTransport for UdpTransport {
                 // to ourselves and comes straight back. Learning that "peer" would loop every later frame
                 // back into our own parser for the rest of the session — drop it unseen.
                 if src.ip().is_loopback() && Some(src.port()) == self.socket.local_addr().ok().map(|a| a.port()) {
+                    return Ok(0);
+                }
+                // A relay of our own that reaches this port (a subnet broadcast, a second address of this
+                // machine): relaying it again would never end.
+                let own_sender = OWN_SENDERS.lock().map(|l| l.contains(&src.port())).unwrap_or(false);
+                if own_sender && is_this_machine(src.ip()) {
                     return Ok(0);
                 }
                 // Peer learning: remember every source that talks to us (n == 0 never happens for a
@@ -229,5 +290,52 @@ impl ByteTransport for UdpTransport {
 
     fn description(&self) -> String {
         format!("UDP({})", self.configured)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn free_port() -> u16 {
+        UdpSocket::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
+    }
+
+    #[test]
+    fn a_relay_aimed_at_the_link_port_is_recognised() {
+        let port = free_port();
+        assert!(!targets_own_listener("127.0.0.1", port));
+        let link = UdpTransport::connect("127.0.0.1", port).unwrap();
+        assert!(targets_own_listener("127.0.0.1", port));
+        assert!(targets_own_listener("localhost", port));
+        assert!(targets_own_listener("255.255.255.255", port));
+        // Another machine may listen on the same port number: that is a normal relay target.
+        assert!(!targets_own_listener("192.0.2.1", port));
+        assert!(!targets_own_listener("127.0.0.1", port.wrapping_add(1)));
+        drop(link);
+        assert!(!targets_own_listener("127.0.0.1", port));
+    }
+
+    #[test]
+    fn datagrams_of_an_own_relay_socket_are_dropped() {
+        let port = free_port();
+        let mut link = UdpTransport::connect("127.0.0.1", port).unwrap();
+        let mut buf = [0u8; 64];
+
+        let relay = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let relay_port = relay.local_addr().unwrap().port();
+        register_own_sender(relay_port);
+        relay.send_to(b"relayed", ("127.0.0.1", port)).unwrap();
+        assert_eq!(link.read_bytes(&mut buf).unwrap(), 0);
+        assert!(link.peers.is_empty());
+
+        let vehicle = UdpSocket::bind("127.0.0.1:0").unwrap();
+        vehicle.send_to(b"vehicle", ("127.0.0.1", port)).unwrap();
+        assert_eq!(link.read_bytes(&mut buf).unwrap(), 7);
+        assert_eq!(link.peers.len(), 1);
+
+        forget_own_sender(relay_port);
+        relay.send_to(b"relayed", ("127.0.0.1", port)).unwrap();
+        assert_eq!(link.read_bytes(&mut buf).unwrap(), 7);
     }
 }
