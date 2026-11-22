@@ -398,9 +398,11 @@ mod link {
     const CHARACTERISTIC: uuid::Uuid =
         uuid::Uuid::from_u128(0x0000fff6_0000_1000_8000_00805f9b34fb);
     const FIND_TIMEOUT: Duration = Duration::from_secs(10);
-    /// The scan also lists a radio that was just switched off (BlueZ keeps it for a while), and a
-    /// connect to it only fails after BlueZ's 30 s call timeout. A present radio connects (and pairs)
-    /// in about 3 s.
+    /// BlueZ lists every radio it ever connected to, switched on or not; only one with a signal
+    /// strength was heard in this scan. Connecting to an absent one costs the whole connect timeout.
+    const LISTED_MAY_BE_ABSENT: bool = cfg!(target_os = "linux");
+    /// A radio switched off between the scan and the connect: BlueZ answers only after its 30 s call
+    /// timeout. A present radio connects (and pairs) in about 3 s.
     const CONNECT_TIMEOUT: Duration = Duration::from_secs(12);
     const RETRY_DELAY: Duration = Duration::from_secs(2);
     const STATUS_INTERVAL: Duration = Duration::from_millis(250);
@@ -550,10 +552,16 @@ mod link {
                 .peripherals()
                 .await
                 .map_err(|e| format!("list peripherals: {e}"))?;
-            let mut known: Vec<_> = list
-                .into_iter()
-                .filter(|p| ids.iter().any(|d| *d == p.id().to_string()))
-                .collect();
+            let mut known = Vec::new();
+            for p in list {
+                if !ids.iter().any(|d| *d == p.id().to_string()) {
+                    continue;
+                }
+                let heard = p.properties().await.ok().flatten().is_some_and(|x| x.rssi.is_some());
+                if heard || !LISTED_MAY_BE_ABSENT {
+                    known.push(p);
+                }
+            }
             known.sort_by_key(|p| failed == Some(p.id().to_string().as_str()));
             if let Some(p) = known.into_iter().next() {
                 break Some(p);

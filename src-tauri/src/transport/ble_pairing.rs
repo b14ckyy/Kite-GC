@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Programmatic PIN pairing for BLE modules that send a security request on connect and drop the link
-// when it stays unanswered (older FrSky modules). They do not keep the bond across a disconnect, so
-// every connection pairs anew. Windows pairs before the connect and removes the bond afterwards; on
-// Linux the kernel pairs during the connect and only needs our agent for the passkey (see `imp`).
+// PIN pairing for BLE modules that send a security request on connect and hang up when it stays
+// unanswered (older FrSky modules). They keep no bond, so every connection pairs anew: Windows before
+// the connect (bond removed afterwards), Linux in the kernel during it, with our agent for the passkey.
 
 use std::sync::Mutex;
 
@@ -147,11 +146,9 @@ mod imp {
 
     const AGENT_PATH: &str = "/org/kitegc/pairing_agent";
 
-    /// `Device1.Pair()` cannot pair the older module: BlueZ offers Secure Connections in the pairing
-    /// request and the module's BT 4.0 stack then rejects the right passkey ("confirm value failed").
-    /// The kernel answers the module's own security request with a legacy pairing the module
-    /// accepts, and asks bluetoothd's DEFAULT agent for the passkey. So the agent becomes the default
-    /// agent while the link comes up; it answers only for that one radio and rejects everything else.
+    /// `Device1.Pair()` offers Secure Connections, and the module's BT 4.0 stack then fails the right
+    /// passkey. The kernel's answer to the module's own security request is a legacy pairing it accepts;
+    /// that one asks bluetoothd's DEFAULT agent, so this agent is the default while the link comes up.
     struct Agent {
         pin: String,
         device: String,
