@@ -31,6 +31,7 @@ const WRITE_TIMEOUT_MS: i32 = 1000;
 /// Pause before the first reconnect attempt after a loss; doubles per failure up to the cap.
 const RECONNECT_FIRST: Duration = Duration::from_millis(500);
 const RECONNECT_CAP: Duration = Duration::from_secs(5);
+const OFF_RECHECK: Duration = Duration::from_secs(2);
 
 /// Information about a discovered BLE device. Same shape as the desktop struct so the frontend's
 /// `ble-device` event payload is identical on every platform.
@@ -266,6 +267,7 @@ pub struct BleTransport {
     up_since: Instant,
     restarted: bool,
     ended: bool,
+    off_readings: u8,
 }
 
 impl BleTransport {
@@ -284,6 +286,7 @@ impl BleTransport {
             up_since: Instant::now(),
             restarted: false,
             ended: false,
+            off_readings: 0,
         }
     }
 
@@ -420,10 +423,21 @@ impl BleTransport {
                     self.unproven = true;
                     self.up_since = Instant::now();
                     self.restarted = true;
+                    self.off_readings = 0;
                     return Ok(());
                 }
-                Err(Failure::End(reason)) => return Err(self.give_up(&reason)),
+                // A Bluetooth stack that restarts itself reads as off for a moment: only the second
+                // reading in a row ends the link.
+                Err(Failure::End(reason)) => {
+                    self.off_readings += 1;
+                    if self.off_readings >= 2 {
+                        return Err(self.give_up(&reason));
+                    }
+                    self.next_attempt = Instant::now() + OFF_RECHECK;
+                    log::debug!("[ble] {}: {reason} — checking again in {OFF_RECHECK:?}", self.address);
+                }
                 Err(Failure::Retry(reason)) => {
+                    self.off_readings = 0;
                     self.backoff = (self.backoff * 2).min(RECONNECT_CAP);
                     self.next_attempt = Instant::now() + self.backoff;
                     log::debug!(
@@ -511,7 +525,7 @@ impl Attempt {
         }
     }
 
-    /// Closing the handle releases every wait inside `openLink` / `subscribe`, so the thread ends promptly.
+    /// Closing the handle releases the connect, discovery and subscribe waits, so the thread ends promptly.
     fn cancel(&self, address: &str) {
         let previous = std::mem::replace(&mut *self.lock(), AttemptState::Cancelled);
         if let AttemptState::Running(Some(handle)) | AttemptState::Done(Ok(handle)) = previous {

@@ -244,7 +244,10 @@ object BleSerial {
     fun connect(address: String): Int {
         val handle = newLink(address)
         if (handle < 0) return -1
-        return if (openLink(handle)) handle else -1
+        if (openLink(handle)) return handle
+        // The caller has no handle to ask with: hand the reason over under NO_HANDLE.
+        lastErrors.remove(handle)?.let { lastErrors[NO_HANDLE] = it }
+        return -1
     }
 
     /** Bluetooth on and, from Android 12, the connect permission held; no dialog. False with the reason

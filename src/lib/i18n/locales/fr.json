@@ -2129,7 +2129,7 @@
     "title": "Enregistrement inachevé trouvé",
     "intro": "Un enregistrement d'une session précédente n'a pas été fermé correctement (l'application a peut-être planté ou été fermée en plein vol).",
     "titleLost": "Connexion à l'appareil perdue",
-    "introLost": "La connexion avec l'appareil a été interrompue (le périphérique série a été débranché ou la liaison BLE a été perdue) pendant l'enregistrement d'un vol. Choisissez quoi faire de l'enregistrement.",
+    "introLost": "La connexion avec l'appareil a disparu (le périphérique a été débranché, le Bluetooth a été désactivé ou le réseau n'est plus disponible) pendant l'enregistrement d'un vol. Choisissez quoi faire de l'enregistrement.",
     "craft": "Appareil",
     "started": "Début",
     "samples": "Échantillons",

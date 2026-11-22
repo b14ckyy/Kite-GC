@@ -94,7 +94,8 @@ struct SharedInner {
     services_done: bool,
     chars_done: usize,
     rx: VecDeque<u8>,
-    /// Set once the first connect is done; from then on the delegate re-establishes a dropped link.
+    /// Set once the first connect is done; from then on the delegate redoes discovery and notify after
+    /// the transport's reconnect request.
     session: Option<Session>,
     /// Bluetooth will not come back by itself (off, not allowed, unsupported): the link ends.
     unavailable: Option<&'static str>,

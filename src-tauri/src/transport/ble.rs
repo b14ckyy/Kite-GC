@@ -375,12 +375,9 @@ pub async fn connect_ble(device_id: &str) -> Result<BleTransport, String> {
                     Some(data) = write_async_rx.recv() => {
                         let mut write_err = None;
                         for (i, chunk) in data.chunks(BLE_WRITE_MTU).enumerate() {
-                            // Pace only *between* chunks, never after the last: a single-chunk write
-                            // (every MSP telemetry request is 9 bytes = 1 chunk) then incurs no delay, so
-                            // it can't park the reply notification while this branch sleeps (tokio::select!
-                            // runs one branch to completion before re-polling `notifications.next()`). The
-                            // inter-chunk delay still protects a small-buffered peripheral (CC2541) from an
-                            // RX overrun on a multi-chunk upload.
+                            // Pace only between chunks: a one-chunk MSP poll then never parks the reply
+                            // notification while this branch sleeps (select! runs it to completion); the gap
+                            // protects a small-buffered peripheral (CC2541).
                             if i > 0 && !write_delay.is_zero() {
                                 tokio::time::sleep(write_delay).await;
                             }
@@ -431,8 +428,8 @@ pub async fn connect_ble(device_id: &str) -> Result<BleTransport, String> {
 }
 
 /// One reconnect: a brief scan so a re-advertising device is found, then connect, rediscover, resubscribe.
-/// `Characteristic` handles are keyed by UUID, so the first connect's stay valid. Like the first listen
-/// connect, it fails only when none of `subscribe` takes.
+/// `Characteristic` handles are keyed by UUID, so the first connect's stay valid. Fails only when every
+/// characteristic of a non-empty `subscribe` is refused.
 async fn ble_reconnect(
     adapter: &btleplug::platform::Adapter,
     peripheral: &btleplug::platform::Peripheral,
@@ -479,7 +476,12 @@ async fn reconnect_until_up(
     loop {
         match stop_rx.try_recv() {
             Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {}
-            _ => return None, // stop requested, or the transport was dropped
+            // Stop requested, or the transport was dropped. A failed attempt may have left the device
+            // connected, which keeps it from advertising for the next connect.
+            _ => {
+                let _ = peripheral.disconnect().await;
+                return None;
+            }
         }
         let state = tokio::time::timeout(Duration::from_secs(2), adapter.adapter_state()).await;
         if matches!(state, Ok(Ok(CentralState::PoweredOff))) {
@@ -505,7 +507,10 @@ async fn reconnect_until_up(
                 );
                 tokio::select! {
                     _ = tokio::time::sleep(Duration::from_millis(backoff_ms)) => {}
-                    _ = stop_rx.recv() => return None,
+                    _ = stop_rx.recv() => {
+                        let _ = peripheral.disconnect().await;
+                        return None;
+                    }
                 }
                 backoff_ms = (backoff_ms * 2).min(5000);
             }
@@ -636,7 +641,6 @@ pub async fn connect_ble_listen(
         .next()
         .ok_or_else(|| "No BLE adapter available".to_string())?;
 
-    // Rediscover the selected device.
     adapter
         .start_scan(ScanFilter { services: vec![] })
         .await
@@ -672,15 +676,12 @@ pub async fn connect_ble_listen(
         .and_then(|p| p.local_name)
         .unwrap_or_else(|| "Unknown".to_string());
 
-    // Build the GATT table + subscribe to every Notify/Indicate characteristic.
     let services = peripheral.services();
     let mut table_services = Vec::new();
     let mut subscribed_count = 0usize;
 
-    // Collect ALL writable vendor-service characteristics so the listen path can transmit (e.g. the
-    // experimental MSP-over-SmartPort probe). We don't know which characteristic the radio's bridge
-    // routes to the FC uplink, so during this trial phase we write to every candidate (e.g. FrSky
-    // X20RS exposes both 0xFFF3 and 0xFFF6) and let the probe's reply detection reveal what works.
+    // Which writable characteristic the radio routes to the FC uplink is unknown (FrSky X20RS exposes
+    // FFF3 and FFF6), so every writable vendor characteristic is a transmit candidate.
     let mut write_chars: Vec<(btleplug::api::Characteristic, WriteType)> = Vec::new();
     let mut subscribed_chars: Vec<btleplug::api::Characteristic> = Vec::new();
 
@@ -693,7 +694,6 @@ pub async fn connect_ble_listen(
             let notifiable = ch
                 .properties
                 .intersects(CharPropFlags::NOTIFY | CharPropFlags::INDICATE);
-            // Collect every writable vendor characteristic as a transmit candidate.
             if !skip_service {
                 let can_wnr = ch.properties.contains(CharPropFlags::WRITE_WITHOUT_RESPONSE);
                 let can_w = ch.properties.contains(CharPropFlags::WRITE);
@@ -757,8 +757,6 @@ pub async fn connect_ble_listen(
         log::info!("BLE listen: transmit enabled on {} characteristic(s): {}", write_chars.len(), names.join(", "));
     }
 
-    // Channels bridging async BLE → sync ByteTransport. The write channel is now driven if any writable
-    // characteristic was found, so the listen path can transmit (e.g. the MSP-over-SmartPort probe).
     let (write_tx, mut write_async_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
     let (read_tx, read_rx) = mpsc::channel::<Vec<u8>>();
     let (stop_tx, mut stop_async_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
@@ -810,8 +808,6 @@ pub async fn connect_ble_listen(
                         if write_chars.is_empty() {
                             log::warn!("BLE listen: write requested but no writable characteristic — dropping {} bytes", data.len());
                         } else {
-                            // Trial phase: write to every writable candidate (we don't yet know which one
-                            // the radio routes to the FC uplink).
                             for (wc, wt) in &write_chars {
                                 for chunk in data.chunks(BLE_WRITE_MTU) {
                                     if let Err(e) = peripheral_clone.write(wc, chunk, *wt).await {
