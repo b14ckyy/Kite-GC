@@ -1826,8 +1826,8 @@ impl FlightRecorder {
         self.was_armed = is_armed;
     }
 
-    /// The active session's flown track at the live trail's point spacing; the newest points when it is
-    /// longer than the trail holds. A row without a mode takes the one before it.
+    /// The active session's track, thinned to the live trail's spacing and capped at the newest
+    /// `MAX_TRACK_POINTS` (payload size). A row without a mode takes the one before it, the first rows the first known one.
     fn session_track(&self) -> Vec<TrackPoint> {
         let Some(flight) = self.active_flight.as_ref() else { return Vec::new() };
         let Some(conn) = flight.temp_db.as_ref() else { return Vec::new() };
@@ -1848,6 +1848,9 @@ impl FlightRecorder {
             let mode = r.mode_primary.or_else(|| last.map(|l| l.mode.clone())).unwrap_or_default();
             let ts_ms = r.wall_ms.unwrap_or(start_ms + r.timestamp_ms);
             points.push(TrackPoint { lat: r.lat, lon: r.lon, alt_msl: r.alt_m, mode, ts_ms });
+        }
+        if let Some(first) = points.iter().find(|p| !p.mode.is_empty()).map(|p| p.mode.clone()) {
+            points.iter_mut().take_while(|p| p.mode.is_empty()).for_each(|p| p.mode = first.clone());
         }
         let excess = points.len().saturating_sub(MAX_TRACK_POINTS);
         points.drain(..excess);
@@ -3680,7 +3683,7 @@ mod tests {
     }
 
     /// A session resumed on reconnect hands its flown track to the frontend: thinned to the trail
-    /// spacing, a row without a mode coloured like the one before it.
+    /// spacing, a row without a mode coloured like the one before it, the first like the first known.
     #[test]
     fn continue_on_reconnect_restores_the_track() {
         let rig = Rig::new("continue-track");
@@ -3689,11 +3692,12 @@ mod tests {
             alt_m: Some(500.0), mode_primary: mode.map(str::to_string), ..row(ts, lat, 5.0, 10)
         };
         let rows = [
-            at(0, 48.0, Some("cruise")),
-            at(100, 48.000_01, Some("cruise")),
-            at(1000, 48.001, None),
+            at(0, 48.0, None),
+            at(100, 48.000_01, Some("rth")),
+            at(1000, 48.001, Some("cruise")),
             TelemetryRecord { lat: None, ..at(1500, 48.0, Some("rth")) },
-            at(2000, 48.002, Some("rth")),
+            at(2000, 48.002, None),
+            at(3000, 48.003, Some("rth")),
         ];
         write_ktmp(&path, Some("single"), None, &rows, &[]);
         let (p, _) = summarize_temp_session(path.clone(), rig.dir.join("flights.db"), rig.clock.as_ref()).unwrap();
@@ -3706,7 +3710,8 @@ mod tests {
         assert_eq!(seen, [
             (48.0, "cruise", 1_700_000_000_000),
             (48.001, "cruise", 1_700_000_001_000),
-            (48.002, "rth", 1_700_000_002_000),
+            (48.002, "cruise", 1_700_000_002_000),
+            (48.003, "rth", 1_700_000_003_000),
         ]);
         assert_eq!(track[0].alt_msl, 500.0);
     }

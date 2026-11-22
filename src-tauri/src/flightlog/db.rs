@@ -2070,7 +2070,7 @@ pub fn read_session_events(conn: &Connection) -> SqlResult<Vec<FlightEvent>> {
     rows.collect()
 }
 
-/// One flown point of a temp session; `alt_m` is GPS MSL.
+/// One position row of a temp session; `alt_m` as the link reports it (MSL, arming-relative on LTM / CRSF).
 pub struct SessionTrackRow {
     pub timestamp_ms: i64,
     pub wall_ms: Option<i64>,

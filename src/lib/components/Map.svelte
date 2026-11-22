@@ -2052,6 +2052,9 @@
     }
   }
 
+  // While set, the active polyline is not redrawn per point (a redraw walks the whole run).
+  let trailBatch = false;
+
   function updateTrail(lat: number, lon: number, modePrimary: string) {
     if (!map) return;
     const pos = L.latLng(lat, lon);
@@ -2067,6 +2070,7 @@
     // Color changed → finalize the active segment and start a new one
     if (color !== trailCurrentColor && trailCurrentPositions.length >= 2) {
       if (activeTrailLine) {
+        if (trailBatch) activeTrailLine.setLatLngs(trailCurrentPositions);
         trailSegments.push(activeTrailLine);
         activeTrailLine = undefined;
       }
@@ -2080,8 +2084,10 @@
     // Update or create the active (in-progress) polyline
     if (trailCurrentPositions.length >= 2) {
       if (activeTrailLine) {
-        activeTrailLine.setLatLngs(trailCurrentPositions);
-        activeTrailLine.setStyle({ color });
+        if (!trailBatch) {
+          activeTrailLine.setLatLngs(trailCurrentPositions);
+          activeTrailLine.setStyle({ color });
+        }
       } else {
         activeTrailLine = L.polyline(trailCurrentPositions, { color, weight: 2, opacity: 0.7 }).addTo(map);
       }
@@ -2091,7 +2097,10 @@
   /** Trail points the backend buffered while the page was hidden — through the live path, so the
    *  per-mode segments come out as if live. */
   export function appendTrailPoints(points: { lat: number; lon: number; mode: string }[]): void {
+    trailBatch = true;
     for (const p of points) updateTrail(p.lat, p.lon, p.mode);
+    trailBatch = false;
+    activeTrailLine?.setLatLngs(trailCurrentPositions);
   }
 
   function clearTrail() {
@@ -2637,7 +2646,6 @@
         // Trail reset on arm (home is set centrally in +page → the home marker follows homePosition).
         if (armed && !wasArmed && t.fixType >= 2 && t.lat !== 0) {
           clearTrail();
-          // Drop the pre-arm line — the colored flight trail takes over.
           resetPreArmTrail();
         }
         wasArmed = armed;
