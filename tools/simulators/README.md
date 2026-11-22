@@ -105,6 +105,9 @@ python tools/simulators/ardupilot-sitl-manager.py --headless --count 3 --frame q
   Parameter files come from the ArduPilot GitHub tree. Linux and macOS paths are untested so far.
 - **State**: settings + presets, instance EEPROMs / logs, downloads and parameter files under the
   `kite-sitl` data dir (see [../README.md](../README.md)).
+- **DataFlash logs** are off by default (`LOG_BACKEND_TYPE=0`): an instance otherwise writes up to several
+  GB of `.BIN` files per working day into its data folder. Tick *DataFlash logs* when you need them, e.g.
+  for a log-import test.
 
 ## `inav-sitl-manager.py` — INAV SITL desk
 
