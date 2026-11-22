@@ -1814,6 +1814,10 @@ best-effort basis and are not officially supported. Setup and limits:
 <a href="../guides/connecting/#inav-over-mavlink-mspmav">Connecting → INAV over MAVLink</a>. <a href="https://github.com/b14ckyy/Kite-GC/pull/202">#202</a></p>
 <p>On a slow link Kite measures the round trip and gives the tunnel more time, so it is found
 there too instead of falling back to plain MAVLink. [#337]</p>
+<p><strong>RadioMaster AX12.</strong> Kite runs on this Android transmitter and connects through its
+built-in ELRS module: pick the internal port in the serial port list, the baud rate is
+already set. With INAV 10.0 on the aircraft that link carries the planner as described
+above. [#317]</p>
 </details>
 <details class="info">
 <summary>Your own maps — online with your own key, offline from a folder</summary>
@@ -1829,7 +1833,7 @@ still needs the internet. <a href="https://github.com/b14ckyy/Kite-GC/pull/246">
 <p>Both are described in <a href="../guides/custom-maps/">Your own maps</a>.</p>
 </details>
 <details class="info">
-<summary>Logbook and replay — native Blackbox import, HI-RES replay, a smaller database</summary>
+<summary>Logbook and replay — native Blackbox import, HI-RES replay, the logbook as one file</summary>
 <p><strong>INAV Blackbox import without a helper program.</strong> Kite decodes INAV Blackbox logs itself:
 no <code>blackbox_decode</code> download, faster imports, and the stretches the old tool lost after a
 flight-mode change are in the track. Only INAV logs are accepted; a Blackbox log from
@@ -1846,6 +1850,10 @@ want to keep it. <a href="https://github.com/b14ckyy/Kite-GC/pull/99">#99</a></p
 Blackbox flights; a logbook that consists of such flights can shrink by more than 30 %.
 Flights from ArduPilot and PX4 logs keep their size. For every flight, space freed by
 deleting flights or stored logs is now handed back to the disk. <a href="https://github.com/b14ckyy/Kite-GC/pull/232">#232</a></p>
+<p><strong>Take your logbook with you.</strong> Settings → Data saves the whole flight database as one
+file and loads it again, on every platform — on Android and iOS that is the way to keep a
+logbook across a reinstall. The same place writes every flight into a single <code>.kflight</code>.
+See <a href="../guides/logbook/#exporting-and-importing-the-whole-database">Logbook</a>. [#325]</p>
 </details>
 <details class="info">
 <summary>Telemetry API — live telemetry for other programs</summary>
@@ -1858,13 +1866,27 @@ one switch for the network. Every field and examples are in the
 <strong><a href="../reference/telemetry-api/">Telemetry API</a></strong> reference. <a href="https://github.com/b14ckyy/Kite-GC/pull/123">#123</a></p>
 </details>
 <details class="info">
-<summary>Widgets in several sizes, and a raw telemetry view</summary>
+<summary>Widgets in several sizes, a weather widget and a raw telemetry view</summary>
 <p>Every flight widget has <strong>two or three sizes</strong>: in edit mode a corner button steps it from
 small to large (and, for the wide Live AGL and Video tiles, to a square). The docks shrink
 to their largest widget, which hands the freed space back to the map. Widgets are
 rearranged by <strong>long-pressing</strong> them, with the mouse or a finger. <a href="https://github.com/b14ckyy/Kite-GC/pull/101">#101</a> · <a href="https://github.com/b14ckyy/Kite-GC/pull/127">#127</a></p>
 <p>The <strong>≡ Raw</strong> button in the top bar opens one view with every value the telemetry link
 delivers, in its raw unit. It replaces the Raw Telemetry widget. <a href="https://github.com/b14ckyy/Kite-GC/pull/101">#101</a></p>
+<p><strong>Weather widget.</strong> A new widget shows the forecast wind at the height your aircraft is
+flying at — direction relative to the nose, speed and gusts — and, in its wide size, the
+wind for the next 30, 60 and 90 minutes. The forecast is also stored with every recorded
+flight, so a replay shows the wind of that day. Needs internet. [#299] · [#316]</p>
+</details>
+<details class="info">
+<summary>Your radio as a wireless controller — RC control over Bluetooth</summary>
+<p>RC control on the desktop can take its sticks from a radio over Bluetooth, without a cable.
+Set the radio's Bluetooth trainer link to <strong>Slave</strong> and pick the radio once with the
+Bluetooth button in the RC panel; from then on Kite connects whenever the radio is on in
+that mode, and it appears in the device list like a joystick. The older FrSky Bluetooth module, also
+retro-fitted to EdgeTX radios, is paired without a prompt on Windows and Linux. Setup:
+<a href="../guides/rc-control/#a-frsky-radio-over-bluetooth">RC control → A FrSky radio over Bluetooth</a>.
+[#348]</p>
 </details>
 <details class="info">
 <summary>Kite updates itself</summary>
