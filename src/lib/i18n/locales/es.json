@@ -2129,7 +2129,7 @@
     "title": "Se encontró una grabación sin terminar",
     "intro": "Una grabación de una sesión anterior no se cerró correctamente (la aplicación puede haber fallado o haberse cerrado en pleno vuelo).",
     "titleLost": "Conexión con el dispositivo perdida",
-    "introLost": "La conexión con la aeronave se cortó (se desenchufó el dispositivo serie o se perdió el enlace BLE) mientras se grababa un vuelo. Elige qué hacer con la grabación.",
+    "introLost": "La conexión con la aeronave se perdió (se desenchufó el dispositivo, se desactivó el Bluetooth o la red ya no está disponible) mientras se grababa un vuelo. Elige qué hacer con la grabación.",
     "craft": "Aeronave",
     "started": "Inicio",
     "samples": "Muestras",

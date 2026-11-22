@@ -285,11 +285,12 @@ open, and the display returns to normal as soon as data arrives again — a radi
 own. Once a link that had delivered data is silent for five seconds, a red **Telemetry lost** line is pinned above the system messages,
 with a timer counting up and an alarm tone that repeats every minute; on the phone the dot of the
 **🔗** button turns amber. The line stays until data returns or you disconnect, whatever
-**System Messages** is set to. The same holds when a **TCP connection breaks** — the Wi-Fi bridge
-restarted, or it was out of range for a while: Kite connects to the same address again in the
-background, every few seconds, and carries on where it left off. Only a **lost transport** — a USB
-cable unplugged, a Bluetooth link gone on a phone or tablet, no network left to reach the address
-(Wi-Fi off, cable out), or a TCP connection that breaks before any data arrived — ends the connection; if a flight was being recorded, Kite then asks what to
+**System Messages** is set to. The same holds when a **TCP or Bluetooth connection breaks** — the
+Wi-Fi bridge or the Bluetooth module restarted, or it was out of range for a while: Kite connects to
+the same address or device again in the background, every few seconds, and carries on where it left
+off. Only a **lost transport** — a USB cable unplugged, Bluetooth switched off, no network left to
+reach the address (Wi-Fi off, cable out), or a TCP connection that breaks before any data arrived —
+ends the connection; if a flight was being recorded, Kite then asks what to
 do with it (**Device connection lost**: **Discard**, **Save Incomplete** or **Continue on Reconnect**).
 
 If you always fly the same link and would rather not have a stray session decide, set
