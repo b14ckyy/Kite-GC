@@ -24,7 +24,7 @@
   import { resetGcsManual, gcsManuallySet } from '$lib/stores/gcsLocation';
   import type { AppSettings, InterfaceSettings, RadarSettings, GcsMode, AirspaceSettings, AirspaceProvider, SystemMessagesLevel, LogLevel, RcControlSettings, TelemetryApiSettings, UpdateCheckSettings, UpdateCheckMode, DefaultProtocol } from '$lib/stores/settings';
   import { revealItemInDir } from '@tauri-apps/plugin-opener';
-  import { isAndroid, isMobile, hasDbCompact, hasCustomMaps, hasRcControl } from '$lib/platform';
+  import { isAndroid, isIOS, isMobile, hasDbCompact, hasCustomMaps, hasRcControl } from '$lib/platform';
   import { updatesSupported, updateKind } from '$lib/controllers/updateCheck';
   import { blackboxDecoderVersion, blackboxLegacyMode, downloadBlackboxDecode } from '$lib/stores/flightlog';
   import type { TileCacheStats } from '$lib/cache/tileCache';
@@ -43,6 +43,7 @@
     localeValue = 'en',
     uiScale = 1,
     stayAwake = false,
+    miniView = false,
     mapProvider = 'osm',
     mapCacheMaxMB = 200,
     cacheStats = { usedBytes: 0, maxBytes: 0, tileCount: 0 },
@@ -103,6 +104,7 @@
     localeValue?: string;
     uiScale?: number;
     stayAwake?: boolean;
+    miniView?: boolean;
     mapProvider?: string;
     mapCacheMaxMB?: number;
     cacheStats?: TileCacheStats;
@@ -636,6 +638,12 @@
         <label class="s-label" for="stay-awake">{$t('settings.stayAwake')}</label>
         <Toggle checked={stayAwake} id="stay-awake" onchange={(c) => onPatch({ stayAwake: c })} />
       </div>
+      {#if !isIOS}
+        <div class="s-row" title={$t('settings.miniViewHint')}>
+          <label class="s-label" for="mini-view">{$t('settings.miniView')}</label>
+          <Toggle checked={miniView} id="mini-view" onchange={(c) => onPatch({ miniView: c })} />
+        </div>
+      {/if}
       <!-- Which protocol the connection bar starts on. "Last used" is the historic behaviour and
            stays the default; a fixed choice overrides the stored one on every launch. -->
       <div class="s-row" title={$t('settings.defaultProtocolHint')}>

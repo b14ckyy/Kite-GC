@@ -441,12 +441,12 @@ pub fn run() {
     if !is_portable() {
         use tauri_plugin_window_state::StateFlags;
         // Persist everything EXCEPT decorations (custom titlebar; a saved `decorations: true` would bring the
-        // native one back). The detached video window is denylisted: the plugin restores sizes onto vanished
-        // monitors (VIDEO_MULTISINK_WINDOW.md §5.5).
+        // native one back). The detached video and mini windows place themselves: the plugin restores sizes onto
+        // vanished monitors (VIDEO_MULTISINK_WINDOW.md §5.5).
         builder = builder.plugin(
             tauri_plugin_window_state::Builder::default()
                 .with_state_flags(StateFlags::all() & !StateFlags::DECORATIONS)
-                .with_denylist(&[crate::commands::video::DETACHED_LABEL])
+                .with_denylist(&[crate::commands::video::DETACHED_LABEL, crate::commands::mini_view::MINI_LABEL])
                 .build(),
         );
     }
@@ -853,6 +853,8 @@ pub fn run() {
             video_detached_chrome,
             video_detached_aspect,
             video_detached_nudge,
+            commands::mini_view::mini_view_set_enabled,
+            commands::mini_view::mini_view_restore,
             radar_configure,
             radar_set_center,
             radar_set_node_pos,
@@ -922,6 +924,12 @@ pub fn run() {
                     if let Some(win) = app.get_webview_window(commands::video::DETACHED_LABEL) {
                         let _ = win.destroy();
                     }
+                }
+            }
+            #[cfg(desktop)]
+            if let tauri::RunEvent::WindowEvent { label, event, .. } = &event {
+                if label == "main" {
+                    commands::mini_view::on_main_window_event(app, event);
                 }
             }
         });

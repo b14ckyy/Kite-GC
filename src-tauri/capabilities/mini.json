@@ -1,0 +1,13 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "mini-window",
+  "description": "Capability for the desktop mini view window: drag by its body and the event channel from the main window. No dialogs, no opener, no filesystem.",
+  "platforms": ["windows", "linux", "macOS"],
+  "windows": [
+    "mini"
+  ],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging"
+  ]
+}

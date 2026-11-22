@@ -21,6 +21,10 @@
     "protocolTelemetry": "Telemetrie",
     "protocolMspMav": "MSP/MAV"
   },
+  "miniView": {
+    "sat": "SAT",
+    "restore": "Klicken, um Kite zurückzuholen"
+  },
   "relay": {
     "title": "Telemetrie-Relay — Live-Telemetrie an Tracker / GCS weiterleiten",
     "short": "Relay",
@@ -1284,6 +1288,8 @@
     "uiScale": "UI-Skalierung",
     "stayAwake": "Ohne Verbindung wach bleiben",
     "stayAwakeHint": "Kite hält den Bildschirm an, solange das Fluggerät gearmt ist. Verbunden, aber nicht gearmt, gilt der Bildschirm-Timeout des Geräts – außer bei durchgehender Raw-Aufzeichnung oder wenn der Telemetrie-Feed nicht meldet, ob das Fluggerät gearmt ist: Dann bleibt der Bildschirm für die ganze Verbindung an. Mit diesem Schalter bleibt der Bildschirm immer an, solange Kite geöffnet ist, auch ohne Verbindung.",
+    "miniView": "Mini-Ansicht im Hintergrund",
+    "miniViewHint": "Solange Kite minimiert ist (Android: verlassen wurde), zeigt eine kleine schwebende Ansicht Akku, Flugmodus, Entfernung zum Home-Punkt und Satelliten.",
     "interface": "Interface",
     "tabData": "Daten",
     "groupUi": "UI",

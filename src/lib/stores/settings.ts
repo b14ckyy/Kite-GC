@@ -439,6 +439,8 @@ export interface AppSettings {
   /** Phone / tablet: keep the display awake all the time, also without a connection. Off = only
    *  while the vehicle is armed (the backend holds the rule, link_presence.rs). */
   stayAwake: boolean;
+  /** Small always-on-top view while Kite is minimized (desktop) or left (Android: picture-in-picture). */
+  miniView: boolean;
   // 3D Map
   cesiumIonToken: string;
   /** User chose "don't remind me" on the missing-Cesium-key prompt → never auto-show it again. */
@@ -544,6 +546,7 @@ const defaults: AppSettings = {
   locale: 'en',
   uiScale: 1,
   stayAwake: false,
+  miniView: false,
   cesiumIonToken: '',
   cesiumKeyPromptDismissed: false,
   dbBackupAck: {},

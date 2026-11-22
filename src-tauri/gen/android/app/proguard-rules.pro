@@ -54,3 +54,5 @@
 # Device profile (android/device.rs → DeviceProfile): profile/internalSerialPorts are JNI-only,
 # same rule.
 -keep class com.kitegc.app.DeviceProfile { *; }
+# Mini view switch (android/pip.rs → MiniView): setEnabled is JNI-only, same rule.
+-keep class com.kitegc.app.MiniView { *; }

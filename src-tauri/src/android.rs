@@ -11,6 +11,7 @@ pub mod jvm;
 pub mod link_service;
 pub mod native_video;
 pub mod net;
+pub mod pip;
 pub mod screen;
 pub mod storage;
 

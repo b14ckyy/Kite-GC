@@ -130,6 +130,8 @@
   import { LARGE_BASE_VMIN } from "$lib/config/widgetRegistry";
   import FloatingVideoWindow from "$lib/components/video/FloatingVideoWindow.svelte";
   import { startDetachedVideo, stopDetachedVideo } from "$lib/controllers/detachedVideo";
+  import { startMiniView, stopMiniView } from "$lib/controllers/miniView";
+  import MiniViewPip from "$lib/components/MiniViewPip.svelte";
   import PhoneVideoDock from "$lib/components/phone/PhoneVideoDock.svelte";
   import MapSearch from "$lib/components/MapSearch.svelte";
   import PhoneBottomBar from "$lib/components/phone/PhoneBottomBar.svelte";
@@ -1356,6 +1358,11 @@
   onMount(() => {
     startDetachedVideo();
     return () => stopDetachedVideo();
+  });
+
+  onMount(() => {
+    startMiniView();
+    return () => stopMiniView();
   });
 
   function toggleNavPanel() {
@@ -4642,6 +4649,7 @@
             localeValue={$locale ?? 'en'}
             {uiScale}
             stayAwake={$settings.stayAwake}
+            miniView={$settings.miniView}
             {mapProvider}
             {mapCacheMaxMB}
             {cacheStats}
@@ -4823,6 +4831,10 @@
   <BatchEditPopup {interfaceSettings} />
   <ArduBatchEditPopup />
 </div><!-- .ui-root -->
+
+{#if isAndroid}
+  <MiniViewPip />
+{/if}
 
 <style>
   /* Kite theme — floating panel layout. Palette derived from the INAV Configurator

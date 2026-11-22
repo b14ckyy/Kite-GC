@@ -1,9 +1,16 @@
 package com.kitegc.app
 
+import android.app.PictureInPictureParams
+import android.content.pm.PackageManager
+import android.content.res.Configuration
+import android.graphics.Point
 import android.os.Build
 import android.os.Bundle
+import android.util.Rational
 import android.view.WindowManager
+import android.webkit.WebView
 import android.widget.Toast
+import androidx.annotation.RequiresApi
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -16,6 +23,8 @@ import androidx.core.view.WindowInsetsControllerCompat
 class MainActivity : TauriActivity() {
   /** Timestamp of the last back press, for the confirm-to-exit guard below. 0 = none pending. */
   private var lastBackPress = 0L
+
+  private var webView: WebView? = null
 
   /** System folder picker for the custom database / raw-log locations. A field initializer on
    *  purpose: activity-result contracts must be registered before the activity reaches STARTED. */
@@ -49,6 +58,7 @@ class MainActivity : TauriActivity() {
     NativeVideo.init(this)
     NetInfo.init(this)
     InstallSource.init(this)
+    MiniView.init(this)
 
     enableEdgeToEdge()
 
@@ -96,6 +106,7 @@ class MainActivity : TauriActivity() {
   /** Hand the WebView to the native-video host: it must go transparent while the hole-punch
    *  video layer below it is visible (see NativeVideo). */
   override fun onWebViewCreate(webView: android.webkit.WebView) {
+    this.webView = webView
     NativeVideo.attachWebView(webView)
     // Before the first navigation (wry calls this hook before it loads the URL): the frontend reads
     // the device profile from the user-agent at module load, so the token must already be there.
@@ -114,6 +125,78 @@ class MainActivity : TauriActivity() {
     if (hasFocus) hideSystemBars()
   }
 
+  /** Mini view on: leaving Kite enters PiP. API 31+ enters by itself (auto-enter), also on the
+   *  gestures that skip [onUserLeaveHint]; below that only the hint does it. */
+  internal fun applyPipParams() {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || !hasPip()) return
+    setPictureInPictureParams(pipParams())
+  }
+
+  override fun onUserLeaveHint() {
+    super.onUserLeaveHint()
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) return
+    if (!MiniView.enabled || !hasPip() || isInPictureInPictureMode) return
+    try {
+      enterPictureInPictureMode(pipParams())
+    } catch (_: IllegalStateException) {
+      // The device refused PiP (e.g. disabled for the app in system settings).
+    }
+  }
+
+  /** The page swaps its whole UI for the mini view while in PiP (MiniViewPip.svelte). */
+  override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
+    super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+    webView?.evaluateJavascript(
+      "window.dispatchEvent(new CustomEvent('kite-pip',{detail:$isInPictureInPictureMode}))",
+      null,
+    )
+  }
+
+  /** The params are set ahead of time for auto-enter, so a rotation must refresh the aspect. */
+  override fun onConfigurationChanged(newConfig: Configuration) {
+    super.onConfigurationChanged(newConfig)
+    if (MiniView.enabled && !isInPictureInPictureMode) applyPipParams()
+  }
+
+  private fun hasPip(): Boolean =
+    packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
+
+  /** The display's shape in its current orientation, inside Android's PiP range (1:2.39 .. 2.39:1,
+   *  checked as a float — hence the margin). */
+  private fun pipAspect(): Rational {
+    val w: Int
+    val h: Int
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+      val b = windowManager.maximumWindowMetrics.bounds
+      w = b.width()
+      h = b.height()
+    } else {
+      val p = Point()
+      @Suppress("DEPRECATION")
+      windowManager.defaultDisplay.getRealSize(p)
+      w = p.x
+      h = p.y
+    }
+    if (w <= 0 || h <= 0) return Rational(16, 9)
+    val r = w.toFloat() / h
+    return when {
+      r > MAX_PIP_ASPECT -> Rational(238, 100)
+      r < 1f / MAX_PIP_ASPECT -> Rational(100, 238)
+      else -> Rational(w, h)
+    }
+  }
+
+  @RequiresApi(Build.VERSION_CODES.O)
+  private fun pipParams(): PictureInPictureParams {
+    val b = PictureInPictureParams.Builder().setAspectRatio(pipAspect())
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      b.setAutoEnterEnabled(MiniView.enabled)
+      // No live video to stretch: a plain cross-fade instead of a seamless resize.
+      b.setSeamlessResizeEnabled(false)
+    }
+    return b.build()
+  }
+
   /**
    * Full immersive: a ground station is a full-screen landscape instrument. The bars come back on an
    * edge swipe and hide again; the back gesture still goes through the press-twice-to-exit guard.
@@ -129,5 +212,6 @@ class MainActivity : TauriActivity() {
     /** How long the first back press stays "armed". Long enough to read the toast, short enough that
      *  a press minutes later is not treated as a confirmation. */
     const val BACK_TO_EXIT_WINDOW_MS = 2000L
+    const val MAX_PIP_ASPECT = 2.38f
   }
 }
