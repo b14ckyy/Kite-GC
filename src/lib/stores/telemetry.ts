@@ -341,6 +341,8 @@ async function captureGroundAnchor(t: TelemetryData): Promise<void> {
     } else if (Math.abs(t.altMsl - g) <= ARM_MSL_MAX_DIFF) {
       altReference.set({ msl: true });
       groundAnchor.set(null);
+      // The recorder stores the flight's reference: without this the replay anchors it as relative.
+      void invoke('set_alt_reference_msl').catch((e) => console.warn('[altAnchor] recorder not told', e));
       console.log(`[altAnchor] altitude is MSL (${t.altMsl.toFixed(1)} m at arm, terrain ${g.toFixed(1)} m)`);
     }
   } catch (e) {
