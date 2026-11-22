@@ -285,7 +285,8 @@ export async function startConnectListeners() {
     await listen<{ quadplane: boolean }>('telemetry-vehicle', (event) => {
       if (event.payload.quadplane) noteQuadplane();
     }),
-    // Passive telemetry, sent once at the protocol lock: true MSL, or only arming-relative altitude?
+    // Passive telemetry: true MSL, or only arming-relative altitude? Sent at the protocol lock, and again
+    // when a CRSF stream turns out to carry MSL.
     await listen<{ msl: boolean }>('telemetry-alt-ref', (event) => {
       altReference.set({ msl: event.payload.msl });
       // A real-MSL protocol supersedes any relative ground anchor.
