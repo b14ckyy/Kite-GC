@@ -574,6 +574,7 @@
     "removeSource": "Quelle entfernen",
     "contacts": "Kontakte",
     "sourceError": "Quellen-Fehler",
+    "sourceRateLimited": "Anfragelimit erreicht, pausiert bis zum Zurücksetzen",
     "localSources": "Lokale Quellen",
     "selectPort": "Port wählen…",
     "portMissing": "nicht gefunden",
