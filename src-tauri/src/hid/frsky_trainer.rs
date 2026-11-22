@@ -398,6 +398,10 @@ mod link {
     const CHARACTERISTIC: uuid::Uuid =
         uuid::Uuid::from_u128(0x0000fff6_0000_1000_8000_00805f9b34fb);
     const FIND_TIMEOUT: Duration = Duration::from_secs(10);
+    /// The scan also lists a radio that was just switched off (BlueZ keeps it for a while), and a
+    /// connect to it only fails after BlueZ's 30 s call timeout. A present radio connects (and pairs)
+    /// in about 3 s.
+    const CONNECT_TIMEOUT: Duration = Duration::from_secs(12);
     const RETRY_DELAY: Duration = Duration::from_secs(2);
     const STATUS_INTERVAL: Duration = Duration::from_millis(250);
     /// Data without a single trainer frame for this long is something else (telemetry): release.
@@ -606,9 +610,9 @@ mod link {
             None => {}
         }
         set_state(app, stats, "connecting");
-        peripheral
-            .connect()
+        tokio::time::timeout(CONNECT_TIMEOUT, peripheral.connect())
             .await
+            .map_err(|_| format!("BLE connect: no answer within {} s", CONNECT_TIMEOUT.as_secs()))?
             .map_err(|e| format!("BLE connect failed: {e}"))?;
         peripheral
             .discover_services()

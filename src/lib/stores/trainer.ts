@@ -40,6 +40,9 @@ export const trainerForeign = writable<string[]>([]);
 
 let listening = false;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
+/** A radio added while another one streams: the running task does not know it yet. It is not
+ *  interrupted for that; the restart follows once its link is gone. */
+let restartPending = false;
 /** A radio that sent telemetry stays remembered; look again this often for trainer data. */
 const RETRY_FOREIGN_MS = 15000;
 
@@ -66,6 +69,10 @@ function clearRetry(): void {
 
 function onStatus(status: TrainerStatus): void {
   trainerStatus.set(status);
+  if (restartPending && status.state === 'searching' && get(hidActive)) {
+    void startTrainer();
+    return;
+  }
   const list = radios();
   const radio = list.find((r) => r.id === status.device_id);
   if (status.pairing && radio && !radio.pairing) {
@@ -96,6 +103,7 @@ export async function startTrainer(): Promise<void> {
     await listen<TrainerStatus>('trainer-status', (e) => onStatus(e.payload));
   }
   clearRetry();
+  restartPending = false;
   try {
     await invoke('trainer_start', { devices: list.map((r) => ({ id: r.id, pairing: r.pairing ?? false })) });
   } catch (e) {
@@ -106,6 +114,7 @@ export async function startTrainer(): Promise<void> {
 
 export async function stopTrainer(): Promise<void> {
   clearRetry();
+  restartPending = false;
   await invoke('trainer_stop');
 }
 
@@ -113,9 +122,11 @@ export async function rememberTrainer(radio: { id: string; name: string }): Prom
   const list = radios();
   if (!list.some((r) => r.id === radio.id)) saveRadios([...list, radio]);
   bleDevices.update((devs) => devs.filter((d) => d.id !== radio.id));
-  // A restart drops the link of a radio that streams (and with it an engaged session): the next
-  // start of the HID input picks the new radio up instead.
-  if (get(hidActive) && trainerRadioId() == null) await startTrainer();
+  // A restart drops the link of a radio that streams (and with it an engaged session): that one is
+  // left alone, and the restart waits until its link is gone.
+  if (!get(hidActive)) return;
+  if (trainerRadioId() == null) await startTrainer();
+  else restartPending = true;
 }
 
 export async function forgetTrainer(id: string): Promise<void> {
