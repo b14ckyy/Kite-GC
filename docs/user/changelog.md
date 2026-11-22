@@ -339,7 +339,7 @@ inside the box of the feature release they belong to, so the notes for one relea
       becomes an input device of RC control, without a cable. Kite remembers a list of radios,
       connects to the one in trainer mode by itself and tells trainer data from telemetry in both
       directions. The older FrSky Bluetooth module, also retro-fitted to EdgeTX radios, is paired
-      with its code without a prompt (confirmed on Windows). Frame format taken from garfield2412's
+      with its code without a prompt (Windows and Linux). Frame format taken from garfield2412's
       FrSky-Bluetooth-Trainer. See
       [A FrSky radio over Bluetooth](guides/rc-control.md#a-frsky-radio-over-bluetooth). [#348]
     - **INAV over a MAVLink-only link (MSP/MAV)** — with INAV 10.0, missions, safe homes, geozones,
