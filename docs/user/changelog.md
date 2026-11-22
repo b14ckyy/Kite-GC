@@ -571,6 +571,12 @@ inside the box of the feature release they belong to, so the notes for one relea
       the link shows as stalled, like a radio dropout. Over TCP and UDP the connection only
       ends when the computer has no network left to reach the address, or when a TCP
       connection breaks before any data arrived. [#358]
+    - **Bluetooth LE: a dropped link is re-established on every platform.** On Windows, Linux
+      and macOS Kite already reconnected to a Bluetooth module that was out of range or
+      restarted. On Android, iPhone and iPad, and for a listen-only telemetry link on every
+      platform, the connection ended instead. Now the link comes back by itself everywhere and
+      shows as stalled meanwhile; it only ends when Bluetooth is switched off or no longer
+      allowed. [#359]
 
     **Fixed**
 
