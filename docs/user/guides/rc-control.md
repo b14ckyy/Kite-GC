@@ -85,8 +85,10 @@ Things to know:
   transmitters, demands a pairing code and hangs up without one. On **Windows** and **Linux** Kite
   pairs with its code `000000` by itself, without a system prompt. On Linux, Kite answers pairing
   requests for the remembered radio while it connects to it, in place of the desktop's own Bluetooth
-  prompt; nothing stays paired in the system afterwards. macOS gives an app no way to answer the
-  pairing, so the module is not usable there for now.
+  prompt; nothing stays paired in the system afterwards. During those few seconds a pairing started
+  for another device from the desktop's Bluetooth settings is refused: start it again. If the radio
+  was paired in those settings before, remove it there, or the module drops every connection. macOS
+  gives an app no way to answer the pairing, so the module is not usable there for now.
 - Tested on Windows and Linux with a FrSky X20RS on ETHOS 26.2 and with a RadioMaster TX16S on EdgeTX
   carrying the older FrSky module.
 - **If the X20RS is found but never connects** after the link was closed and opened again, switch the
