@@ -62,6 +62,8 @@ export interface AdsbProviderStatus {
   name: string;
   count: number;
   ok: boolean;
+  /** Online providers only: paused until the provider's rate limit resets. */
+  limited?: boolean;
 }
 export const radarAdsbStatus = writable<Record<string, AdsbProviderStatus>>({});
 

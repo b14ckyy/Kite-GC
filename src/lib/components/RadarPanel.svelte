@@ -67,7 +67,7 @@
   const removeProvider = (i: number) =>
     patchAdsb({ online: radar.adsb.online.filter((_, j) => j !== i) });
   const addProvider = () =>
-    patchAdsb({ online: [...radar.adsb.online, { name: '', url: 'https://api.adsb.lol/v2/point/{lat}/{lon}/{dist}', enabled: false }] });
+    patchAdsb({ online: [...radar.adsb.online, { name: '', url: 'https://example.org/v2/point/{lat}/{lon}/{dist}', enabled: false }] });
   const inputVal = (e: Event) => (e.target as HTMLInputElement).value;
 
   // Local hardware receivers (Phase 2: serial MAVLink).
@@ -294,7 +294,7 @@
           <span class="src-name" title={b.url}>{b.name}</span>
           {#if on && st}
             {#if st.ok}<span class="src-stat ok" title={$t('radar.contacts')}>{st.count}</span>
-            {:else}<span class="src-stat err" title={$t('radar.sourceError')}>✕</span>{/if}
+            {:else}<span class="src-stat err" title={$t(st.limited ? 'radar.sourceRateLimited' : 'radar.sourceError')}>✕</span>{/if}
           {/if}
           <Toggle checked={on} onchange={(c) => setBuiltinEnabled(b.name, c)} />
         </div>
@@ -318,7 +318,7 @@
               <span class="src-name" title={p.url}>{p.name || '—'}</span>
               {#if st}
                 {#if st.ok}<span class="src-stat ok" title={$t('radar.contacts')}>{st.count}</span>
-                {:else}<span class="src-stat err" title={$t('radar.sourceError')}>✕</span>{/if}
+                {:else}<span class="src-stat err" title={$t(st.limited ? 'radar.sourceRateLimited' : 'radar.sourceError')}>✕</span>{/if}
               {/if}
             {/if}
             <Toggle checked={p.enabled} onchange={(c) => updateProvider(i, { enabled: c })} />
@@ -359,7 +359,7 @@
               <span class="src-name">{l.name || '—'}{#if l.port}<span class="src-sub"> · {l.port}</span>{/if}</span>
               {#if st}
                 {#if st.ok}<span class="src-stat ok" title={$t('radar.contacts')}>{st.count}</span>
-                {:else}<span class="src-stat err" title={$t('radar.sourceError')}>✕</span>{/if}
+                {:else}<span class="src-stat err" title={$t(st.limited ? 'radar.sourceRateLimited' : 'radar.sourceError')}>✕</span>{/if}
               {/if}
             {/if}
             <Toggle checked={l.enabled} onchange={(c) => updateLocal(i, { enabled: c })} />

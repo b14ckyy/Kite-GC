@@ -89,7 +89,7 @@ struct ProtoHit {
 
 /// Altitude-reference signal (`telemetry-alt-ref`): tells the frontend whether this protocol's GPS
 /// altitude is true MSL (`msl: true`) or only relative-to-arming (`msl: false`). Relative-only protocols
-/// (LTM, CRSF) carry no MSL, so the frontend must anchor them to a ground reference for correct AGL/3D.
+/// (LTM, older CRSF layouts) carry no MSL, so the frontend must anchor them to a ground reference.
 #[derive(Clone, Serialize)]
 struct AltRef {
     msl: bool,
@@ -183,6 +183,7 @@ fn handler_loop(
     let mut last_probe = Instant::now() - MSP_PROBE_INTERVAL;
     // Refine the recorder's protocol label once the sub-protocol is locked (set only once).
     let mut protocol_labeled = false;
+    let mut crsf_msl_told = false;
     // Last protocol info pushed to the status box (re-emitted only on change, e.g. AP passthrough start).
     let mut last_proto: Option<ProtoInfo> = None;
     // Last FC-link-alive state pushed to the status box (re-emitted only on change).
@@ -244,9 +245,7 @@ fn handler_loop(
                         if let Some(ref rec) = recorder {
                             if let Ok(mut r) = rec.lock() { r.set_protocol(label); }
                         }
-                        // Tell the frontend whether this protocol delivers true MSL altitude. LTM/CRSF
-                        // send only arming-relative altitude → the frontend must anchor it to a ground
-                        // reference (captured at the arm edge) for correct AGL/3D.
+                        // LTM and CRSF count as arming-relative; a CRSF stream that shows MSL corrects this below.
                         let msl = !matches!(p, Protocol::Ltm | Protocol::Crsf);
                         let _ = app_handle.emit("telemetry-alt-ref", AltRef { msl });
                         log::info!("Passive telemetry locked: {} (alt MSL: {})", label, msl);
@@ -261,12 +260,18 @@ fn handler_loop(
                         msp_probe.get_or_insert_with(MspProbe::new).push_bytes(chunk);
                     }
                 }
-                // Once CRSF is locked, decode frames into the analysis dump (E2; no widget feed yet).
+                // Once CRSF is locked, decode into unified events (+ dump for validation).
                 if detector.locked() == Some(Protocol::Crsf) {
                     crsf.get_or_insert_with(|| {
                         CrsfDecoder::new(capture.as_ref().map(|c| c.sibling_path("crsf.txt")))
                     })
                     .push_bytes(chunk);
+                    // The stream itself tells when its GPS altitude is MSL after all.
+                    if !crsf_msl_told && crsf.as_ref().is_some_and(|d| d.gps_alt_is_msl()) {
+                        crsf_msl_told = true;
+                        let _ = app_handle.emit("telemetry-alt-ref", AltRef { msl: true });
+                        log::info!("Passive telemetry: CRSF GPS altitude is MSL (3-byte barometer frame seen)");
+                    }
                 }
                 // Once LTM is locked, decode into unified events (+ dump for validation).
                 if detector.locked() == Some(Protocol::Ltm) {

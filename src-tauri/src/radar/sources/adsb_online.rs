@@ -1,13 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Radar — ADS-B online source (Phase 1).
-//
-// Polls one or more free REST providers (adsb.lol / adsb.one / adsb.fi by default) for aircraft
-// within a radius of the user location and maps them to TrackedVehicles. Runs as an async task on
-// the Tauri runtime (reqwest), pushing batches into the manager's aggregator channel; the aggregator
-// merges providers by ICAO. Provider URLs are templates with {lat}/{lon}/{dist} placeholders.
-// See docs/active/RADAR_TRACKING_CORE.md §7.1.
+// Radar — ADS-B online source: polls REST providers in the readsb shape (URL templates with
+// {lat}/{lon}/{dist}) around the query centre; the aggregator merges them by ICAO.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
@@ -30,6 +25,8 @@ struct AdsbProviderStatus {
     name: String,
     count: usize,
     ok: bool,
+    /// Not polled because the provider named a time to wait (HTTP 429).
+    limited: bool,
 }
 
 const KM_PER_NM: f64 = 1.852;
@@ -39,10 +36,11 @@ const FPM_TO_MS: f64 = 0.00508;
 const POLL_GRANULARITY: Duration = Duration::from_millis(200);
 /// Cap for the per-provider failure backoff (poll interval × 2^n, never beyond this).
 const MAX_BACKOFF: Duration = Duration::from_secs(60);
+/// Longest pause taken from a provider's rate-limit headers (daily quotas reset within this).
+const MAX_LIMIT_PAUSE: Duration = Duration::from_secs(24 * 3600);
 
-/// Per-provider failure backoff. A failed fetch doubles the provider's spacing (in poll cycles) up to
-/// `MAX_BACKOFF`; a success resets it. Providers back off independently, so a rate-limited adsb.lol
-/// never slows down adsb.fi.
+/// Per-provider failure backoff, independent per provider. A failed fetch doubles the spacing (in poll
+/// cycles) up to `MAX_BACKOFF`; a success resets it.
 struct Backoff {
     /// Current spacing multiplier in poll cycles (1 = every cycle).
     mult: u32,
@@ -50,10 +48,18 @@ struct Backoff {
     skip: u32,
     /// Cycles skipped since the failure began (for the recovery log line).
     skipped: u32,
+    /// The provider's own wait after a 429: no request before this, whatever the cycle count says.
+    until: Option<Instant>,
 }
 
 impl Default for Backoff {
-    fn default() -> Self { Self { mult: 1, skip: 0, skipped: 0 } }
+    fn default() -> Self { Self { mult: 1, skip: 0, skipped: 0, until: None } }
+}
+
+struct FetchError {
+    msg: String,
+    /// Wait named by the provider with a 429.
+    retry_after: Option<Duration>,
 }
 
 pub struct AdsbOnlineSource {
@@ -108,10 +114,7 @@ impl RadarSource for AdsbOnlineSource {
         let stop_task = stop.clone();
 
         let handle = tauri::async_runtime::spawn(async move {
-            // No connection reuse: adsb.lol rate-limits a persistent (HTTP/2) connection far harder
-            // than fresh ones — measured at a 5 s poll, every second request on a kept-alive connection
-            // came back 429 while a new TLS connection per request never did (same IP, same minute).
-            // One handshake per poll is nothing next to the JSON payload.
+            // No connection reuse: some providers rate-limit a kept-alive connection far harder than fresh ones.
             let client = reqwest::Client::builder()
                 .user_agent("Kite-GC/0.5 radar")
                 .timeout(Duration::from_secs(10))
@@ -138,11 +141,8 @@ impl RadarSource for AdsbOnlineSource {
                     }
                 };
 
-                // Atomic rate claim, shared across ALL source loops (including any left over from a
-                // reconfigure): fetch only if `poll` has elapsed since the last actual fetch, and stamp
-                // the slot in the SAME lock so concurrent loops can't all slip through. This bounds
-                // outgoing requests to at most one set per poll interval no matter how many loops exist.
-                // (A previous read-then-wait gate let each loop pass on a stale read → HTTP 429.)
+                // Atomic rate claim across ALL source loops (incl. leftovers of a reconfigure): fetch only if `poll`
+                // elapsed and stamp the slot under the SAME lock — a read-then-wait gate let every loop pass (HTTP 429).
                 let claimed = match self.last_fetch.lock() {
                     Ok(mut g) => {
                         let due = g.map(|t| t.elapsed() >= self.poll).unwrap_or(true);
@@ -167,11 +167,19 @@ impl RadarSource for AdsbOnlineSource {
                 let mut statuses: Vec<AdsbProviderStatus> = Vec::with_capacity(self.providers.len());
 
                 for (p, b) in self.providers.iter().zip(backoff.iter_mut()) {
+                    if let Some(until) = b.until {
+                        if Instant::now() < until {
+                            b.skipped += 1;
+                            statuses.push(AdsbProviderStatus { name: p.name.clone(), count: 0, ok: false, limited: true });
+                            continue;
+                        }
+                        b.until = None;
+                    }
                     // Backing off after a failure: sit this cycle out (the panel keeps the error dot).
                     if b.skip > 0 {
                         b.skip -= 1;
                         b.skipped += 1;
-                        statuses.push(AdsbProviderStatus { name: p.name.clone(), count: 0, ok: false });
+                        statuses.push(AdsbProviderStatus { name: p.name.clone(), count: 0, ok: false, limited: false });
                         continue;
                     }
                     let url = p
@@ -185,7 +193,7 @@ impl RadarSource for AdsbOnlineSource {
                         Ok(root) => {
                             let before = vehicles.len();
                             parse_into(&root, now, &mut vehicles);
-                            statuses.push(AdsbProviderStatus { name: p.name.clone(), count: vehicles.len() - before, ok: true });
+                            statuses.push(AdsbProviderStatus { name: p.name.clone(), count: vehicles.len() - before, ok: true, limited: false });
                             if b.mult > 1 {
                                 log::info!(
                                     "[radar][adsb] {} recovered after {} skipped cycle(s), back to the {:.0} s interval",
@@ -194,11 +202,15 @@ impl RadarSource for AdsbOnlineSource {
                             }
                             *b = Backoff::default();
                         }
-                        Err(e) => {
-                            // Back off this provider: double the spacing per consecutive failure (capped at
-                            // MAX_BACKOFF). Both a 429 and a network error mean "leave it alone for a while";
-                            // adsb.fi even counts 429 replies towards a temporary IP ban, so hammering on
-                            // regardless is the one thing not to do.
+                        Err(FetchError { msg, retry_after: Some(wait) }) => {
+                            // Requests during the wait still count at some providers (ban, revoked key).
+                            let wait = wait.min(MAX_LIMIT_PAUSE);
+                            b.until = Some(Instant::now() + wait);
+                            log::warn!("[radar][adsb] {} rate limit ({}) — paused for {} s", p.name, msg, wait.as_secs());
+                            statuses.push(AdsbProviderStatus { name: p.name.clone(), count: 0, ok: false, limited: true });
+                        }
+                        Err(FetchError { msg: e, .. }) => {
+                            // Back off this provider: double the spacing per consecutive failure (capped).
                             let first = b.mult == 1;
                             b.mult = (b.mult * 2).min(max_mult);
                             b.skip = b.mult - 1;
@@ -210,7 +222,7 @@ impl RadarSource for AdsbOnlineSource {
                             } else {
                                 log::debug!("[radar][adsb] {} still failing: {} — next try in {:.0} s", p.name, e, wait);
                             }
-                            statuses.push(AdsbProviderStatus { name: p.name.clone(), count: 0, ok: false });
+                            statuses.push(AdsbProviderStatus { name: p.name.clone(), count: 0, ok: false, limited: false });
                         }
                     }
                 }
@@ -243,18 +255,35 @@ async fn fetch(
     client: &reqwest::Client,
     url: &str,
     api_key: Option<&str>,
-) -> Result<Value, String> {
+) -> Result<Value, FetchError> {
+    let plain = |msg: String| FetchError { msg, retry_after: None };
     let mut req = client.get(url);
     if let Some(k) = api_key {
         if !k.is_empty() {
             req = req.header("api-key", k);
         }
     }
-    let resp = req.send().await.map_err(|e| e.to_string())?;
+    let resp = req.send().await.map_err(|e| plain(e.to_string()))?;
     if !resp.status().is_success() {
-        return Err(format!("HTTP {}", resp.status()));
+        let retry_after = (resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS)
+            .then(|| {
+                let header = |name: &str| resp.headers().get(name)?.to_str().ok()?.trim().parse::<u64>().ok();
+                limit_wait(header("retry-after"), header("x-ratelimit-reset"), now_ms() / 1000)
+            })
+            .flatten();
+        return Err(FetchError { msg: format!("HTTP {}", resp.status()), retry_after });
     }
-    resp.json::<Value>().await.map_err(|e| e.to_string())
+    resp.json::<Value>().await.map_err(|e| plain(e.to_string()))
+}
+
+/// The wait a 429 names: `Retry-After` in seconds, else `X-RateLimit-Reset` — seconds to go, or at some
+/// providers the Unix time of the reset.
+fn limit_wait(retry_after: Option<u64>, reset: Option<u64>, now_s: i64) -> Option<Duration> {
+    let secs = retry_after.or_else(|| {
+        let r = reset?;
+        Some(if r > 1_000_000_000 { r.saturating_sub(now_s.max(0) as u64) } else { r })
+    })?;
+    (secs > 0).then(|| Duration::from_secs(secs))
 }
 
 /// Map the provider's `ac[]` array (readsb v2 shape) into TrackedVehicles. Defensive: ADS-B JSON is
@@ -299,5 +328,20 @@ fn parse_into(root: &Value, now: i64, out: &mut Vec<TrackedVehicle>) {
             .and_then(|s| s.parse::<u16>().ok());
         v.category = a.get("category").and_then(Value::as_str).map(str::to_string);
         out.push(v);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn limit_wait_reads_both_headers() {
+        assert_eq!(limit_wait(Some(30), Some(4842), 0), Some(Duration::from_secs(30)));
+        assert_eq!(limit_wait(None, Some(4842), 1_795_000_000), Some(Duration::from_secs(4842)));
+        // A reset given as Unix time.
+        assert_eq!(limit_wait(None, Some(1_795_000_600), 1_795_000_000), Some(Duration::from_secs(600)));
+        assert_eq!(limit_wait(None, Some(1_795_000_000), 1_795_000_600), None);
+        assert_eq!(limit_wait(None, None, 0), None);
     }
 }
