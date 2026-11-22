@@ -2044,6 +2044,7 @@ impl FlightRecorder {
         self.emit("flight-recording-resumed", ());
         let points = self.session_track();
         if !points.is_empty() {
+            log::info!("{}: resumed session, {} track points restored", self.key(), points.len());
             self.emit("flight-track-restored", TrackRestoredEvent { points });
         }
     }
