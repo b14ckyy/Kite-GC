@@ -89,6 +89,11 @@ object BleSerial {
     @JvmStatic
     fun lastError(handle: Int): String = lastErrors.remove(handle) ?: ""
 
+    /** Records [reason] without losing a drop the GATT callback recorded first: that one says why. */
+    private fun fail(handle: Int, reason: String) {
+        lastErrors.merge(handle, reason) { earlier, now -> "$now; $earlier" }
+    }
+
     // ── Permissions ──────────────────────────────────────────────────────────────────────────────
 
     private fun requiredPermissions(): Array<String> =
@@ -233,13 +238,34 @@ object BleSerial {
 
     // ── Connections ──────────────────────────────────────────────────────────────────────────────
 
-    /**
-     * Connect to [address] and discover its services. Returns a handle, or -1 with the reason in
-     * [lastError]. Blocks for up to ~25 s (connect + discovery). The serial characteristics are
-     * chosen afterwards by the Rust side via [services] + [subscribe].
-     */
+    /** Blocking (≤ ~25 s): [newLink] + [openLink]. The serial characteristics are chosen afterwards by
+     *  the Rust side via [services] + [subscribe]. */
     @JvmStatic
     fun connect(address: String): Int {
+        val handle = newLink(address)
+        if (handle < 0) return -1
+        return if (openLink(handle)) handle else -1
+    }
+
+    /** Bluetooth on and, from Android 12, the connect permission held; no dialog. False with the reason
+     *  in [lastError] ([NO_HANDLE]). */
+    @JvmStatic
+    fun canConnect(): Boolean {
+        readyAdapter(NO_HANDLE) ?: return false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            ContextCompat.checkSelfPermission(activity, Manifest.permission.BLUETOOTH_CONNECT) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            lastErrors[NO_HANDLE] = "Bluetooth permission revoked"
+            return false
+        }
+        return true
+    }
+
+    /** A handle for [address] before any connect, so a [close] can cancel the [openLink] in progress.
+     *  -1 with the reason in [lastError] ([NO_HANDLE]). */
+    @JvmStatic
+    fun newLink(address: String): Int {
         val adapter = readyAdapter(NO_HANDLE) ?: return -1
         val device: BluetoothDevice = try {
             adapter.getRemoteDevice(address)
@@ -248,15 +274,22 @@ object BleSerial {
             return -1
         }
         val handle = nextHandle.getAndIncrement()
-        val link = Link(handle, address)
-        handles[handle] = link
+        handles[handle] = Link(handle, device)
+        return handle
+    }
+
+    /** Connect [handle]'s link and discover its services; blocks up to ~25 s, or until [close]. False with
+     *  the reason in [lastError] ([handle]), the link closed. */
+    @JvmStatic
+    fun openLink(handle: Int): Boolean {
+        val link = handles[handle] ?: run { lastErrors[handle] = "link is closed"; return false }
 
         // connectGatt on the main thread: on a number of vendor stacks a background-thread call gets
         // a callback storm or none at all; the main thread is the one path every device supports.
         val started = CountDownLatch(1)
         activity.runOnUiThread {
             try {
-                link.gatt = device.connectGatt(activity, false, link, BluetoothDevice.TRANSPORT_LE)
+                link.attach { link.device.connectGatt(activity, false, link, BluetoothDevice.TRANSPORT_LE) }
             } catch (e: SecurityException) {
                 lastErrors[handle] = "connect refused: ${e.message}"
             }
@@ -265,25 +298,30 @@ object BleSerial {
         started.await(5_000, TimeUnit.MILLISECONDS)
         if (link.gatt == null) {
             if (!lastErrors.containsKey(handle)) lastErrors[handle] = "connectGatt returned nothing"
-            handles.remove(handle)
-            return -1
+            close(handle) // a connectGatt still queued on the main thread must not open a link
+            return false
         }
         if (!link.connectLatch.await(CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS) || !link.connected) {
             lastErrors[handle] = link.failure ?: "connect timed out"
             close(handle)
-            return -1
+            return false
         }
-        if (!link.gatt!!.discoverServices()) {
-            lastErrors[handle] = "service discovery could not be started"
+        val gatt = link.gatt ?: run { lastErrors[handle] = "link is closed"; return false }
+        if (!gatt.discoverServices()) {
+            fail(handle, "service discovery could not be started")
             close(handle)
-            return -1
+            return false
         }
         if (!link.servicesLatch.await(DISCOVERY_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
-            lastErrors[handle] = "service discovery timed out"
+            fail(handle, "service discovery timed out")
             close(handle)
-            return -1
+            return false
         }
-        return handle
+        if (link.closed) {
+            lastErrors[handle] = "link is closed"
+            return false
+        }
+        return true
     }
 
     /** The connected device's service UUIDs as a JSON array of strings (lowercase, 128-bit form). */
@@ -305,7 +343,8 @@ object BleSerial {
         val link = handles[handle] ?: run { lastErrors[handle] = "no such link"; return false }
         val gatt = link.gatt ?: run { lastErrors[handle] = "link is closed"; return false }
         val service = gatt.getService(UUID.fromString(serviceUuid)) ?: run {
-            lastErrors[handle] = "service $serviceUuid not on device"; return false
+            lastErrors[handle] = "service $serviceUuid not on device" + (link.failure?.let { " ($it)" } ?: "")
+            return false
         }
         val readChar = service.getCharacteristic(UUID.fromString(readUuid)) ?: run {
             lastErrors[handle] = "read characteristic $readUuid not found"; return false
@@ -316,11 +355,11 @@ object BleSerial {
 
         // MTU first — before notifications, so the peripheral's first burst already uses it.
         link.mtuLatch = CountDownLatch(1)
-        if (gatt.requestMtu(REQUESTED_MTU)) {
+        if (!link.closed && gatt.requestMtu(REQUESTED_MTU)) {
             link.mtuLatch?.await(MTU_TIMEOUT_MS, TimeUnit.MILLISECONDS)
         }
 
-        enableNotifications(link, gatt, readChar)?.let { lastErrors[handle] = it; return false }
+        enableNotifications(link, gatt, readChar)?.let { fail(handle, it); return false }
 
         link.writeChar = writeChar
         // Write-without-response where the adapter offers it: no round trip per chunk, which is
@@ -357,6 +396,8 @@ object BleSerial {
         link.pendingCccd = cccd
         link.descriptorStatus = BluetoothGatt.GATT_SUCCESS
         link.descriptorLatch = latch
+        // Checked after publishing the latch: a close() that missed it has set the flag by now.
+        if (link.closed) return "link is closed"
         val ok = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             gatt.writeDescriptor(cccd, value) == BluetoothGatt.GATT_SUCCESS
         } else {
@@ -365,7 +406,7 @@ object BleSerial {
         }
         if (!ok) return "CCCD write could not be started"
         if (!latch.await(DESCRIPTOR_TIMEOUT_MS, TimeUnit.MILLISECONDS)) return "enabling notifications timed out"
-        return null
+        return if (link.closed) "link is closed" else null
     }
 
     /** The device's answer to the last CCCD write; a refusal (e.g. pairing required) leaves the link silent. */
@@ -382,7 +423,7 @@ object BleSerial {
         val gatt = link.gatt ?: run { lastErrors[handle] = "link is closed"; return "" }
 
         link.mtuLatch = CountDownLatch(1)
-        if (gatt.requestMtu(REQUESTED_MTU)) {
+        if (!link.closed && gatt.requestMtu(REQUESTED_MTU)) {
             link.mtuLatch?.await(MTU_TIMEOUT_MS, TimeUnit.MILLISECONDS)
         }
 
@@ -450,7 +491,7 @@ object BleSerial {
     fun write(handle: Int, data: ByteArray, timeoutMs: Int, delayMs: Int): Boolean {
         val link = handles[handle] ?: run { lastErrors[handle] = "no such link"; return false }
         val err = link.write(data, timeoutMs, delayMs)
-        if (err != null) lastErrors[handle] = err
+        if (err != null) fail(handle, err)
         return err == null
     }
 
@@ -462,8 +503,13 @@ object BleSerial {
 
     // ── One GATT link ────────────────────────────────────────────────────────────────────────────
 
-    private class Link(val handle: Int, val address: String) : BluetoothGattCallback() {
-        var gatt: BluetoothGatt? = null
+    private class Link(val handle: Int, val device: BluetoothDevice) : BluetoothGattCallback() {
+        @Volatile var gatt: BluetoothGatt? = null
+            private set
+        private val lock = Any()
+        /** Set by [close]; a link is never reopened. */
+        @Volatile var closed = false
+            private set
         @Volatile var connected = false
         @Volatile var failure: String? = null
 
@@ -518,6 +564,8 @@ object BleSerial {
                 val latch = CountDownLatch(1)
                 writeLatch = latch
                 writeStatus = BluetoothGatt.GATT_SUCCESS
+                // After publishing the latch: a drop that released the previous one is seen here.
+                if (!connected) return "link is disconnected"
                 val started = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     g.writeCharacteristic(ch, part, writeType) == BluetoothGatt.GATT_SUCCESS
                 } else {
@@ -534,6 +582,7 @@ object BleSerial {
                 if (!latch.await(timeoutMs.toLong().coerceAtLeast(1), TimeUnit.MILLISECONDS)) {
                     return "write acknowledgement timed out"
                 }
+                if (!connected) return "link is disconnected"
                 if (writeStatus != BluetoothGatt.GATT_SUCCESS) return "write failed (GATT status $writeStatus)"
                 off += n
                 if (delayMs > 0 && off < data.size) Thread.sleep(delayMs.toLong())
@@ -541,18 +590,32 @@ object BleSerial {
             return null
         }
 
+        /** Main thread: keep the [connectGatt] result, unless [close] came first. */
+        fun attach(connectGatt: () -> BluetoothGatt?) {
+            synchronized(lock) {
+                if (!closed) gatt = connectGatt()
+            }
+        }
+
         fun close() {
-            connected = false
-            val g = gatt
-            gatt = null
+            val g = synchronized(lock) {
+                closed = true
+                connected = false
+                gatt.also { gatt = null }
+            }
             try {
                 g?.disconnect()
                 g?.close()
             } catch (_: Exception) {
                 // Already gone; nothing to release.
             }
-            // Wake a reader blocked in poll(): with connected=false the next poll() is non-blocking
-            // and returns -1 once the queue is drained.
+            // Release every wait, so a connect or setup in progress on another thread returns now. A reader
+            // blocked in poll() wakes; the next poll() is non-blocking and returns -1 once drained.
+            connectLatch.countDown()
+            servicesLatch.countDown()
+            mtuLatch?.countDown()
+            descriptorLatch?.countDown()
+            writeLatch?.countDown()
             rx.offer(ByteArray(0))
         }
 
@@ -563,7 +626,9 @@ object BleSerial {
                 connected = true
             } else {
                 if (!connected) failure = "connect failed (GATT status $status)"
+                else lastErrors[handle] = "link dropped (GATT status $status)"
                 connected = false
+                writeLatch?.countDown() // a write in flight fails now, not at its timeout
                 rx.offer(ByteArray(0)) // release a blocked reader
             }
             connectLatch.countDown()

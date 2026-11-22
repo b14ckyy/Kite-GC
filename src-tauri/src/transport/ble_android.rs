@@ -6,7 +6,8 @@
 //! Rust's (ble_profiles.rs); listen-only mode subscribes without one.
 
 use std::collections::HashSet;
-use std::time::Duration;
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::{Duration, Instant};
 
 use jni::objects::{JByteArray, JString, JValue};
 
@@ -25,8 +26,11 @@ const SCAN_MS: u64 = 3000;
 const SCAN_POLL_MS: u64 = 400;
 /// Idle read timeout before the scheduler tightens it.
 const READ_TIMEOUT_MS: i32 = 100;
-/// Per-chunk write acknowledgement timeout.
-const WRITE_TIMEOUT_MS: i32 = 2000;
+/// Per-chunk write acknowledgement timeout. A fading link holds the caller's thread this long per write.
+const WRITE_TIMEOUT_MS: i32 = 1000;
+/// Pause before the first reconnect attempt after a loss; doubles per failure up to the cap.
+const RECONNECT_FIRST: Duration = Duration::from_millis(500);
+const RECONNECT_CAP: Duration = Duration::from_secs(5);
 
 /// Information about a discovered BLE device. Same shape as the desktop struct so the frontend's
 /// `ble-device` event payload is identical on every platform.
@@ -234,18 +238,55 @@ pub async fn connect_ble_listen(
     Ok(transport)
 }
 
-/// A connected BLE-serial link. The Kotlin side owns the `BluetoothGatt`; this is the handle to it.
+/// What a (re)connect subscribes to.
+#[derive(Clone)]
+enum Setup {
+    Profile { service: String, read: String, write: String },
+    /// No write characteristic: writes fail.
+    Listen,
+}
+
+/// A BLE-serial link; the Kotlin side owns the `BluetoothGatt` behind `handle`. A lost link is
+/// re-established underneath (the layers above see a stall); `Disconnected` only once Bluetooth is off
+/// or its permission is gone.
 pub struct BleTransport {
     address: String,
-    handle: i32,
+    /// `None` while the link is down and being re-established.
+    handle: Option<i32>,
+    setup: Setup,
     profile_name: String,
     write_delay_ms: i32,
     read_timeout_ms: i32,
-    /// Listen-only link: no write characteristic, writes fail.
-    listen: bool,
+    backoff: Duration,
+    next_attempt: Instant,
+    attempt: Option<Arc<Attempt>>,
+    /// Set by a reconnect: a loss within `RECONNECT_CAP` of it logs at debug and keeps the backoff
+    /// growing, so a device that connects and drops cannot flood the log.
+    unproven: bool,
+    up_since: Instant,
+    restarted: bool,
+    ended: bool,
 }
 
 impl BleTransport {
+    fn new(address: &str, handle: i32, setup: Setup, profile_name: String, write_delay_ms: i32) -> Self {
+        Self {
+            address: address.to_string(),
+            handle: Some(handle),
+            setup,
+            profile_name,
+            write_delay_ms,
+            read_timeout_ms: READ_TIMEOUT_MS,
+            backoff: RECONNECT_FIRST,
+            next_attempt: Instant::now(),
+            attempt: None,
+            unproven: false,
+            up_since: Instant::now(),
+            restarted: false,
+            ended: false,
+        }
+    }
+
     /// Blocking: connect and discovery as in `open`, then MTU (≤2 s) and up to 5 s per notifying characteristic.
     fn open_listen(address: &str) -> Result<(Self, serde_json::Value), String> {
         log::info!("[ble] listen-only connect requested: {address}");
@@ -272,17 +313,7 @@ impl BleTransport {
             }
         };
         log::info!("[ble] {address} listening (handle {handle}): {json}");
-        Ok((
-            Self {
-                address: address.to_string(),
-                handle,
-                profile_name: "listen-only".to_string(),
-                write_delay_ms: 0,
-                read_timeout_ms: READ_TIMEOUT_MS,
-                listen: true,
-            },
-            services,
-        ))
+        Ok((Self::new(address, handle, Setup::Listen, "listen-only".to_string(), 0), services))
     }
 
     fn connect_handle(address: &str) -> Result<i32, String> {
@@ -308,9 +339,16 @@ impl BleTransport {
 
         // The device's services decide the profile — most adapters advertise nothing, so this is
         // the authoritative match, not the scan-time tag.
-        let json = call_string("services", "(I)Ljava/lang/String;", &[JValue::Int(handle)])?;
-        let services: Vec<String> =
-            serde_json::from_str(&json).map_err(|e| format!("bad service list from Android: {e}"))?;
+        let services = call_string("services", "(I)Ljava/lang/String;", &[JValue::Int(handle)]).and_then(|json| {
+            serde_json::from_str::<Vec<String>>(&json).map_err(|e| format!("bad service list from Android: {e}"))
+        });
+        let services = match services {
+            Ok(services) => services,
+            Err(e) => {
+                close_handle(handle, address);
+                return Err(e);
+            }
+        };
         let profile = known_profiles().into_iter().find(|p| {
             let want = p.service_uuid.to_string();
             services.iter().any(|s| s.eq_ignore_ascii_case(&want))
@@ -323,37 +361,218 @@ impl BleTransport {
             ));
         };
 
-        let env = jvm::env()?;
-        let svc = env.new_string(profile.service_uuid.to_string()).map_err(|e| e.to_string())?;
-        let rd = env.new_string(profile.read_characteristic.to_string()).map_err(|e| e.to_string())?;
-        let wr = env.new_string(profile.write_characteristic.to_string()).map_err(|e| e.to_string())?;
-        drop(env);
-        let ok = call_bool(
-            "subscribe",
-            "(ILjava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z",
-            &[
-                JValue::Int(handle),
-                JValue::Object(&svc),
-                JValue::Object(&rd),
-                JValue::Object(&wr),
-            ],
-        )?;
-        if !ok {
-            let reason = last_error(handle);
-            close_handle(handle, address);
-            return Err(format!("BLE profile setup failed ({}): {reason}", profile.name));
+        let setup = Setup::Profile {
+            service: profile.service_uuid.to_string(),
+            read: profile.read_characteristic.to_string(),
+            write: profile.write_characteristic.to_string(),
+        };
+        match subscribe(handle, &setup) {
+            Ok(true) => {}
+            Ok(false) => {
+                let reason = last_error(handle);
+                close_handle(handle, address);
+                return Err(format!("BLE profile setup failed ({}): {reason}", profile.name));
+            }
+            Err(e) => {
+                close_handle(handle, address);
+                return Err(e);
+            }
         }
 
         log::info!("[ble] {address} connected as {} (handle {handle})", profile.name);
-        Ok(Self {
-            address: address.to_string(),
-            handle,
-            profile_name: profile.name.to_string(),
-            write_delay_ms: profile.write_delay_ms as i32,
-            read_timeout_ms: READ_TIMEOUT_MS,
-            listen: false,
-        })
+        Ok(Self::new(address, handle, setup, profile.name.to_string(), profile.write_delay_ms as i32))
     }
+
+    fn lost(&mut self, reason: &str) {
+        if let Some(handle) = self.handle.take() {
+            close_handle(handle, &self.address);
+        }
+        if self.unproven && self.up_since.elapsed() < RECONNECT_CAP {
+            self.backoff = (self.backoff * 2).min(RECONNECT_CAP);
+            log::debug!("[ble] BLE link to {} lost again ({reason}) — retry in {:?}", self.address, self.backoff);
+        } else {
+            self.unproven = false;
+            self.backoff = RECONNECT_FIRST;
+            log::warn!("[ble] BLE link to {} lost ({reason}) — reconnecting", self.address);
+        }
+        self.next_attempt = Instant::now() + self.backoff;
+    }
+
+    fn give_up(&mut self, reason: &str) -> TransportError {
+        if !self.ended {
+            self.ended = true;
+            log::warn!("[ble] BLE link to {}: {reason} — closing the link", self.address);
+        }
+        TransportError::Disconnected
+    }
+
+    /// While down: take a finished attempt's result, start the next attempt when due.
+    fn service_reconnect(&mut self) -> Result<(), TransportError> {
+        let finished = self.attempt.as_ref().and_then(|a| a.take_result().map(|r| (r, a.started.elapsed())));
+        if let Some((result, took)) = finished {
+            self.attempt = None;
+            match result {
+                Ok(handle) => {
+                    // At the level of the loss: a default-level log must show both.
+                    let level = if self.unproven { log::Level::Debug } else { log::Level::Warn };
+                    log::log!(level, "[ble] BLE link to {} re-established (attempt took {took:.1?})", self.address);
+                    self.handle = Some(handle);
+                    self.unproven = true;
+                    self.up_since = Instant::now();
+                    self.restarted = true;
+                    return Ok(());
+                }
+                Err(Failure::End(reason)) => return Err(self.give_up(&reason)),
+                Err(Failure::Retry(reason)) => {
+                    self.backoff = (self.backoff * 2).min(RECONNECT_CAP);
+                    self.next_attempt = Instant::now() + self.backoff;
+                    log::debug!(
+                        "[ble] reconnect to {} failed after {took:.1?}: {reason} — retry in {:?}",
+                        self.address,
+                        self.backoff
+                    );
+                }
+            }
+        }
+        if self.attempt.is_none() && Instant::now() >= self.next_attempt {
+            let attempt = Arc::new(Attempt { state: Mutex::new(AttemptState::Running(None)), started: Instant::now() });
+            let (address, setup, shared) = (self.address.clone(), self.setup.clone(), attempt.clone());
+            let spawned = std::thread::Builder::new()
+                .name("ble-reconnect".into())
+                .spawn(move || run_attempt(&address, &setup, &shared));
+            match spawned {
+                Ok(_) => self.attempt = Some(attempt),
+                Err(e) => {
+                    self.next_attempt = Instant::now() + self.backoff;
+                    log::debug!("[ble] reconnect thread for {} failed to start: {e}", self.address);
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Blocking: subscribe to the profile's read characteristic and keep its write one, or (listen mode) to
+/// every notifying characteristic. False with the reason in `last_error(handle)`.
+fn subscribe(handle: i32, setup: &Setup) -> Result<bool, String> {
+    let Setup::Profile { service, read, write } = setup else {
+        let json = call_string("listen", "(I)Ljava/lang/String;", &[JValue::Int(handle)])?;
+        return Ok(!json.is_empty());
+    };
+    let env = jvm::env()?;
+    let svc = env.new_string(service).map_err(|e| e.to_string())?;
+    let rd = env.new_string(read).map_err(|e| e.to_string())?;
+    let wr = env.new_string(write).map_err(|e| e.to_string())?;
+    call_bool(
+        "subscribe",
+        "(ILjava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z",
+        &[
+            JValue::Int(handle),
+            JValue::Object(&svc),
+            JValue::Object(&rd),
+            JValue::Object(&wr),
+        ],
+    )
+}
+
+enum Failure {
+    Retry(String),
+    /// Bluetooth is off or its permission is gone.
+    End(String),
+}
+
+enum AttemptState {
+    /// The handle of the link being opened, once there is one.
+    Running(Option<i32>),
+    Done(Result<i32, Failure>),
+    /// Taken or cancelled: the attempt's handle is no longer its own.
+    Cancelled,
+}
+
+/// One reconnect, run on its own thread: a connect blocks up to ~25 s, the caller's thread must not.
+struct Attempt {
+    state: Mutex<AttemptState>,
+    started: Instant,
+}
+
+impl Attempt {
+    fn lock(&self) -> MutexGuard<'_, AttemptState> {
+        self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn take_result(&self) -> Option<Result<i32, Failure>> {
+        let mut state = self.lock();
+        if !matches!(*state, AttemptState::Done(_)) {
+            return None;
+        }
+        match std::mem::replace(&mut *state, AttemptState::Cancelled) {
+            AttemptState::Done(result) => Some(result),
+            _ => None,
+        }
+    }
+
+    /// Closing the handle releases every wait inside `openLink` / `subscribe`, so the thread ends promptly.
+    fn cancel(&self, address: &str) {
+        let previous = std::mem::replace(&mut *self.lock(), AttemptState::Cancelled);
+        if let AttemptState::Running(Some(handle)) | AttemptState::Done(Ok(handle)) = previous {
+            close_handle(handle, address);
+        }
+    }
+}
+
+fn run_attempt(address: &str, setup: &Setup, attempt: &Attempt) {
+    let result = reopen(address, setup, attempt);
+    let mut state = attempt.lock();
+    if matches!(*state, AttemptState::Cancelled) {
+        drop(state);
+        // `cancel` closed a published handle already; `close` is idempotent.
+        if let Ok(handle) = result {
+            close_handle(handle, address);
+        }
+        return;
+    }
+    *state = AttemptState::Done(result);
+}
+
+/// Blocking: the same device and subscription as the first connect, on a fresh Kotlin link.
+fn reopen(address: &str, setup: &Setup, attempt: &Attempt) -> Result<i32, Failure> {
+    if !call_bool("canConnect", "()Z", &[]).map_err(Failure::Retry)? {
+        return Err(Failure::End(last_error(NO_HANDLE)));
+    }
+    let env = jvm::env().map_err(Failure::Retry)?;
+    let j_addr = env.new_string(address).map_err(|e| Failure::Retry(e.to_string()))?;
+    let handle = call_int("newLink", "(Ljava/lang/String;)I", &[JValue::Object(&j_addr)]).map_err(Failure::Retry)?;
+    if handle < 0 {
+        return Err(Failure::Retry(last_error(NO_HANDLE)));
+    }
+    {
+        let mut state = attempt.lock();
+        if matches!(*state, AttemptState::Cancelled) {
+            drop(state);
+            close_handle(handle, address);
+            return Err(Failure::Retry("cancelled".into()));
+        }
+        *state = AttemptState::Running(Some(handle));
+    }
+    let step = match call_bool("openLink", "(I)Z", &[JValue::Int(handle)]) {
+        Ok(true) => match subscribe(handle, setup) {
+            Ok(true) => return Ok(handle),
+            Ok(false) => "subscribe: ",
+            Err(e) => {
+                close_handle(handle, address);
+                return Err(Failure::Retry(format!("subscribe: {e}")));
+            }
+        },
+        // openLink's reasons name their step (connect / service discovery).
+        Ok(false) => "",
+        Err(e) => {
+            close_handle(handle, address);
+            return Err(Failure::Retry(e));
+        }
+    };
+    let reason = last_error(handle);
+    close_handle(handle, address);
+    Err(Failure::Retry(format!("{step}{reason}")))
 }
 
 fn close_handle(handle: i32, address: &str) {
@@ -364,12 +583,30 @@ fn close_handle(handle: i32, address: &str) {
 
 impl Drop for BleTransport {
     fn drop(&mut self) {
-        close_handle(self.handle, &self.address);
+        if let Some(attempt) = self.attempt.take() {
+            attempt.cancel(&self.address);
+        }
+        if let Some(handle) = self.handle.take() {
+            close_handle(handle, &self.address);
+        }
     }
 }
 
 impl ByteTransport for BleTransport {
     fn read_bytes(&mut self, buf: &mut [u8]) -> Result<usize, TransportError> {
+        if self.ended {
+            return Err(TransportError::Disconnected);
+        }
+        let Some(handle) = self.handle else {
+            let start = Instant::now();
+            self.service_reconnect()?;
+            if self.handle.is_none() {
+                // Pace the caller like a read that timed out — it loops on `Ok(0)` without waiting.
+                let timeout = Duration::from_millis(self.read_timeout_ms as u64);
+                std::thread::sleep(timeout.saturating_sub(start.elapsed()));
+            }
+            return Ok(0);
+        };
         let mut env = jvm::env().map_err(TransportError::Io)?;
         let class = jvm::app_class(&mut env, BRIDGE).map_err(TransportError::Io)?;
         let r = env.new_byte_array(buf.len() as i32);
@@ -380,7 +617,7 @@ impl ByteTransport for BleTransport {
                 "read",
                 "(I[BI)I",
                 &[
-                    JValue::Int(self.handle),
+                    JValue::Int(handle),
                     JValue::Object(&jbuf),
                     JValue::Int(self.read_timeout_ms),
                 ],
@@ -390,7 +627,9 @@ impl ByteTransport for BleTransport {
         // Negative = the link is gone and drained; zero = idle timeout, which the protocol loops treat
         // as "nothing this tick".
         if n < 0 {
-            return Err(TransportError::Disconnected);
+            let reason = last_error(handle);
+            self.lost(&reason);
+            return Ok(0);
         }
         if n == 0 {
             return Ok(0);
@@ -403,10 +642,19 @@ impl ByteTransport for BleTransport {
         Ok(n)
     }
 
+    /// While the link is down the data is dropped, like on any stalled link. A failed write counts as a
+    /// loss: a fading link fails its writes before Android reports the disconnect.
     fn write_bytes(&mut self, data: &[u8]) -> Result<(), TransportError> {
-        if self.listen {
+        if self.ended {
+            return Err(TransportError::Disconnected);
+        }
+        if matches!(self.setup, Setup::Listen) {
             return Err(TransportError::Io("listen-only BLE link has no write characteristic".into()));
         }
+        let Some(handle) = self.handle else {
+            // Write-only users (the relay sink) never read, so the reconnect is driven from here too.
+            return self.service_reconnect();
+        };
         let mut env = jvm::env().map_err(TransportError::Io)?;
         let class = jvm::app_class(&mut env, BRIDGE).map_err(TransportError::Io)?;
         let r = env.byte_array_from_slice(data);
@@ -418,7 +666,7 @@ impl ByteTransport for BleTransport {
                 "write",
                 "(I[BII)Z",
                 &[
-                    JValue::Int(self.handle),
+                    JValue::Int(handle),
                     JValue::Object(&jdata),
                     JValue::Int(WRITE_TIMEOUT_MS),
                     JValue::Int(self.write_delay_ms),
@@ -426,15 +674,19 @@ impl ByteTransport for BleTransport {
             )
             .and_then(|v| v.z());
         let ok = jvm::check(&mut env, r, "BleSerial.write").map_err(TransportError::Io)?;
-        if ok {
-            Ok(())
-        } else {
-            Err(TransportError::Io(format!("BLE write failed: {}", last_error(self.handle))))
+        if !ok {
+            let reason = last_error(handle);
+            self.lost(&format!("write: {reason}"));
         }
+        Ok(())
     }
 
     fn set_read_timeout(&mut self, timeout: Duration) {
         self.read_timeout_ms = (timeout.as_millis() as i32).max(1);
+    }
+
+    fn take_stream_restart(&mut self) -> bool {
+        std::mem::take(&mut self.restarted)
     }
 
     fn description(&self) -> String {

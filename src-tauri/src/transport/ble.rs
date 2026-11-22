@@ -45,12 +45,17 @@ pub struct BleTransport {
     stop_tx: tokio::sync::mpsc::UnboundedSender<()>,
     /// Buffered bytes from previous reads that haven't been fully consumed
     read_buffer: Vec<u8>,
-    /// Idle timeout for `read_bytes` when no notification is queued. The pipelined MSP scheduler tightens
-    /// this (via `set_read_timeout`) so its drain/emit loop ticks fast (~100 Hz) instead of being paced by
-    /// a coarse blocking read — otherwise high-rate polls (Attitude) can't hit their interval. Default
-    /// 100 ms for the MAVLink/idle paths.
+    /// Idle timeout for `read_bytes`; the pipelined MSP scheduler tightens it so its loop ticks at
+    /// ~100 Hz instead of being paced by a coarse blocking read.
     read_timeout: std::time::Duration,
+    restarted: bool,
 }
+
+/// Sent on `read_rx` after a transparent reconnect, so empty notifications are never forwarded.
+const STREAM_RESTART: Vec<u8> = Vec::new();
+
+type Notifications =
+    std::pin::Pin<Box<dyn futures::Stream<Item = btleplug::api::ValueNotification> + Send>>;
 
 /// Scan for BLE devices.
 /// Scans WITHOUT a service UUID filter because many BLE serial adapters
@@ -341,28 +346,22 @@ pub async fn connect_ble(device_id: &str) -> Result<BleTransport, String> {
     let profile_name = matched_profile.name.to_string();
     let write_delay = Duration::from_millis(matched_profile.write_delay_ms);
 
-    // Spawn async task that handles BLE I/O.
-    //
-    // Transparent reconnect: a dropped link (notification stream ended / write error) does NOT end the
-    // task — it keeps the read/write channels open and silently re-establishes the BLE connection
-    // underneath (endless, capped backoff). The scheduler therefore never sees `Disconnected` (only a
-    // stall, which it surfaces in the status icon without tearing down), keeps polling, and resumes when
-    // the link returns — no fresh FC handshake, just a time gap in the data. A full TX/BLE-endpoint
-    // power-cycle is just a longer gap. The task only ends (dropping `read_tx` → scheduler teardown) on an
-    // explicit stop (user disconnect).
+    // A lost link is re-established underneath with the channels kept open, so the layers above see a
+    // stall. The task ends (dropping `read_tx` = `Disconnected`) only on stop or with Bluetooth off.
     let peripheral_clone = peripheral.clone();
     let adapter_clone = adapter.clone();
+    let task_name = device_name.clone();
     tauri::async_runtime::spawn(async move {
         use btleplug::api::Peripheral as _;
         let mut notifications = notification_stream;
 
-        'session: loop {
+        loop {
             // ── Serve the live link until it drops (break → reconnect) or stop is requested (return) ──
             loop {
                 tokio::select! {
                     maybe = notifications.next() => match maybe {
                         Some(notification) => {
-                            if notification.uuid == read_char.uuid {
+                            if notification.uuid == read_char.uuid && !notification.value.is_empty() {
                                 let _ = read_tx.send(notification.value);
                             }
                         }
@@ -398,8 +397,6 @@ pub async fn connect_ble(device_id: &str) -> Result<BleTransport, String> {
                             break;
                         }
                     }
-                    // Explicit stop (user disconnect) → end the task (drops read_tx → scheduler teardown).
-                    // This is the ONLY path that reports the link as gone.
                     _ = stop_async_rx.recv() => {
                         log::info!("BLE runtime stopping");
                         let _ = peripheral_clone.disconnect().await;
@@ -408,33 +405,14 @@ pub async fn connect_ble(device_id: &str) -> Result<BleTransport, String> {
                 }
             }
 
-            // The serve loop only breaks on link loss (a stop returns above) → reconnect.
-            {
-                let _ = peripheral_clone.disconnect().await; // clean slate before reconnecting
-                // ── Reconnect with capped backoff; abort on stop ──
-                let mut backoff_ms = 1000u64;
-                loop {
-                    match stop_async_rx.try_recv() {
-                        Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {}
-                        _ => return, // stop requested, or the transport was dropped
-                    }
-                    match ble_reconnect(&adapter_clone, &peripheral_clone, &read_char).await {
-                        Ok(s) => {
-                            notifications = s;
-                            while write_async_rx.try_recv().is_ok() {} // drop writes queued during the gap
-                            log::info!("BLE reconnected");
-                            continue 'session;
-                        }
-                        Err(e) => {
-                            log::warn!("BLE reconnect failed: {e} — retry in {backoff_ms}ms");
-                            tokio::select! {
-                                _ = tokio::time::sleep(Duration::from_millis(backoff_ms)) => {}
-                                _ = stop_async_rx.recv() => return,
-                            }
-                            backoff_ms = (backoff_ms * 2).min(5000);
-                        }
-                    }
+            let subscribe = std::slice::from_ref(&read_char);
+            match reconnect_until_up(&adapter_clone, &peripheral_clone, subscribe, &mut stop_async_rx, &task_name).await {
+                Some(stream) => {
+                    notifications = stream;
+                    while write_async_rx.try_recv().is_ok() {} // drop writes queued during the gap
+                    let _ = read_tx.send(STREAM_RESTART);
                 }
+                None => return,
             }
         }
     });
@@ -448,22 +426,18 @@ pub async fn connect_ble(device_id: &str) -> Result<BleTransport, String> {
         stop_tx,
         read_buffer: Vec::new(),
         read_timeout: Duration::from_millis(100),
+        restarted: false,
     })
 }
 
-/// Re-establish a dropped BLE link in place: a brief scan (so a re-advertising device — e.g. after the
-/// user restarted their TX/BLE endpoint — is rediscovered), then (re-)connect, rediscover services,
-/// re-subscribe to the read characteristic and return a fresh notification stream. The read/write
-/// `Characteristic` handles are keyed by UUID so they stay valid across reconnects. Used by the I/O
-/// task's transparent-reconnect loop; failures are retried with backoff there.
+/// One reconnect: a brief scan so a re-advertising device is found, then connect, rediscover, resubscribe.
+/// `Characteristic` handles are keyed by UUID, so the first connect's stay valid. Like the first listen
+/// connect, it fails only when none of `subscribe` takes.
 async fn ble_reconnect(
     adapter: &btleplug::platform::Adapter,
     peripheral: &btleplug::platform::Peripheral,
-    read_char: &btleplug::api::Characteristic,
-) -> Result<
-    std::pin::Pin<Box<dyn futures::Stream<Item = btleplug::api::ValueNotification> + Send>>,
-    String,
-> {
+    subscribe: &[btleplug::api::Characteristic],
+) -> Result<Notifications, String> {
     use btleplug::api::{Central, Peripheral as _, ScanFilter};
     // Best-effort rediscovery; ignore scan errors (the device may already be cached/advertising).
     let _ = adapter.start_scan(ScanFilter { services: vec![] }).await;
@@ -474,8 +448,69 @@ async fn ble_reconnect(
         peripheral.connect().await.map_err(|e| format!("reconnect: {e}"))?;
     }
     peripheral.discover_services().await.map_err(|e| format!("rediscover: {e}"))?;
-    peripheral.subscribe(read_char).await.map_err(|e| format!("resubscribe: {e}"))?;
+    let mut refused = Vec::new();
+    for ch in subscribe {
+        if let Err(e) = peripheral.subscribe(ch).await {
+            refused.push(format!("{}: {e}", ch.uuid));
+        }
+    }
+    if !refused.is_empty() {
+        if refused.len() == subscribe.len() {
+            return Err(format!("resubscribe: {}", refused.join(", ")));
+        }
+        log::debug!("BLE resubscribe skipped {}", refused.join(", "));
+    }
     peripheral.notifications().await.map_err(|e| format!("renotify: {e}"))
+}
+
+/// Retries `ble_reconnect` with capped backoff until the link is back. `None` = stop requested, or the
+/// adapter reads powered off twice in a row (BlueZ also reports an unreadable adapter as off).
+async fn reconnect_until_up(
+    adapter: &btleplug::platform::Adapter,
+    peripheral: &btleplug::platform::Peripheral,
+    subscribe: &[btleplug::api::Characteristic],
+    stop_rx: &mut tokio::sync::mpsc::UnboundedReceiver<()>,
+    name: &str,
+) -> Option<Notifications> {
+    use btleplug::api::{Central, CentralState, Peripheral as _};
+    let _ = peripheral.disconnect().await; // clean slate before reconnecting
+    let mut backoff_ms = 1000u64;
+    let mut off_readings = 0;
+    loop {
+        match stop_rx.try_recv() {
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {}
+            _ => return None, // stop requested, or the transport was dropped
+        }
+        let state = tokio::time::timeout(Duration::from_secs(2), adapter.adapter_state()).await;
+        if matches!(state, Ok(Ok(CentralState::PoweredOff))) {
+            off_readings += 1;
+            if off_readings >= 2 {
+                log::warn!("BLE link to {name}: Bluetooth is off or the adapter is gone — closing the link");
+                return None;
+            }
+        } else {
+            off_readings = 0;
+        }
+        let started = std::time::Instant::now();
+        match ble_reconnect(adapter, peripheral, subscribe).await {
+            Ok(stream) => {
+                // At the level of the loss: a default-level log must show both.
+                log::warn!("BLE link to {name} re-established (attempt took {:.1?})", started.elapsed());
+                return Some(stream);
+            }
+            Err(e) => {
+                log::debug!(
+                    "BLE reconnect to {name} failed after {:.1?}: {e} — retry in {backoff_ms}ms",
+                    started.elapsed()
+                );
+                tokio::select! {
+                    _ = tokio::time::sleep(Duration::from_millis(backoff_ms)) => {}
+                    _ = stop_rx.recv() => return None,
+                }
+                backoff_ms = (backoff_ms * 2).min(5000);
+            }
+        }
+    }
 }
 
 // ── BLE GATT Explorer (dev) — listen-only auto-discovery ──────────────────────
@@ -647,6 +682,7 @@ pub async fn connect_ble_listen(
     // routes to the FC uplink, so during this trial phase we write to every candidate (e.g. FrSky
     // X20RS exposes both 0xFFF3 and 0xFFF6) and let the probe's reply detection reveal what works.
     let mut write_chars: Vec<(btleplug::api::Characteristic, WriteType)> = Vec::new();
+    let mut subscribed_chars: Vec<btleplug::api::Characteristic> = Vec::new();
 
     for service in &services {
         // Skip standard SIG services — subscribing to their characteristics (esp. Service Changed,
@@ -677,6 +713,7 @@ pub async fn connect_ble_listen(
                     Ok(()) => {
                         subscribed = true;
                         subscribed_count += 1;
+                        subscribed_chars.push(ch.clone());
                         log::info!("BLE listen: subscribed to {} (service {})", ch.uuid, service.uuid);
                     }
                     Err(e) => log::warn!("BLE listen: subscribe to {} failed: {}", ch.uuid, e),
@@ -738,58 +775,68 @@ pub async fn connect_ble_listen(
         let mut trainer_frames = Vec::new();
         let mut trainer_seen = 0usize;
         loop {
-            tokio::select! {
-                maybe = notifications.next() => {
-                    match maybe {
-                        Some(n) => {
-                            trainer.feed(&n.value, &mut trainer_frames);
-                            trainer_seen += trainer_frames.len();
-                            trainer_frames.clear();
-                            if trainer_seen >= TRAINER_FRAMES_TO_HAND_OVER {
-                                log::warn!("BLE listen: '{}' sends trainer frames, not telemetry — closing the link", trainer_name);
-                                let _ = app_clone.emit("ble-trainer-detected", TrainerDetected {
-                                    id: trainer_id.clone(),
-                                    name: trainer_name.clone(),
+            loop {
+                tokio::select! {
+                    maybe = notifications.next() => {
+                        match maybe {
+                            Some(n) => {
+                                trainer.feed(&n.value, &mut trainer_frames);
+                                trainer_seen += trainer_frames.len();
+                                trainer_frames.clear();
+                                if trainer_seen >= TRAINER_FRAMES_TO_HAND_OVER {
+                                    log::warn!("BLE listen: '{}' sends trainer frames, not telemetry — closing the link", trainer_name);
+                                    let _ = app_clone.emit("ble-trainer-detected", TrainerDetected {
+                                        id: trainer_id.clone(),
+                                        name: trainer_name.clone(),
+                                    });
+                                    let _ = peripheral_clone.disconnect().await;
+                                    return;
+                                }
+                                let _ = app_clone.emit("ble-gatt-char-data", GattCharData {
+                                    uuid: n.uuid.to_string(),
+                                    len: n.value.len(),
                                 });
-                                let _ = peripheral_clone.disconnect().await;
+                                if !n.value.is_empty() {
+                                    let _ = read_tx.send(n.value);
+                                }
+                            }
+                            None => {
+                                log::warn!("BLE listen: notification stream ended — link lost, reconnecting");
                                 break;
                             }
-                            let _ = app_clone.emit("ble-gatt-char-data", GattCharData {
-                                uuid: n.uuid.to_string(),
-                                len: n.value.len(),
-                            });
-                            let _ = read_tx.send(n.value);
-                        }
-                        None => {
-                            // Stream ended — link dropped. Break so read_tx is dropped and the sync side
-                            // sees a clean disconnect instead of an endless silent timeout (see connect_ble).
-                            log::warn!("BLE listen: notification stream ended — link lost");
-                            let _ = peripheral_clone.disconnect().await;
-                            break;
                         }
                     }
-                }
-                Some(data) = write_async_rx.recv() => {
-                    if write_chars.is_empty() {
-                        log::warn!("BLE listen: write requested but no writable characteristic — dropping {} bytes", data.len());
-                    } else {
-                        // Trial phase: write to every writable candidate (we don't yet know which one
-                        // the radio routes to the FC uplink).
-                        for (wc, wt) in &write_chars {
-                            for chunk in data.chunks(BLE_WRITE_MTU) {
-                                if let Err(e) = peripheral_clone.write(wc, chunk, *wt).await {
-                                    log::error!("BLE listen write to {} failed: {}", wc.uuid, e);
-                                    break;
+                    Some(data) = write_async_rx.recv() => {
+                        if write_chars.is_empty() {
+                            log::warn!("BLE listen: write requested but no writable characteristic — dropping {} bytes", data.len());
+                        } else {
+                            // Trial phase: write to every writable candidate (we don't yet know which one
+                            // the radio routes to the FC uplink).
+                            for (wc, wt) in &write_chars {
+                                for chunk in data.chunks(BLE_WRITE_MTU) {
+                                    if let Err(e) = peripheral_clone.write(wc, chunk, *wt).await {
+                                        log::error!("BLE listen write to {} failed: {}", wc.uuid, e);
+                                        break;
+                                    }
                                 }
                             }
                         }
                     }
+                    _ = stop_async_rx.recv() => {
+                        log::info!("BLE listen runtime stopping");
+                        let _ = peripheral_clone.disconnect().await;
+                        return;
+                    }
                 }
-                _ = stop_async_rx.recv() => {
-                    log::info!("BLE listen runtime stopping");
-                    let _ = peripheral_clone.disconnect().await;
-                    break;
+            }
+
+            match reconnect_until_up(&adapter, &peripheral_clone, &subscribed_chars, &mut stop_async_rx, &trainer_name).await {
+                Some(stream) => {
+                    notifications = stream;
+                    while write_async_rx.try_recv().is_ok() {} // drop writes queued during the gap
+                    let _ = read_tx.send(STREAM_RESTART);
                 }
+                None => return,
             }
         }
     });
@@ -802,12 +849,12 @@ pub async fn connect_ble_listen(
         stop_tx,
         read_buffer: Vec::new(),
         read_timeout: Duration::from_millis(100),
+        restarted: false,
     })
 }
 
 impl ByteTransport for BleTransport {
     fn read_bytes(&mut self, buf: &mut [u8]) -> Result<usize, TransportError> {
-        // First, drain any buffered bytes from previous reads
         if !self.read_buffer.is_empty() {
             let n = std::cmp::min(buf.len(), self.read_buffer.len());
             buf[..n].copy_from_slice(&self.read_buffer[..n]);
@@ -815,9 +862,12 @@ impl ByteTransport for BleTransport {
             return Ok(n);
         }
 
-        // Wait for new data from a BLE notification, bounded by the (settable) idle timeout so a fast
-        // caller loop isn't paced by a coarse blocking read. Returns immediately when data is available.
         match self.read_rx.recv_timeout(self.read_timeout) {
+            // In order with the bytes: everything before the marker came from the old stream.
+            Ok(data) if data.is_empty() => {
+                self.restarted = true;
+                Ok(0)
+            }
             Ok(data) => {
                 let n = std::cmp::min(buf.len(), data.len());
                 buf[..n].copy_from_slice(&data[..n]);
@@ -842,6 +892,10 @@ impl ByteTransport for BleTransport {
         self.read_timeout = timeout;
     }
 
+    fn take_stream_restart(&mut self) -> bool {
+        std::mem::take(&mut self.restarted)
+    }
+
     fn description(&self) -> String {
         format!("BLE({}, {})", self.device_name, self.profile_name)
     }
@@ -850,5 +904,44 @@ impl ByteTransport for BleTransport {
 impl Drop for BleTransport {
     fn drop(&mut self) {
         let _ = self.stop_tx.send(());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_restart_is_reported_between_the_old_and_the_new_bytes() {
+        let (write_tx, _write_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (stop_tx, _stop_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (read_tx, read_rx) = mpsc::channel();
+        let mut link = BleTransport {
+            device_name: "test".into(),
+            profile_name: "test".into(),
+            write_tx,
+            read_rx,
+            stop_tx,
+            read_buffer: Vec::new(),
+            read_timeout: Duration::from_millis(10),
+            restarted: false,
+        };
+        read_tx.send(b"old".to_vec()).unwrap();
+        read_tx.send(STREAM_RESTART).unwrap();
+        read_tx.send(b"new".to_vec()).unwrap();
+
+        let mut buf = [0u8; 2];
+        let mut read = |link: &mut BleTransport| {
+            let n = link.read_bytes(&mut buf).expect("the link is open");
+            (buf[..n].to_vec(), link.take_stream_restart())
+        };
+        assert_eq!(read(&mut link), (b"ol".to_vec(), false));
+        assert_eq!(read(&mut link), (b"d".to_vec(), false));
+        assert_eq!(read(&mut link), (Vec::new(), true));
+        assert_eq!(read(&mut link), (b"ne".to_vec(), false));
+        assert_eq!(read(&mut link), (b"w".to_vec(), false));
+
+        drop(read_tx);
+        assert!(matches!(link.read_bytes(&mut buf), Err(TransportError::Disconnected)));
     }
 }
