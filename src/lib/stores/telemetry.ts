@@ -322,7 +322,8 @@ export function resolveTrueMsl(altMsl: number, ref: { msl: boolean }, anchor: nu
 let prevArmed = false;
 let anchorBusy = false;
 
-/** Capture the ground MSL at the arming edge (relative-only protocols only, when on the ground). */
+/** Arm edge of a relative-only link: anchor the ground MSL when on the ground, else detect an MSL altitude
+ *  and tell the recorder. */
 async function captureGroundAnchor(t: TelemetryData): Promise<void> {
   if (anchorBusy) return;
   if (get(altReference).msl) return; // protocol already in MSL → no anchor needed
@@ -331,10 +332,11 @@ async function captureGroundAnchor(t: TelemetryData): Promise<void> {
   const onGround = Math.abs(t.altMsl) <= GROUND_ARM_MAX_REL;
   if (!onGround && t.groundSpeed > ARM_MAX_GROUND_SPEED) return; // armed in the air → no valid ground reference
   anchorBusy = true;
+  const vid = get(activeVehicleId);
   try {
     const g = await invoke<number | null>('terrain_elevation', { lat: t.lat, lon: t.lon });
-    // A CRSF stream can turn out to be MSL while the lookup runs: nothing to do then.
-    if (g == null || get(altReference).msl) return;
+    // While the lookup ran, a CRSF stream can have shown MSL, or another vehicle can have become the active one.
+    if (g == null || get(altReference).msl || get(activeVehicleId) !== vid) return;
     if (onGround) {
       groundAnchor.set(g);
       console.log(`[altAnchor] ground MSL anchor = ${g.toFixed(1)} m (captured at arm, rel ${t.altMsl.toFixed(1)} m)`);

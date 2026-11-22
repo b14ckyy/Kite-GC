@@ -1800,6 +1800,10 @@ impl FlightRecorder {
             if let Some(p) = resume {
                 if is_armed {
                     log::info!("Continue-on-reconnect: armed on first poll — resuming the recovered session");
+                    // MSL found by the frontend's check at arming: no arm edge on the ground comes again.
+                    if p.alt_relative == Some(false) {
+                        self.alt_relative = Some(false);
+                    }
                     self.resume_session(p);
                 } else {
                     log::info!("Continue-on-reconnect: disarmed on first poll — finalizing the recovered session");

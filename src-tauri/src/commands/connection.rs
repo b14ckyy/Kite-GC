@@ -1100,9 +1100,9 @@ pub fn set_alt_reference_msl(state: State<'_, AppState>) -> Result<(), String> {
     if let Some(rec) = recorder {
         if let Ok(mut r) = rec.lock() {
             r.set_alt_relative(false);
+            log::info!("Altitude reference: MSL by the check at arming");
         }
     }
-    log::info!("Altitude reference: MSL by the check at arming");
     Ok(())
 }
 
