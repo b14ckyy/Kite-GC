@@ -569,6 +569,12 @@ inside the box of the feature release they belong to, so the notes for one relea
 
     Every fix of 1.0.1 and 1.0.2 is part of 2.0. This list holds what is fixed in 2.0 only.
 
+    - **Flight trail: the flown track comes back when a flight is continued.** After a lost
+      connection to an armed aircraft (TCP or Bluetooth out of range, a cable pulled, the app
+      restarted) and **Continue on Reconnect**, the map started with an empty trail although the
+      recording carried on as one flight. The same happened on arming again shortly after a
+      landing, where Kite continues the same recording. The track flown so far is now drawn
+      again, on the 2D and the 3D map. [#357]
     - **RC control: a second controller no longer takes over.** With two controllers connected,
       losing the one in use let the stick stream continue from the other with the same mapping.
       Control now ends when the controller it was started with disappears. [#348]
