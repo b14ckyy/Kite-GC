@@ -580,7 +580,7 @@ inside the box of the feature release they belong to, so the notes for one relea
 
     **Fixed**
 
-    Every fix of 1.0.1 and 1.0.2 is part of 2.0. This list holds what is fixed in 2.0 only.
+    Every fix of 1.0.1, 1.0.2 and 1.0.3 is part of 2.0. This list holds what is fixed in 2.0 only.
 
     - **Flight trail: the flown track comes back when a flight is continued.** After a lost
       connection to an armed aircraft (TCP or Bluetooth out of range, a cable pulled, the app
@@ -588,9 +588,6 @@ inside the box of the feature release they belong to, so the notes for one relea
       recording carried on as one flight. The same happened on arming again shortly after a
       landing, where Kite continues the same recording. The track flown so far is now drawn
       again, on the 2D and the 3D map. [#357]
-    - **RC control: a second controller no longer takes over.** With two controllers connected,
-      losing the one in use let the stick stream continue from the other with the same mapping.
-      Control now ends when the controller it was started with disappears. [#348]
     - **Relay: a UDP relay aimed at Kite's own port no longer freezes the app.** A UDP relay whose
       target was the port Kite itself receives telemetry on (for example `127.0.0.1:14550` while
       connected over UDP on 14550) fed its MAVLink output back into the link, where it was read as
@@ -604,22 +601,11 @@ inside the box of the feature release they belong to, so the notes for one relea
       figure as the flight altitude. LTM now carries the altitude above home. CRSF follows INAV's
       current layout: the GPS frame stays above sea level, and the barometer-altitude frame carries
       the altitude above home and the vertical speed (it replaces the separate vario frame). [#339]
-    - **Telemetry mode over CRSF: INAV's current frame layout is understood.** With
-      `crsf_use_legacy_baro_packet` off, INAV sends the GPS altitude above sea level and packs the
-      vertical speed into the barometer-altitude frame. Kite showed no vertical speed on such a link
-      and took the GPS altitude for a height above home, which left AGL and the 3D altitude without
-      a reference. Kite now tells the two layouts apart by the frame itself, so both work. [#339]
     - **ArduPilot and PX4: the mission on the aircraft is offered when you connect.** INAV
       already asked whether to download the flight controller's mission; on ArduPilot and PX4
       nothing happened and the mission had to be fetched by hand. Where the firmware reports
       the mission size with the telemetry, Kite now asks once per connection, without an extra
       request to the aircraft. [#344]
-    - **Radar: adsb.lol is no longer a built-in source, a rate limit pauses a feed.** adsb.lol now
-      allows 500 requests a day per address, which Kite's polling uses up in well under an hour;
-      the feed then showed a source error for the rest of the day. **adsb.fi** is the built-in
-      source, and the example row for adsb.one, a service that no longer exists, is gone. A feed
-      whose provider reports its rate limit and a time to wait is left alone until then, and its
-      status says so. adsb.lol can still be added as a custom source. [#342]
     - **Telemetry mode: a lost link closes the connection.** When the source of a passive telemetry
       link went away — the radio's Bluetooth dropped, the TCP side closed — Kite kept showing
       "connected", and on Android the background notification and the screen hold stayed. The
@@ -637,9 +623,6 @@ inside the box of the feature release they belong to, so the notes for one relea
     - **Missions: the waypoint editor was pulled away by a follow camera** — with the map following
       the aircraft, opening a waypoint's editor moved the map to the waypoint and the next position
       update took it back to the aircraft. The map now stays on the waypoint while it is selected. [#330]
-    - **Missions (INAV): Move up / down left the modifiers behind** — a waypoint moved in the
-      editor without its Jump, RTH or Set Heading; a single waypoint with an RTH ended up behind
-      the end of its own mission. A waypoint now moves together with what belongs to it. [#329]
     - **Replay of imported ArduPilot and PX4 logs showed the wrong GPS fix type** — a plain 3D fix
       read as "3D DGPS". Logs imported from now on are right; re-import an older one to correct
       it. [#322]
@@ -698,6 +681,72 @@ inside the box of the feature release they belong to, so the notes for one relea
 
     Everything this version contains is covered by the regular documentation — start with the
     [quick tour](getting-started/quick-tour.md) or the [GitHub release](https://github.com/b14ckyy/Kite-GC/releases).
+
+    ---
+
+    **1.0.3**{ .kite-patch } *unreleased*{ .kite-badge }
+
+    **Fixed**
+
+    - **INAV missions: an AGL waypoint without terrain data was flown as relative to home.** INAV stores
+      altitudes relative to home or above sea level only, so Kite converts AGL waypoints with the terrain
+      elevation before an upload or a `.mission` export. When terrain data for a waypoint was missing
+      (offline, and the area never loaded before), the waypoint went out with its AGL number unconverted
+      — 30 m above ground on a hill 50 m above home became 30 m above home. Upload and export now
+      refuse and name the waypoint; nothing is written to the flight controller or the file. The
+      altitude-mode switch in the waypoint editor had the same gap and now leaves the waypoint unchanged
+      when it cannot convert.
+    - **INAV missions: switching mission tabs changed the mission.** Switching to another mission tab,
+      or removing one, silently turned fly-by-home waypoints into normal waypoints and AGL altitudes
+      into relative or sea-level ones with the same number. Missions now keep their waypoints as they are.
+    - **INAV missions: a fly-by-home waypoint split the mission.** Kite treated fly-by-home as the end
+      of a mission: a download split the mission in two there, and an upload dropped the flag inside a
+      mission. Fly-by-home is an ordinary waypoint now, as it is in INAV.
+    - **INAV missions: moving a waypoint left its modifiers behind.** The up / down buttons in the
+      waypoint editor moved the waypoint alone and left its Jump, RTH, Set Heading and fly-by-home
+      entries where they were — a waypoint moved below its RTH could not be edited any more. A waypoint
+      now moves together with them, Jump targets follow, and a waypoint cannot be moved behind an RTH.
+      Also fixed: after two quick changes an edit could apply to the neighbouring waypoint as well.
+    - **INAV missions: wrong waypoint count after an upload.** The message after an upload or an EEPROM
+      save named the count of the open tab although all missions are uploaded, and "Total" below the
+      list did not update.
+    - **Mission Manager: every QGroundControl plan was imported as ArduPilot.** With a PX4 vehicle
+      connected such a plan could not be loaded to the map, and the library stored the wrong system. The
+      plan's own firmware type decides now.
+    - **ArduPilot: the GPS widget flickered between 0/0 and "NO FIX" without a satellite fix.** A
+      position message without a fix was taken as a 3D fix at latitude 0, longitude 0, about once a
+      second. The fix type the receiver reports is used now.
+    - **ArduPilot QuadPlane: detected at random.** From one connect to the next, Vehicle Control came
+      up with or without the takeoff altitude and the VTOL transition buttons, and the map showed the
+      plane airframe. A QuadPlane is now detected on every connect and shown as VTOL. The EKF label in
+      the header could be missing for the same reason, and a passive LTM / CRSF link could have its
+      relative altitude treated as sea-level altitude for the session.
+    - **3D map: the follow camera spun a full turn when the heading passed north.** In a right-hand
+      loiter this happened on every lap from the second one on.
+    - **Logbook: `.tlog` files from Mission Planner and QGroundControl imported with wrong times or cut
+      short.** A message Kite could not read shifted the timestamps of the records after it, could
+      swallow records, and could end the import silently with the rest of the flight missing. Records
+      are now cut by their length, and the import resumes after a damaged stretch. Logs recorded by
+      Kite itself were not affected.
+    - **RC control: a second controller took over when the one in use disappeared.** With two
+      controllers connected, losing the one that had control let the other continue with the same
+      mapping. Control now ends with its input device. *Take control* is also disabled while no input
+      device is selected — before, it sent the last values of a device that was gone.
+    - **Radio telemetry (CRSF): no vertical speed and no Live AGL with newer flight controller
+      firmware.** INAV 10 with its new CRSF layout, ArduPilot and PX4 send the vertical speed inside the
+      barometer frame and the sea-level altitude in the GPS frame. Kite read the vertical speed from the
+      older vario frame only and took the GPS altitude as relative to the arming point, which left Live
+      AGL and the 3D altitude without a reference. Both forms of the barometer frame are read now, and
+      a link whose altitude matches the terrain when the vehicle arms is treated as sea-level altitude.
+    - **Radar: the adsb.lol online source showed an error for most of the day.** adsb.lol now allows 500
+      requests per day and address, which the default poll rate uses up in about 40 minutes. It is no
+      longer a built-in source; **adsb.fi** remains. When a provider answers that its rate limit is
+      reached and says how long to wait, Kite pauses that feed until then instead of asking again every
+      minute. If you had adsb.fi switched off and used adsb.lol only, switch adsb.fi back on (Radar
+      panel → Online sources).
+    - **"Disconnect while recording" and recovery dialogs: button labels wrapped.** On macOS the buttons
+      did not fit, shrank and broke their labels over two lines at different heights. The dialog now
+      takes the width its buttons need.
 
     ---
 

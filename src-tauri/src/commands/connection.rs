@@ -1088,6 +1088,24 @@ pub fn set_platform_type(platform_type: u8, state: State<'_, AppState>) -> Resul
     Ok(())
 }
 
+/// The active vehicle's link turned out to carry MSL altitude (the frontend's check at the arm edge): the
+/// recorder stores this and later flights on the link as MSL. The stream's own word comes from the handler.
+#[tauri::command]
+pub fn set_alt_reference_msl(state: State<'_, AppState>) -> Result<(), String> {
+    let active_key = {
+        let reg = state.links.lock().map_err(|e| e.to_string())?;
+        reg.active().ok_or_else(|| crate::vehicle_registry::ERR_NOT_CONNECTED.to_string())?.to_key()
+    };
+    let recorder = state.recorders.lock().ok().and_then(|m| m.get(&active_key).cloned());
+    if let Some(rec) = recorder {
+        if let Ok(mut r) = rec.lock() {
+            r.set_alt_relative(false);
+            log::info!("Altitude reference: MSL by the check at arming");
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{parse_hex_payload, tunnel_probe_window, tunnel_reply_timeout};
