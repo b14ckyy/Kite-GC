@@ -288,8 +288,8 @@ with a timer counting up and an alarm tone that repeats every minute; on the pho
 **System Messages** is set to. The same holds when a **TCP connection breaks** — the Wi-Fi bridge
 restarted, or it was out of range for a while: Kite connects to the same address again in the
 background, every few seconds, and carries on where it left off. Only a **lost transport** — a USB
-cable unplugged, a Bluetooth link gone on a phone or tablet, or no network left to reach the address
-(Wi-Fi off, cable out) — ends the connection; if a flight was being recorded, Kite then asks what to
+cable unplugged, a Bluetooth link gone on a phone or tablet, no network left to reach the address
+(Wi-Fi off, cable out), or a TCP connection that breaks before any data arrived — ends the connection; if a flight was being recorded, Kite then asks what to
 do with it (**Device connection lost**: **Discard**, **Save Incomplete** or **Continue on Reconnect**).
 
 If you always fly the same link and would rather not have a stray session decide, set
