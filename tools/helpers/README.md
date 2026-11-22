@@ -23,12 +23,13 @@ registration out again before committing.
 
 Compares every locale file with `en.json`. `de.json` has to match it exactly (same keys, same
 `{placeholders}`); the community locales may lack keys, which then fall back to English, but must not
-carry keys `en.json` no longer has or lose a placeholder in a translated string. Exit code 1 on an error.
+carry keys `en.json` does not have, and a translated string must have the same placeholders. An empty
+string counts as missing. Exit code 1 on an error.
 
 ```sh
 npm run check:i18n                                  # or: node tools/helpers/i18n-check.mjs
 node tools/helpers/i18n-check.mjs --all             # also list the keys a community locale lacks
-node tools/helpers/i18n-check.mjs --strict de,fr    # locales that must be complete (default: de)
+node tools/helpers/i18n-check.mjs --strict de,fr    # locales that must be complete (replaces the default, de)
 ```
 
 It does not find hard-coded text in components; that stays a review point.

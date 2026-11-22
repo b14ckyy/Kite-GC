@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Marc Hoffmann
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 //
 // Checks the locale files against en.json, the reference for all string keys.
 //
@@ -8,10 +8,11 @@
 //
 //   de.json must match en.json exactly: same keys, same value kinds, same {placeholders}.
 //   Every other locale may lack keys (they fall back to English), but must not carry keys
-//   that en.json does not have, and a translated string must keep the placeholders.
+//   that en.json does not have, and a translated string must have the same placeholders.
+//   An empty string counts as a missing key: the app shows the English text for it.
 //
 //   --all      list the missing keys of the best-effort locales instead of only counting them
-//   --strict   locales that must be complete (default: de)
+//   --strict   locales that must be complete; replaces the default (de)
 //
 // Exit code 1 on any error, 0 otherwise.
 
@@ -24,10 +25,28 @@ const REFERENCE = 'en';
 // Pseudo-locale written by i18n-key-paths.py
 const IGNORED = new Set(['xx']);
 
+const USAGE = 'Usage: node tools/helpers/i18n-check.mjs [--all] [--strict <code>[,<code>...]]';
+
+function usage(message) {
+  console.error(message);
+  console.error(USAGE);
+  process.exit(1);
+}
+
+let listAll = false;
+let strict = new Set(['de']);
 const args = process.argv.slice(2);
-const listAll = args.includes('--all');
-const strictArg = args.indexOf('--strict');
-const strict = new Set(strictArg >= 0 ? (args[strictArg + 1] ?? '').split(',').filter(Boolean) : ['de']);
+for (let i = 0; i < args.length; i++) {
+  if (args[i] === '--all') {
+    listAll = true;
+  } else if (args[i] === '--strict') {
+    const value = args[++i];
+    if (!value || value.startsWith('--')) usage('--strict needs a locale code');
+    strict = new Set(value.split(',').filter(Boolean));
+  } else {
+    usage(`Unknown argument: ${args[i]}`);
+  }
+}
 
 function flatten(node, path, out) {
   if (node !== null && typeof node === 'object' && !Array.isArray(node)) {
@@ -38,7 +57,7 @@ function flatten(node, path, out) {
   return out;
 }
 
-// Argument names of an ICU message, including those of plural / select branches.
+// Approximates the ICU parser: ASCII names only, no '' escapes, no syntax check.
 function placeholders(text) {
   const names = new Set();
   let depth = 0;
@@ -62,7 +81,7 @@ function placeholders(text) {
 function load(code) {
   const file = join(LOCALES, `${code}.json`);
   try {
-    return flatten(JSON.parse(readFileSync(file, 'utf8')), '', new Map());
+    return flatten(JSON.parse(readFileSync(file, 'utf8').replace(/^﻿/, '')), '', new Map());
   } catch (err) {
     console.error(`${code}.json: ${err.message}`);
     process.exit(1);
@@ -77,10 +96,7 @@ const codes = readdirSync(LOCALES)
   .sort((a, b) => Number(strict.has(b)) - Number(strict.has(a)) || a.localeCompare(b));
 
 for (const code of strict) {
-  if (!codes.includes(code)) {
-    console.error(`--strict: no locale file ${code}.json`);
-    process.exit(1);
-  }
+  if (!codes.includes(code)) usage(`--strict: ${code} is not a locale that can be checked`);
 }
 
 let errors = 0;
@@ -93,7 +109,7 @@ for (const code of codes) {
   const problems = [];
 
   for (const [key, refValue] of reference) {
-    if (!locale.has(key)) {
+    if (!locale.has(key) || (locale.get(key) === '' && refValue !== '')) {
       missing.push(key);
       continue;
     }
@@ -129,5 +145,5 @@ for (const code of codes) {
 
 if (errors) {
   console.error(`\n${errors} error(s)`);
-  process.exit(1);
+  process.exitCode = 1;
 }
