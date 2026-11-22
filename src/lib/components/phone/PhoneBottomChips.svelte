@@ -3,18 +3,11 @@
   Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 -->
 
-<!-- PhoneBottomChips — the phone's bottom-left corner (Dev-Docs archive/PHONE_UI.md D18): the
-     arming state and the sensor chip (ONLY while a sensor is amber or red — it is an arming-block
-     indicator as much as a health one). They moved down from the top row so the replay player and
-     its compact strip own the space between the burger and the chain-link button. The old status
-     strip (connection text) is gone: the chain-link button already carries the connection dot.
-     The chips sit BELOW the panel layer (a panel may cover them; they still peek out left of it),
-     the dev Debug button (PhoneDebugButton) floats right of them above the panels. The row
-     publishes its right edge as `--phone-bottom-w` on the root, so the Debug button and the
-     Leaflet attribution can line up after it, and the arming pill's own right edge as
-     `--phone-arming-w` for the bottom widget slots (PhoneBottomBar, B4/B5): while a slot is filled
-     (`html.phone-bar`) the sensor chip stacks ABOVE the tiles instead of sitting beside the pill,
-     so a sensor turning amber in flight never changes the tiles' room. -->
+<!-- PhoneBottomChips — the phone's bottom-left corner (Dev-Docs archive/PHONE_UI.md D18): the arming
+     state and, right of it, the sensor chip, shown only while a sensor is amber or red. Below the panel
+     layer. Publishes the row's right edge as `--phone-bottom-w` (Debug button, attribution) and the
+     arming pill's as `--phone-arming-w`: the bottom widget tiles start there, so the chip may cover
+     their lower edge. -->
 <script lang="ts">
   import { t } from 'svelte-i18n';
   import ArmingIndicator from '$lib/components/ArmingIndicator.svelte';
@@ -45,8 +38,6 @@
 </script>
 
 <div class="chips" bind:this={rowEl} bind:clientWidth={widthPx}>
-  <!-- The row is a flex row; while the bottom slots are in use the sensor chip leaves the flow
-       and sits above the tiles (html.phone-bar), so the row's width is the pill's alone. -->
   <ArmingIndicator {telem} />
   {#if problems.length > 0 || ekfProblem}
     <div class="sensor-chip">
@@ -67,11 +58,6 @@
     align-items: center;
     gap: 8px;
     pointer-events: auto;
-  }
-  :global(html.phone-bar) .sensor-chip {
-    position: absolute;
-    left: 0;
-    bottom: var(--phone-bar-lift, 0px);
   }
   /* The arming pill is styled for the toolbar's solid background; over the map it gets a backing. */
   .chips > :global(.arming) {
