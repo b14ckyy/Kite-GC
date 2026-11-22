@@ -25,6 +25,8 @@ What it does
   selected vehicles, per receiver: OK, Off, Jam (SIM_GPSn_ENABLE / SIM_GPSn_JAM over PARAM_SET, names of
   ArduPilot 4.6+). As the FC reports them: GPS1 off = no fix with the last position, GPS2 off = no
   receiver after ~5 s, back ~7 s after OK; jam = the fix comes and goes and the position wanders.
+- DataFlash logging is off unless ticked (LOG_BACKEND_TYPE=0 as boot default and over PARAM_SET): an
+  instance writes up to several GB of .BIN logs per working day into its data folder otherwise.
 - Watchdog: an instance that exits is restarted (on Windows the Cygwin binaries die the moment a TCP
   client disconnects — a Kite disconnect would otherwise leave a dead port).
 - Fleet changes at runtime: stop / start / restart / remove the selected vehicles and add one — a vehicle
@@ -180,6 +182,7 @@ DEFAULTS = {
     "preset": "CMAC (ArduPilot default)", "formation": "line", "spacingM": 12,
     "layout": "tcp", "udpPort": 14550, "udpHost": "127.0.0.1", "monitorPort": 14650, "autoRestart": True,
     "dualGps": False,
+    "dataflashLog": False,
     "extraParams": "",
     "binSource": "auto", "channel": next(iter(CHANNELS)), "buildDir": "",
     "presets": [{"name": "CMAC (ArduPilot default)", "lat": -35.363261, "lon": 149.165230, "alt": 584, "hdg": 353}],
@@ -507,7 +510,9 @@ class Manager:
 
     @staticmethod
     def extra_params() -> list[tuple[str, float]]:
-        out = []
+        # LOG_BACKEND_TYPE first, so a line in the extra parameters can still override it. It is read at
+        # boot: over PARAM_SET it only reaches an EEPROM that has the value stored, for the next start.
+        out = [("LOG_BACKEND_TYPE", 1.0 if SETTINGS["dataflashLog"] else 0.0)]
         for line in str(SETTINGS["extraParams"]).splitlines():
             m = re.match(r"^([A-Za-z0-9_]{1,16})\s*[=,]\s*(-?[0-9.]+)$", line.strip())
             if m:
@@ -939,6 +944,7 @@ def run_ui(mgr: Manager, auto_start: bool) -> None:
     v_vehicle, v_frame = tk.StringVar(), tk.StringVar()
     v_count, v_sysid, v_speed, v_wipe = tk.IntVar(), tk.IntVar(), tk.DoubleVar(), tk.BooleanVar()
     v_dual_gps = tk.BooleanVar()
+    v_dataflash = tk.BooleanVar()
     ttk.Label(g_veh, text="Type").grid(row=0, column=0, sticky="w", **pad_)
     cb_vehicle = ttk.Combobox(g_veh, textvariable=v_vehicle, values=VEHICLES, state="readonly", width=10)
     cb_vehicle.grid(row=0, column=1, **pad_)
@@ -953,6 +959,7 @@ def run_ui(mgr: Manager, auto_start: bool) -> None:
     ttk.Spinbox(g_veh, from_=1, to=20, increment=0.5, textvariable=v_speed, width=6).grid(row=2, column=1, sticky="w", **pad_)
     ttk.Checkbutton(g_veh, text="Wipe EEPROM (fresh params)", variable=v_wipe).grid(row=2, column=2, columnspan=2, sticky="w", **pad_)
     ttk.Checkbutton(g_veh, text="Second GPS receiver", variable=v_dual_gps).grid(row=3, column=2, columnspan=2, sticky="w", **pad_)
+    ttk.Checkbutton(g_veh, text="DataFlash logs (GBs per day)", variable=v_dataflash).grid(row=4, column=2, columnspan=2, sticky="w", **pad_)
 
     # Start position
     g_pos = ttk.LabelFrame(top, text="Start position", padding=6)
@@ -1099,7 +1106,7 @@ def run_ui(mgr: Manager, auto_start: bool) -> None:
                         speedup=float(v_speed.get()), wipe=bool(v_wipe.get()), preset=v_preset.get(),
                         formation=v_formation.get(), spacingM=int(v_spacing.get()), layout=v_layout.get(),
                         udpHost=v_udp_host.get().strip() or "127.0.0.1", udpPort=int(v_udp_port.get()), autoRestart=bool(v_restart.get()),
-                        dualGps=bool(v_dual_gps.get()),
+                        dualGps=bool(v_dual_gps.get()), dataflashLog=bool(v_dataflash.get()),
                         extraParams=txt_params.get("1.0", "end").strip(),
                         binSource=next((s for s in sources if source_labels[s] == v_source.get()), "auto"),
                         channel=v_channel.get(), buildDir=v_build.get().strip())
@@ -1114,6 +1121,7 @@ def run_ui(mgr: Manager, auto_start: bool) -> None:
         v_speed.set(float(SETTINGS["speedup"]))
         v_wipe.set(bool(SETTINGS["wipe"]))
         v_dual_gps.set(bool(SETTINGS["dualGps"]))
+        v_dataflash.set(bool(SETTINGS["dataflashLog"]))
         fill_presets()
         show_preset()
         v_formation.set(SETTINGS["formation"])
