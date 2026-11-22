@@ -580,7 +580,7 @@ inside the box of the feature release they belong to, so the notes for one relea
 
     **Fixed**
 
-    Every fix of 1.0.1 and 1.0.2 is part of 2.0. This list holds what is fixed in 2.0 only.
+    Every fix of 1.0.1, 1.0.2 and 1.0.3 is part of 2.0. This list holds what is fixed in 2.0 only.
 
     - **Flight trail: the flown track comes back when a flight is continued.** After a lost
       connection to an armed aircraft (TCP or Bluetooth out of range, a cable pulled, the app
@@ -588,9 +588,6 @@ inside the box of the feature release they belong to, so the notes for one relea
       recording carried on as one flight. The same happened on arming again shortly after a
       landing, where Kite continues the same recording. The track flown so far is now drawn
       again, on the 2D and the 3D map. [#357]
-    - **RC control: a second controller no longer takes over.** With two controllers connected,
-      losing the one in use let the stick stream continue from the other with the same mapping.
-      Control now ends when the controller it was started with disappears. [#348]
     - **Relay: a UDP relay aimed at Kite's own port no longer freezes the app.** A UDP relay whose
       target was the port Kite itself receives telemetry on (for example `127.0.0.1:14550` while
       connected over UDP on 14550) fed its MAVLink output back into the link, where it was read as
@@ -604,22 +601,11 @@ inside the box of the feature release they belong to, so the notes for one relea
       figure as the flight altitude. LTM now carries the altitude above home. CRSF follows INAV's
       current layout: the GPS frame stays above sea level, and the barometer-altitude frame carries
       the altitude above home and the vertical speed (it replaces the separate vario frame). [#339]
-    - **Telemetry mode over CRSF: INAV's current frame layout is understood.** With
-      `crsf_use_legacy_baro_packet` off, INAV sends the GPS altitude above sea level and packs the
-      vertical speed into the barometer-altitude frame. Kite showed no vertical speed on such a link
-      and took the GPS altitude for a height above home, which left AGL and the 3D altitude without
-      a reference. Kite now tells the two layouts apart by the frame itself, so both work. [#339]
     - **ArduPilot and PX4: the mission on the aircraft is offered when you connect.** INAV
       already asked whether to download the flight controller's mission; on ArduPilot and PX4
       nothing happened and the mission had to be fetched by hand. Where the firmware reports
       the mission size with the telemetry, Kite now asks once per connection, without an extra
       request to the aircraft. [#344]
-    - **Radar: adsb.lol is no longer a built-in source, a rate limit pauses a feed.** adsb.lol now
-      allows 500 requests a day per address, which Kite's polling uses up in well under an hour;
-      the feed then showed a source error for the rest of the day. **adsb.fi** is the built-in
-      source, and the example row for adsb.one, a service that no longer exists, is gone. A feed
-      whose provider reports its rate limit and a time to wait is left alone until then, and its
-      status says so. adsb.lol can still be added as a custom source. [#342]
     - **Telemetry mode: a lost link closes the connection.** When the source of a passive telemetry
       link went away — the radio's Bluetooth dropped, the TCP side closed — Kite kept showing
       "connected", and on Android the background notification and the screen hold stayed. The
@@ -637,9 +623,6 @@ inside the box of the feature release they belong to, so the notes for one relea
     - **Missions: the waypoint editor was pulled away by a follow camera** — with the map following
       the aircraft, opening a waypoint's editor moved the map to the waypoint and the next position
       update took it back to the aircraft. The map now stays on the waypoint while it is selected. [#330]
-    - **Missions (INAV): Move up / down left the modifiers behind** — a waypoint moved in the
-      editor without its Jump, RTH or Set Heading; a single waypoint with an RTH ended up behind
-      the end of its own mission. A waypoint now moves together with what belongs to it. [#329]
     - **Replay of imported ArduPilot and PX4 logs showed the wrong GPS fix type** — a plain 3D fix
       read as "3D DGPS". Logs imported from now on are right; re-import an older one to correct
       it. [#322]
