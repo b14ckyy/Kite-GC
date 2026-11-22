@@ -30,6 +30,8 @@ struct Reconnect {
     attempt: Duration,
 }
 
+const WRITE_TIMEOUT: Duration = Duration::from_secs(3);
+
 const RECONNECT: Reconnect = Reconnect {
     first: Duration::from_millis(500),
     cap: Duration::from_secs(5),
@@ -48,9 +50,10 @@ pub struct TcpTransport {
     timing: Reconnect,
     backoff: Duration,
     next_attempt: Instant,
-    /// A reconnected stream that has not delivered a byte yet: losing it again keeps the backoff growing
-    /// and logs at debug, so a server that accepts and drops at once cannot flood the log.
+    /// A reconnected stream that has not stayed up for `timing.cap` yet: losing it again keeps the backoff
+    /// growing and logs at debug, so a server that accepts and drops again cannot flood the log.
     unproven: bool,
+    up_since: Instant,
     restarted: bool,
     /// False for callers that reopen the link themselves and show its state (radar sources).
     reconnect: bool,
@@ -62,13 +65,16 @@ fn configure(stream: &TcpStream, read_timeout: Duration) -> Result<(), String> {
     stream
         .set_read_timeout(Some(read_timeout))
         .map_err(|e| format!("Failed to set read timeout: {}", e))?;
+    // A peer that stops reading must not block the caller once the send buffer is full.
+    stream
+        .set_write_timeout(Some(WRITE_TIMEOUT))
+        .map_err(|e| format!("Failed to set write timeout: {}", e))?;
     stream
         .set_nodelay(true)
         .map_err(|e| format!("Failed to set TCP_NODELAY: {}", e))
 }
 
 impl TcpTransport {
-    /// Connect to a flight controller via TCP
     pub fn connect(host: &str, port: u16) -> Result<Self, String> {
         Self::connect_with(host, port, RECONNECT)
     }
@@ -97,6 +103,7 @@ impl TcpTransport {
             backoff: timing.first,
             next_attempt: Instant::now(),
             unproven: false,
+            up_since: Instant::now(),
             restarted: false,
             reconnect: true,
             received: false,
@@ -104,8 +111,8 @@ impl TcpTransport {
         })
     }
 
-    /// Drop the stream after a loss. Reported to the caller as a stall, or as `Disconnected` when the
-    /// link ends (see the struct).
+    /// `Ok` = a stall, the stream is retried after the backoff; `Err(Disconnected)` = the link ends (see
+    /// the struct).
     fn lost(&mut self, reason: &str, no_path: bool) -> Result<(), TransportError> {
         self.stream = None;
         if no_path {
@@ -128,7 +135,9 @@ impl TcpTransport {
         self.stream = None;
         if !self.ended {
             self.ended = true;
-            log::warn!("TCP link to {}: {} — closing the link", self.address, reason);
+            // A caller that reopens the link itself reports its own failures.
+            let level = if self.reconnect { log::Level::Warn } else { log::Level::Debug };
+            log::log!(level, "TCP link to {}: {} — closing the link", self.address, reason);
         }
         TransportError::Disconnected
     }
@@ -137,9 +146,12 @@ impl TcpTransport {
         let failure = match TcpStream::connect_timeout(&self.target, self.timing.attempt) {
             Ok(stream) => match configure(&stream, self.read_timeout) {
                 Ok(()) => {
-                    log::info!("TCP link to {} re-established", self.address);
+                    // At the level of the loss: a default-level log must show both.
+                    let level = if self.unproven { log::Level::Debug } else { log::Level::Warn };
+                    log::log!(level, "TCP link to {} re-established", self.address);
                     self.stream = Some(stream);
                     self.unproven = true;
+                    self.up_since = Instant::now();
                     self.restarted = true;
                     return;
                 }
@@ -181,7 +193,7 @@ impl ByteTransport for TcpTransport {
             Ok(0) => self.lost("closed by the remote end", false).map(|()| 0),
             Ok(n) => {
                 self.received = true;
-                if self.unproven {
+                if self.unproven && self.up_since.elapsed() >= self.timing.cap {
                     self.unproven = false;
                     self.backoff = self.timing.first;
                 }
@@ -269,7 +281,7 @@ mod tests {
         assert!(!link.take_stream_restart(), "the restart is reported once");
     }
 
-    /// Closes each accepted stream, the first one after sending `hello`.
+    /// Accepts one stream, sends `hello` and closes it; later connects are refused.
     fn closing_server(hello: &'static [u8]) -> (u16, std::thread::JoinHandle<()>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();

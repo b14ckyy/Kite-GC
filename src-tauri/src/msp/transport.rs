@@ -114,7 +114,6 @@ impl Transport for MspTransport {
         // connection lost.
         self.write_frame(MspCodec::encode_v2(code, payload))?;
 
-        // Read until we get the matching response or timeout
         let mut buf = [0u8; 512];
         let deadline = Instant::now() + Duration::from_millis(timeout_ms);
 
@@ -125,7 +124,7 @@ impl Transport for MspTransport {
 
             match self.read_inner(&mut buf) {
                 Ok(0) => {
-                    // No data available (timeout from underlying transport) — retry
+                    // Nothing yet: a read timeout, or a TCP link reconnecting underneath.
                 }
                 Ok(n) => {
                     // Raw-log the incoming chunk (ADR-049) — mirrors mwp-serial-cap (per read-chunk).
@@ -141,9 +140,7 @@ impl Transport for MspTransport {
                         }
                     }
                 }
-                Err(crate::transport::TransportError::Timeout) => {
-                    // Retry until deadline
-                }
+                Err(crate::transport::TransportError::Timeout) => {}
                 Err(crate::transport::TransportError::Disconnected) => {
                     self.mark_lost("read: transport disconnected".to_string()); // device gone
                     return Err("Transport disconnected".to_string());
