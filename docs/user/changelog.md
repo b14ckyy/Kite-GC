@@ -569,6 +569,12 @@ inside the box of the feature release they belong to, so the notes for one relea
 
     Every fix of 1.0.1 and 1.0.2 is part of 2.0. This list holds what is fixed in 2.0 only.
 
+    - **TCP links: a broken connection is re-established instead of ending the session.** When
+      the TCP connection to a Wi-Fi bridge or a simulator broke (bridge restarted, out of range
+      for a while), Kite disconnected, cleared the map and asked what to do with the recording.
+      Kite now connects to the same address again in the background and carries on; meanwhile
+      the link shows as stalled, like a radio dropout. Over TCP and UDP the connection only
+      ends when the computer has no network left to reach the address. [#358]
     - **Flight trail: the flown track comes back when a flight is continued.** After a lost
       connection to an armed aircraft (TCP or Bluetooth out of range, a cable pulled, the app
       restarted) and **Continue on Reconnect**, the map started with an empty trail although the
