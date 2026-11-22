@@ -3,7 +3,8 @@
 
 // Programmatic PIN pairing for BLE modules that send a security request on connect and drop the link
 // when it stays unanswered (older FrSky modules). They do not keep the bond across a disconnect, so
-// every connection pairs anew and the bond is removed again afterwards.
+// every connection pairs anew. Windows pairs before the connect and removes the bond afterwards; on
+// Linux the kernel pairs during the connect and only needs our agent for the passkey (see `imp`).
 
 use std::sync::Mutex;
 
@@ -146,32 +147,67 @@ mod imp {
 
     const AGENT_PATH: &str = "/org/kitegc/pairing_agent";
 
-    /// BlueZ asks the agent of the client that called `Pair()`, so the desktop's own agent stays out.
+    /// `Device1.Pair()` cannot pair the older module: BlueZ offers Secure Connections in the pairing
+    /// request and the module's BT 4.0 stack then rejects the right passkey ("confirm value failed").
+    /// The kernel answers the module's own security request with a legacy pairing the module
+    /// accepts, and asks bluetoothd's DEFAULT agent for the passkey. So the agent becomes the default
+    /// agent while the link comes up; it answers only for that one radio and rejects everything else.
     struct Agent {
         pin: String,
+        device: String,
+    }
+
+    #[derive(Debug, zbus::DBusError)]
+    #[zbus(prefix = "org.bluez.Error")]
+    enum AgentError {
+        #[zbus(error)]
+        ZBus(zbus::Error),
+        Rejected(String),
+    }
+
+    impl Agent {
+        fn check(&self, device: &ObjectPath<'_>) -> Result<(), AgentError> {
+            if device.as_str() == self.device {
+                Ok(())
+            } else {
+                Err(AgentError::Rejected("not the trainer radio".into()))
+            }
+        }
     }
 
     #[interface(name = "org.bluez.Agent1")]
     impl Agent {
         fn release(&self) {}
-        fn request_pin_code(&self, _device: ObjectPath<'_>) -> String {
-            self.pin.clone()
+        fn request_pin_code(&self, device: ObjectPath<'_>) -> Result<String, AgentError> {
+            self.check(&device)?;
+            Ok(self.pin.clone())
         }
-        fn request_passkey(&self, _device: ObjectPath<'_>) -> u32 {
-            self.pin.parse().unwrap_or(0)
+        fn request_passkey(&self, device: ObjectPath<'_>) -> Result<u32, AgentError> {
+            self.check(&device)?;
+            Ok(self.pin.parse().unwrap_or(0))
         }
         fn display_passkey(&self, _device: ObjectPath<'_>, _passkey: u32, _entered: u16) {}
         fn display_pin_code(&self, _device: ObjectPath<'_>, _pincode: &str) {}
-        fn request_confirmation(&self, _device: ObjectPath<'_>, _passkey: u32) {}
-        fn request_authorization(&self, _device: ObjectPath<'_>) {}
-        fn authorize_service(&self, _device: ObjectPath<'_>, _uuid: &str) {}
+        fn request_confirmation(
+            &self,
+            device: ObjectPath<'_>,
+            _passkey: u32,
+        ) -> Result<(), AgentError> {
+            self.check(&device)
+        }
+        fn request_authorization(&self, device: ObjectPath<'_>) -> Result<(), AgentError> {
+            self.check(&device)
+        }
+        fn authorize_service(&self, device: ObjectPath<'_>, _uuid: &str) -> Result<(), AgentError> {
+            self.check(&device)
+        }
         fn cancel(&self) {}
     }
 
-    /// Holds the D-Bus connection the agent lives on; BlueZ drops the agent with it.
+    /// Holds the D-Bus connection the agent lives on; BlueZ drops the agent with it and the previous
+    /// default agent (the desktop's, if it has one) takes over again.
     pub struct Bond {
         conn: Connection,
-        device: String,
     }
 
     /// BlueZ has no unpair: removing the device object is the way, and it is found again by the next scan.
@@ -188,52 +224,63 @@ mod imp {
         Ok(())
     }
 
+    async fn agent_manager(conn: &Connection) -> zbus::Result<Proxy<'static>> {
+        Proxy::new(conn, "org.bluez", "/org/bluez", "org.bluez.AgentManager1").await
+    }
+
     impl Bond {
+        /// The module asks for no bond, so nothing is left to remove: only the agent goes.
         pub async fn release(self) {
-            if let Err(e) = remove_device(&self.conn, &self.device).await {
-                log::warn!("[ble-pair] removing the bond failed: {e}");
+            let result = async {
+                agent_manager(&self.conn)
+                    .await?
+                    .call_method("UnregisterAgent", &(ObjectPath::try_from(AGENT_PATH)?,))
+                    .await
+            }
+            .await;
+            if let Err(e) = result {
+                log::warn!("[ble-pair] unregistering the pairing agent failed: {e}");
             }
         }
     }
 
-    async fn pair_device(device: &str, pin: &str) -> zbus::Result<Bond> {
+    async fn stand_by(device: &str, pin: &str) -> zbus::Result<Bond> {
         let conn = Connection::system().await?;
-        conn.object_server()
-            .at(
-                AGENT_PATH,
-                Agent {
-                    pin: pin.to_string(),
-                },
-            )
-            .await?;
-        let manager =
-            Proxy::new(&conn, "org.bluez", "/org/bluez", "org.bluez.AgentManager1").await?;
-        manager
-            .call_method(
-                "RegisterAgent",
-                &(ObjectPath::try_from(AGENT_PATH)?, "KeyboardOnly"),
-            )
-            .await?;
+        // A bond from elsewhere (the desktop's Bluetooth settings) makes the module drop the link.
         let proxy = Proxy::new(&conn, "org.bluez", device.to_string(), "org.bluez.Device1").await?;
-        if proxy.get_property::<bool>("Paired").await.unwrap_or(false) {
+        if super::flagged(device.trim_start_matches("/org/bluez/"))
+            && proxy.get_property::<bool>("Paired").await.unwrap_or(false)
+        {
             remove_device(&conn, device).await?;
             return Err(zbus::Error::Failure(
                 "stale bond removed, the radio is looked for again".into(),
             ));
         }
-        proxy.call_method("Pair", &()).await?;
-        Ok(Bond {
-            conn,
-            device: device.to_string(),
-        })
+        conn.object_server()
+            .at(
+                AGENT_PATH,
+                Agent {
+                    pin: pin.to_string(),
+                    device: device.to_string(),
+                },
+            )
+            .await?;
+        let manager = agent_manager(&conn).await?;
+        let path = ObjectPath::try_from(AGENT_PATH)?;
+        manager
+            .call_method("RegisterAgent", &(&path, "KeyboardOnly"))
+            .await?;
+        manager.call_method("RequestDefaultAgent", &(&path,)).await?;
+        Ok(Bond { conn })
     }
 
+    /// Puts the passkey agent in place for the next connect; the kernel pairs on the module's request.
     /// btleplug's peripheral id on Linux is the BlueZ object path without `/org/bluez/`.
     pub async fn pair(device_id: &str, pin: &str) -> Result<Bond, String> {
         let device = format!("/org/bluez/{device_id}");
-        pair_device(&device, pin)
+        stand_by(&device, pin)
             .await
-            .map_err(|e| format!("pairing failed: {e}"))
+            .map_err(|e| format!("pairing agent failed: {e}"))
     }
 
     pub fn release_all_blocking() {}
@@ -253,6 +300,21 @@ mod imp {
     }
 
     pub fn release_all_blocking() {}
+}
+
+/// Linux: the module hangs up within half a second when the kernel's pairing finds no agent, before
+/// its GATT can tell it apart. The agent therefore stands by on every trainer connect there; a radio
+/// that never asks for a passkey does not notice it.
+pub const AGENT_ON_EVERY_CONNECT: bool = cfg!(target_os = "linux");
+
+/// Linux needs the agent only while the link is being secured; Windows keeps its device object open
+/// for the whole session.
+pub async fn link_up(bond: &mut Option<Bond>) {
+    if cfg!(target_os = "linux") {
+        if let Some(b) = bond.take() {
+            b.release().await;
+        }
+    }
 }
 
 pub use imp::{pair, release_all_blocking, Bond};

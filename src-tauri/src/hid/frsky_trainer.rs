@@ -570,12 +570,16 @@ mod link {
         }
 
         stats.status.pairing = ble_pairing::flagged(device_id);
-        if stats.status.pairing {
+        if stats.status.pairing || ble_pairing::AGENT_ON_EVERY_CONNECT {
             set_state(app, stats, "connecting");
             match ble_pairing::pair(device_id, ble_pairing::FRSKY_PIN).await {
                 Ok(b) => {
                     *bond = Some(b);
                     stats.pair_failures = 0;
+                }
+                // A radio not known to need the PIN connects as it always did.
+                Err(e) if !stats.status.pairing => {
+                    log::warn!("[trainer] {e}; connecting without it");
                 }
                 Err(e) if stats.pair_failures + 1 < PAIR_ATTEMPTS => {
                     stats.pair_failures += 1;
@@ -629,8 +633,11 @@ mod link {
         if pin_module && !stats.status.pairing {
             ble_pairing::flag(device_id);
             stats.status.pairing = true;
-            stats.status.state = "searching";
-            return Err("module demands a passkey: reconnecting with PIN pairing".into());
+            // Linux: the standing agent already paired this link, it stays.
+            if bond.is_none() {
+                stats.status.state = "searching";
+                return Err("module demands a passkey: reconnecting with PIN pairing".into());
+            }
         }
         let mut targets: Vec<_> = all
             .iter()
@@ -667,6 +674,7 @@ mod link {
             .notifications()
             .await
             .map_err(|e| format!("BLE notification stream failed: {e}"))?;
+        ble_pairing::link_up(bond).await;
 
         stats.begin_session();
         stats.status.error = None;
