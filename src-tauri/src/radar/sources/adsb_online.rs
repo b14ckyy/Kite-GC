@@ -141,11 +141,8 @@ impl RadarSource for AdsbOnlineSource {
                     }
                 };
 
-                // Atomic rate claim, shared across ALL source loops (including any left over from a
-                // reconfigure): fetch only if `poll` has elapsed since the last actual fetch, and stamp
-                // the slot in the SAME lock so concurrent loops can't all slip through. This bounds
-                // outgoing requests to at most one set per poll interval no matter how many loops exist.
-                // (A previous read-then-wait gate let each loop pass on a stale read → HTTP 429.)
+                // Atomic rate claim across ALL source loops (incl. leftovers of a reconfigure): fetch only if `poll`
+                // elapsed and stamp the slot under the SAME lock — a read-then-wait gate let every loop pass (HTTP 429).
                 let claimed = match self.last_fetch.lock() {
                     Ok(mut g) => {
                         let due = g.map(|t| t.elapsed() >= self.poll).unwrap_or(true);

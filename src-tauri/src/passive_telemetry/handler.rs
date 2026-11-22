@@ -245,9 +245,7 @@ fn handler_loop(
                         if let Some(ref rec) = recorder {
                             if let Ok(mut r) = rec.lock() { r.set_protocol(label); }
                         }
-                        // Tell the frontend whether this protocol delivers true MSL altitude. LTM/CRSF
-                        // send only arming-relative altitude → the frontend must anchor it to a ground
-                        // reference (captured at the arm edge) for correct AGL/3D.
+                        // LTM and CRSF count as arming-relative; a CRSF stream that shows MSL corrects this below.
                         let msl = !matches!(p, Protocol::Ltm | Protocol::Crsf);
                         let _ = app_handle.emit("telemetry-alt-ref", AltRef { msl });
                         log::info!("Passive telemetry locked: {} (alt MSL: {})", label, msl);
@@ -262,7 +260,7 @@ fn handler_loop(
                         msp_probe.get_or_insert_with(MspProbe::new).push_bytes(chunk);
                     }
                 }
-                // Once CRSF is locked, decode frames into the analysis dump (E2; no widget feed yet).
+                // Once CRSF is locked, decode into unified events (+ dump for validation).
                 if detector.locked() == Some(Protocol::Crsf) {
                     crsf.get_or_insert_with(|| {
                         CrsfDecoder::new(capture.as_ref().map(|c| c.sibling_path("crsf.txt")))

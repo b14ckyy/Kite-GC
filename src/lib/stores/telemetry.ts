@@ -216,8 +216,7 @@ export function resetTelemetry() {
 // anchor persists across reconnects until a real-MSL protocol supersedes it. With no anchor (late
 // connect, or armed in the air) the true MSL is unknown → AGL is shown as N/A.
 
-/** Whether the active protocol delivers true MSL GPS altitude. Default true; the backend's
- *  `telemetry-alt-ref` sets it false for relative-only protocols (LTM/CRSF). */
+/** True MSL from the active link; `telemetry-alt-ref` sets it per protocol and for a CRSF stream that shows MSL. */
 export const altReference = writable<{ msl: boolean }>({ msl: true });
 /** Ground MSL (m) captured at the arming edge for relative-only protocols, or null if unknown. */
 export const groundAnchor = writable<number | null>(null);
@@ -247,7 +246,8 @@ async function captureGroundAnchor(t: TelemetryData): Promise<void> {
   anchorBusy = true;
   try {
     const g = await invoke<number | null>('terrain_elevation', { lat: t.lat, lon: t.lon });
-    if (g != null) {
+    // A CRSF stream can turn out to be MSL while the lookup runs: no anchor then.
+    if (g != null && !get(altReference).msl) {
       groundAnchor.set(g);
       console.log(`[altAnchor] ground MSL anchor = ${g.toFixed(1)} m (captured at arm, rel ${t.altMsl.toFixed(1)} m)`);
     }
