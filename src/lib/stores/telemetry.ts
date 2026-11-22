@@ -306,8 +306,8 @@ export const groundAnchor = writable<number | null>(null);
 /** |relative altitude| (m) at the arm edge must be below this to trust it as the ground reference —
  *  this also excludes "armed in the air" (HITL / mid-air arm), where no ground ref is recoverable. */
 const GROUND_ARM_MAX_REL = 5;
-/** An altitude this close (m) to the terrain at the arm edge, standing still, is MSL after all (PX4 over
- *  CRSF, INAV without a barometer): no frame tells that. A late connect in flight is no arm edge. */
+/** An altitude this close (m) to the terrain at a real arm edge, standing still, is MSL after all (PX4 over
+ *  CRSF, INAV without a barometer): no frame tells that. */
 const ARM_MSL_MAX_DIFF = 20;
 const ARM_MAX_GROUND_SPEED = 2;
 
@@ -324,13 +324,14 @@ let anchorBusy = false;
 
 /** Arm edge of a relative-only link: anchor the ground MSL when on the ground, else detect an MSL altitude
  *  and tell the recorder. */
-async function captureGroundAnchor(t: TelemetryData): Promise<void> {
+async function captureGroundAnchor(t: TelemetryData, sawDisarmed: boolean): Promise<void> {
   if (anchorBusy) return;
   if (get(altReference).msl) return; // protocol already in MSL → no anchor needed
   const validCoord = (t.lat !== 0 || t.lon !== 0) && Math.abs(t.lat) <= 90 && Math.abs(t.lon) <= 180;
   if (t.fixType < 1 || !validCoord) return; // need a GPS fix (2D or better)
   const onGround = Math.abs(t.altMsl) <= GROUND_ARM_MAX_REL;
-  if (!onGround && t.groundSpeed > ARM_MAX_GROUND_SPEED) return; // armed in the air → no valid ground reference
+  // Armed in the air, or met already armed (late connect, vehicle switch): no valid ground reference.
+  if (!onGround && (!sawDisarmed || t.groundSpeed > ARM_MAX_GROUND_SPEED)) return;
   anchorBusy = true;
   const vid = get(activeVehicleId);
   try {
@@ -355,9 +356,15 @@ async function captureGroundAnchor(t: TelemetryData): Promise<void> {
 }
 
 // Detect the disarm→arm transition on the live telemetry stream (cheap; only acts on the edge).
+// `disarmedOf`: the vehicle whose real disarmed status frame came last — a reset store or another vehicle's
+// seed reads "disarmed" too, and a vehicle met already armed must not pass for one that just armed.
+let disarmedOf: string | null | undefined;
 telemetry.subscribe((t) => {
   const armed = (t.armingFlags & 0x04) !== 0;
-  if (armed && !prevArmed) void captureGroundAnchor(t);
+  const vid = get(activeVehicleId);
+  if (armed && !prevArmed) void captureGroundAnchor(t, disarmedOf === vid);
+  if (!t.statusSeen || armed) disarmedOf = undefined;
+  else disarmedOf = vid;
   prevArmed = armed;
 });
 

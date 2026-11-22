@@ -795,7 +795,7 @@ pub fn summarize_temp_session(
             membership,
             vehicle_key: None,
             weather_seq: 0,
-            alt_relative: None,
+            alt_relative: meta.alt_relative,
         },
         count,
     ))
@@ -1468,6 +1468,11 @@ impl FlightRecorder {
 
     pub fn set_alt_relative(&mut self, relative: bool) {
         self.alt_relative = Some(relative);
+        if let Some(conn) = self.active_flight.as_ref().and_then(|f| f.temp_db.as_ref()) {
+            if let Err(e) = db::update_session_meta_alt_relative(conn, self.alt_relative) {
+                log::warn!("Failed to update session_meta altitude reference: {}", e);
+            }
+        }
     }
 
     /// Start continuous raw logging on connect (`raw_always`): one session-level file incl. pre-arm data.
@@ -2117,6 +2122,9 @@ impl FlightRecorder {
                         None,
                     ) {
                         log::warn!("Failed to write session_meta: {}", e);
+                    }
+                    if let Err(e) = db::update_session_meta_alt_relative(&conn, self.alt_relative) {
+                        log::warn!("Failed to write session_meta altitude reference: {}", e);
                     }
                     log::info!("Temp session store: {}", path.display());
                     (Some(conn), Some(path))
@@ -3934,6 +3942,23 @@ mod tests {
             .map(Result::unwrap)
             .collect();
         assert_eq!(rows, vec![(2000, 48.1, "{\"a\":1}".to_string()), (8000, 48.2, "{\"a\":2}".to_string())]);
+    }
+
+    /// A session read back from its file (crash recovery) knows what the link said, also when that came
+    /// after the arm.
+    #[test]
+    fn the_altitude_reference_survives_in_the_session_file() {
+        let rig = Rig::new("alt-ref-file");
+        let (mut rec, _) = rig.recorder("L1:S1", fc("Solo", None));
+        rec.set_alt_relative(true);
+        rec.on_gps(&gps(2, 48.1, 11.5));
+        rec.on_status(&status(false));
+        rec.on_status(&status(true));
+        let path = active_path(&rec);
+        let read = || db::read_session_meta(&Connection::open(&path).unwrap()).unwrap().unwrap().alt_relative;
+        assert_eq!(read(), Some(true));
+        rec.set_alt_relative(false);
+        assert_eq!(read(), Some(false));
     }
 
     /// What the link said about its altitude travels with the finished session into the flight row; a
