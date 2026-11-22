@@ -131,8 +131,9 @@ instead of the text. The file is git-ignored; take the `index.ts` registration o
 Contributed by teodoryantcheff.
 
 **Checking the locale files:** `npm run check:i18n` compares every locale with `en.json` and reports keys that
-`en.json` no longer has and translated strings that lost a `{placeholder}`. It also lists keys missing in
-`de.json`, which the maintainer keeps complete; in an English-only PR that part of the report is expected.
+`en.json` does not have, values of another kind and translated strings whose `{placeholders}` differ from the
+English ones. It also lists keys missing in `de.json`, which the maintainer keeps complete; in an English-only
+PR that part of the report is expected and makes the run end with exit code 1.
 
 ## Licensing & contributor terms
 
