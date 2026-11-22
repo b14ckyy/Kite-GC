@@ -398,6 +398,12 @@ mod link {
     const CHARACTERISTIC: uuid::Uuid =
         uuid::Uuid::from_u128(0x0000fff6_0000_1000_8000_00805f9b34fb);
     const FIND_TIMEOUT: Duration = Duration::from_secs(10);
+    /// BlueZ lists every radio it ever connected to, switched on or not; only one with a signal
+    /// strength was heard in this scan. Connecting to an absent one costs the whole connect timeout.
+    const LISTED_MAY_BE_ABSENT: bool = cfg!(target_os = "linux");
+    /// A radio switched off between the scan and the connect: BlueZ answers only after its 30 s call
+    /// timeout. A present radio connects (and pairs) in about 3 s.
+    const CONNECT_TIMEOUT: Duration = Duration::from_secs(12);
     const RETRY_DELAY: Duration = Duration::from_secs(2);
     const STATUS_INTERVAL: Duration = Duration::from_millis(250);
     /// Data without a single trainer frame for this long is something else (telemetry): release.
@@ -546,10 +552,16 @@ mod link {
                 .peripherals()
                 .await
                 .map_err(|e| format!("list peripherals: {e}"))?;
-            let mut known: Vec<_> = list
-                .into_iter()
-                .filter(|p| ids.iter().any(|d| *d == p.id().to_string()))
-                .collect();
+            let mut known = Vec::new();
+            for p in list {
+                if !ids.iter().any(|d| *d == p.id().to_string()) {
+                    continue;
+                }
+                let heard = p.properties().await.ok().flatten().is_some_and(|x| x.rssi.is_some());
+                if heard || !LISTED_MAY_BE_ABSENT {
+                    known.push(p);
+                }
+            }
             known.sort_by_key(|p| failed == Some(p.id().to_string().as_str()));
             if let Some(p) = known.into_iter().next() {
                 break Some(p);
@@ -570,12 +582,16 @@ mod link {
         }
 
         stats.status.pairing = ble_pairing::flagged(device_id);
-        if stats.status.pairing {
+        if stats.status.pairing || ble_pairing::AGENT_ON_EVERY_CONNECT {
             set_state(app, stats, "connecting");
             match ble_pairing::pair(device_id, ble_pairing::FRSKY_PIN).await {
                 Ok(b) => {
                     *bond = Some(b);
                     stats.pair_failures = 0;
+                }
+                // A radio not known to need the PIN connects as it always did.
+                Err(e) if !stats.status.pairing => {
+                    log::warn!("[trainer] {e}; connecting without it");
                 }
                 Err(e) if stats.pair_failures + 1 < PAIR_ATTEMPTS => {
                     stats.pair_failures += 1;
@@ -602,9 +618,9 @@ mod link {
             None => {}
         }
         set_state(app, stats, "connecting");
-        peripheral
-            .connect()
+        tokio::time::timeout(CONNECT_TIMEOUT, peripheral.connect())
             .await
+            .map_err(|_| format!("BLE connect: no answer within {} s", CONNECT_TIMEOUT.as_secs()))?
             .map_err(|e| format!("BLE connect failed: {e}"))?;
         peripheral
             .discover_services()
@@ -629,8 +645,11 @@ mod link {
         if pin_module && !stats.status.pairing {
             ble_pairing::flag(device_id);
             stats.status.pairing = true;
-            stats.status.state = "searching";
-            return Err("module demands a passkey: reconnecting with PIN pairing".into());
+            // Linux: the standing agent already paired this link, it stays.
+            if bond.is_none() {
+                stats.status.state = "searching";
+                return Err("module demands a passkey: reconnecting with PIN pairing".into());
+            }
         }
         let mut targets: Vec<_> = all
             .iter()
@@ -667,6 +686,7 @@ mod link {
             .notifications()
             .await
             .map_err(|e| format!("BLE notification stream failed: {e}"))?;
+        ble_pairing::link_up(bond).await;
 
         stats.begin_session();
         stats.status.error = None;

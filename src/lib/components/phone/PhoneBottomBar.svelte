@@ -150,8 +150,8 @@
   $effect(() => {
     if (barH !== filledH) barH = filledH;
   });
-  // Published on the root: the sensor chip, the error bar and the resume banner move up by the lift while
-  // a tile is on the bottom edge (or in edit mode). The Debug button and the credit stay (a tile may cover it).
+  // Published on the root: the error bar and the resume banner move up by the lift while a tile is on the
+  // bottom edge (or in edit mode); the chip row, the Debug button and the credit stay.
   $effect(() => {
     const lift = anyFilled || editing ? Math.max(filledH, editing ? Math.max(sideH, centreH) : 0) + PHONE_BOTTOM_GAP : 0;
     const root = document.documentElement;

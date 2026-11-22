@@ -82,12 +82,22 @@ Things to know:
   **Telemetry** link over BLE is recognised: Kite closes that link and offers the radio for RC control (a
   radio already on the list switches over without asking).
 - **Older FrSky Bluetooth module.** The module of older FrSky radios, also retro-fitted to other
-  transmitters, demands a pairing code and hangs up without one. On **Windows** Kite recognises this
-  module and pairs with its code `000000` by itself, without a system prompt. The same is built for
-  **Linux** but not confirmed there yet. macOS gives an app no way to answer the pairing, so the
-  module is not usable there for now.
-- Tested on Windows with a FrSky X20RS on ETHOS 26.2 and with a RadioMaster TX16S on EdgeTX carrying
-  the older FrSky module. Linux is not confirmed yet: in a first test the link was unstable.
+  transmitters, demands a pairing code and hangs up without one. On **Windows** and **Linux** Kite
+  pairs with its code `000000` by itself, without a system prompt. On Linux, Kite answers pairing
+  requests for the remembered radio while it connects to it, in place of the desktop's own Bluetooth
+  prompt; nothing stays paired in the system afterwards. During those few seconds a pairing started
+  for another device from the desktop's Bluetooth settings is refused: start it again. If the radio
+  was paired in those settings before, remove it there, or the module drops every connection. macOS
+  gives an app no way to answer the pairing, so the module is not usable there for now.
+- Tested on Windows and Linux with a FrSky X20RS on ETHOS 26.2 and with a RadioMaster TX16S on EdgeTX
+  carrying the older FrSky module.
+- **Linux: reconnecting and changing radios.** The first connection to a radio works. After it, Linux
+  keeps slower connection settings for that radio, and with them a second connection soon after the
+  first usually fails (the radio is found, the line stays on *Connecting* or *Searching*) or the
+  channels stutter with gaps of half a second. That also hits a change from one radio to another and
+  back. To get a clean connection again, switch the computer's Bluetooth off and on (or leave the radio
+  switched off for about a minute), then let Kite connect. This comes from the Linux Bluetooth stack
+  and cannot be changed from within an app; Windows is not affected.
 
 ### Channel mapping
 

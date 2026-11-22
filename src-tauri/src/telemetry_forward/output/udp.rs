@@ -11,6 +11,7 @@ use super::OutputSink;
 pub struct UdpSink {
     socket: UdpSocket,
     target: String,
+    local_port: Option<u16>,
 }
 
 impl UdpSink {
@@ -19,7 +20,19 @@ impl UdpSink {
         // Allow broadcast targets (e.g. 255.255.255.255 / subnet broadcast) — harmless for unicast.
         let _ = socket.set_broadcast(true);
         let target = format!("{host}:{port}");
-        Ok(Self { socket, target })
+        let local_port = socket.local_addr().ok().map(|a| a.port());
+        if let Some(p) = local_port {
+            crate::transport::udp::register_own_sender(p);
+        }
+        Ok(Self { socket, target, local_port })
+    }
+}
+
+impl Drop for UdpSink {
+    fn drop(&mut self) {
+        if let Some(p) = self.local_port {
+            crate::transport::udp::forget_own_sender(p);
+        }
     }
 }
 

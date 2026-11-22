@@ -2135,7 +2135,7 @@
     "title": "Unfinished recording found",
     "intro": "A recording from a previous session was not closed properly (the app may have crashed or been closed mid-flight).",
     "titleLost": "Device connection lost",
-    "introLost": "The connection to the aircraft dropped (the serial device was unplugged or the BLE link was lost) while a flight was being recorded. Choose what to do with the recording.",
+    "introLost": "The connection to the aircraft is gone (the device was unplugged, Bluetooth was switched off or the network is no longer available) while a flight was being recorded. Choose what to do with the recording.",
     "craft": "Aircraft",
     "started": "Started",
     "samples": "Samples",
