@@ -97,7 +97,7 @@ Each provider handles the request under its own privacy policy, which we link be
 | Feature | Service | What is sent |
 | --- | --- | --- |
 | **3D map** | Cesium ion ([privacy](https://cesium.com/legal/privacy-policy/)) with the access token *you* created; imagery and terrain from the providers configured in your Cesium account | Terrain and imagery requests for the area on screen, authenticated with your own token, i.e. under your own Cesium account |
-| **Radar / ADS-B traffic** | adsb.lol, adsb.one, adsb.fi (community ADS-B aggregators; each publishes its own terms) | The query centre (the map viewport or your aircraft's position) and a search radius, polled while the radar is on |
+| **Radar / ADS-B traffic** | adsb.fi, and any online service you add yourself (community ADS-B aggregators; each publishes its own terms) | The query centre (the map viewport or your aircraft's position) and a search radius, polled while the radar is on |
 | **Airspace Manager** | OpenAIP ([privacy](https://www.openaip.net/privacy)) with the API key *you* registered | A position and radius for the airspace layers you enabled, authenticated with your key |
 
 !!! note "Weather and place-name lookup"
