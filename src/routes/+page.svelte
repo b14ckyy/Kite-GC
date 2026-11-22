@@ -101,7 +101,7 @@
   import type { PhoneWidgetsConfig } from '$lib/controllers/phoneWidgetController';
   import { isValidGpsCoordinate, isArmed } from '$lib/helpers/telemetry';
   import { anyCase } from '$lib/helpers/fileFilters';
-  import { liveTrack, appendLivePoint, clearLiveTrack, backfillLivePoints } from '$lib/stores/liveTrack';
+  import { liveTrack, appendLivePoint, clearLiveTrack, backfillLivePoints, restoreLivePoints, type LiveTrackPoint } from '$lib/stores/liveTrack';
   import { toTelemetryData } from '$lib/adapters/telemetryAdapter';
   import { activeWpNumber, replayWpTotal } from '$lib/stores/navStatus';
   import { missionManagerOpen, missionManagerSelectedId, requestOpenFlightId, requestOpenMissionId, missionLibraryRevision } from '$lib/stores/missionManager';
@@ -194,8 +194,9 @@
   });
   // Map3D instance handle — used to read the 3D camera focus on a 3D→2D switch so
   // the 2D map can re-centre on the same spot (keeping its own zoom).
-  /** 2D map instance — for the trail backfill after the page was hidden (BACKGROUND_TELEMETRY.md). */
-  let mapRef: { appendTrailPoints?: (points: { lat: number; lon: number; mode: string }[]) => void } | undefined = $state();
+  type TrailPoint = { lat: number; lon: number; mode: string };
+  /** 2D map instance — trail backfill after the page was hidden (BACKGROUND_TELEMETRY.md) and a resumed flight's trail. */
+  let mapRef: { appendTrailPoints?: (points: TrailPoint[]) => void; restoreTrail?: (points: TrailPoint[]) => void } | undefined = $state();
   // `connection-lost` while hidden → one reconnect attempt on return (unless the recording-interrupted
   // prompt took over). Not a loop.
   let lostWhileHidden = false;
@@ -593,16 +594,28 @@
     // announced (MSP-tunnel probe). Secondaries are announced before their frames, so none is adopted here.
     return ownerGone && (vehicleId === get(activeVehicleId) || !get(vehicles).has(vehicleId));
   }
+  // A resumed flight's earlier track, held until the armed frame that resumed it is through: track
+  // and 2D trail are cleared on that frame, in this same store update.
+  let pendingTrackRestore: { vid: string | null; points: LiveTrackPoint[] } | null = null;
+  function applyTrackRestore(): void {
+    if (!pendingTrackRestore || !armEdgeInit || !prevArmed) return;
+    // The arm state read here is the active vehicle's; another vehicle's restore waits.
+    if (pendingTrackRestore.vid !== null && pendingTrackRestore.vid !== flightStatsOwner) return;
+    const points = pendingTrackRestore.points;
+    pendingTrackRestore = null;
+    setTimeout(() => {
+      const merged = restoreLivePoints(points);
+      mapRef?.restoreTrail?.(merged.map((p) => ({ lat: p.lat, lon: p.lon, mode: p.mode_primary })));
+    }, 0);
+  }
   telemetry.subscribe((t) => {
     liveTelem = t;
-    // Accumulate the live flown track (RAM) for the Terrain Analyzer
     const armed = isArmed(t.armingFlags, t.lastUpdate);
     // Baseline on the first frame that CARRIES the armed state (statusSeen), not any first frame: 5–10 Hz
     // attitude/GPS beat the 1 Hz status after a reconnect and would fake an arm edge (moving Home).
     if (!armEdgeInit && t.statusSeen) { armEdgeInit = true; prevArmed = armed; }
     if (armed && !prevArmed) {
       clearLiveTrack();
-      // reset the flight-stats accumulator for the new flight
       armStartMs = t.lastUpdate || Date.now();
       accMaxAlt = 0; accMaxSpeed = 0; accMaxDist = 0; accMah = 0; accTotalDist = 0;
       accStartLat = null; accStartLon = null; accLastLat = null; accLastLon = null;
@@ -639,9 +652,7 @@
     // reference once from the current fix (mirrored into a manual home below → the widget points to it).
     if (armed && !prevArmed && t.fixType >= 2 && isValidGpsCoordinate(t.lat, t.lon)) {
       if (get(connection).status === 'connected') {
-        // altMsl, NOT t.altitude (relative): Home consumers treat alt as AMSL (the HOME_POSITION /
-        // MSP_WP0 paths store AMSL, Map3D places the "H" absolutely) — the relative alt (~0 at a
-        // ground arm) sank the 3D marker below the terrain by the local elevation.
+        // altMsl, not the relative t.altitude: Home consumers (HOME_POSITION / MSP_WP0, Map3D's "H") treat alt as AMSL.
         homePosition.set({ lat: t.lat, lon: t.lon, alt: t.altMsl, set: true, source: 'fc' });
         launchPoint.set({ lat: t.lat, lng: t.lon });
       } else if (get(homePosition).source !== 'fc') {
@@ -655,6 +666,7 @@
       if (t.statusSeen) armStartMs = 0;
     }
     prevArmed = armed;
+    applyTrackRestore();
   });
 
   // Mirror the manual launch reference into the Home store so the Home widget points at the
@@ -1015,6 +1027,7 @@
     // Auto-refresh the logbook on disconnect (picks up a just-recorded live flight). Disarm is covered by
     // the flight-recording-ended listener.
     if (wasConnected && c.status !== 'connected') {
+      pendingTrackRestore = null;
       void loadLogbook();
       // Lost the FC → the locked home becomes a manual reference (keeps its position so planning
       // continues; the marker reverts to a draggable orange "L").
@@ -3949,6 +3962,7 @@
         const p = event.payload;
         const vid = p.vehicleId ?? null;
         bumpPendingEpoch(vid);
+        if (pendingTrackRestore?.vid === vid) pendingTrackRestore = null; // that flight is over
         const stats: EndFlightStats = {
           durationSec: p.duration_sec,
           maxAltM: p.max_alt_m,
@@ -3991,6 +4005,17 @@
       awaitingResumeReconnect = false;
       endFlightDialog?.close();
     });
+    // The vehicle may not be announced yet when its recorder reports (MSP-tunnel probe).
+    void listen<{ vehicleId?: string; points: { lat: number; lon: number; alt_msl: number; mode: string; ts_ms: number }[] }>(
+      'flight-track-restored',
+      (event) => {
+        const vid = event.payload.vehicleId ?? null;
+        if (vid !== null && vid !== get(activeVehicleId) && get(vehicles).has(vid)) return;
+        const points = event.payload.points.map((p) => ({ lat: p.lat, lon: p.lon, alt_m: p.alt_msl, mode_primary: p.mode, timestamp_ms: p.ts_ms }));
+        pendingTrackRestore = { vid, points };
+        applyTrackRestore();
+      },
+    );
     // Connection lost while recording (device gone, e.g. USB unplugged) → recovery prompt.
     void listen<{ temp_path: string; craft_name: string; start_time: string; duration_sec: number; sample_count: number; vehicleId?: string }>(
       'flight-recording-interrupted',
@@ -3998,6 +4023,7 @@
         lostWhileHidden = false;
         const vid = event.payload.vehicleId ?? null;
         bumpPendingEpoch(vid);
+        if (pendingTrackRestore?.vid === vid) pendingTrackRestore = null;
         const flown = endedMissionFor(vid); // captured now, the prompt may open later (§5e M3)
         enqueueFlightDialog(vid, () => onRecordingInterrupted(event.payload, vid, flown));
       },

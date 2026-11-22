@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Live flown track — accumulated in RAM while armed, for the Terrain Analyzer
-// (and future live widgets). lat/lon + MSL altitude over time; cleared on each
-// new arm. Independent of the map trail (which keeps lat/lon only) and of the
-// flight-log DB (this exists regardless of the recording setting).
+// Live flown track (RAM) of the active vehicle — lat/lon + altitude per point for the 3D trail and the
+// Terrain Analyzer; cleared on each new arm, refilled from the recording when a flight is resumed.
 
 import { get, writable } from 'svelte/store';
 import { activeVehicleId, vehicles } from '$lib/stores/vehicles';
@@ -65,11 +63,26 @@ export function clearLiveTrack(): void {
   liveTrack.set([]);
 }
 
+let restoredAtMs = 0;
+
 /** Points the backend buffered while the page was hidden (BACKGROUND_TELEMETRY.md). A buffered
- *  flight that began after our last point is a new flight — start over. */
+ *  flight that began after our last point is a new flight — start over. Not after a restore: its
+ *  points are older than the buffer's flight start, which a reconnect resets. */
 export function backfillLivePoints(points: LiveTrackPoint[], flightStartMs: number): void {
   if (points.length === 0) return;
   const cur = get(liveTrack);
-  if (cur.length > 0 && cur[cur.length - 1].timestamp_ms < flightStartMs) clearLiveTrack();
+  if (cur.length > 0 && cur[cur.length - 1].timestamp_ms < flightStartMs && flightStartMs > restoredAtMs) clearLiveTrack();
   for (const p of points) appendLivePoint(p.lat, p.lon, p.alt_m, p.mode_primary, p.timestamp_ms);
+}
+
+/** A resumed flight's earlier points, in front of those that arrived since.
+ *  Emptied first: the 3D trail rebuilds only when the store shrinks. */
+export function restoreLivePoints(points: LiveTrackPoint[]): LiveTrackPoint[] {
+  if (points.length === 0) return get(liveTrack);
+  restoredAtMs = Date.now();
+  const lastMs = points[points.length - 1].timestamp_ms;
+  const merged = [...points, ...get(liveTrack).filter((p) => p.timestamp_ms > lastMs)];
+  liveTrack.set([]);
+  liveTrack.set(merged);
+  return merged;
 }
