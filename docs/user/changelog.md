@@ -119,6 +119,11 @@ inside the box of the feature release they belong to, so the notes for one relea
         On a slow link Kite measures the round trip and gives the tunnel more time, so it is found
         there too instead of falling back to plain MAVLink. [#337]
 
+        **RadioMaster AX12.** Kite runs on this Android transmitter and connects through its
+        built-in ELRS module: pick the internal port in the serial port list, the baud rate is
+        already set. With INAV 10.0 on the aircraft that link carries the planner as described
+        above. [#317]
+
     ??? info "Your own maps — online with your own key, offline from a folder"
         **Custom online providers.** Add any online tile service by its URL template under
         Settings → Map → Providers; an API key goes into the URL. **Test** checks the service and
@@ -133,7 +138,7 @@ inside the box of the feature release they belong to, so the notes for one relea
 
         Both are described in [Your own maps](guides/custom-maps.md).
 
-    ??? info "Logbook and replay — native Blackbox import, HI-RES replay, a smaller database"
+    ??? info "Logbook and replay — native Blackbox import, HI-RES replay, the logbook as one file"
         **INAV Blackbox import without a helper program.** Kite decodes INAV Blackbox logs itself:
         no `blackbox_decode` download, faster imports, and the stretches the old tool lost after a
         flight-mode change are in the track. Only INAV logs are accepted; a Blackbox log from
@@ -154,6 +159,11 @@ inside the box of the feature release they belong to, so the notes for one relea
         Flights from ArduPilot and PX4 logs keep their size. For every flight, space freed by
         deleting flights or stored logs is now handed back to the disk. [#232]
 
+        **Take your logbook with you.** Settings → Data saves the whole flight database as one
+        file and loads it again, on every platform — on Android and iOS that is the way to keep a
+        logbook across a reinstall. The same place writes every flight into a single `.kflight`.
+        See [Logbook](guides/logbook.md#exporting-and-importing-the-whole-database). [#325]
+
     ??? info "Telemetry API — live telemetry for other programs"
         Kite can **serve its live telemetry as JSON** to other programs: an NDJSON stream over TCP
         (port 27300), an HTTP snapshot (port 27301) and UDP subscribers. It is read-only and holds
@@ -163,7 +173,7 @@ inside the box of the feature release they belong to, so the notes for one relea
         one switch for the network. Every field and examples are in the
         **[Telemetry API](reference/telemetry-api.md)** reference. [#123]
 
-    ??? info "Widgets in several sizes, and a raw telemetry view"
+    ??? info "Widgets in several sizes, a weather widget and a raw telemetry view"
         Every flight widget has **two or three sizes**: in edit mode a corner button steps it from
         small to large (and, for the wide Live AGL and Video tiles, to a square). The docks shrink
         to their largest widget, which hands the freed space back to the map. Widgets are
@@ -171,6 +181,20 @@ inside the box of the feature release they belong to, so the notes for one relea
 
         The **≡ Raw** button in the top bar opens one view with every value the telemetry link
         delivers, in its raw unit. It replaces the Raw Telemetry widget. [#101]
+
+        **Weather widget.** A new widget shows the forecast wind at the height your aircraft is
+        flying at — direction relative to the nose, speed and gusts — and, in its wide size, the
+        wind for the next 30, 60 and 90 minutes. The forecast is also stored with every recorded
+        flight, so a replay shows the wind of that day. Needs internet. [#299] · [#316]
+
+    ??? info "Your radio as a wireless controller — RC control over Bluetooth"
+        RC control on the desktop can take its sticks from a radio over Bluetooth, without a cable.
+        Set the radio's Bluetooth trainer link to **Slave** and pick the radio once with the
+        Bluetooth button in the RC panel; from then on Kite connects whenever the radio is on in
+        that mode, and it appears in the device list like a joystick. The older FrSky Bluetooth module, also
+        retro-fitted to EdgeTX radios, is paired without a prompt on Windows and Linux. Setup:
+        [RC control → A FrSky radio over Bluetooth](guides/rc-control.md#a-frsky-radio-over-bluetooth).
+        [#348]
 
     ??? info "Kite updates itself"
         The update notice shows the **release notes** in the dialog, and next to *Open Release Page*
