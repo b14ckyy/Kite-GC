@@ -82,12 +82,16 @@ Things to know:
   **Telemetry** link over BLE is recognised: Kite closes that link and offers the radio for RC control (a
   radio already on the list switches over without asking).
 - **Older FrSky Bluetooth module.** The module of older FrSky radios, also retro-fitted to other
-  transmitters, demands a pairing code and hangs up without one. On **Windows** Kite recognises this
-  module and pairs with its code `000000` by itself, without a system prompt. The same is built for
-  **Linux** but not confirmed there yet. macOS gives an app no way to answer the pairing, so the
-  module is not usable there for now.
-- Tested on Windows with a FrSky X20RS on ETHOS 26.2 and with a RadioMaster TX16S on EdgeTX carrying
-  the older FrSky module. Linux is not confirmed yet: in a first test the link was unstable.
+  transmitters, demands a pairing code and hangs up without one. On **Windows** and **Linux** Kite
+  pairs with its code `000000` by itself, without a system prompt. On Linux, Kite answers pairing
+  requests for the remembered radio while it connects to it, in place of the desktop's own Bluetooth
+  prompt; nothing stays paired in the system afterwards. macOS gives an app no way to answer the
+  pairing, so the module is not usable there for now.
+- Tested on Windows and Linux with a FrSky X20RS on ETHOS 26.2 and with a RadioMaster TX16S on EdgeTX
+  carrying the older FrSky module.
+- **If the X20RS is found but never connects** after the link was closed and opened again, switch the
+  radio off for a moment and on again. Seen once on Linux; the radio then refused to list its services
+  until it was restarted.
 
 ### Channel mapping
 
