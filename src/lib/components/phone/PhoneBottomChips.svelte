@@ -3,11 +3,9 @@
   Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 -->
 
-<!-- PhoneBottomChips — the phone's bottom-left corner (Dev-Docs archive/PHONE_UI.md D18): the arming
-     state and, right of it, the sensor chip, shown only while a sensor is amber or red. Below the panel
-     layer. Publishes the row's right edge as `--phone-bottom-w` (Debug button, attribution) and the
-     arming pill's as `--phone-arming-w`: the bottom widget tiles start there, so the chip may cover
-     their lower edge. -->
+<!-- PhoneBottomChips — the phone's bottom-left arming pill + sensor chip (Dev-Docs archive/PHONE_UI.md D18).
+     The row edge (--phone-bottom-w) feeds the Debug button and the credit; the bottom widget tiles start at
+     the pill's edge (--phone-arming-w), so the chip never resizes them and may cover their lower edge. -->
 <script lang="ts">
   import { t } from 'svelte-i18n';
   import ArmingIndicator from '$lib/components/ArmingIndicator.svelte';
@@ -29,7 +27,9 @@
     const right = rowEl ? Math.ceil(rowEl.getBoundingClientRect().right) : 0;
     root.setProperty('--phone-bottom-w', `${right}px`);
     const pill = rowEl?.querySelector('.arming');
-    root.setProperty('--phone-arming-w', `${pill ? Math.ceil(pill.getBoundingClientRect().right) : right}px`);
+    // Without a pill the tiles get the row's left edge, not its right one: that would include the chip.
+    const left = rowEl ? Math.ceil(rowEl.getBoundingClientRect().left) : 0;
+    root.setProperty('--phone-arming-w', `${pill ? Math.ceil(pill.getBoundingClientRect().right) : left}px`);
     return () => {
       root.removeProperty('--phone-bottom-w');
       root.removeProperty('--phone-arming-w');
@@ -52,15 +52,16 @@
 </div>
 
 <style>
+  /* Only the pill takes touches: the chip may lie on a widget tile, whose long press must still arrive. */
   .chips {
-    position: relative;
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    pointer-events: auto;
+    pointer-events: none;
   }
   /* The arming pill is styled for the toolbar's solid background; over the map it gets a backing. */
   .chips > :global(.arming) {
+    pointer-events: auto;
     background-color: rgba(46, 46, 46, 0.92);
     backdrop-filter: var(--glass-blur, blur(6px));
     -webkit-backdrop-filter: var(--glass-blur, blur(6px));
