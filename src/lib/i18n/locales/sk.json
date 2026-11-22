@@ -2129,7 +2129,7 @@
     "title": "Našiel sa nedokončený záznam",
     "intro": "Záznam z predchádzajúcej relácie nebol správne uzavretý (aplikácia mohla spadnúť alebo byť zatvorená počas letu).",
     "titleLost": "Spojenie so zariadením stratené",
-    "introLost": "Počas zaznamenávania letu sa prerušilo spojenie s lietadlom (sériové zariadenie bolo odpojené alebo sa stratilo spojenie BLE). Vyberte, čo urobiť so záznamom.",
+    "introLost": "Počas zaznamenávania letu sa stratilo spojenie s lietadlom (zariadenie bolo odpojené, Bluetooth bol vypnutý alebo sieť už nie je dostupná). Vyberte, čo urobiť so záznamom.",
     "craft": "Lietadlo",
     "started": "Začiatok",
     "samples": "Vzorky",

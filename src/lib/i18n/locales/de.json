@@ -2129,7 +2129,7 @@
     "title": "Unvollständige Aufnahme gefunden",
     "intro": "Eine Aufnahme aus einer früheren Sitzung wurde nicht ordnungsgemäß abgeschlossen (die App ist evtl. abgestürzt oder wurde während des Flugs geschlossen).",
     "titleLost": "Geräteverbindung verloren",
-    "introLost": "Die Verbindung zum Fluggerät ist abgebrochen (das serielle Gerät wurde getrennt oder der BLE-Link ging verloren), während ein Flug aufgezeichnet wurde. Wähle, was mit der Aufnahme passieren soll.",
+    "introLost": "Die Verbindung zum Fluggerät ist weg (das Gerät wurde abgezogen, Bluetooth wurde ausgeschaltet oder das Netzwerk ist nicht mehr erreichbar), während ein Flug aufgezeichnet wurde. Wähle, was mit der Aufnahme passieren soll.",
     "craft": "Fluggerät",
     "started": "Gestartet",
     "samples": "Datenpunkte",

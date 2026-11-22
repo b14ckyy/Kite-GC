@@ -2070,6 +2070,36 @@ pub fn read_session_events(conn: &Connection) -> SqlResult<Vec<FlightEvent>> {
     rows.collect()
 }
 
+/// One position row of a temp session; `alt_m` as the link reports it (MSL, arming-relative on LTM / CRSF).
+pub struct SessionTrackRow {
+    pub timestamp_ms: i64,
+    pub wall_ms: Option<i64>,
+    pub lat: f64,
+    pub lon: f64,
+    pub alt_m: f64,
+    pub mode_primary: Option<String>,
+}
+
+/// A temp session's rows that carry a position, in time order.
+pub fn read_session_track(conn: &Connection) -> SqlResult<Vec<SessionTrackRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT timestamp_ms, wall_ms, lat, lon, alt_m, mode_primary FROM telemetry_records
+         WHERE lat IS NOT NULL AND lon IS NOT NULL AND alt_m IS NOT NULL AND (lat != 0 OR lon != 0)
+         ORDER BY timestamp_ms ASC, id ASC",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(SessionTrackRow {
+            timestamp_ms: row.get(0)?,
+            wall_ms: row.get(1)?,
+            lat: row.get(2)?,
+            lon: row.get(3)?,
+            alt_m: row.get(4)?,
+            mode_primary: row.get(5)?,
+        })
+    })?;
+    rows.collect()
+}
+
 /// The latest point of a temp session at which its relative timeline (`timestamp_ms`) and the wall
 /// clock (`wall_ms`) are both known — the last telemetry row or event carrying a wall stamp, whichever
 /// is later on the timeline. `None` for a session without any wall stamp (written before v20).

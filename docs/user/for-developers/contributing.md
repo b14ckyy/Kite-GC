@@ -130,6 +130,11 @@ start the dev app and switch the language to it — the interface then shows the
 instead of the text. The file is git-ignored; take the `index.ts` registration out again before you commit.
 Contributed by teodoryantcheff.
 
+**Checking the locale files:** `npm run check:i18n` compares every locale with `en.json` and reports keys that
+`en.json` does not have, values of another kind and translated strings whose `{placeholders}` differ from the
+English ones. It also lists keys missing in `de.json`, which the maintainer keeps complete; in an English-only
+PR that part of the report is expected and makes the run end with exit code 1.
+
 ## Licensing & contributor terms
 
 Kite Ground Control is licensed under **[GPL-3.0-or-later](https://www.gnu.org/licenses/gpl-3.0.html)**.

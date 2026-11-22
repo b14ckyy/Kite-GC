@@ -77,6 +77,12 @@ impl From<std::io::Error> for TransportError {
     }
 }
 
+/// The OS has no network path for the link at all (interface down, no route): treated like a pulled
+/// cable. Anything short of that (host unreachable, refused, timed out) may heal, so TCP / UDP keep trying.
+pub fn is_no_network_path(e: &std::io::Error) -> bool {
+    matches!(e.kind(), std::io::ErrorKind::NetworkUnreachable | std::io::ErrorKind::NetworkDown)
+}
+
 /// Keeps a read loop from flooding the log and spinning on a read error that is not a known link loss —
 /// a broken socket fails at once, on every pass. Later errors are logged at most every `LOG_INTERVAL`, and
 /// the loop pauses only while errors follow back to back, so one odd error on a working link costs nothing.
@@ -134,6 +140,12 @@ pub trait ByteTransport: Send {
     /// streaming RC overrides. Default: no-op.
     fn set_read_timeout(&mut self, timeout: std::time::Duration) {
         let _ = timeout;
+    }
+
+    /// True once after the transport replaced its stream underneath (transparent reconnect): a frame cut
+    /// off by the loss never continues, so a parser above must drop its partial frame. Default: never.
+    fn take_stream_restart(&mut self) -> bool {
+        false
     }
 
     /// Human-readable description (for logging)
@@ -261,6 +273,17 @@ mod tests {
     fn a_read_timeout_is_not_a_lost_link() {
         for kind in [std::io::ErrorKind::TimedOut, std::io::ErrorKind::WouldBlock] {
             assert!(matches!(TransportError::from(std::io::Error::from(kind)), TransportError::Timeout));
+        }
+    }
+
+    #[test]
+    fn only_a_missing_network_path_ends_an_ip_link() {
+        use std::io::ErrorKind::*;
+        for kind in [NetworkUnreachable, NetworkDown] {
+            assert!(is_no_network_path(&std::io::Error::from(kind)), "{kind:?}");
+        }
+        for kind in [HostUnreachable, ConnectionRefused, TimedOut, ConnectionReset, ConnectionAborted, NotConnected, Other] {
+            assert!(!is_no_network_path(&std::io::Error::from(kind)), "{kind:?}");
         }
     }
 

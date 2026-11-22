@@ -55,6 +55,12 @@
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.location.gps" android:required="false" />
+    <!-- Implied as REQUIRED by a permission or the landscape lock unless declared optional. -->
+    <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
+    <uses-feature android:name="android.hardware.location" android:required="false" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+    <uses-feature android:name="android.hardware.wifi" android:required="false" />
+    <uses-feature android:name="android.hardware.screen.landscape" android:required="false" />
     <!-- A GCS is a landscape, two-handed, tablet-first app, but nothing about it needs a touchscreen
          specifically — this also keeps it installable on Android TV / desktop-mode devices. -->
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />

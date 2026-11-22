@@ -8,7 +8,7 @@ Kite side); the tool's own header comment and `--help` are the full reference.
 |--------|-------|
 | [`simulators/`](simulators/README.md) | Stand-ins for an aircraft or a video source: `fc_sim.py` (fake flight controller — ArduPilot over MAVLink, INAV over MSP or MAVLink), `ardupilot-sitl-manager.py` and `inav-sitl-manager.py` (run the real firmware's SITL, single vehicle or swarm), `ltm_sim.py` (LTM telemetry link), `rtsp_test_server.py` (RTSP source for the native video client). |
 | [`analyzers/`](analyzers/README.md) | Read what Kite recorded: `tlog_analyze.py` + `tlog_detail.py` (MAVLink `.tlog` link diagnosis), `turn_analysis.py` (turn-rate study over the flight database). |
-| [`helpers/`](helpers/README.md) | Development loop: `i18n-key-paths.py` (pseudo-locale that shows every i18n key on screen), `phone-emu.ps1` + `phone-devtools.mjs` (Android emulator / device loop with hot reload and page screenshots). |
+| [`helpers/`](helpers/README.md) | Development loop: `i18n-key-paths.py` (pseudo-locale that shows every i18n key on screen), `i18n-check.mjs` (locale files against `en.json`: keys and placeholders), `phone-emu.ps1` + `phone-devtools.mjs` (Android emulator / device loop with hot reload and page screenshots). |
 | [`models/`](models/README.md) | The procedural 3D model pipeline for `static/models/` (own UAV and radar contacts). |
 
 ## Conventions
