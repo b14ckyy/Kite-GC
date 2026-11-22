@@ -24,7 +24,7 @@ use std::net::{IpAddr, SocketAddr, ToSocketAddrs, UdpSocket};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use super::{ByteTransport, TransportError};
+use super::{is_no_network_path, ByteTransport, TransportError};
 
 /// Read timeout for individual recv calls. Short on purpose — bounds the latency the MAVLink handler
 /// loop adds to outgoing commands (it services a queued write only once the current blocking recv
@@ -83,27 +83,28 @@ pub struct UdpTransport {
     peer: SocketAddr,
     /// The local port as registered in `LISTENING`.
     local_port: u16,
-    /// Every source that has sent us data recently, with its last-seen time (peer learning). Outgoing
-    /// frames go to ALL of them: several vehicles pushing to our listening port each speak from their
-    /// own socket (multi-vehicle SITL / several telemetry bridges), and a command for sysid 3 sent
-    /// only to "whoever spoke last" would mostly land on the wrong aircraft and be ignored. Vehicles
-    /// drop frames not addressed to them, so the fan-out is harmless; peers silent for PEER_TTL age out.
+    /// Every source heard within `PEER_TTL`. Sends fan out to all of them: several vehicles on one port
+    /// each speak from their own socket, and a vehicle drops frames not addressed to it.
     peers: HashMap<SocketAddr, Instant>,
     socket: UdpSocket,
     /// The first ICMP "port unreachable" of the session is logged at warn (a tester's log must show why
     /// nothing arrives); every further one goes to debug so a dead peer doesn't flood the log.
     peer_unreachable_logged: bool,
+    /// Same once-at-warn rule for any other socket error, which is a stall as well; per direction, so
+    /// an early send error cannot hide a recv error that repeats.
+    send_error_logged: bool,
+    recv_error_logged: bool,
+    read_timeout: Duration,
+    /// The OS reported no network path: the link is over, every call returns `Disconnected`.
+    no_path: bool,
 }
 
 /// A learned peer that has been silent this long is dropped from the send fan-out.
 const PEER_TTL: Duration = Duration::from_secs(10);
 
 impl UdpTransport {
-    /// Create a UDP transport targeting `host:port`.
-    ///
-    /// Binds the local socket to `0.0.0.0:port` so we receive datagrams the FC/bridge sends to that
-    /// well-known port; falls back to an ephemeral port if it's already in use. Does not `connect()`
-    /// — the peer is learned from incoming traffic (see module docs).
+    /// Binds `0.0.0.0:port` (fallback when busy) and never `connect()`s: the peer is learned from
+    /// incoming traffic (see module docs).
     pub fn connect(host: &str, port: u16) -> Result<Self, String> {
         let addr = format!("{}:{}", host, port);
 
@@ -114,13 +115,9 @@ impl UdpTransport {
             .next()
             .ok_or_else(|| format!("UDP resolve {} returned no address", addr))?;
 
-        // Prefer binding to the same port number the user targeted (listener-friendly). If that port
-        // is busy (another ground station listening there — Mission Planner on 14550/14560 is the
-        // typical case), fall back to a STABLE alternate port derived from the target, and only then
-        // to an ephemeral one. Stable matters: relays such as Mission Planner's UDP server remember
-        // the client address they stream to, and keep streaming to a dead port for a while after we
-        // close it. Coming back on the same port makes a reconnect pick the stream up immediately
-        // instead of timing out until the relay forgets us.
+        // Bind the targeted port number; when it is busy (another GCS), a stable fallback before an
+        // ephemeral one: relays such as Mission Planner keep streaming to the client address they
+        // learned, so a reconnect must come back on the same port.
         let mut bind_note = None;
         let socket = match UdpSocket::bind(("0.0.0.0", port)) {
             Ok(s) => {
@@ -164,6 +161,10 @@ impl UdpTransport {
             peers: HashMap::new(),
             socket,
             peer_unreachable_logged: false,
+            send_error_logged: false,
+            recv_error_logged: false,
+            read_timeout: Duration::from_millis(READ_TIMEOUT_MS),
+            no_path: false,
         })
     }
 
@@ -191,6 +192,24 @@ impl UdpTransport {
             log::debug!("UDP {}: {} — peer still unreachable, ignoring", op, e);
         }
     }
+
+    fn note_io_error(&mut self, recv: bool, op: &str, e: &std::io::Error) {
+        let logged = if recv { &mut self.recv_error_logged } else { &mut self.send_error_logged };
+        if !*logged {
+            *logged = true;
+            log::warn!("UDP {} failed ({}); the link stays open", op, e);
+        } else {
+            log::debug!("UDP {} failed: {}", op, e);
+        }
+    }
+
+    fn give_up(&mut self, op: &str, e: &std::io::Error) -> TransportError {
+        if !self.no_path {
+            self.no_path = true;
+            log::warn!("UDP link {}: no network path ({} — {}) — closing the link", self.configured, op, e);
+        }
+        TransportError::Disconnected
+    }
 }
 
 impl Drop for UdpTransport {
@@ -208,6 +227,9 @@ fn stable_fallback_port(port: u16) -> u16 {
 
 impl ByteTransport for UdpTransport {
     fn read_bytes(&mut self, buf: &mut [u8]) -> Result<usize, TransportError> {
+        if self.no_path {
+            return Err(TransportError::Disconnected);
+        }
         match self.socket.recv_from(buf) {
             Ok((n, src)) => {
                 // Our own echo: with the default target 127.0.0.1:<our port> the first GCS HEARTBEAT goes
@@ -242,11 +264,20 @@ impl ByteTransport for UdpTransport {
                 self.note_peer_unreachable("recv", peer.unwrap_or(self.peer), e);
                 Ok(0)
             }
-            Err(e) => Err(TransportError::from(e)),
+            Err(e) if is_no_network_path(&e) => Err(self.give_up("recv", &e)),
+            Err(e) => {
+                self.note_io_error(true, "recv", &e);
+                // A failing recv returns at once; pace the caller like a read that timed out.
+                std::thread::sleep(self.read_timeout);
+                Ok(0)
+            }
         }
     }
 
     fn write_bytes(&mut self, data: &[u8]) -> Result<(), TransportError> {
+        if self.no_path {
+            return Err(TransportError::Disconnected);
+        }
         // Age out silent peers, then fan out to every live one; with none learned yet, the configured
         // target gets it (this is how the first GCS HEARTBEAT wakes a client-mode FC / bridge).
         let now = Instant::now();
@@ -256,31 +287,30 @@ impl ByteTransport for UdpTransport {
         } else {
             self.peers.keys().copied().collect()
         };
-        // A datagram is delivered when at least one target took it. A peer that is gone (ICMP "port
-        // unreachable" surfacing on the send side, see `is_peer_unreachable`) is not a failure: the
-        // datagram is simply lost, like on any quiet link, and the peer ages out on its own. A fatal
-        // `Io` here would make the MSP scheduler tear the link down (`mark_lost`) and the MAVLink
-        // handler warn once per heartbeat / RC frame. Only a real socket error on EVERY target is
-        // reported — with several peers, one dead one must not hide that the others were reached.
-        let mut delivered = 0usize;
-        let mut first_err = None;
-        for addr in targets {
+        // A failed send is a lost datagram, i.e. a stall: any error here would make the MSP wrapper tear
+        // the link down (`mark_lost`). Only "no network path" on EVERY target ends the link — one target
+        // still reachable must keep it open.
+        let mut unroutable = 0usize;
+        let mut last_unroutable = None;
+        for addr in &targets {
             match self.socket.send_to(data, addr) {
-                Ok(_) => delivered += 1,
-                Err(ref e) if Self::is_peer_unreachable(e) => self.note_peer_unreachable("send", addr, e),
-                Err(e) => {
-                    log::debug!("UDP send to {} failed: {}", addr, e);
-                    first_err.get_or_insert_with(|| TransportError::Io(format!("UDP send to {} failed: {}", addr, e)));
+                Ok(_) => {}
+                Err(ref e) if Self::is_peer_unreachable(e) => self.note_peer_unreachable("send", *addr, e),
+                Err(e) if is_no_network_path(&e) => {
+                    unroutable += 1;
+                    last_unroutable = Some(e);
                 }
+                Err(e) => self.note_io_error(false, &format!("send to {}", addr), &e),
             }
         }
-        match first_err {
-            Some(e) if delivered == 0 => Err(e),
+        match last_unroutable {
+            Some(e) if unroutable == targets.len() => Err(self.give_up("send", &e)),
             _ => Ok(()),
         }
     }
 
     fn set_read_timeout(&mut self, timeout: Duration) {
+        self.read_timeout = timeout;
         let _ = self.socket.set_read_timeout(Some(timeout));
     }
 

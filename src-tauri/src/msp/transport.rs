@@ -8,7 +8,7 @@
 use std::time::{Duration, Instant};
 
 use crate::flightlog::msp_raw_logger::{log_to_sink, MspRawSink, DIR_IN, DIR_OUT};
-use crate::transport::{ByteTransport, Transport};
+use crate::transport::{ByteTransport, Transport, TransportError};
 
 use super::{MspCodec, MspMessage, MspParser};
 
@@ -68,6 +68,16 @@ impl MspTransport {
         self.inner
     }
 
+    /// After a transparent reconnect the parser's partial frame is dropped before parsing: its remaining
+    /// bytes never come, and the new stream's bytes would otherwise complete it.
+    fn read_inner(&mut self, buf: &mut [u8]) -> Result<usize, TransportError> {
+        let result = self.inner.read_bytes(buf);
+        if self.inner.take_stream_restart() {
+            self.parser.reset();
+        }
+        result
+    }
+
     /// Write a pre-encoded MSP frame, raw-logging it on success. A write TIMEOUT is a retryable
     /// stall, not a lost device: on Windows the short scheduler read timeout applies to writes too
     /// (`WriteTotalTimeoutConstant`), and a USB-CDC FC that NAKs its OUT endpoint while producing
@@ -104,7 +114,6 @@ impl Transport for MspTransport {
         // connection lost.
         self.write_frame(MspCodec::encode_v2(code, payload))?;
 
-        // Read until we get the matching response or timeout
         let mut buf = [0u8; 512];
         let deadline = Instant::now() + Duration::from_millis(timeout_ms);
 
@@ -113,9 +122,9 @@ impl Transport for MspTransport {
                 return Err(format!("MSP response timeout for command 0x{:04X}", code));
             }
 
-            match self.inner.read_bytes(&mut buf) {
+            match self.read_inner(&mut buf) {
                 Ok(0) => {
-                    // No data available (timeout from underlying transport) — retry
+                    // Nothing yet: a read timeout, or a TCP link reconnecting underneath.
                 }
                 Ok(n) => {
                     // Raw-log the incoming chunk (ADR-049) — mirrors mwp-serial-cap (per read-chunk).
@@ -131,9 +140,7 @@ impl Transport for MspTransport {
                         }
                     }
                 }
-                Err(crate::transport::TransportError::Timeout) => {
-                    // Retry until deadline
-                }
+                Err(crate::transport::TransportError::Timeout) => {}
                 Err(crate::transport::TransportError::Disconnected) => {
                     self.mark_lost("read: transport disconnected".to_string()); // device gone
                     return Err("Transport disconnected".to_string());
@@ -162,7 +169,7 @@ impl Transport for MspTransport {
         // by code. A partially-received frame stays buffered in the parser across calls.
         let mut out = Vec::new();
         let mut buf = [0u8; 512];
-        match self.inner.read_bytes(&mut buf) {
+        match self.read_inner(&mut buf) {
             Ok(0) => {}
             Ok(n) => {
                 log_to_sink(&self.raw_sink, DIR_IN, &buf[..n]);
@@ -203,5 +210,51 @@ impl Transport for MspTransport {
 
     fn checksum_errors(&self) -> u32 {
         self.parser.checksum_errors()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::VecDeque;
+    use std::sync::{Arc, Mutex};
+
+    /// Replays read chunks; a chunk flagged `true` arrives on a freshly reconnected stream.
+    struct Replay {
+        chunks: VecDeque<(bool, Vec<u8>)>,
+        restarted: bool,
+    }
+
+    impl ByteTransport for Replay {
+        fn read_bytes(&mut self, buf: &mut [u8]) -> Result<usize, TransportError> {
+            let Some((restart, chunk)) = self.chunks.pop_front() else { return Ok(0) };
+            self.restarted |= restart;
+            buf[..chunk.len()].copy_from_slice(&chunk);
+            Ok(chunk.len())
+        }
+        fn write_bytes(&mut self, _: &[u8]) -> Result<(), TransportError> {
+            Ok(())
+        }
+        fn take_stream_restart(&mut self) -> bool {
+            std::mem::take(&mut self.restarted)
+        }
+        fn description(&self) -> String {
+            "replay".into()
+        }
+    }
+
+    #[test]
+    fn a_frame_cut_off_by_a_reconnect_does_not_swallow_the_next_one() {
+        let frame = MspCodec::encode_v2(0x1234, &[1, 2, 3, 4, 5, 6, 7, 8]);
+        let replay = Replay {
+            chunks: VecDeque::from([(false, frame[..10].to_vec()), (true, frame.clone())]),
+            restarted: false,
+        };
+        let mut msp = MspTransport::new(Box::new(replay), Arc::new(Mutex::new(None)));
+        assert!(msp.poll_incoming().unwrap().is_empty());
+        let got = msp.poll_incoming().unwrap();
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].code, 0x1234);
+        assert_eq!(got[0].payload, vec![1, 2, 3, 4, 5, 6, 7, 8]);
     }
 }

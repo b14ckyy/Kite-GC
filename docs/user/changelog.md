@@ -564,6 +564,13 @@ inside the box of the feature release they belong to, so the notes for one relea
     - **Live AGL: the projected flight line is smoother**, and the compass and horizon have the
       frosted-glass look of the other widgets. [#101]
     - **The second battery widget is labelled "BAT 2".** [#237]
+    - **TCP links: a broken connection is re-established instead of ending the session.** When
+      the TCP connection to a Wi-Fi bridge or a simulator broke (the other end restarted or
+      closed it), Kite disconnected, cleared the map and asked what to do with the recording.
+      Kite now connects to the same address again in the background and carries on; meanwhile
+      the link shows as stalled, like a radio dropout. Over TCP and UDP the connection only
+      ends when the computer has no network left to reach the address, or when a TCP
+      connection breaks before any data arrived. [#358]
 
     **Fixed**
 
