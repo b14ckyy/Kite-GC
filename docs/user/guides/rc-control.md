@@ -91,9 +91,13 @@ Things to know:
   gives an app no way to answer the pairing, so the module is not usable there for now.
 - Tested on Windows and Linux with a FrSky X20RS on ETHOS 26.2 and with a RadioMaster TX16S on EdgeTX
   carrying the older FrSky module.
-- **If the X20RS is found but never connects** after the link was closed and opened again, switch the
-  radio off for a moment and on again. Seen once on Linux; the radio then refused to list its services
-  until it was restarted.
+- **Linux: reconnecting and changing radios.** The first connection to a radio works. After it, Linux
+  keeps slower connection settings for that radio, and with them a second connection soon after the
+  first usually fails (the radio is found, the line stays on *Connecting* or *Searching*) or the
+  channels stutter with gaps of half a second. That also hits a change from one radio to another and
+  back. To get a clean connection again, switch the computer's Bluetooth off and on (or leave the radio
+  switched off for about a minute), then let Kite connect. This comes from the Linux Bluetooth stack
+  and cannot be changed from within an app; Windows is not affected.
 
 ### Channel mapping
 
