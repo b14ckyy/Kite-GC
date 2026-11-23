@@ -1,6 +1,7 @@
 # Helpers
 
-Small scripts for the development loop itself: translating, and iterating on the phone UI.
+Small scripts for the development loop itself: translating, iterating on the phone UI, and the widget
+pictures of the user docs.
 
 ---
 
@@ -75,3 +76,28 @@ Why not `adb screencap`: Kite's activity window is transparent (native-video hol
 in 3D map mode the map area comes out white. On a **real device** `adb exec-out screencap -p` works and
 shows everything — use that there. Options: `--serial <adb serial>` (default:
 the first emulator, else the first device), `--port <local port>`.
+
+## `widget-shots.mjs` — widget pictures for the user docs
+
+Renders every telemetry widget in every size from the same canned in-flight state and saves the
+pictures to `docs/user/assets/getting-started/widgets/`. The widgets are the real components, mounted
+one at a time by the dev-only page `/dev/widgets` (fixture data and the mocked backend answers in
+`src/lib/dev/widgetFixtures.ts`); a headless Microsoft Edge captures each slot over the Chrome DevTools
+protocol. No npm dependency beyond the project's own.
+
+```sh
+node tools/helpers/widget-shots.mjs                        # all widgets, all sizes
+node tools/helpers/widget-shots.mjs --only ahi,liveAgl     # these widget ids only (widgetRegistry ids)
+node tools/helpers/widget-shots.mjs --out some/dir         # another output folder
+node tools/helpers/widget-shots.mjs --browser <path>       # another Chromium-family browser
+```
+
+- The default size is written as `<name>.png` (the names the docs link), the other sizes as
+  `<name>_s.png` / `_l.png` / `_w.png`; slot box plus a 6 px body-coloured margin, at device scale
+  factor 2. `battery2` is skipped (the `battery` component with the title "BAT 2").
+- Uses the dev server of `src-tauri/tauri.conf.json` `devUrl`: a running one is reused, otherwise the
+  script starts `vite dev` and stops it again. The browser gets a throw-away profile in the temp folder.
+- Repeated runs produce byte-identical files on the same machine. Another font set or browser version
+  changes the pixels.
+- Open `http://localhost:1420/dev/widgets` in a dev session to see all widgets in all sizes on one page;
+  `?id=<widget>&size=S|L|W` shows one. The page does not exist in a production build.
