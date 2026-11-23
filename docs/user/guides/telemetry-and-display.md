@@ -97,6 +97,13 @@ along the bottom. Each widget is self-contained and updates live.
   long-press a widget to rearrange or resize — see **Kite on a phone** in the
   **[Quick tour](../getting-started/quick-tour.md#kite-on-a-phone)**.
 
+![Live AGL, wide](../assets/getting-started/widgets/liveagl.png){ width="328" }
+![Live AGL, large](../assets/getting-started/widgets/liveagl_l.png){ width="168" }
+![Live AGL, small](../assets/getting-started/widgets/liveagl_s.png){ width="104" }
+/// caption
+The three sizes of a wide widget: wide, large and small.
+///
+
 ![A widget dock in edit mode](../assets/guides/telemetry/widget_edit_mode.png)
 /// caption
 Edit mode — drag widgets to reorder them or move them between the docks.

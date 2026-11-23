@@ -162,7 +162,7 @@ Each widget, at a glance — expand for what it shows and how it works:
     offset from the symbol by **angle of attack** (vertically) and **crab** (laterally) — smoothed so it
     reads cleanly.
 
-    ![The AHI widget](../assets/getting-started/widgets/ahi.png)
+    ![The AHI widget](../assets/getting-started/widgets/ahi.png){ width="252" }
 
 ??? note "Speed"
     The big number is **airspeed** when the aircraft reports it (what matters in flight), with **ground
@@ -170,14 +170,14 @@ Each widget, at a glance — expand for what it shows and how it works:
     **throttle bar** (0–100 %, from the FC) sits on the left and a **derived acceleration bar** on the
     right (±4 m/s², estimated from the speed trend — no number, just a bipolar bar from centre).
 
-    ![The Speed widget](../assets/getting-started/widgets/speed.png)
+    ![The Speed widget](../assets/getting-started/widgets/speed.png){ width="156" }
 
 ??? note "Altitude"
     The aircraft's altitude (barometric / navigation, relative to home), switching to **km** above
     999 m to stay compact. Below it, a **vario** read-out with an ▲ / ▼ trend arrow and colour for climb
     / sink.
 
-    ![The Altitude widget](../assets/getting-started/widgets/altitude.png)
+    ![The Altitude widget](../assets/getting-started/widgets/altitude.png){ width="156" }
 
 ??? note "Battery"
     A **charge bar** (the FC's battery percentage, shown when the FC reports one) plus **voltage**,
@@ -190,13 +190,13 @@ Each widget, at a glance — expand for what it shows and how it works:
     second **Battery 2** widget to watch two packs at once (e.g. a QuadPlane's forward and lift packs).
     See **[Batteries](../guides/batteries.md)**.
 
-    ![The Battery widget](../assets/getting-started/widgets/battery.png)
+    ![The Battery widget](../assets/getting-started/widgets/battery.png){ width="156" }
 
 ??? note "GPS"
     **Latitude / longitude**, **satellite count**, **fix type** (No fix / 2D / 3D / 3D DGPS, colour-coded)
     and **HDOP**.
 
-    ![The GPS widget](../assets/getting-started/widgets/gps.png)
+    ![The GPS widget](../assets/getting-started/widgets/gps.png){ width="156" }
 
 ??? note "RC Link"
     An adaptive radio-link read-out — it shows whatever the active protocol provides and hides the rest:
@@ -205,7 +205,7 @@ Each widget, at a glance — expand for what it shows and how it works:
     (ArduPilot / PX4)**, **LTM** and **INAV before 9.1** report **RSSI only** — so that's all the widget
     shows there. The primary value is colour-coded green / amber / red by strength.
 
-    ![The RC Link widget](../assets/getting-started/widgets/rclink.png)
+    ![The RC Link widget](../assets/getting-started/widgets/rclink.png){ width="156" }
 
 ??? note "Compass"
     A rotating compass rose with the **heading** at the centre and a fixed top pointer. While moving, an
@@ -213,13 +213,13 @@ Each widget, at a glance — expand for what it shows and how it works:
     angle** — and the COG value is read out above the heading. When the aircraft reports wind, a blue
     **wind arrow** (pointing downwind) and the wind speed appear.
 
-    ![The Compass widget](../assets/getting-started/widgets/compass.png)
+    ![The Compass widget](../assets/getting-started/widgets/compass.png){ width="252" }
 
 ??? note "Home"
     A large **arrow** pointing to the home / launch point relative to the aircraft's heading, with the
     **distance** and **bearing** to home. Appears once the flight controller has set home.
 
-    ![The Home widget](../assets/getting-started/widgets/home.png)
+    ![The Home widget](../assets/getting-started/widgets/home.png){ width="156" }
 
 ??? note "Flight Mode"
     The current **flight mode** as a badge. Kite maps every stack's modes onto one **protocol-agnostic**
@@ -234,7 +234,7 @@ Each widget, at a glance — expand for what it shows and how it works:
     and any active **modifiers** (AltHold, Heading, HeadFree, Soaring, Autoland, …) appear as small chips
     beside it. During a mission the badge also shows the FC's current target as **WP N/X**.
 
-    ![The Flight Mode widget](../assets/getting-started/widgets/flightmode.png)
+    ![The Flight Mode widget](../assets/getting-started/widgets/flightmode.png){ width="156" }
 
 ??? note "Live AGL"
     A forward-looking **terrain-profile HUD** (a wide widget). The left part (15 %) shows the terrain you've
@@ -243,7 +243,7 @@ Each widget, at a glance — expand for what it shows and how it works:
     a climb, descent or ground intersection coming. Centre read-outs give **AGL** and **minimum clearance
     ahead** (red when it goes negative). Works live and in replay.
 
-    ![The Live AGL widget](../assets/getting-started/widgets/liveagl.png)
+    ![The Live AGL widget](../assets/getting-started/widgets/liveagl.png){ width="492" }
 
 ??? note "Terrain Radar"
     A top-down, **track-up** terrain-awareness display in the style of an airliner's EGPWS: a forward fan
@@ -253,7 +253,7 @@ Each widget, at a glance — expand for what it shows and how it works:
     current altitude and a sink-rate-predicted one. Both buttons appear only while the dock is in
     **edit mode** (long-press a widget), so they don't clutter the display in flight.
 
-    ![The Terrain Radar widget](../assets/getting-started/widgets/terrainradar.png)
+    ![The Terrain Radar widget](../assets/getting-started/widgets/terrainradar.png){ width="252" }
 
 ??? note "Weather"
     The **forecast wind at your flight height** from a weather model: a blue arrow shows where the wind
@@ -262,7 +262,8 @@ Each widget, at a glance — expand for what it shows and how it works:
     between the ground and 200 m. The wide size adds the wind for the next 30, 60 and 90 minutes.
     Needs internet. See **[Telemetry & display](../guides/telemetry-and-display.md)**.
 
-    <!-- SCREENSHOT: ../assets/getting-started/widgets/weather.png -->
+    ![The Weather widget](../assets/getting-started/widgets/weather.png){ width="252" }
+    ![The Weather widget in its wide size](../assets/getting-started/widgets/weather_w.png){ width="492" }
 
 ??? note "Video"
     A live **video feed** embedded as a widget — an RTSP stream or a local capture device / camera (e.g. a
