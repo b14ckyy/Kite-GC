@@ -9,11 +9,27 @@
 {% endblock %}
 
 <!-- Shown by the theme on every version whose aliases do NOT include the site default ("latest"),
-     i.e. on old releases and on "Dev". ../<base_url> climbs out of the version folder to the site
-     root, which redirects to the latest release. -->
-{% block outdated %}
+     i.e. on old releases. A pre-release build ("Dev", a line before its final) leaves the block empty,
+     which drops the banner: its amber header says it instead. The trim marks keep "empty" empty. -->
+{% block outdated -%}
+  {%- if not config.extra.kite_prerelease -%}
   You are not reading the documentation for the latest release.
   <a href="{{ '../' ~ base_url }}">
     <strong>Switch to the latest release.</strong>
   </a>
+  {%- endif -%}
+{%- endblock %}
+
+<!-- Pre-release build: header and tab bar in the app's amber, with dark text for contrast. -->
+{% block extrahead %}
+  {{ super() }}
+  {% if config.extra.kite_prerelease %}
+  <style>
+    .md-header, .md-tabs {
+      --md-primary-fg-color: #e8a317;
+      --md-primary-bg-color: #1f1f1f;
+      --md-primary-bg-color--light: rgba(31, 31, 31, 0.7);
+    }
+  </style>
+  {% endif %}
 {% endblock %}

@@ -74,6 +74,8 @@ extra:
   # maintains on the gh-pages branch. Old versions get the "outdated" banner (overrides/main.html).
   version:
     provider: mike
+  # Set by docs.yml for "Dev" and for a line before its final release (see overrides/main.html).
+  kite_prerelease: !ENV [KITE_DOCS_PRERELEASE, false]
 
 markdown_extensions:
   - admonition

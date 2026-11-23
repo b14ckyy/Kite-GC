@@ -92,6 +92,8 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
       - name: Deploy the development docs (Dev = development tip)
         if: github.ref == 'refs/heads/development'
+        env:
+          KITE_DOCS_PRERELEASE: 'true'
         run: mike deploy --push --title Dev dev
       - name: Deploy the release docs (the minor of package.json, plus the latest alias when it is the highest released one)
         if: startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')
@@ -99,6 +101,7 @@ jobs:
           # The changelog hook: this version renders the shared changelog only if it is the newest line.
           KITE_DOCS_VERSION: ${{ steps.ver.outputs.minor }}
           KITE_DOCS_CHANGELOG_HOME: ${{ steps.ver.outputs.newest }}
+          KITE_DOCS_PRERELEASE: ${{ steps.ver.outputs.prerelease }}
         run: |
           title="${{ steps.ver.outputs.minor }}"
           [ "${{ steps.ver.outputs.prerelease }}" = "true" ] && title="$title (pre-release)"
