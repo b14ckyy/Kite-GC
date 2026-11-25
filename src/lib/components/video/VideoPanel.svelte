@@ -60,7 +60,7 @@
   import NumberStepper from '$lib/components/NumberStepper.svelte';
   import Toggle from '$lib/components/panel/Toggle.svelte';
   import { isLinux, isMobile, isAndroid, isPhone, hasVideo, hasVideoRecording } from '$lib/platform';
-  import { open as openDialog } from '@tauri-apps/plugin-dialog';
+  import { open as openDialog } from '$lib/helpers/fileDialog';
   import { videoRecording, videoRecordDefaultDir } from '$lib/controllers/videoRecording';
   import { cleanupOrphanVideos } from '$lib/controllers/flightVideoTransfer';
   import type { DbTransferUi } from '$lib/controllers/dbTransfer';

@@ -10,7 +10,7 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import { get } from 'svelte/store';
-  import { open } from '@tauri-apps/plugin-dialog';
+  import { open } from '$lib/helpers/fileDialog';
   import { invoke } from '@tauri-apps/api/core';
   import { t, locale } from 'svelte-i18n';
   import {

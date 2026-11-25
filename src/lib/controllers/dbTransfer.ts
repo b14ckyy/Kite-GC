@@ -6,7 +6,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { open, save } from '@tauri-apps/plugin-dialog';
+import { open, save } from '$lib/helpers/fileDialog';
 import type { DialogOptions } from '$lib/components/ConfirmDialog.svelte';
 import { isMobile } from '$lib/platform';
 import { formatBackupSize } from './dbBackupPrompt';

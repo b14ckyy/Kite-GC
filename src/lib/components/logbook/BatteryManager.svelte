@@ -15,7 +15,7 @@
   import { get } from 'svelte/store';
   import { anyCase } from '$lib/helpers/fileFilters';
   import { exportFile } from '$lib/helpers/exportFile';
-  import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
+  import { open as openFileDialog } from '$lib/helpers/fileDialog';
   import { settings } from '$lib/stores/settings';
   import {
     batteryDbList, batteryDbCreate, batteryDbUpdate, batteryDbDelete,

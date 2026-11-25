@@ -13,7 +13,7 @@
   import { exportFile } from '$lib/helpers/exportFile';
   import { vehicleTypeForPlatform } from '$lib/helpers/vehicleTypes';
   import { get } from 'svelte/store';
-  import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
+  import { open as openFileDialog } from '$lib/helpers/fileDialog';
   import { settings } from '$lib/stores/settings';
   import { convertAltitude, convertDistance, formatConverted } from '$lib/utils/units';
   import {
