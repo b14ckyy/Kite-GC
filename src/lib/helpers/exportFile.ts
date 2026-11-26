@@ -6,7 +6,7 @@
 // or person. Dev-Docs ROADMAP "Mobile: every export goes through the OS share sheet".
 
 import { invoke } from '@tauri-apps/api/core';
-import { save } from '@tauri-apps/plugin-dialog';
+import { save } from '$lib/helpers/fileDialog';
 import { get } from 'svelte/store';
 import { t } from 'svelte-i18n';
 import { isAndroid, isIOS } from '$lib/platform';

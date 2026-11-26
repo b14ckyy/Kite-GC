@@ -7,7 +7,7 @@
 
 import { writable, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
-import { open } from '@tauri-apps/plugin-dialog';
+import { open } from '$lib/helpers/fileDialog';
 import { settings } from '$lib/stores/settings';
 import { hasCustomMaps } from '$lib/platform';
 import {

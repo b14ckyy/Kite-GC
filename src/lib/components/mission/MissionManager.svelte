@@ -12,7 +12,7 @@
 <script lang="ts">
   import { t, locale } from 'svelte-i18n';
   import { get } from 'svelte/store';
-  import { open } from '@tauri-apps/plugin-dialog';
+  import { open } from '$lib/helpers/fileDialog';
   import { invoke } from '@tauri-apps/api/core';
   import { settings } from '$lib/stores/settings';
   import {

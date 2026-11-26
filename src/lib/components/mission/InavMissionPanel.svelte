@@ -54,7 +54,7 @@
   import type { InterfaceSettings } from '$lib/stores/settings';
   import { convertAltitude, convertSpeed, convertDistance, formatConverted } from '$lib/utils/units';
   import { inavWpDetailLines } from '$lib/helpers/missionWpDetails';
-  import { open } from '@tauri-apps/plugin-dialog';
+  import { open } from '$lib/helpers/fileDialog';
   import { t } from 'svelte-i18n';
   // Helper: untyped $t wrapper for dynamic params (svelte-i18n types are too strict)
   function _t(id: string, params?: Record<string, string>): string {
